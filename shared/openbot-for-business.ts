@@ -59,16 +59,14 @@ export function bookingCalendarSrc(
   return url.href;
 }
 
-/** The first line, in big letters: where OpenBot for Business runs. */
-export const DEPLOY_LINE =
-  "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.";
-
 /** Over the calendar: what booking a call is for. */
 export const BOOK_A_DEMO_LINE =
   "Pick a time to see a demo or scope a proof of concept with us.";
 
 /** Which icon a feature is drawn with. Each app maps these to its own Tabler icon. */
 export type BusinessFeatureIcon =
+  | "deploy"
+  | "agents"
   | "sign-in"
   | "people"
   | "shared-bots"
@@ -84,6 +82,9 @@ export type BusinessFeatureIcon =
 /**
  * What the team edition has and the personal edition does not, one short line each, in the three
  * things a team gets: its people, where its Bots work, and control over both.
+ *
+ * Where it runs is the list's first line. It was once a big line over the list, and somebody
+ * looking down the list for running it in their own VPC didn't find it there.
  */
 export const BUSINESS_FEATURE_GROUPS: readonly {
   title: string;
@@ -92,6 +93,11 @@ export const BUSINESS_FEATURE_GROUPS: readonly {
   {
     title: "For your whole organization",
     features: [
+      {
+        title:
+          "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
+        icon: "deploy",
+      },
       {
         title: "Sign-in with Google, Microsoft or custom SSO",
         icon: "sign-in",
@@ -102,6 +108,11 @@ export const BUSINESS_FEATURE_GROUPS: readonly {
         icon: "shared-bots",
       },
       { title: "Learning shared across your organization", icon: "learning" },
+      {
+        title:
+          "Deploy custom agents built with any agent stack, or bring your own custom harness, with a great user experience and governance",
+        icon: "agents",
+      },
     ],
   },
   {
@@ -114,6 +125,8 @@ export const BUSINESS_FEATURE_GROUPS: readonly {
   {
     title: "In control",
     features: [
+      { title: "Top-to-bottom enterprise governance", icon: "governance" },
+      { title: "A full audit trail, with export", icon: "audit" },
       { title: "Controls over models, apps and networks", icon: "controls" },
       { title: "Rules every Bot follows", icon: "rules" },
       /*
@@ -125,8 +138,6 @@ export const BUSINESS_FEATURE_GROUPS: readonly {
         title: "Policies in plain English, tested on past activity",
         icon: "policies",
       },
-      { title: "Governance for everyone", icon: "governance" },
-      { title: "A full audit trail, with export", icon: "audit" },
     ],
   },
 ];

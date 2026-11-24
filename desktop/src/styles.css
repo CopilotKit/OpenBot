@@ -968,8 +968,9 @@ button.text-link.inline-link {
 
 /*
  * OpenBot for Business, under the rows: the app's OpenBot for Business view stacked for the card.
- * Where it runs in big letters, what it adds in three short lists, then the calendar to book a
- * call on a card of its own. Sizes are the app dialog's: 28px icon tiles, 10px between rows.
+ * Its name in big letters, where it runs and what it adds in three short lists, then the calendar
+ * to book a call on a card of its own. Sizes are the app dialog's: 28px icon tiles, 10px between
+ * rows.
  */
 .business-booker {
   display: flex;
@@ -1057,7 +1058,7 @@ button.text-link.inline-link {
   outline: none;
 }
 
-/* Book a demo, under where it runs: one button that takes the card down to the calendar. */
+/* Book a demo, under its name: one button that takes the card down to the calendar. */
 .business-book {
   display: flex;
   margin-top: -4px;

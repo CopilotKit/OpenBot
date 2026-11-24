@@ -331,7 +331,7 @@ test("the move screen offers OpenBot for Business between Cloud and Self-Contain
   expect(business.checked).toBe(true);
   expect(
     view.getByText(
-      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
+      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
     ),
   ).toBeTruthy();
   expect(view.getByRole("heading", { name: "Book a demo" })).toBeTruthy();
@@ -366,6 +366,68 @@ test("the move screen offers OpenBot for Business between Cloud and Self-Contain
   expect(called("move_to_cloud")).toEqual([]);
   expect(called("keep_self_contained")).toEqual([]);
   expect(called("show_openbot")).toEqual([]);
+});
+
+/*
+ * Where OpenBot for Business runs is the first thing in its list, not a big line over it: somebody
+ * looking down the list for running it in their own VPC found it missing, because the eye skips a
+ * large heading of that sort. The screen keeps a short heading. Governance and the audit trail lead
+ * "In control", and custom agents and harnesses are listed for the whole organization.
+ */
+test("OpenBot for Business lists where it runs first, governance and the audit trail first in control, and custom agents", async () => {
+  selfContainedRunning({ due: true });
+  const view = await launch();
+  await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot for Business/ }),
+  );
+  const booker = document.querySelector(".business-booker") as HTMLElement;
+  expect(booker).toBeTruthy();
+  // A short heading, and the booker is named by it.
+  const heading = booker.querySelector<HTMLElement>(".business-deploy");
+  expect(heading?.textContent).toBe("OpenBot for Business");
+  expect(
+    document.getElementById(booker.getAttribute("aria-labelledby") ?? ""),
+  ).toBe(heading);
+  // Each group as drawn: its heading, then its items in order.
+  const groups = [...booker.querySelectorAll(".business-group")].map(
+    (group) => [
+      group.querySelector("h3")?.textContent,
+      [...group.querySelectorAll("li")].map((item) => item.textContent),
+    ],
+  );
+  expect(groups).toEqual([
+    [
+      "For your whole organization",
+      [
+        "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
+        "Sign-in with Google, Microsoft or custom SSO",
+        "People, roles and admins",
+        "Bots shared with your whole organization",
+        "Learning shared across your organization",
+        "Deploy custom agents built with any agent stack, or bring your own custom harness, with a great user experience and governance",
+      ],
+    ],
+    [
+      "Where your Bots work",
+      ["Bots in Slack and Microsoft Teams", "A computer for each Bot"],
+    ],
+    [
+      "In control",
+      [
+        "Top-to-bottom enterprise governance",
+        "A full audit trail, with export",
+        "Controls over models, apps and networks",
+        "Rules every Bot follows",
+        "Policies in plain English, tested on past activity",
+      ],
+    ],
+  ]);
+  // Every item has its icon.
+  for (const item of booker.querySelectorAll(".business-list li")) {
+    expect(item.querySelector(".business-icon svg")).toBeTruthy();
+  }
+  expect(view.queryByText("Governance for everyone")).toBeNull();
 });
 
 test("a launch that isn't due shows OpenBot straight away, and a connected app is never asked", async () => {

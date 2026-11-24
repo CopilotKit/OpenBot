@@ -766,10 +766,10 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
   expect(
     view.queryByRole("heading", { name: "What this computer needs" }),
   ).toBeNull();
-  // What it adds, in the app's words.
+  // What it adds, in the app's words, where it runs first.
   expect(
     view.getByText(
-      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
+      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
     ),
   ).toBeTruthy();
   expect(
