@@ -85,11 +85,15 @@ pub const DARK: Palette = Palette {
 };
 
 /**
-Where the setup page puts its card and the card's first two lines, in a client area `width` by
-`height` physical pixels at `scale`, so the cover's heading sits where the page's will: `main`'s
-padding (`clamp(16px, 3vh, 32px) 24px`), the `.sheet`'s width (`max-width: 36rem`), padding (32px)
-and corners (`--r-sheet`, 14px), the h1's line (22.5px at 1.3) and the gap after it (8px), and the
-lede's line (22px) and the margin after it (20px). Rectangles are left, top, right, bottom.
+Where the setup page puts its page and the page's first two lines, in a client area `width` by
+`height` physical pixels at `scale`, so the cover's heading sits where the page's will. Setup is a
+sidebar on the ground with the step as an inset page beside it (`main > .rail + .sheet` in
+styles.css): the sidebar 320px wide (`--rail-width`), 248px in a window 860px wide or less; the
+page 10px in from the window's top, right and bottom edges (`margin: 10px 10px 10px 0`), with
+corners of 14px (`calc(var(--radius) * 1.4)`), 48px of padding at the side (`--sheet-pad`) and
+56px at the top (32px and 40px in the narrow window), its lines no wider than 36rem; then the h1's
+line (22.5px at 1.3) and the gap after it (8px), and the lede's line (22px). Rectangles are left,
+top, right, bottom.
 */
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sheet {
@@ -104,21 +108,28 @@ pub struct Sheet {
 #[cfg_attr(not(windows), allow(dead_code))]
 pub fn sheet(width: i32, height: i32, scale: f64) -> Sheet {
     let px = |css: f64| (css * scale).round() as i32;
-    let top = px((f64::from(height) / scale * 0.03).clamp(16.0, 32.0));
-    let card_width = (width - 2 * px(24.0)).clamp(0, px(576.0));
-    let left = (width - card_width) / 2;
-    let right = left + card_width;
-    let pad = px(32.0);
-    let heading_top = top + pad;
+    let narrow = f64::from(width) / scale <= 860.0;
+    let (rail, pad, pad_top) = if narrow {
+        (248.0, 32.0, 40.0)
+    } else {
+        (320.0, 48.0, 56.0)
+    };
+    let left = px(rail).min(width);
+    let right = (width - px(10.0)).max(left);
+    let top = px(10.0);
+    let bottom = (height - px(10.0)).max(top);
+    let text_left = left + px(pad);
+    let text_right = (text_left + px(576.0)).min(right - px(pad)).max(text_left);
+    let heading_top = top + px(pad_top);
     let heading_bottom = heading_top + px(22.5 * 1.3);
     let line_top = heading_bottom + px(8.0);
     let line_bottom = line_top + px(22.0);
     Sheet {
-        card: [left, top, right, line_bottom + px(20.0) + pad],
+        card: [left, top, right, bottom],
         radius: px(14.0),
-        heading: [left + pad, heading_top, right - pad, heading_bottom],
+        heading: [text_left, heading_top, text_right, heading_bottom],
         heading_px: px(22.5),
-        line: [left + pad, line_top, right - pad, line_bottom],
+        line: [text_left, line_top, text_right, line_bottom],
         line_px: px(15.0),
     }
 }
@@ -484,7 +495,7 @@ mod native {
                     let ground = CreateSolidBrush(colorref(palette.ground));
                     FillRect(canvas, &area, ground);
                     let _ = DeleteObject(ground.into());
-                    // The setup page's card, where the page puts it, with its heading and a line.
+                    // The setup page, inset beside the sidebar where the page puts it, with its heading and a line.
                     let scale = f64::from(GetDpiForWindow(window).max(96)) / 96.0;
                     let at = super::sheet(area.right - area.left, area.bottom - area.top, scale);
                     let card = CreateSolidBrush(colorref(palette.card));
@@ -835,13 +846,19 @@ mod tests {
             "--foreground: oklch(0.956 0.005 286.3);",
             "--muted-foreground: oklch(0.69 0.017 285.9);",
             "--surface-main: var(--sidebar);",
-            // The card and its lines.
-            "padding: clamp(16px, 3vh, 32px) 24px 24px;",
+            // The sidebar, the inset page and its lines.
+            "--rail-width: 320px;",
+            "@media (max-width: 860px) {",
+            "--rail-width: 248px;",
+            "margin: 10px 10px 10px 0;",
+            "--sheet-pad: 48px;",
+            "--sheet-ground: var(--card);",
+            "padding-top: 56px;",
+            "--sheet-pad: 32px;",
+            "padding-top: 40px;",
             "max-width: 36rem;",
-            "padding: 32px;",
             "--radius: 0.625rem;",
-            "--radius-xl: calc(var(--radius) * 1.4);",
-            "--r-sheet: var(--radius-xl);",
+            "border-radius: calc(var(--radius) * 1.4);",
             "--text-2xl: 1.40625rem; /* 22.5px */",
             "--text-base: 0.9375rem; /* 15px */",
         ] {
@@ -856,14 +873,22 @@ mod tests {
         // The words the setup page uses while OpenBot gets ready.
         assert!(include_str!("../../src/App.tsx").contains(&format!("<h1>{HEADING}</h1>")));
         assert_eq!(LINE, "This can take a minute.");
-        // Box H's window, 1000 by 838 at 100%: the card 576 wide in the middle, 25 down (3vh).
+        // Box H's window, 1000 by 838 at 100%: the page beside the 320px sidebar, 10px in from
+        // the other edges, its heading 48px in and 56px down.
         let at = sheet(1000, 838, 1.0);
-        assert_eq!(at.card[..3], [212, 25, 788]);
-        assert_eq!(at.heading[..2], [244, 57]);
+        assert_eq!(at.card, [320, 10, 990, 828]);
+        assert_eq!(at.heading[..2], [368, 66]);
         assert_eq!((at.heading_px, at.line_px, at.radius), (23, 15, 14));
-        // At 150% the same card in physical pixels; a narrow window keeps 24px each side.
-        assert_eq!(sheet(1500, 1257, 1.5).card[..3], [318, 38, 1182]);
-        assert_eq!(sheet(600, 600, 1.0).card[0], 24);
+        // Its lines stop at the page's padding, which at this width is nearer than 36rem.
+        assert_eq!(at.heading[2], 990 - 48);
+        // On a wide window they stop at 36rem.
+        assert_eq!(sheet(1600, 1000, 1.0).heading[2], 320 + 48 + 576);
+        // At 150% the same page in physical pixels.
+        assert_eq!(sheet(1500, 1257, 1.5).card[..3], [480, 15, 1485]);
+        // The window's least width: the narrow sidebar, and the page's narrow padding.
+        let narrow = sheet(720, 560, 1.0);
+        assert_eq!(narrow.card[..3], [248, 10, 710]);
+        assert_eq!(narrow.heading[..2], [280, 50]);
     }
 
     /// A fresh Mac in Dark Mode opened setup on the light ground: before OpenBot's page has said

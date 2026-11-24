@@ -2947,7 +2947,8 @@ main:has(> .rail) {
 
 main > .rail + .sheet {
   --sheet-pad: 48px;
-  --sheet-ground: var(--background);
+  /* The card's colour, which the Windows cover draws before the page (first_paint.rs). */
+  --sheet-ground: var(--card);
   max-width: none;
   max-height: none;
   min-height: 0;
