@@ -13,6 +13,7 @@ import {
 } from "./apps-api";
 import {
   confirmationResponse,
+  connectionBody,
   connectionPage,
   connectionsCall,
   startResponse,
@@ -510,6 +511,86 @@ describe.skipIf(!asked)("a sign-in through Composio", () => {
         timeout: MS(SECONDS + 2),
       });
     }, 30_000);
+
+    /*
+     * Reported on OpenBot Cloud: Connect on a Bot's Gmail card, sign in, and the new tab was left on
+     * Gmail's page under Connections. The person expected to be back with the Bot, which was already
+     * carrying on in the first tab. Now the tab the card opened closes once Gmail is connected, and
+     * where the browser will not let it close, it goes back to where Connect was pressed.
+     */
+    async function signInFromCard(
+      name: "chromium" | "webkit",
+      options: { closeRefused?: boolean } = {},
+    ) {
+      const { page, context } = await launch(name);
+      if (options.closeRefused)
+        await context.addInitScript({ content: "window.close = () => {};" });
+      let connected = false;
+      /*
+       * The provider's consent, done: back to the app's page, as the connect route returns a
+       * browser. Sent on by the page rather than a 302, whose follow-up request Playwright's routes
+       * don't always see.
+       */
+      const back = `${ORIGIN}/connections/composio-gmail?status=success&connected_account_id=ca_test`;
+      await context.route(`${CONSENT}/**`, (route) => {
+        connected = true;
+        return route.fulfill({
+          contentType: "text/html",
+          body: `<!doctype html><title>Consent</title><script>location.replace(${JSON.stringify(back)})</script>`,
+        });
+      });
+      // Once it is done, the person's connections list Gmail.
+      await context.route(`${ORIGIN}/api/**`, (route) => {
+        const call = connectionsCall(new URL(route.request().url()).pathname, {
+          method: route.request().method(),
+        });
+        if (call?.operation !== "list" || !connected) return route.fallback();
+        return route.fulfill({
+          json: {
+            connections: [
+              connectionBody({
+                serverId: "composio-gmail",
+                verified: true,
+                checkable: false,
+              }),
+            ],
+            nextCursor: null,
+          },
+        });
+      });
+      await page.goto(`${ORIGIN}/card/composio-gmail`, {
+        waitUntil: "domcontentloaded",
+      });
+      const connect = page.getByRole("button", { name: "Connect" });
+      await connect.waitFor();
+      const [tab] = await Promise.all([
+        context.waitForEvent("page", { timeout: 5_000 }),
+        connect.click(),
+      ]);
+      return { page, tab };
+    }
+
+    test(`in ${name}: once Gmail is connected, the tab a Bot's card opened for the sign-in closes`, async () => {
+      const { page, tab } = await signInFromCard(name);
+      // Through OpenBot's step and the consent, back on Gmail's page, then gone.
+      await tab.waitForEvent("close", { timeout: MS(SECONDS + 10) });
+      // The person is where they pressed Connect, and the card says Gmail is connected.
+      expect(page.url()).toBe(`${ORIGIN}/card/composio-gmail`);
+      await page
+        .getByText("Waiting for Gmail…")
+        .waitFor({ state: "hidden", timeout: 10_000 });
+    }, 40_000);
+
+    test(`in ${name}: where the browser won't close that tab, it goes back to where Connect was pressed`, async () => {
+      const { tab } = await signInFromCard(name, { closeRefused: true });
+      await tab.waitForURL(`${ORIGIN}/connections/composio-gmail**`, {
+        timeout: MS(SECONDS + 5),
+      });
+      await tab.waitForURL(`${ORIGIN}/card/composio-gmail`, {
+        timeout: 10_000,
+      });
+      expect(tab.isClosed()).toBe(false);
+    }, 40_000);
 
     test(`in ${name}: the page Desktop's sign-in comes back to says Gmail is connected and counts down before it hands back`, async () => {
       const { page } = await launch(name);

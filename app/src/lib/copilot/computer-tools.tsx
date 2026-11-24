@@ -214,7 +214,7 @@ function didNotWork(outcome: ComputerOutcome): boolean {
  * Whether a call came back because the computer was still starting, and so did nothing.
  *
  * Not a failure, and not drawn as one. A cold start can outlast the server's wait, and when it does
- * the call is turned away before anything reaches the computer. Drawn as "didn't work" in amber, it
+ * the call is turned away before anything reaches the computer. Drawn as "didn't work" in the warning colour, it
  * read as a broken computer during the one minute every first start takes.
  */
 function stillStarting(outcome: ComputerOutcome): boolean {

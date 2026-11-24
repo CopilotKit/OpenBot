@@ -84,7 +84,7 @@ function settingWords(change: CapabilityChange): {
       change.scopeKind === "team" || change.scopeKind === "group"
         ? "Grant"
         : "On",
-    className: "text-emerald-600 dark:text-emerald-400",
+    className: "text-success",
   };
 }
 
@@ -195,7 +195,7 @@ function verdictOf(person: PreviewPerson): { text: string; className: string } {
   if (person.capabilities.some(gains))
     return {
       text: "Gains access",
-      className: "text-emerald-600 dark:text-emerald-400",
+      className: "text-success",
     };
   return { text: "Keeps access", className: "text-muted-foreground" };
 }
@@ -325,9 +325,7 @@ export function PermissionsPreview({
           </FieldDescription>
         </div>
         {data.warning ? (
-          <p className="text-amber-600 text-sm dark:text-amber-500">
-            {data.warning}
-          </p>
+          <p className="text-warning text-sm">{data.warning}</p>
         ) : null}
         {data.people.length > 0 ? (
           <PageRows>

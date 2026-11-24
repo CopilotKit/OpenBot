@@ -8,7 +8,41 @@ import { ClientError } from "@/lib/client";
 export const moveKeys = {
   all: ["moves"] as const,
   imports: () => ["moves", "imports"] as const,
+  importsIn: (organizationId: string) =>
+    ["moves", "imports-in", organizationId] as const,
 };
+
+/** Every page of the person's own moves into one organization, newest first. */
+async function everyImportIn(
+  organizationId: string,
+  signal: AbortSignal,
+): Promise<Import[]> {
+  try {
+    return await everyPage(async (cursor) => {
+      const page = await listImports(
+        organizationId,
+        { limit: 100, ...(cursor ? { cursor } : {}) },
+        { signal, fallback: "Couldn't load your moves to OpenBot Cloud." },
+      );
+      return { items: page.items, nextCursor: page.nextCursor };
+    });
+  } catch (error) {
+    if (error instanceof ClientError && error.status === 404) return [];
+    throw error;
+  }
+}
+
+/**
+ * The person's own moves into another of their organizations than the one they work in, by the
+ * same rules as `importListQueryOptions`. A move goes into the organization the person's sign-in
+ * named at the time, which need not be the one this browser works in.
+ */
+export function importListInQueryOptions(organizationId: string) {
+  return queryOptions({
+    queryKey: moveKeys.importsIn(organizationId),
+    queryFn: ({ signal }) => everyImportIn(organizationId, signal),
+  });
+}
 
 /**
  * The person's own moves into this organization (listImports), newest first, every page.
@@ -20,20 +54,6 @@ export const moveKeys = {
 export function importListQueryOptions() {
   return queryOptions({
     queryKey: moveKeys.imports(),
-    queryFn: async ({ signal }): Promise<Import[]> => {
-      try {
-        return await everyPage(async (cursor) => {
-          const page = await listImports(
-            organizationId(),
-            { limit: 100, ...(cursor ? { cursor } : {}) },
-            { signal, fallback: "Couldn't load your moves to OpenBot Cloud." },
-          );
-          return { items: page.items, nextCursor: page.nextCursor };
-        });
-      } catch (error) {
-        if (error instanceof ClientError && error.status === 404) return [];
-        throw error;
-      }
-    },
+    queryFn: ({ signal }) => everyImportIn(organizationId(), signal),
   });
 }

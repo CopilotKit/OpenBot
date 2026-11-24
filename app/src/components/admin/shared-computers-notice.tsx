@@ -29,7 +29,7 @@ export function SharedComputersNotice({ className }: { className?: string }) {
   return (
     <p
       className={cn(
-        "rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm",
+        "rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm",
         className,
       )}
       data-shared-computers-notice=""

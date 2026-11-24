@@ -12,7 +12,7 @@ import {
 } from "@/lib/api/generated/bot-grants/bot-grants";
 import type { AppAccessApproval } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { pluginKeys } from "@/lib/plugins/queries";
+import { invalidatePlugins } from "@/lib/plugins/mutations";
 import { type AppAccessRequest, accessRequestOf } from "./queries";
 
 const FALLBACK = "That request could not be sent.";
@@ -24,8 +24,7 @@ const FALLBACK = "That request could not be sent.";
  * standing. The app-access keys sit under `pluginKeys.all`, so one invalidation covers the Bot page,
  * the card, the inbox and the plugin screens the approval just changed.
  */
-const refresh = (queryClient: QueryClient) =>
-  queryClient.invalidateQueries({ queryKey: pluginKeys.all });
+const refresh = (queryClient: QueryClient) => invalidatePlugins(queryClient);
 
 /** What approving does, as the inbox and the card read it. */
 function approvalOf(approval: AppAccessApproval): {
@@ -59,6 +58,25 @@ export function requestAppAccessMutationOptions(queryClient: QueryClient) {
         ),
       ),
     }),
+    onSettled: () => refresh(queryClient),
+  });
+}
+
+/**
+ * Ask an admin to add an app nobody has added yet, for everyone in the organization, with no Bot
+ * named. `app` is the directory entry's slug. A second press answers the request already waiting.
+ */
+export function requestAppMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (app: string): Promise<AppAccessRequest> =>
+      accessRequestOf(
+        await createAppAccessRequest(
+          organizationId(),
+          { appId: app },
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: "Couldn't send that request. Try again." },
+        ),
+      ),
     onSettled: () => refresh(queryClient),
   });
 }

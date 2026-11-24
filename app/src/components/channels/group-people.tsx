@@ -1,6 +1,7 @@
 import { IconUser, IconUsers } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
+import { PeopleTypeahead } from "@/components/teams/people-typeahead";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import {
   Item,
   ItemActions,
@@ -26,11 +26,13 @@ import {
   groupQueryOptions,
   removeGroupMemberMutationOptions,
 } from "@/lib/groups";
+import { personName } from "@/lib/organizations/words";
+import type { OrganizationPerson } from "@/lib/teams/queries";
 
 /**
  * Who is in a group, from its top bar: how many people, and a dialog listing them where the creator
- * can take someone out, anyone else can leave, and anyone in it can add a person who has signed in
- * here. Everyone added sees the whole conversation.
+ * can take someone out, anyone else can leave, and anyone in it can add a member of the
+ * organization, found by name or address as they type. Everyone added sees the whole conversation.
  */
 export function GroupPeopleButton({ channelId }: { channelId: string }) {
   const queryClient = useQueryClient();
@@ -43,8 +45,14 @@ export function GroupPeopleButton({ channelId }: { channelId: string }) {
     removeGroupMemberMutationOptions(queryClient, channelId),
   );
   const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState("");
+  // Chosen and not yet answered, and the last person added, for a screen reader.
+  const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
+  const [last, setLast] = useState<OrganizationPerson | null>(null);
   const people = group.data?.people ?? [];
+  // Who is in it already, by id and by address, so they are offered as such.
+  const inGroup = new Set(
+    people.flatMap((person) => [person.userId, person.email.toLowerCase()]),
+  );
   if (!group.data) return null;
   const iCreated = people.some(
     (person) => person.creator && person.userId === me?.id,
@@ -113,28 +121,37 @@ export function GroupPeopleButton({ channelId }: { channelId: string }) {
                 );
               })}
             </div>
-            <form
-              className="flex items-center gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                add.mutate(email.trim(), { onSuccess: () => setEmail("") });
+            {/*
+              Somebody is added from the organization's own members, found as they are typed:
+              nobody outside it can be found or added here.
+            */}
+            <PeopleTypeahead
+              announcement={
+                last ? `${personName(last)} added to this group` : undefined
+              }
+              autoFocus={false}
+              label="People to add to this group"
+              onChoose={(person) => {
+                setAdding((now) => new Set([...now, person.id]));
+                add.mutate(person.email, {
+                  onSuccess: () => setLast(person),
+                  onSettled: () =>
+                    setAdding(
+                      (now) =>
+                        new Set([...now].filter((one) => one !== person.id)),
+                    ),
+                });
               }}
-            >
-              <Input
-                aria-label="Their email"
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="Add someone by email"
-                type="email"
-                value={email}
-              />
-              <Button
-                disabled={!email.trim() || add.isPending}
-                size="sm"
-                type="submit"
-              >
-                Add
-              </Button>
-            </form>
+              unavailable={(person) =>
+                inGroup.has(person.id) ||
+                inGroup.has(person.email.toLowerCase()) ||
+                adding.has(person.id)
+                  ? "In this group"
+                  : person.email.trim()
+                    ? null
+                    : "Hasn't signed in yet"
+              }
+            />
             {add.error || remove.error ? (
               <p className="text-destructive text-sm" role="alert">
                 {(add.error ?? remove.error)?.message}

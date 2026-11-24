@@ -52,6 +52,7 @@ import type {
   ListConversationMembersParams,
   ListConversationMessagesParams,
   ListConversationsParams,
+  ListRefusedTurnsParams,
   LiveChannelsUnavailableResponse,
   MarkConversationReadHeaders,
   NoBotToAnswerResponse,
@@ -60,6 +61,7 @@ import type {
   PayloadTooLargeResponse,
   PlanRequiredResponse,
   RecordConversationActivityHeaders,
+  RefusedTurnPage,
   RemoveConversationMemberHeaders,
   RouteConversationMessageHeaders,
   RouteMessageRequest,
@@ -2868,6 +2870,264 @@ export const useSendConversationMessage = <
     queryClient,
   );
 };
+export const getListRefusedTurnsUrl = (
+  organizationId: string,
+  conversationId: string,
+  params?: ListRefusedTurnsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/conversations/${encodeURIComponent(String(conversationId))}/refused-turns?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/conversations/${encodeURIComponent(String(conversationId))}/refused-turns`;
+};
+
+/**
+ * Return one page of the caller's own turns in the conversation that were refused before they ran, newest first: a model they may not run (MODEL_NOT_ALLOWED), a permission they don't have (CAPABILITY_REQUIRED), no OpenBot plan (PLAN_REQUIRED). Each says what the turn was for (the person's message, or what a routine or a task asked) and why it was refused, in the words the refusal said. Nothing of a refused turn reaches the conversation's thread, so a client draws these into the transcript itself: each after the message named by afterMessageId, or after the thread's messages where that is null. botId narrows the list to one Bot's. A missing cursor starts at the newest page and nextCursor null ends the list.
+ * @summary List the caller's turns in a conversation that were refused
+ */
+export const listRefusedTurns = async (
+  organizationId: string,
+  conversationId: string,
+  params?: ListRefusedTurnsParams,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<RefusedTurnPage> => {
+  return apiRequest<RefusedTurnPage>(
+    getListRefusedTurnsUrl(organizationId, conversationId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListRefusedTurnsQueryKey = (
+  organizationId: string,
+  conversationId: string,
+  params?: ListRefusedTurnsParams,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/conversations/${conversationId}/refused-turns`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListRefusedTurnsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listRefusedTurns>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  conversationId: string,
+  params?: ListRefusedTurnsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listRefusedTurns>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListRefusedTurnsQueryKey(organizationId, conversationId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listRefusedTurns>>
+  > = ({ signal }) =>
+    listRefusedTurns(organizationId, conversationId, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      conversationId !== null &&
+      conversationId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listRefusedTurns>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListRefusedTurnsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listRefusedTurns>>
+>;
+export type ListRefusedTurnsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | ConversationNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useListRefusedTurns<
+  TData = Awaited<ReturnType<typeof listRefusedTurns>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  conversationId: string,
+  params: undefined | ListRefusedTurnsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listRefusedTurns>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRefusedTurns>>,
+          TError,
+          Awaited<ReturnType<typeof listRefusedTurns>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListRefusedTurns<
+  TData = Awaited<ReturnType<typeof listRefusedTurns>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  conversationId: string,
+  params?: ListRefusedTurnsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listRefusedTurns>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRefusedTurns>>,
+          TError,
+          Awaited<ReturnType<typeof listRefusedTurns>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListRefusedTurns<
+  TData = Awaited<ReturnType<typeof listRefusedTurns>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  conversationId: string,
+  params?: ListRefusedTurnsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listRefusedTurns>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List the caller's turns in a conversation that were refused
+ */
+
+export function useListRefusedTurns<
+  TData = Awaited<ReturnType<typeof listRefusedTurns>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  conversationId: string,
+  params?: ListRefusedTurnsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listRefusedTurns>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListRefusedTurnsQueryOptions(
+    organizationId,
+    conversationId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getUploadConversationAttachmentUrl = (
   organizationId: string,
   conversationId: string,

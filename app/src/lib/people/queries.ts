@@ -40,6 +40,9 @@ export function personOf(
   return { ...person, role: knownRole(person.role) };
 }
 
+/** The most a search of a list of people, invitations or teams may hold: the API's cap. */
+export const SEARCH_MAX = 200;
+
 export const peopleKeys = {
   all: ["people"] as const,
   list: (search = "") => ["people", "list", { search }] as const,

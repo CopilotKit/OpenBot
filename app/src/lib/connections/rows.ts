@@ -1,5 +1,6 @@
-import type { IdentityProviders, LinkedAccount } from "@/lib/identity/queries";
 import { directorySlug } from "@/lib/apps/queries";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
+import type { IdentityProviders, LinkedAccount } from "@/lib/identity/queries";
 import { appNeedsKey } from "@/lib/plugins/enablement-notes";
 import type { CatalogueItem, PluginServer } from "@/lib/plugins/queries";
 
@@ -34,9 +35,13 @@ export type ConnectionRow = {
    * no account, and `setup` opens the app's page because something has to be typed there first.
    * Absent everywhere else: the tile opens its page.
    */
-  action?: "connect" | "add" | "setup";
+  action?: "connect" | "add" | "setup" | "request";
   /** An app with no account behind it, which reads "On" rather than "Connected" once added. */
   noAccount?: boolean;
+  /** A member asked an admin to add this app and the request is still waiting. */
+  requested?: boolean;
+  /** The directory entry a tile from the directory stands for: its press adds or asks for it. */
+  directoryEntryId?: string;
   /**
    * Added, and the person's own account isn't connected yet. The tile says "Not connected" beside
    * Connect, so an app that is on never reads as ready before anybody has signed in to it.
@@ -153,7 +158,7 @@ export function connectionRows(input: {
           // expected a sign-in is surprised when the page asks for one.
           summary:
             !input.connected.has(server.id) && appNeedsKey(server)
-              ? `Needs a key from ${server.title}`
+              ? `Needs a key from ${vendorNameOf(server.title)}`
               : server.summary,
           state: input.connected.has(server.id) ? "connected" : "available",
           notConnected: !input.connected.has(server.id),
@@ -248,6 +253,59 @@ function personalAppRow(
     action: entry.auth === "deployment-bearer" ? "setup" : "add",
     noAccount: true,
   };
+}
+
+/**
+ * Apps from the directory that nobody here has added, as tiles under Add an app, for a search on
+ * Connections that reaches past the apps already here.
+ *
+ * Only ones not added: an added app is already one of the person's own rows. Only ones whose name
+ * isn't already a row, so an app added from the catalogue never shows twice. The press is the
+ * person's: `connect` adds the app and connects their account in one go (anybody who may add apps),
+ * `add` turns on an app with no account, and `request` asks an admin to add it (a member).
+ */
+export function directoryRows(input: {
+  entries: readonly {
+    id: string;
+    title: string;
+    summary: string;
+    logo: string | null;
+    appId: string | null;
+    connectsWith: string;
+  }[];
+  /** Whether this person adds apps themselves, or asks an admin to. */
+  mayAdd: boolean;
+  /** The titles already on the page, lower case. */
+  listed: ReadonlySet<string>;
+  /** Slugs this person has asked an admin for, still waiting. */
+  requested: ReadonlySet<string>;
+}): ConnectionRow[] {
+  return input.entries
+    .filter(
+      (entry) =>
+        entry.appId === null &&
+        !input.listed.has(entry.title.toLocaleLowerCase()),
+    )
+    .map((entry): ConnectionRow => {
+      const slug = directorySlug(entry.id) ?? entry.id;
+      return {
+        key: slug,
+        directoryEntryId: entry.id,
+        title: entry.title,
+        summary:
+          entry.connectsWith === "key"
+            ? `Needs a key from ${entry.title}`
+            : entry.summary,
+        state: "available",
+        action: !input.mayAdd
+          ? "request"
+          : entry.connectsWith === "nothing"
+            ? "add"
+            : "connect",
+        requested: !input.mayAdd && input.requested.has(slug),
+        mark: { kind: "logo", logo: entry.logo },
+      };
+    });
 }
 
 /**

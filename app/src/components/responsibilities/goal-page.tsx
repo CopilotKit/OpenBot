@@ -57,6 +57,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { BotMarkdown, markdownComponents } from "@/lib/markdown";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import {
   deleteResponsibilityMutationKey,
   deleteResponsibilityMutationOptions,
@@ -303,9 +304,11 @@ export function GoalPage({
                 render={
                   <button
                     disabled={action.isPending}
-                    onClick={() =>
-                      action.mutate({ id: goal.id, action: "run" })
-                    }
+                    onClick={() => {
+                      // Bots can't run until a card is added: the dialog says why, in place of a run.
+                      if (stopIfNeedsCard()) return;
+                      action.mutate({ id: goal.id, action: "run" });
+                    }}
                     type="button"
                   />
                 }
@@ -604,7 +607,7 @@ function runStatusClass(status: string) {
   return status === "failed"
     ? "text-destructive"
     : status === "succeeded"
-      ? "text-emerald-600 dark:text-emerald-500"
+      ? "text-success"
       : "text-muted-foreground";
 }
 

@@ -350,12 +350,14 @@
  * The live orb's disc: the same sphere as its ground, on the light page's `--background` in both
  * themes, so it reads the same on either page (the mesh is clear in places, and on the dark page its
  * own `--background` made a dark hole in the bottom of the sphere, with the halo's pattern showing
- * through). Written here rather than as a token, since theme.css holds only shadcn's tokens. The
+ * through). The scheme's light value, written here rather than as a token of its own. The
  * sheen and the rim are AgentOrb's own, and its halftone is kept faint, since at full strength it
  * washes light colors out to white.
  */
 .bot-orb-live .agent-orb {
+  /* tokens/src/scheme.ts, light: background (bun run tokens:generate) */
   --background: oklch(0.983 0.003 286.4);
+  /* end of tokens/src/scheme.ts */
   background-color: var(--background);
   background-image: radial-gradient(
     circle at 38% 34%,

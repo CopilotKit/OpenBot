@@ -1369,7 +1369,7 @@ export const getListOrganizationInvitationsUrl = (
 };
 
 /**
- * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. search narrows the list to the invitations whose address holds it, ignoring case; it finds only this organization's invitations. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List the invitations an organization has sent
  */
 export const listOrganizationInvitations = async (
@@ -1907,7 +1907,7 @@ export const getGetOrganizationPlanUrl = (organizationId: string) => {
 };
 
 /**
- * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
+ * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands for the caller: on the free allowance with runs left, on the plan, behind on a payment, or needing a card. The free allowance is a number of runs each person gets, across every organization they are in, so freeRunsUsedPercent is the caller's own. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
  * @summary Read an organization's plan
  */
 export const getOrganizationPlan = async (

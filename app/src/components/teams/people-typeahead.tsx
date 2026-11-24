@@ -30,29 +30,50 @@ const DEBOUNCE_MS = 120;
 const SLOW_MS = 300;
 
 /**
- * The box for finding people to add to a team: type-ahead, as the WAI-ARIA editable combobox with a
- * list and inline completion (aria-autocomplete="both").
+ * The box for picking somebody from the organization: adding them to a team, to a group
+ * conversation, or to who a Bot is published to. Type-ahead, as the WAI-ARIA editable combobox with
+ * a list and inline completion (aria-autocomplete="both").
  *
  * As somebody types, the server is asked for the organization's members matching it (name, first or
- * last name, or address; best matches first) and they are listed under the box. The top person who
- * can be added is highlighted, and the rest of their name or address is completed in the box,
- * selected after the caret: Tab takes the completion, Enter adds the highlighted person, and typing
- * on replaces it. Arrow keys move through the list, Escape closes it and then clears the box. Focus
- * never leaves the box, so several people are added in a row. People already in the team are listed
- * as such and can't be chosen.
+ * last name, or address; best matches first), one short page of them, and they are
+ * listed under the box. Only the organization's own members are ever asked for or shown: nobody
+ * outside it is found here, and inviting somebody new is a plain address box elsewhere. The top
+ * person who can be chosen is highlighted, and the rest of their name or address is completed in the
+ * box, selected after the caret: Tab takes the completion, Enter chooses the highlighted person, and
+ * typing on replaces it. Arrow keys move through the list, Escape closes it and then clears the box.
+ * Focus never leaves the box, so several people are chosen in a row. People who are there already
+ * (`unavailable`) are listed as such and can't be chosen.
  */
 export function PeopleTypeahead({
-  teamName,
-  inTeam,
+  label,
+  unavailable,
   onChoose,
+  onSearch,
   announcement,
+  name = "Name or email",
+  autoFocus = true,
+  waiting = false,
 }: {
-  teamName: string;
-  /** Who is in the team already, by id, including anybody being added right now. */
-  inTeam: ReadonlySet<string>;
+  /** What the list of people found is called to a screen reader: "People to add to Sales". */
+  label: string;
+  /**
+   * Why somebody found can't be chosen, in a few words ("In this team"), or null when they can:
+   * who is there already, including anybody being added right now.
+   */
+  unavailable: (person: OrganizationPerson) => string | null;
   onChoose: (person: OrganizationPerson) => void;
+  /** Told what is searched for each time it changes, as it is sent to the server. */
+  onSearch?: (search: string) => void;
   /** Said to a screen reader once the box is empty again: who was just added. */
   announcement?: string | undefined;
+  /** The box's name, for a screen reader and as its placeholder. */
+  name?: string;
+  autoFocus?: boolean;
+  /**
+   * Whether what `unavailable` needs is still on its way (who of those found is in the team): the
+   * people found wait for it, so nobody is offered as choosable and then taken back.
+   */
+  waiting?: boolean;
 }) {
   const id = useId();
   const listId = `${id}-people`;
@@ -81,20 +102,26 @@ export function PeopleTypeahead({
         : undefined;
     },
   });
-  const slow = useAfter(found.isFetching, SLOW_MS);
+  useEffect(() => {
+    onSearch?.(search);
+  }, [onSearch, search]);
+  // Nobody is offered until who can be chosen is known too.
+  const answered = waiting ? undefined : found.data;
+  const fetching = found.isFetching || waiting;
+  const slow = useAfter(fetching, SLOW_MS);
 
   const open = typed.trim() !== "" && !dismissed;
-  const people = open ? (found.data ?? []) : [];
+  const people = open ? (answered ?? []) : [];
   const choosable = people.flatMap((person, index) =>
-    inTeam.has(person.id) ? [] : [index],
+    unavailable(person) !== null ? [] : [index],
   );
 
-  // A fresh answer highlights the best person who can be added.
-  const answer = found.data;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new answer moves the highlight; somebody joining the team is skipped by `current` below.
+  // A fresh answer highlights the best person who can be chosen.
+  const answer = answered;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new answer moves the highlight; somebody who can no longer be chosen is skipped by `current` below.
   useEffect(() => {
     if (!answer) return;
-    setActive(answer.findIndex((person) => !inTeam.has(person.id)));
+    setActive(answer.findIndex((person) => unavailable(person) === null));
   }, [answer]);
 
   // The highlighted person, while they can still be added.
@@ -128,7 +155,7 @@ export function PeopleTypeahead({
   }, [current]);
 
   const choose = (chosen: OrganizationPerson) => {
-    if (inTeam.has(chosen.id)) return;
+    if (unavailable(chosen) !== null) return;
     onChoose(chosen);
     setTyped("");
     setCompleting(false);
@@ -209,10 +236,10 @@ export function PeopleTypeahead({
       ? ""
       : slow
         ? "Searching…"
-        : found.data && !found.isPlaceholderData
-          ? found.data.length === 0
+        : answered && !found.isPlaceholderData
+          ? answered.length === 0
             ? "No matches"
-            : `${found.data.length} ${found.data.length === 1 ? "person" : "people"} found`
+            : `${answered.length} ${answered.length === 1 ? "person" : "people"} found`
           : "";
 
   return (
@@ -229,9 +256,9 @@ export function PeopleTypeahead({
           aria-autocomplete="both"
           aria-controls={open ? listId : undefined}
           aria-expanded={open}
-          aria-label="Name or email"
+          aria-label={name}
           autoComplete="off"
-          autoFocus
+          autoFocus={autoFocus}
           onChange={(event) => {
             const next = event.target.value;
             // A deletion as the browser names it, or, where it names none, text that got no longer.
@@ -257,7 +284,7 @@ export function PeopleTypeahead({
       </p>
       {open ? (
         <div
-          aria-busy={found.isFetching || undefined}
+          aria-busy={fetching || undefined}
           className="overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10"
           data-slot="people-typeahead-results"
         >
@@ -265,13 +292,13 @@ export function PeopleTypeahead({
             <p className="px-3 py-2.5 text-destructive text-sm" role="alert">
               {found.error.message}
             </p>
-          ) : !found.data ? (
+          ) : !answered ? (
             slow ? (
               <p className="px-3 py-2.5 text-muted-foreground text-sm">
                 Searching…
               </p>
             ) : null
-          ) : found.data.length === 0 && !found.isPlaceholderData ? (
+          ) : answered.length === 0 && !found.isPlaceholderData ? (
             <div className="flex items-start gap-3 px-3 py-2.5">
               <IconSearch className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0">
@@ -283,14 +310,15 @@ export function PeopleTypeahead({
             </div>
           ) : (
             <div
-              aria-label={`People to add to ${teamName}`}
+              aria-label={label}
               className="no-scrollbar flex max-h-80 scroll-py-1 flex-col gap-0.5 overflow-y-auto overscroll-contain p-1"
               id={listId}
               ref={list}
               role="listbox"
             >
               {people.map((one, index) => {
-                const member = inTeam.has(one.id);
+                const why = unavailable(one);
+                const member = why !== null;
                 const highlighted = index === current;
                 return (
                   // The box keeps focus (aria-activedescendant), so an option is never tabbed to,
@@ -302,7 +330,7 @@ export function PeopleTypeahead({
                     aria-label={[
                       one.name ?? one.email,
                       one.name ? one.email : null,
-                      member ? "in this team" : null,
+                      why?.toLowerCase() ?? null,
                     ]
                       .filter(Boolean)
                       .join(", ")}
@@ -344,7 +372,7 @@ export function PeopleTypeahead({
                     </div>
                     {member ? (
                       <span className="shrink-0 text-muted-foreground text-xs">
-                        In this team
+                        {why}
                       </span>
                     ) : highlighted ? (
                       <span

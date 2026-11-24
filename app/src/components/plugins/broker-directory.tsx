@@ -1,6 +1,6 @@
 import { IconKey, IconPlug, IconSearch } from "@tabler/icons-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, type LinkOptions, useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Link, type LinkOptions } from "@tanstack/react-router";
 import * as React from "react";
 import {
   PageEmpty,
@@ -8,11 +8,13 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import {
-  type ConnectInNewTab,
-  useConnectInNewTab,
-} from "@/components/plugins/connect-in-new-tab";
+import type { ConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
+import { KeyVersionLine } from "@/components/plugins/key-version";
 import { AppInitial, LOGO_TILE } from "@/components/plugins/plugin-logo";
+import {
+  type DirectoryPressMode,
+  useDirectoryPress,
+} from "@/components/plugins/use-directory-press";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -25,13 +27,15 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { addDirectoryAppMutationOptions } from "@/lib/apps/mutations";
+import { myAppRequestsQueryOptions } from "@/lib/app-access/queries";
 import {
   appsQueryOptions,
   type DirectoryApp,
   directoryAppsQueryOptions,
   directorySlug,
 } from "@/lib/apps/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   type DirectoryAppState,
@@ -44,7 +48,6 @@ import {
   keyNeededLine,
   matchingApps,
 } from "@/lib/plugins/enablement-notes";
-import { invalidatePlugins } from "@/lib/plugins/mutations";
 import {
   directoryDescriptions,
   directoryReadFailure,
@@ -62,12 +65,16 @@ import { connectionsQueryOptions } from "@/lib/plugins/queries";
  * of the app you already came looking for.
  *
  * Adding one is account-wide, and it still reads nothing. Every app here is reached as whoever is
- * asking, so a person's own connection is what makes their own mail or messages readable. In the
- * personal edition Add goes straight on to that connection; in the team edition it is each
- * person's own step, and every added row says whether the person looking has taken it.
+ * asking, so a person's own connection is what makes their own mail or messages readable.
  *
- * A COMPONENT AND NOT A ROUTE, so both directory routes are the same screen rather than two that
- * drift. A route file importing another route file is how that drift starts, so neither does. Every
+ * WHERE IT IS OPENED DECIDES WHAT A PRESS DOES (`place`). From Connections, a person is finding an
+ * app to use: somebody who may add apps (the personal edition's one person, or an admin of their
+ * organization, which is OpenBot Cloud's usual case) adds it and connects their own account in one
+ * press, and a member asks an admin to add it. From Admin, adding is the admin's act for everybody,
+ * and each person connects their own account afterwards.
+ *
+ * A COMPONENT AND NOT A ROUTE, so every directory route is the same screen rather than several that
+ * drift. A route file importing another route file is how that drift starts, so none does. Every
  * vendor word is read from {@link providerVocabulary}; nothing here spells a vendor, and nothing
  * here branches on which one it is — a `provider === "composio"` test inside a screen is the same
  * mistake wearing a conditional.
@@ -75,9 +82,27 @@ import { connectionsQueryOptions } from "@/lib/plugins/queries";
 /** Placeholder rows while the directory loads: enough to fill the view, not to suggest a count. */
 const LOADING_ROWS = ["a", "b", "c", "d", "e", "f"];
 
-export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
-  // The provider's client, which is the app's own one; a screen mounted under another is refetched there.
-  const queryClient = useQueryClient();
+/** Where the directory was opened from: a person's Connections, or Admin's Apps. */
+export type DirectoryPlace = "connections" | "admin";
+
+/** What a press does for this person, opened from `place`. */
+export function directoryPressMode(input: {
+  edition: "team" | "personal";
+  place: DirectoryPlace;
+  role: string | null | undefined;
+}): DirectoryPressMode {
+  if (input.edition === "personal") return "connect";
+  if (input.place === "admin") return "add";
+  return isOrganizationAdmin(input.role) ? "connect" : "request";
+}
+
+export function BrokerDirectory({
+  provider,
+  place = "admin",
+}: {
+  provider: PluginsProvider;
+  place?: DirectoryPlace;
+}) {
   const paths = useManagePaths();
   const { directoryLabel } = providerVocabulary(provider);
   const [search, setSearch] = React.useState("");
@@ -93,34 +118,11 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   }, [search]);
 
   const apps = useQuery(directoryAppsQueryOptions(query));
-  /*
-   * WHAT A FAILED ADD SAID, KEPT WHERE A SECOND ADD CANNOT ERASE IT.
-   *
-   * ONE OBSERVER SERVES EVERY BUTTON, which is what `enable.variables` below is already written
-   * around — and the same fact makes `enable.error` unusable as the place a refusal lives.
-   * `MutationObserver.mutate` does `this.#currentMutation?.removeObserver(this)` and rebuilds, so
-   * `error`, `isPending` and `variables` describe ONLY the most recent press. An admin pressing Add
-   * on Slack and then, a beat later, on Gmail watched Slack's row revert from "Adding…" to "Add"
-   * with its request still in flight — and when Slack came back 409, or 503, or carrying the
-   * vendor's own sentence about a bad key, the banner never showed it, because `enable.error` was
-   * Gmail's and Gmail's was null. What was left was a row saying "Add" and no record of a failure.
-   *
-   * THE MUTATION-LEVEL `onError` STILL FIRES AFTER `removeObserver`, which is why this works and
-   * reading the observer does not. It is the shape the sibling grant screen already uses
-   * (`plugin-bot-page.tsx`), arriving at the one screen that was reading the observer instead.
-   */
-  const [enableError, setEnableError] = React.useState<string | null>(null);
-  /*
-   * AND WHICH ROWS ARE IN FLIGHT, FOR THE SAME REASON AND OUT OF THE SAME HOOKS.
-   *
-   * `enable.isPending && enable.variables?.directoryEntryId === entry.id` is the observer again: it names the
-   * most recent press and no other, so pressing Add on a second app put the FIRST row back to "Add"
-   * with its request still open — an invitation to press it again, which asks the server to enable
-   * an app it is already enabling. A set of slugs is what survives the rebuild, added in `onMutate`
-   * and removed in `onSettled` so it drains on a refusal exactly as it does on a success.
-   */
-  const [adding, setAdding] = React.useState<ReadonlySet<string>>(new Set());
   const personal = paths.edition === "personal";
+  const role = useQuery(currentUserQueryOptions()).data?.role;
+  const mode = directoryPressMode({ edition: paths.edition, place, role });
+  /** From Connections the app's page is under Connections, in either edition. */
+  const ownPages = personal || place === "connections";
   /*
    * WHETHER EACH ADDED APP IS CONNECTED, which the directory itself cannot say: it knows an app is
    * added, and adding records the app without signing anybody in to it. These are the reads the
@@ -128,35 +130,12 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
    */
   const plugins = useQuery(appsQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
-  /*
-   * ONE SIGN-IN AT A TIME, IN A NEW TAB, the way a Bot's Connect card starts one
-   * (`AppAccessAction`). `signingIn` names the row it is for, so only that row says it is waiting.
-   */
-  const tab = useConnectInNewTab();
-  const [signingIn, setSigningIn] = React.useState<string | null>(null);
-  const navigate = useNavigate();
-  const enable = useMutation({
-    ...addDirectoryAppMutationOptions(queryClient),
-    onMutate: (input: { directoryEntryId: string }) => {
-      setEnableError(null);
-      setAdding((held) => new Set(held).add(input.directoryEntryId));
-    },
-    onError: (thrown: Error) => setEnableError(thrown.message),
-    /*
-     * SPELLED OUT RATHER THAN INHERITED, because the spread above carries an `onSettled` of its own
-     * — `invalidatePlugins` — and a second one here replaces it rather than running beside it. The
-     * refetch is what turns the added row into its connection state, so dropping it would leave the list claiming
-     * the app is still addable until something else invalidated.
-     */
-    onSettled: (_data, _error, input) => {
-      setAdding((held) => {
-        const left = new Set(held);
-        left.delete(input.directoryEntryId);
-        return left;
-      });
-      return invalidatePlugins(queryClient);
-    },
-  });
+  /** A member's own requests still waiting, so a row they asked for reads "Requested". */
+  const mine = useQuery(myAppRequestsQueryOptions(mode === "request"));
+  const requested = new Set((mine.data ?? []).map((request) => request.appKey));
+  const press = useDirectoryPress(mode);
+  const { tab, signingIn } = press;
+  const { waiting } = tab;
   const listed = matchingApps(apps.data ?? []);
   const stateOf = (entry: DirectoryApp) =>
     directoryAppState(entry, {
@@ -165,107 +144,58 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
     });
 
   /*
-   * WATCHED WHILE THE SIGN-IN IS OPEN in the other tab: the connections are read again every two
-   * seconds until the row reads connected, and then the wait ends. Coming back from the tab proves
-   * nothing, so the server is what is asked.
+   * WHERE AN ADDED KEY VERSION'S PAGE IS, beside the sign-in it was offered under. Its key form opens
+   * on arrival while this person hasn't connected it, as Connect on a key app's own row does.
    */
-  const { waiting, stopWaiting } = tab;
-  React.useEffect(() => {
-    if (!waiting) return;
-    const timer = setInterval(() => {
-      void queryClient.invalidateQueries({
-        queryKey: connectionsQueryOptions().queryKey,
-      });
-    }, 2_000);
-    return () => clearInterval(timer);
-  }, [waiting, queryClient]);
+  const keyVersionLink = (keyAppId: string | null): LinkOptions | null => {
+    if (keyAppId === null) return null;
+    if (!ownPages) return paths.plugin(keyAppId);
+    const keyState = directoryAppState(
+      { appId: keyAppId, connectsWith: "key" },
+      { servers: plugins.data, connections: connections.data?.connections },
+    );
+    return {
+      to: "/connections/$key",
+      params: { key: keyAppId },
+      ...(keyState.kind === "not_connected"
+        ? { search: { connect: true } }
+        : {}),
+    };
+  };
+
   const signedIn =
     signingIn !== null &&
     listed.some(
       (entry) => entry.id === signingIn && stateOf(entry).kind === "connected",
     );
+  const { signedIn: endSignIn } = press;
   React.useEffect(() => {
-    if (!signedIn) return;
-    stopWaiting();
-    setSigningIn(null);
-  }, [signedIn, stopWaiting]);
-
-  /*
-   * An app that turned out to take a key goes to its page with the key form open: there is no
-   * sign-in page to send anybody to.
-   */
-  const openKeyForm = React.useCallback(
-    (serverId: string) =>
-      void navigate({
-        to: "/connections/$key",
-        params: { key: serverId },
-        search: { connect: true },
-      }),
-    [navigate],
+    if (signedIn) endSignIn();
+  }, [signedIn, endSignIn]);
+  const description = directoryDescriptions(
+    personal
+      ? "personal"
+      : place === "admin"
+        ? "team"
+        : mode === "request"
+          ? "request"
+          : "connect",
   );
-  const signingInServer = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (!tab.needsKey || !signingInServer.current) return;
-    if (personal) openKeyForm(signingInServer.current);
-  }, [tab.needsKey, personal, openKeyForm]);
-
-  /** Start this person's own sign-in to an app that is already added. */
-  const connect = (entryId: string, serverId: string) => {
-    setEnableError(null);
-    stopWaiting();
-    setSigningIn(entryId);
-    signingInServer.current = serverId;
-    tab.open(serverId);
-  };
-
-  /*
-   * ADD, AND IN THE PERSONAL EDITION GO STRAIGHT ON TO CONNECTING. The one person is also the admin,
-   * so adding an app and signing in to it are one decision. An app that signs in opens its sign-in in
-   * a new tab on the same press (the tab is claimed on the click, before the app is added, or the
-   * browser blocks it). An app that takes a key opens its page with the key form. In the team
-   * edition Add stays the admin's act for everybody, and the row then says the admin's own account
-   * isn't connected.
-   */
-  const add = (entry: DirectoryApp) => {
-    const how = directoryConnect(entry);
-    if (personal && how === "sign-in") {
-      stopWaiting();
-      setSigningIn(entry.id);
-      signingInServer.current = null;
-      tab.openAfter(async () => {
-        const serverId = await enable.mutateAsync({
-          directoryEntryId: entry.id,
-        });
-        signingInServer.current = serverId;
-        return serverId;
-      });
-      return;
-    }
-    if (personal && how === "key") {
-      enable
-        .mutateAsync({ directoryEntryId: entry.id })
-        .then(openKeyForm, () => {
-          // Said by the mutation's own `onError`.
-        });
-      return;
-    }
-    enable.mutate({ directoryEntryId: entry.id });
-  };
-  const tabError = signingIn ? tab.error : null;
 
   return (
     <PageShell
-      backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
-      description={directoryDescriptions(paths.edition).page}
+      backButton={
+        place === "connections"
+          ? { label: "Connections", linkProps: { to: "/connections" } }
+          : { label: paths.pluginsLabel, linkProps: paths.plugins() }
+      }
+      description={description.page}
       title={directoryLabel}
     >
-      <PageSection
-        description={directoryDescriptions(paths.edition).search}
-        title="Apps"
-      >
-        {enableError || tabError ? (
+      <PageSection description={description.search} title="Apps">
+        {press.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {enableError ?? tabError}
+            {press.error}
           </p>
         ) : null}
 
@@ -331,8 +261,9 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
             <PageRows className="mt-2">
               {listed.map((entry, index) => {
                 // One mutation serves every row, so which rows are mid-request is tracked beside it
-                // rather than read off it. See `adding` above.
-                const isAdding = adding.has(entry.id);
+                // rather than read off it (`useDirectoryPress`).
+                const isAdding = press.adding.has(entry.id);
+                const slug = directorySlug(entry.id) ?? entry.id;
                 const state = stateOf(entry);
                 const mine = signingIn === entry.id;
 
@@ -366,6 +297,15 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                         {entry.appId !== null ? null : (
                           <BreadthNote app={entry} />
                         )}
+                        {entry.keyVersion ? (
+                          <KeyVersionLine
+                            keyVersion={entry.keyVersion}
+                            link={keyVersionLink(entry.keyVersion.appId)}
+                            mode={mode}
+                            onPress={() => press.pressKey(entry)}
+                            pending={press.addingKey.has(entry.id)}
+                          />
+                        ) : null}
                         {mine ? (
                           <SignInNote name={entry.title} tab={tab} />
                         ) : null}
@@ -382,10 +322,28 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                          * already holds, and there is nothing on the row to suggest that would be
                          * harmless.
                          */}
-                        {state.kind === "addable" ? (
+                        {state.kind === "addable" && mode === "request" ? (
+                          requested.has(slug) ? (
+                            <span className="text-muted-foreground text-xs">
+                              Requested
+                            </span>
+                          ) : (
+                            <Button
+                              aria-label={`Request ${entry.title}`}
+                              disabled={press.requesting.has(slug)}
+                              onClick={() => press.press(entry)}
+                              size="sm"
+                              variant="outline"
+                            >
+                              {press.requesting.has(slug)
+                                ? "Requesting…"
+                                : "Request"}
+                            </Button>
+                          )
+                        ) : state.kind === "addable" ? (
                           <Button
                             disabled={isAdding || (mine && tab.pending)}
-                            onClick={() => add(entry)}
+                            onClick={() => press.press(entry)}
                             size="sm"
                             variant="outline"
                           >
@@ -396,7 +354,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                             connectLink={
                               directoryConnect(entry) === "key" &&
                               state.kind === "not_connected"
-                                ? personal
+                                ? ownPages
                                   ? {
                                       to: "/connections/$key",
                                       params: { key: state.serverId },
@@ -408,11 +366,11 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                             name={entry.title}
                             onConnect={
                               state.kind === "not_connected"
-                                ? () => connect(entry.id, state.serverId)
+                                ? () => press.connect(entry.id, state.serverId)
                                 : undefined
                             }
                             opening={mine && tab.pending}
-                            personal={personal}
+                            personal={ownPages}
                             state={state}
                             waiting={mine && waiting}
                           />
@@ -506,10 +464,7 @@ function DirectoryRowState({
     return (
       <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
         {/* Decorative: the word beside it already says which. */}
-        <span
-          aria-hidden="true"
-          className="size-1.5 rounded-full bg-emerald-500"
-        />
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
         Connected
       </span>
     );

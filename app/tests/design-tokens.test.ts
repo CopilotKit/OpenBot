@@ -79,13 +79,14 @@ describe("default look tokens", () => {
     },
   );
 
-  // A stock shadcn theme drops in: no token beyond shadcn's own, the success color and the
+  // A stock shadcn theme drops in: no token beyond shadcn's own, the success and warning colors and the
   // empty-state pattern's.
   test.each(THEMES)("%s: declares only shadcn's tokens", (_, tokens) => {
     const extra = [...tokens.keys()].filter(
       (token) =>
         !SHADCN_TOKEN.test(token) &&
         token !== "--success" &&
+        token !== "--warning" &&
         !token.startsWith("--empty-pattern"),
     );
     expect(extra).toEqual([]);

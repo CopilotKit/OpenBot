@@ -201,6 +201,7 @@ paths:
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/members: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1members' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/members/{memberId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1members~1{memberId}' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/messages: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1messages' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/refused-turns: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1refused-turns' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/attachments: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1attachments' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-calls: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1voice-calls' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-sessions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1voice-sessions' }
@@ -340,6 +341,7 @@ paths:
   /api/v2/organizations/{organizationId}/teams/{teamId}: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}' }
   /api/v2/organizations/{organizationId}/teams/{teamId}/members: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1members' }
   /api/v2/organizations/{organizationId}/teams/{teamId}/members/{memberId}: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1members~1{memberId}' }
+  /api/v2/organizations/{organizationId}/teams/{teamId}/models: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1models' }
   /api/v2/organizations/{organizationId}/people/{personId}/approvals: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals' }
   /api/v2/organizations/{organizationId}/people/{personId}/approvals/{approvalId}/decide: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals~1{approvalId}~1decide' }
   /api/v2/organizations/{organizationId}/people/{personId}/questions: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1questions' }
@@ -1081,8 +1083,8 @@ components:
           maxLength: 2048
           description: >-
             On PLAN_REQUIRED, where an owner or an admin goes in the browser to
-            add a card and start the organization's free trial, or to update
-            the card. Null for a member, who asks an admin.
+            add a card, or to update it after a failed payment. Null for a
+            member, who asks an admin.
     ConversationJoinToken: { $ref: './conversations.yaml#/components/schemas/ConversationJoinToken' }
     CredentialKind: { $ref: './model-connections.yaml#/components/schemas/CredentialKind' }
     Credential: { $ref: './model-connections.yaml#/components/schemas/Credential' }
@@ -1455,27 +1457,39 @@ components:
                 security: true
     PlanRequired:
       description: >-
-        This OpenBot runs an organization's Bots only while it is on a plan or
-        its free trial, and this organization is on neither, or its last
-        payment failed (PLAN_REQUIRED). An owner or an admin adds a card at
-        addCardUrl.
+        This OpenBot runs an organization's Bots only while it is on a plan,
+        or while the person the run counts against has free runs left. This
+        organization isn't on the plan and those free runs are used up, or
+        its last payment failed (PLAN_REQUIRED). An owner or an admin adds a
+        card at addCardUrl.
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
-            noPlan:
+            freeRunsUsedUp:
               value:
                 type: https://open.bot/errors/plan-required
                 title: This organization needs a plan.
                 status: 402
-                detail: Bots in this organization can't run until a card is added. Add a card to start your 30-day free trial.
+                detail: You've used your free trial. Add a card to keep your Bots running for $5 a month.
                 code: PLAN_REQUIRED
                 category: permission
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
                 addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+            freeRunsUsedUpMember:
+              value:
+                type: https://open.bot/errors/plan-required
+                title: This organization needs a plan.
+                status: 402
+                detail: You've used your free trial. Ask an admin to add a card to keep your Bots running.
+                code: PLAN_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ConversationNotFound:
       description: >-
         The conversation does not exist, was removed, or the caller is not in

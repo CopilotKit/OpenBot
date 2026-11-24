@@ -7,6 +7,7 @@ import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
 import { CommandMenu } from "../components/navigation/command-menu";
 import { NewOrganizationDialog } from "../components/organizations/new-organization-dialog";
 import { OrganizationBoundary } from "../components/organizations/organization-boundary";
+import { CardNeededDialog } from "../components/plan/card-needed-dialog";
 import { aiConnectionRequired } from "../lib/ai-connection/queries";
 import {
   connectedThroughDesktop,
@@ -88,8 +89,8 @@ export const Route = createFileRoute("/_authed")({
   /*
    * A browser opened at the address of OpenBot on one computer is refused on the first question,
    * who is signed in: OpenBot answers only its own app there. It is told to open the app instead.
-   * Every other failure is the router's own error screen, as it was, and is told to OpenBot
-   * (lib/error-reporting.tsx). The refusal is OpenBot answering as it should, and is not.
+   * Every other failure is the app's error screen, and is told to OpenBot (lib/error-reporting.tsx).
+   * The refusal is OpenBot answering as it should, and is not.
    */
   errorComponent: (props) =>
     refusedForNotBeingItsApp(props.error) ? (
@@ -122,6 +123,11 @@ function AuthedApp() {
           <SkinAccountSync />
           {/* Opened by the personal edition's "OpenBot for Business" entry, from whichever skin draws it. */}
           <TeamFeaturesDialog />
+          {/*
+           * Opened when the free trial is used up, and on every try at something that uses the AI
+           * after that, from whichever skin it is tried in (components/plan/card-needed-dialog.tsx).
+           */}
+          <CardNeededDialog />
           {/* Opened by New organization in the account menu, for somebody who may create one. */}
           <NewOrganizationDialog />
           {/* The command palette, from Cmd/Ctrl+K and from the skins' menus. */}

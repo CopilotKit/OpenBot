@@ -18,13 +18,14 @@
         "0082_routine_goal",
         "0077_channel_opening"
       ],
-      "to": "0162_computer_restores",
+      "to": "0164_schedules_held_by_move",
       "rollbackCompatible": false
     },
     "intelligenceCapabilities": []
   },
   "upgrade": {
     "fromVersions": [
+      "v1.2.0-rc.3",
       "v1.2.0-rc.2",
       "v1.2.0-rc.1",
       "v1.1.3",

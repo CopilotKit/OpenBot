@@ -16,6 +16,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { ORGANIZATION_SWITCH } from "@/components/manage/organization-app-switch";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
@@ -23,6 +24,7 @@ import {
   NotConnected,
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
+import { KeyVersionOffer } from "@/components/plugins/key-version";
 import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
 import { AppTeamGrantsRow } from "@/components/team-grants/team-grants-row";
 import { Button } from "@/components/ui/button";
@@ -63,10 +65,14 @@ import {
   appsQueryOptions,
   catalogueQueryOptions,
 } from "@/lib/apps/queries";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { storeMcpToken } from "@/lib/credentials/mutations";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { atStart, useManagePaths } from "@/lib/manage-paths";
+import { signsInForDirectory } from "@/lib/plugins/directory-state";
 import {
   connectAccountMutationOptions,
   grantPlugin,
@@ -277,6 +283,8 @@ export function PluginPage({
   // One person: adding and connecting are one step, and nothing here is about other people.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  // Whether this person may add apps, for the offer of an app's key version below.
+  const role = useQuery(currentUserQueryOptions()).data?.role;
   // Whose vault a secret saved here goes into: each organization has its own.
   const vaultOwner = personal ? "OpenBot" : "this organization";
   // Routines is on for every Bot in every edition and has no off switch. See personal-defaults.ts.
@@ -479,7 +487,7 @@ export function PluginPage({
      disconnected sentence and once on its own — and two copies of it would drift. */
   /* It names this app's own account. It said "your documents" on every app, Gmail included,
      because it was written for Google Drive. */
-  const reassurance = `Setup is complete without it, and it reaches only your own ${title} account.`;
+  const reassurance = `Setup is complete without it, and it reaches only your own ${vendorNameOf(title)} account.`;
 
   /*
    * A SHARED APP'S ROW IS THE TEAM ACCOUNT, NOT THIS ADMINISTRATOR'S.
@@ -747,13 +755,13 @@ export function PluginPage({
             <Item size="sm">
               <ItemContent>
                 <ItemTitle>
-                  {personal ? "Turned on" : "Enable for this organization"}
+                  {personal ? "Turned on" : ORGANIZATION_SWITCH.title}
                 </ItemTitle>
                 <ItemDescription>
                   {personal
                     ? "Your Bots can use its tools. Turning this off removes it and every Bot's access to its tools."
                     : server
-                      ? "Bots can be given its tools. Turning this off removes it and every Bot's access to its tools."
+                      ? ORGANIZATION_SWITCH.on
                       : "No Bot can reach this vendor. Turn it on to set it up and give Bots its tools."}
                 </ItemDescription>
               </ItemContent>
@@ -762,7 +770,7 @@ export function PluginPage({
                   aria-label={
                     personal
                       ? `Turn ${title} on or off`
-                      : `Enable ${title} for this organization`
+                      : ORGANIZATION_SWITCH.label(title)
                   }
                   checked={server !== undefined}
                   onCheckedChange={(next) => {
@@ -903,7 +911,7 @@ export function PluginPage({
             /* The personal edition has one person, so each sentence speaks to them and names nobody else. */
             auth === "user-oauth"
               ? personal
-                ? `Connect your ${title} account through OpenBot. OpenBot registers an OAuth client, and your Bots see only what you can see.`
+                ? `Connect your ${vendorNameOf(title)} account through OpenBot. OpenBot registers an OAuth client, and your Bots see only what you can see.`
                 : `This vendor answers as whoever is asking. ${paths.hosted ? "OpenBot" : "The deployment"} registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see.`
               : auth === "builtin"
                 ? `Built into ${paths.deploymentName}. There is no vendor to reach and no credential to keep. ${personal ? "A call runs as you." : "A call runs as whoever asked."}`
@@ -1161,14 +1169,14 @@ export function PluginPage({
                        every tool in the personal edition, as the OAuth row below says. */
                     connectedDescription={
                       personal
-                        ? `Connected. Your Bots use your ${title} as you. ${brokeredDisconnectNote(provider)}`
-                        : `Connected. A Bot with these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`
+                        ? `Connected. Your Bots use your ${vendorNameOf(title)} as you. ${brokeredDisconnectNote(provider)}`
+                        : `Connected. A Bot with these tools uses your ${vendorNameOf(title)} as you. ${brokeredDisconnectNote(provider)}`
                     }
                     /* One person: connecting is what lets their Bots use it, as the OAuth row
                        below says, and there is no setup it could be beside. */
                     disconnectedDescription={
                       personal
-                        ? `Connect your ${title} account so your Bots can use it.`
+                        ? `Connect your ${vendorNameOf(title)} account so your Bots can use it.`
                         : `Connect your own account to try this connector. ${reassurance}`
                     }
                     /* The half of the line above that is true whichever way this app connects.
@@ -1198,10 +1206,10 @@ export function PluginPage({
                       <ItemDescription>
                         {personal
                           ? youConnected
-                            ? `Connected. Your Bots use your ${title} as you.`
-                            : `Connect your ${title} account so your Bots can use it.`
+                            ? `Connected. Your Bots use your ${vendorNameOf(title)} as you.`
+                            : `Connect your ${vendorNameOf(title)} account so your Bots can use it.`
                           : youConnected
-                            ? `Connected. A Bot with these tools uses your ${title} as you. Everybody else connects their own.`
+                            ? `Connected. A Bot with these tools uses your ${vendorNameOf(title)} as you. Everybody else connects their own.`
                             : `Connect your own account to try this connector. ${reassurance}`}
                       </ItemDescription>
                     </ItemContent>
@@ -1211,7 +1219,7 @@ export function PluginPage({
                           {/* Decorative: the word beside it already says which. */}
                           <span
                             aria-hidden="true"
-                            className="size-1.5 rounded-full bg-emerald-500"
+                            className="size-1.5 rounded-full bg-success"
                           />
                           <span className="text-muted-foreground text-xs">
                             Connected
@@ -1348,6 +1356,22 @@ export function PluginPage({
               )}
             </div>
           ) : null}
+
+          {/*
+           * THE SAME APP WITH ITS KEY, for an app the directory lists as a sign-in in place of its
+           * key: the vendor's own server, or the directory's sign-in app. A quiet second way to add
+           * it, for somebody who may add apps. Connected as you add it in the personal edition;
+           * only added in Admin, where each person connects their own.
+           */}
+          {server &&
+          signsInForDirectory(server) &&
+          (personal || isOrganizationAdmin(role)) ? (
+            <KeyVersionOffer
+              appId={key}
+              mode={personal ? "connect" : "add"}
+              title={server.title}
+            />
+          ) : null}
         </PageSection>
       ) : null}
 
@@ -1407,7 +1431,7 @@ export function PluginPage({
             <PageEmpty icon={IconTool} title="No tools listed">
               {/* A server that signs each person in lists its tools once somebody has. */}
               {server.signIn && !youConnected
-                ? `Connect your ${title} account to see its tools.`
+                ? `Connect your ${vendorNameOf(title)} account to see its tools.`
                 : (toolsListError(server.lastError, { title, personal }) ??
                   "Refresh tools to check again.")}
             </PageEmpty>
@@ -1458,7 +1482,7 @@ export function PluginPage({
                       <span
                         className={
                           tool.effect === "write"
-                            ? "text-amber-600 text-xs dark:text-amber-500"
+                            ? "text-warning text-xs"
                             : "text-muted-foreground text-xs"
                         }
                       >
@@ -1674,7 +1698,7 @@ export function PluginPage({
 
       {/*
        * Who first, then what: the decision arrives as "set this Bot up", not as a list of tools
-       * looking for an owner. Both groups get a select-all; the amber heading and the footer's
+       * looking for an owner. Both groups get a select-all; the warning-coloured heading and the footer's
        * "N of which change things" are what keep a bulk write grant a read decision, not a blind one.
        */}
       {server ? (
@@ -1787,7 +1811,7 @@ export function PluginPage({
                   >
                     <div className="mb-1 flex items-center justify-between">
                       <p
-                        className="font-medium text-amber-600 text-sm dark:text-amber-500"
+                        className="font-medium text-warning text-sm"
                         id="grant-writes-heading"
                       >
                         Changes things
