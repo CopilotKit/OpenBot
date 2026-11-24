@@ -3782,8 +3782,10 @@ test("Finishing setup has a usage-data checkbox, checked by default, that turns 
   );
   // The desktop's setting, as `usage_data.rs` keeps it: shared until it is turned off.
   let shared = true;
+  const setUp = deferred<unknown>();
   withLocalCli({
-    set_up_local_eval: () => new Promise(() => {}),
+    set_up_local_eval: () => setUp.promise,
+    connect_local_eval: () => new Promise(() => {}),
     "plugin:openbot-desktop|usage_data": () => ({
       shared,
       offByEnvironment: false,
@@ -3802,6 +3804,25 @@ test("Finishing setup has a usage-data checkbox, checked by default, that turns 
   const box = (await view.findByRole("checkbox", {
     name: /^Help make OpenBot better by sharing diagnostics/,
   })) as HTMLInputElement;
+  const sheet = view.container.querySelector<HTMLElement>(
+    ".sheet.setup-layout.finishing-layout",
+  );
+  expect(sheet).not.toBeNull();
+  const header = sheet?.querySelector<HTMLElement>(
+    ":scope > .setup-header-block",
+  );
+  const body = sheet?.querySelector<HTMLElement>(":scope > .setup-body");
+  const content = body?.querySelector<HTMLElement>(":scope > .setup-content");
+  const footer = sheet?.querySelector<HTMLElement>(":scope > .setup-footer");
+  expect(
+    header?.contains(view.getByRole("heading", { name: "Finishing setup" })),
+  ).toBe(true);
+  expect(
+    content?.contains(view.getByRole("region", { name: "How far along" })),
+  ).toBe(true);
+  expect(footer?.contains(box)).toBe(true);
+  expect(body?.contains(box)).toBe(false);
+  expect([...sheet!.children]).toEqual([header!, body!, footer!]);
   expect(box.checked).toBe(true);
   expect(box.labels?.[0]?.textContent).toBe(
     "Help make OpenBot better by sharing diagnostics like errors, hangs, updates and available memory, never any content. OpenBot is built to respect your privacy.",
@@ -3817,6 +3838,20 @@ test("Finishing setup has a usage-data checkbox, checked by default, that turns 
   await userEvent.click(box);
   await waitFor(() => expect(box.checked).toBe(false));
   expect(shared).toBe(false);
+  const reads = invokeCalls.filter(
+    (call) => call.command === "plugin:openbot-desktop|usage_data",
+  ).length;
+  // Completing setup adds a milestone without replacing the choice or rereading its setting.
+  await act(async () => setUp.resolve(localStatus("starting", "valid")));
+  await waitFor(() => expectCompletedMilestones(view, ["Setting up OpenBot"]));
+  expect(view.getByRole("checkbox") as HTMLInputElement).toBe(box);
+  expect(box.checked).toBe(false);
+  expect(
+    invokeCalls.filter(
+      (call) => call.command === "plugin:openbot-desktop|usage_data",
+    ),
+  ).toHaveLength(reads);
+  expect(footer?.contains(box)).toBe(true);
   expect(
     invokeCalls.filter(
       (call) => call.command === "plugin:openbot-desktop|set_usage_data",
@@ -7396,26 +7431,35 @@ test("leftover data is a choice the Start step waits on, on its page under its r
   );
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await view.findByRole("button", { name: "Start fresh" });
-  const card = view.getByRole("heading", { name: "Finishing setup" })
-    .parentElement as HTMLElement;
-  const order = [...card.children].map((child) =>
-    child.matches("h1")
-      ? "heading"
-      : child.querySelector("#start-fresh-title")
-        ? "notice"
-        : child.getAttribute("aria-label") === "OpenBot on this computer"
-          ? "rows"
-          : null,
+  const heading = view.getByRole("heading", { name: "Finishing setup" });
+  const card = heading.closest<HTMLElement>(".sheet.finishing-layout")!;
+  const header = card.querySelector<HTMLElement>(
+    ":scope > .setup-header-block",
+  )!;
+  const content = card.querySelector<HTMLElement>(
+    ":scope > .setup-body > .setup-content",
+  )!;
+  const order = [...content.children].map((child) =>
+    child.querySelector("#start-fresh-title")
+      ? "notice"
+      : child.getAttribute("aria-label") === "OpenBot on this computer"
+        ? "rows"
+        : null,
   );
-  expect(order.filter(Boolean)).toEqual(["heading", "rows", "notice"]);
-  // The sections are in the sidebar beside the page, so nothing sits above the page's heading.
+  expect(order.filter(Boolean)).toEqual(["rows", "notice"]);
+  expect(header.contains(heading)).toBe(true);
+  expect(card.firstElementChild).toBe(header);
+  // The sections stay beside the page, with the fixed header above the scrolling choices.
   expect(card.previousElementSibling?.matches("aside.rail")).toBe(true);
   expect(
     within(card.previousElementSibling as HTMLElement).getByRole("list", {
       name: "Setup",
     }),
   ).toBeTruthy();
-  expect(card.firstElementChild?.matches("h1")).toBe(true);
+  expect(header.firstElementChild?.matches("h1")).toBe(true);
+  expect(
+    content.contains(view.getByRole("button", { name: "Start fresh" })),
+  ).toBe(true);
   const opening = within(
     view.getByRole("listitem", { name: "Opening OpenBot" }),
   );

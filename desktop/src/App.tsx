@@ -1938,67 +1938,73 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     return (
       <main>
         <SetupRail>{!returning && <Sections at="Start" />}</SetupRail>
-        <div className="sheet connection-sheet">
-          {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
-          <h1>Finishing setup</h1>
-          <p className="lede">
-            {leftoverVolumes.length > 0
-              ? "OpenBot starts once you choose what happens to the data a previous installation left."
-              : "OpenBot is setting up on this computer and starts by itself when it’s ready. This can take a few minutes."}
-          </p>
-          {/* The last thing setup asks: whether to share usage data. Above the rows, which come one
-              at a time: under them, on Windows K, the box moved down 147 px while a person could
-              click it, and a click aimed at it missed. */}
-          {!returning && <UsageDataChoice />}
-          {freshInstall || (
-            <LocalIntelligence
-              sequence={local}
-              offerStart
-              handOff={handOff}
-              open={steps}
-              releaseDue={releaseDue}
-              // A choice for the person, not a failure: the step waits on it, with no Retry.
-              waitingOn={
-                leftoverVolumes.length > 0
-                  ? "Choose below what happens to the previous installation’s data."
-                  : null
-              }
-            />
-          )}
-          {/* In the card under its rows, as every other choice the step waits on. On Windows F it
+        <div className="sheet connection-sheet setup-layout finishing-layout">
+          <header className="setup-header-block">
+            {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
+            <h1>Finishing setup</h1>
+            <p className="lede">
+              {leftoverVolumes.length > 0
+                ? "OpenBot starts once you choose what happens to the data a previous installation left."
+                : "OpenBot is setting up on this computer and starts by itself when it’s ready. This can take a few minutes."}
+            </p>
+          </header>
+          <div className="setup-body">
+            <div className="setup-content">
+              {freshInstall || (
+                <LocalIntelligence
+                  sequence={local}
+                  offerStart
+                  handOff={handOff}
+                  open={steps}
+                  releaseDue={releaseDue}
+                  // A choice for the person, not a failure: the step waits on it, with no Retry.
+                  waitingOn={
+                    leftoverVolumes.length > 0
+                      ? "Choose below what happens to the previous installation’s data."
+                      : null
+                  }
+                />
+              )}
+              {/* In the card under its rows, as every other choice the step waits on. On Windows F it
               sat above the card's own header and pushed "Finishing setup" down 300 px. */}
-          {leftoverVolumes.length > 0 && (
-            <StartFresh
-              key={`${root}:${leftoverVolumes.join(",")}:${leftoverContainers.join(",")}`}
-              busy={busy}
-              containers={leftoverContainers}
-              database={Boolean(displayedFailure?.database_reset)}
-              volumes={leftoverVolumes}
-              onStartFresh={startFresh}
-            />
-          )}
-          {goAhead && <PodmanGoAhead asking={goAhead} />}
-          {pauseCard}
-          {updatingLine}
-          {/* Leftover data is a choice, offered above, not a failure to report here. */}
-          {displayedFailure && leftoverVolumes.length === 0 && (
-            <Failure problem={displayedFailure} />
-          )}
-          {!local.running && !busy && (
-            <div className="row">
-              <button
-                type="button"
-                className="quiet"
-                onClick={() =>
-                  returningToInstallation
-                    ? setRefreshIntelligence(false)
-                    : setStep("model")
-                }
-              >
-                Back
-              </button>
+              {leftoverVolumes.length > 0 && (
+                <StartFresh
+                  key={`${root}:${leftoverVolumes.join(",")}:${leftoverContainers.join(",")}`}
+                  busy={busy}
+                  containers={leftoverContainers}
+                  database={Boolean(displayedFailure?.database_reset)}
+                  volumes={leftoverVolumes}
+                  onStartFresh={startFresh}
+                />
+              )}
+              {goAhead && <PodmanGoAhead asking={goAhead} />}
+              {pauseCard}
+              {updatingLine}
+              {/* Leftover data is a choice, offered above, not a failure to report here. */}
+              {displayedFailure && leftoverVolumes.length === 0 && (
+                <Failure problem={displayedFailure} />
+              )}
+              {!local.running && !busy && (
+                <div className="row">
+                  <button
+                    type="button"
+                    className="quiet"
+                    onClick={() =>
+                      returningToInstallation
+                        ? setRefreshIntelligence(false)
+                        : setStep("model")
+                    }
+                  >
+                    Back
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
+          {/* The last setup choice stays separate while progress and recovery details change. */}
+          <footer className="setup-footer">
+            {!returning && <UsageDataChoice />}
+          </footer>
         </div>
       </main>
     );
