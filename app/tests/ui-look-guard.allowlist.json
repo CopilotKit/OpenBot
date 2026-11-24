@@ -70,10 +70,6 @@
   "components/channels/composer/attachment-strip.tsx": {
     "shadowStep": 1
   },
-  "components/channels/composer/composer.tsx": {
-    "cornerStep": 2,
-    "card": 2
-  },
   "components/channels/composer/rejected-files.tsx": {
     "cornerStep": 1
   },

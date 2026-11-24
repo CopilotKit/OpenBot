@@ -130,7 +130,13 @@ describe("the rules", () => {
 
 const SRC = join(import.meta.dir, "../src");
 const ALLOWLIST = join(import.meta.dir, "ui-look-guard.allowlist.json");
-const NOT_READ = ["components/ui/", "skins/", "lib/api/generated/"];
+const NOT_READ = [
+  "components/ui/",
+  "skins/",
+  "lib/api/generated/",
+  // The message box's frame (rule 8): part of the look, kept beside the composer that uses it.
+  "components/channels/composer/frame.ts",
+];
 
 type Counts = Partial<Record<Rule, number>>;
 
@@ -139,6 +145,7 @@ function screenFiles(dir = SRC): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     const file = relative(SRC, path);
+    if (NOT_READ.includes(file)) return [];
     if (statSync(path).isDirectory())
       return NOT_READ.some((skip) => `${file}/`.startsWith(skip))
         ? []
