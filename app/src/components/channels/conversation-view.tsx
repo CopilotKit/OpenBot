@@ -143,8 +143,8 @@ export function ConversationView({
    */
   intro?: ReactNode;
   /**
-   * Drawn in the transcript's top right corner, over it: the Bot's buddy (`ConversationBuddy`). Only
-   * clicks on a button in it land; the rest of its box lets them through to the transcript.
+   * Drawn in the conversation's top right corner, in a narrow column of its own beside the transcript:
+   * the Bot's buddy (`ConversationBuddy`). Drawn over the transcript, it covered the ends of lines.
    */
   corner?: ReactNode;
   /**
@@ -532,12 +532,7 @@ export function ConversationView({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="relative flex flex-1 min-h-0">
-        {corner ? (
-          <div className="pointer-events-none absolute top-2 right-6 z-10 [&_button]:pointer-events-auto">
-            {corner}
-          </div>
-        ) : null}
+      <div className="flex flex-1 min-h-0">
         {/*
          * The commands and their names as one string, rather than the option objects.
          *
@@ -546,22 +541,29 @@ export function ConversationView({
          * array would give every message a new prop identity on each refetch and re-render the whole
          * conversation to change nothing.
          */}
-        <ChatTranscript
-          threadId={threadId}
-          busy={busy}
-          commandLabels={skillLabels(commands ?? [])}
-          {...(orbs && intro ? { intro } : {})}
-          messages={messages}
-          onRemoveQueued={(id) => {
-            apply({ id, type: "remove" });
-          }}
-          onSendQueuedNow={disabled ? undefined : sendQueuedNow}
-          queued={queued}
-          restoring={restoring}
-          {...(stopped ? { stopped } : {})}
-          {...(stopped && onCarryOn && !disabled ? { onCarryOn } : {})}
-          working={working}
-        />
+        <div className="flex min-w-0 flex-1">
+          <ChatTranscript
+            threadId={threadId}
+            busy={busy}
+            commandLabels={skillLabels(commands ?? [])}
+            {...(orbs && intro ? { intro } : {})}
+            messages={messages}
+            onRemoveQueued={(id) => {
+              apply({ id, type: "remove" });
+            }}
+            onSendQueuedNow={disabled ? undefined : sendQueuedNow}
+            queued={queued}
+            restoring={restoring}
+            {...(stopped ? { stopped } : {})}
+            {...(stopped && onCarryOn && !disabled ? { onCarryOn } : {})}
+            working={working}
+          />
+        </div>
+        {corner ? (
+          <aside className="flex w-28 shrink-0 justify-end pt-3 pr-4">
+            <div>{corner}</div>
+          </aside>
+        ) : null}
       </div>
       {/*
        * THE TRANSCRIPT'S SIDE INSET IN A NARROW PANE, AND THE SAME 768px COMPOSER IN A WIDE ONE.
