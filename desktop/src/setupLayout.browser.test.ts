@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
+import { BOOKING_CALENDAR_ORIGIN } from "../../shared/openbot-for-business";
 
 /**
  * The AI step's form holds still while the install behind it comes and goes.
@@ -39,10 +40,12 @@ type Route = {
   fulfill(response: {
     status?: number;
     contentType?: string;
+    headers?: Record<string, string>;
     body: string;
   }): Promise<void>;
 };
 type Page = {
+  addInitScript(script: string): Promise<void>;
   route(url: string, handler: (route: Route) => Promise<void>): Promise<void>;
   goto(url: string): Promise<unknown>;
   getByRole(role: string, options?: { name: string; exact?: boolean }): Locator;
@@ -486,7 +489,12 @@ async function buildWindow(env: Record<string, string> = {}): Promise<Window> {
 }
 
 /** Served as the shell serves the window: its page, its script and its stylesheet. */
-async function open(page: Page, hash = "", served: Window = built) {
+async function open(
+  page: Page,
+  hash = "",
+  served: Window = built,
+  headers: Record<string, string> = {},
+) {
   await page.route("https://openbot.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/main.js")
@@ -499,6 +507,7 @@ async function open(page: Page, hash = "", served: Window = built) {
     if (path === "/")
       return route.fulfill({
         contentType: "text/html",
+        headers,
         body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/main.css"></head><body><div id="root"></div><script type="module" src="/main.js"></script></body></html>',
       });
     return route.fulfill({ status: 404, body: "" });
@@ -3956,4 +3965,131 @@ describe.skipIf(!asked)("a screen that fails to draw", () => {
         await page.close();
       }
     });
+});
+
+/**
+ * The Content Security Policy the shell serves the bundled window with (`app.security.csp`), as
+ * directive name to sources. Tauri adds its own scripts' hashes to `script-src` when it serves the
+ * page, so what is written here is the floor the window draws under.
+ */
+function bundledPolicy(): { text: string; directives: Map<string, string[]> } {
+  const config = JSON.parse(
+    readFileSync(
+      new URL("../src-tauri/tauri.conf.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { app: { security: { csp: unknown } } };
+  const text = config.app.security.csp;
+  if (typeof text !== "string")
+    throw new Error(
+      `tauri.conf.json serves the window with no Content Security Policy (app.security.csp is ${JSON.stringify(text)})`,
+    );
+  const directives = new Map<string, string[]>();
+  for (const part of text.split(";")) {
+    const [name, ...sources] = part.trim().split(/\s+/);
+    if (name) directives.set(name, sources);
+  }
+  return { text, directives };
+}
+
+describe("the bundled window's Content Security Policy", () => {
+  test("loads only the window's own files, its images, the IPC and the booking calendar", () => {
+    const { directives } = bundledPolicy();
+    expect(directives.get("default-src")).toEqual(["'self'"]);
+    // Nothing inline and nothing evaluated: Tauri adds its own scripts by hash.
+    expect(directives.get("script-src")).toEqual(["'self'"]);
+    expect(directives.get("object-src")).toEqual(["'none'"]);
+    expect(directives.get("base-uri")).toEqual(["'self'"]);
+    expect(directives.get("frame-ancestors")).toEqual(["'none'"]);
+    // The one page the window frames is OpenBot for Business's booking calendar.
+    expect(directives.get("frame-src")).toEqual([BOOKING_CALENDAR_ORIGIN]);
+    // The window reaches the shell over Tauri's IPC only: `ipc:` on macOS and Linux, and
+    // http://ipc.localhost on Windows.
+    expect(directives.get("connect-src")).toEqual([
+      "'self'",
+      "ipc:",
+      "http://ipc.localhost",
+    ]);
+  });
+});
+
+/**
+ * The window served with that policy, as the shell serves it, collecting every violation the page
+ * reports. A screen that needs something the policy refuses shows here as a violation.
+ */
+describe.skipIf(!asked)("the window under its Content Security Policy", () => {
+  const RECORD_VIOLATIONS = `
+    globalThis.__violations = [];
+    document.addEventListener("securitypolicyviolation", (event) => {
+      globalThis.__violations.push(event.violatedDirective + " " + event.blockedURI);
+    });
+  `;
+  const violations = (page: Page) =>
+    page.evaluate(
+      () => (globalThis as { __violations?: string[] }).__violations ?? [],
+    );
+
+  test("the first screen and OpenBot for Business's booking calendar draw with nothing refused", async () => {
+    const { text } = bundledPolicy();
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await page.addInitScript(RECORD_VIOLATIONS);
+      await routeCalendar(page);
+      // An app's icon, as the move to OpenBot Cloud shows one from the app directory.
+      await page.route("https://icons.openbot.test/**", (route) =>
+        route.fulfill({
+          contentType: "image/svg+xml",
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>',
+        }),
+      );
+      await open(page, "", built, { "Content-Security-Policy": text });
+      await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+      await page.getByText("Your own cloud or on-prem.").click();
+      await page.locator(".tile-option.chosen").waitFor();
+      await page.getByText("We run it for you.").click();
+      await page
+        .locator(
+          '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
+        )
+        .waitFor();
+      const icon = await page.evaluate(
+        () =>
+          new Promise<boolean>((resolve) => {
+            const image = new Image();
+            image.onload = () => resolve(true);
+            image.onerror = () => resolve(false);
+            image.src = "https://icons.openbot.test/gmail.svg";
+          }),
+      );
+      expect(icon).toBe(true);
+      expect(await violations(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a script put into the page is refused", async () => {
+    const { text } = bundledPolicy();
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await page.addInitScript(RECORD_VIOLATIONS);
+      await open(page, "", built, { "Content-Security-Policy": text });
+      await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+      const ran = await page.evaluate(() => {
+        const script = document.createElement("script");
+        script.textContent = "globalThis.__injected = true;";
+        document.head.append(script);
+        return (globalThis as { __injected?: boolean }).__injected === true;
+      });
+      expect(ran).toBe(false);
+      await page.waitForTimeout(100);
+      expect(await violations(page)).toContain("script-src-elem inline");
+    } finally {
+      await page.close();
+    }
+  });
 });
