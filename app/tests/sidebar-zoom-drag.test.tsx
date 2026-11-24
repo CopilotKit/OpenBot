@@ -47,11 +47,11 @@ const ZOOMED = { width: 820, height: 540 };
 const ZOOMED_MOST = Math.floor(ZOOMED.width * 0.4);
 
 /**
- * The narrowest each shape may be dragged: the panel's floor, plus the 5rem strip beside one; and
+ * The narrowest each shape may be dragged: the panel's floor, plus the 4.5rem strip beside one; and
  * where a drag stopped before (`was`), which it now goes well past.
  */
 const SHAPES = [
-  { name: "app", strip: true, floor: 180 + 80, was: 220 + 80 },
+  { name: "app", strip: true, floor: 180 + 72, was: 220 + 72 },
   { name: "admin-settings", strip: false, floor: 180, was: 220 },
 ] as const;
 type Shape = (typeof SHAPES)[number];

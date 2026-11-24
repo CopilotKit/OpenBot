@@ -118,6 +118,8 @@ test("each section's name is written under its icon, and read out once", () => {
   const label = button.querySelector('[data-slot="strip-label"]');
   expect(label?.textContent).toBe("Conversations");
   expect(label?.className).not.toContain("sr-only");
+  // The scale's smallest step, 10px, so the strip stays narrow (theme.css).
+  expect(label?.className).toContain("text-2xs");
   expect(button.querySelector(".sr-only")).toBeNull();
 });
 
