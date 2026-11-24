@@ -8,6 +8,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useRouterState,
 } from "@tanstack/react-router";
 import {
   act,
@@ -21,6 +22,8 @@ import {
   AppAccessAction,
   appAccessSentence,
 } from "@/components/plugins/app-access-action";
+import { AppSource } from "@/lib/api/generated/model/appSource";
+import { BotAppConnect } from "@/lib/api/generated/model/botAppConnect";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { ME_PATH, meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
@@ -161,7 +164,11 @@ function mounted(
   const settings = createRoute({
     getParentRoute: () => root,
     path: "/connections/$key",
-    component: () => null,
+    // Where a press that ends at a key form lands, read back by the test as the address it reached.
+    component: function AppPage() {
+      const at = useRouterState({ select: (state) => state.location.href });
+      return <p data-testid="app-page">{at}</p>;
+    },
   });
   const directory = createRoute({
     getParentRoute: () => root,
@@ -903,4 +910,203 @@ test("Connect and allow opens the person's consent first, and gives the app once
   // The server's next answer: connected now, and still not given.
   swap({ ...waiting, needsConnect: false });
   await waitFor(() => expect(gives()).toHaveLength(1));
+});
+
+/*
+ * ONE PRESS FOR EVERY KIND OF APP. An admin who presses the card's button is taken through every
+ * step they would otherwise press through: turned on, given, and then their own sign-in or, where
+ * the app takes a key, the key form, which is the one place they type. Every kind the API can
+ * describe is run: each source (`AppSource`) with each way of connecting (`BotAppConnect`, and none),
+ * read from the generated client, so a kind the API gains later is run here too, and a way of
+ * connecting this test has no expectation for fails it until somebody says what one press does.
+ */
+type Kind = {
+  name: string;
+  source: AppAccess["source"];
+  connect: AppAccess["connect"];
+  key: string;
+  /** Whether the app lists its tools before anybody signs in. */
+  listed: boolean;
+};
+
+/** The id an app of this source has: from the directory, Composio's and Arcade's both. */
+function keysFor(source: AppAccess["source"]): string[] {
+  switch (source) {
+    case "directory":
+      return ["composio-gmail", "arcade-Gmail"];
+    case "catalogue":
+      return ["google-drive"];
+    case "address":
+      return ["mcp-notes"];
+    default:
+      throw new Error(
+        `No app id for a source this test doesn't know: ${source}`,
+      );
+  }
+}
+
+const CONNECTS: AppAccess["connect"][] = [
+  ...Object.values(BotAppConnect),
+  null,
+];
+const KINDS: Kind[] = Object.values(AppSource).flatMap((source) =>
+  keysFor(source).flatMap((key) =>
+    CONNECTS.flatMap((connect) =>
+      [true, false].map((listed) => ({
+        name: `${key} (${source}, connects by ${connect ?? "nothing"}, ${listed ? "tools listed" : "nothing listed until signed in"})`,
+        source,
+        connect,
+        key,
+        listed,
+      })),
+    ),
+  ),
+);
+
+/** What one press must do for a kind: the writes it sends, and where it ends. */
+function onePress(kind: Kind): {
+  posts: string[];
+  /** The address a sign-in tab is sent to, or the key form the page goes to. */
+  ends: "signed in, then given" | "sign-in" | "key form" | "given";
+} {
+  const approve = `${botAppPath("expenses", kind.key)}/approve`;
+  const connect = myConnectionPath(kind.key, "connect");
+  switch (kind.connect) {
+    case null:
+      return { posts: [approve], ends: "given" };
+    case "key":
+      return { posts: [approve], ends: "key form" };
+    case "oauth":
+    case "consent":
+      return kind.listed
+        ? { posts: [approve, connect], ends: "sign-in" }
+        : { posts: [approve, connect, approve], ends: "signed in, then given" };
+    default:
+      throw new Error(
+        `No one-press expectation for an app that connects by ${kind.connect}. Say what one press does for it.`,
+      );
+  }
+}
+
+/*
+ * "Nothing listed until signed in" is a kind only where there is a sign-in: an app with a key or
+ * with nothing to connect lists what it can do before anybody connects.
+ */
+test.each(
+  KINDS.filter(
+    (kind) =>
+      kind.listed || kind.connect === "oauth" || kind.connect === "consent",
+  ),
+)("one press takes an admin through every step: $name", async (kind) => {
+  const account = kind.connect === null ? "deployment" : "personal";
+  const before = appAccess({
+    key: kind.key,
+    displayName: "The app",
+    source: kind.source,
+    connect: kind.connect,
+    account,
+    accountHolder: account === "personal" ? "you" : null,
+    state: "disabled",
+    unavailable: "absent",
+    granted: false,
+    connectedAt: null,
+    requestKind: "enable",
+  });
+  // What the server says once the press has turned it on.
+  const afterOn = appAccess({
+    ...before,
+    state: !kind.listed
+      ? "not_granted"
+      : kind.connect === null
+        ? "ready"
+        : "not_connected",
+    unavailable: null,
+    granted: kind.listed,
+    requestKind: kind.listed ? null : "grant",
+  });
+  const { view, sent, opened, swap } = mounted(before, undefined, {
+    admin: true,
+    readAgain: () => afterOn,
+  });
+  const expected = onePress(kind);
+  const posts = () =>
+    sent.filter((call) => call.method === "POST").map((call) => call.url);
+
+  fireEvent.click(
+    await view.findByRole("button", {
+      name: "Turn on The app and give it to Expenses",
+    }),
+  );
+
+  if (expected.ends === "key form") {
+    const page = await view.findByTestId("app-page");
+    expect(page.textContent).toBe(`/connections/${kind.key}?connect=true`);
+  }
+  if (expected.ends === "sign-in" || expected.ends === "signed in, then given")
+    await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+  if (expected.ends === "signed in, then given") {
+    // Only the person's sign-in was theirs to do; the give follows it without another press.
+    await swap({
+      ...afterOn,
+      connectedAt: "2026-11-23T23:10:00.000Z",
+    });
+  }
+  await waitFor(() => expect(posts()).toEqual(expected.posts));
+  if (expected.ends === "given" || expected.ends === "key form")
+    expect(opened).toEqual([]);
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
+test("every kind the API describes is run", () => {
+  for (const source of Object.values(AppSource))
+    for (const connect of CONNECTS)
+      expect(
+        KINDS.some(
+          (kind) => kind.source === source && kind.connect === connect,
+        ),
+      ).toBe(true);
+});
+
+test("an app already connected that only needs giving is given in one press, for every kind that connects", async () => {
+  for (const kind of KINDS.filter(
+    (each) => each.listed && each.connect !== null,
+  )) {
+    const connected = "2026-11-20T09:00:00.000Z";
+    const { view, sent, opened } = mounted(
+      appAccess({
+        key: kind.key,
+        displayName: "The app",
+        source: kind.source,
+        connect: kind.connect,
+        account: "personal",
+        state: "not_granted",
+        granted: false,
+        connectedAt: connected,
+        requestKind: "grant",
+      }),
+      undefined,
+      {
+        admin: true,
+        readAgain: () =>
+          appAccess({
+            key: kind.key,
+            source: kind.source,
+            connect: kind.connect,
+            connectedAt: connected,
+          }),
+      },
+    );
+    fireEvent.click(
+      await view.findByRole("button", { name: "Give The app to Expenses" }),
+    );
+    await waitFor(() =>
+      expect(
+        sent.filter((call) => call.method === "POST").map((call) => call.url),
+      ).toEqual([`${botAppPath("expenses", kind.key)}/approve`]),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sent.filter((call) => call.method === "POST")).toHaveLength(1);
+    expect(opened).toEqual([]);
+    cleanup();
+  }
 });
