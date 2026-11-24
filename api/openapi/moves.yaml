@@ -44,6 +44,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -108,6 +110,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -153,6 +157,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -186,6 +192,9 @@ paths:
       responses:
         '204':
           description: The export is gone.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '404':
@@ -236,6 +245,8 @@ paths:
               $ref: '#/components/headers/PartETag'
             Accept-Ranges:
               $ref: '#/components/headers/AcceptRanges'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/octet-stream:
               schema:
@@ -253,6 +264,8 @@ paths:
               schema:
                 type: string
               example: bytes 1048576-33554431/33554432
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/octet-stream:
               schema:
@@ -323,6 +336,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -367,6 +382,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -408,6 +425,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -464,6 +483,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -538,6 +559,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -581,6 +604,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1079,6 +1104,9 @@ components:
       description: >-
         Moving isn't served here: exports only by an OpenBot on the person's
         own computer, imports only by OpenBot Cloud.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1097,6 +1125,9 @@ components:
                 traceId: trace_example
     ExportNotFound:
       description: The export doesn't exist, has been removed, or isn't the caller's.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1115,6 +1146,9 @@ components:
                 traceId: trace_example
     ExportNotReady:
       description: The export is still being written, or failed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1133,6 +1167,9 @@ components:
                 traceId: trace_example
     RangeNotSatisfiable:
       description: The Range asked for lies outside the part.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1151,6 +1188,9 @@ components:
                 traceId: trace_example
     ImportNotFound:
       description: The import doesn't exist, or isn't the caller's.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1174,6 +1214,9 @@ components:
         (IMPORT_MANIFEST_MISSING), a part is missing (IMPORT_INCOMPLETE), the
         import hasn't finished (IMPORT_NOT_FINISHED), or the Idempotency-Key
         was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1206,6 +1249,9 @@ components:
         Part 1 isn't a bundle this OpenBot reads: not a bundle at all, a
         format newer than it reads (IMPORT_FORMAT_UNSUPPORTED), larger than
         maxBundleBytes, or a model key sealed to another import's key.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1230,6 +1276,8 @@ components:
           schema:
             type: integer
             minimum: 1
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
