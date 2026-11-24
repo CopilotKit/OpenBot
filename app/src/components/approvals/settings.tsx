@@ -42,6 +42,7 @@ import {
   HANDED_TO_YOU,
 } from "./ask-first-copy";
 import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The person's own approval settings: whether their Bots ask before changing things, and the rules
@@ -91,7 +92,7 @@ export function ApprovalSettings() {
     <>
       {error ? (
         <p className="mt-6 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {isOrganizationAdmin(me?.role) && !personal ? (

@@ -25,6 +25,10 @@ import { DeleteConversationDialog } from "@/components/channels/delete-conversat
 import { BrandName } from "@/components/edition/brand-name";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
+import {
+  COMMAND_MENU_KEYS,
+  openCommandMenu,
+} from "@/components/navigation/command-menu";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -46,11 +50,8 @@ import {
 } from "@/lib/channels/queries";
 import { useOffersMemory } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import { loadFailure } from "@/lib/load-failure";
 import { memoriesQueryOptions } from "@/lib/memory";
-import {
-  COMMAND_MENU_KEYS,
-  openCommandMenu,
-} from "@/components/navigation/command-menu";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
@@ -205,7 +206,10 @@ function BotsSection({
       </NavLabel>
       {agents.isPending ? null : agents.error ? (
         <p className="px-3.5 py-1.5 text-[12px] text-destructive" role="alert">
-          Couldn't load your Bots. Try again in a moment.
+          {loadFailure(
+            agents.error,
+            "Couldn't load your Bots. Try again in a moment.",
+          )}
         </p>
       ) : dots.length === 0 ? (
         <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
@@ -451,7 +455,10 @@ function RecentChats({
       >
         {channels.isPending ? null : channels.error ? (
           <p className="px-3.5 py-1.5 text-[12px] text-(--opendots-error-ink)">
-            Couldn't load your conversations. Try again in a moment.
+            {loadFailure(
+              channels.error,
+              "Couldn't load your conversations. Try again in a moment.",
+            )}
           </p>
         ) : visible.length === 0 ? (
           <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">

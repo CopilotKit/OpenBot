@@ -71,6 +71,7 @@ import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { storeMcpToken } from "@/lib/credentials/mutations";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { atStart, useManagePaths } from "@/lib/manage-paths";
 import { signsInForDirectory } from "@/lib/plugins/directory-state";
 import {
@@ -254,7 +255,7 @@ export function connectionKindFor(
  * buttons — somebody reading with a screen reader has to be told the controls are gone and why,
  * not left to notice their absence.
  */
-function ConnectionStateUnreadable() {
+function ConnectionStateUnreadable({ error }: { error: unknown }) {
   const paths = useManagePaths();
   return (
     <Item size="sm">
@@ -262,9 +263,12 @@ function ConnectionStateUnreadable() {
         <ItemTitle>Your account</ItemTitle>
         <ItemDescription role="alert">
           {/* A hosted OpenBot's logs are OpenBot by CopilotKit's: its admin can't read them. */}
-          {paths.hosted
-            ? "Couldn't load whether you've connected an account here. Try again in a moment."
-            : `Couldn't load whether you've connected an account here. Try again in a moment, or check ${paths.deploymentName}'s logs if it keeps happening.`}
+          {loadFailure(
+            error,
+            paths.hosted
+              ? "Couldn't load whether you've connected an account here. Try again in a moment."
+              : `Couldn't load whether you've connected an account here. Try again in a moment, or check ${paths.deploymentName}'s logs if it keeps happening.`,
+          )}
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -657,9 +661,12 @@ export function PluginPage({
         title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          {personal
-            ? "Couldn't load your apps. Try again in a moment."
-            : "Couldn't load apps. Try again in a moment."}
+          {loadFailure(
+            [plugins.error, catalogue.error],
+            personal
+              ? "Couldn't load your apps. Try again in a moment."
+              : "Couldn't load apps. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );
@@ -1132,7 +1139,7 @@ export function PluginPage({
               <>
                 <Separator />
                 {connectionsUnreadable ? (
-                  <ConnectionStateUnreadable />
+                  <ConnectionStateUnreadable error={connections.error} />
                 ) : server?.sharedOnly && !shared ? (
                   /*
                    * NO PERSONAL CONNECT FOR AN APP THAT CAN ONLY HOLD A SHARED ACCOUNT. It signs in
@@ -1198,7 +1205,7 @@ export function PluginPage({
               <>
                 <Separator />
                 {connectionsUnreadable ? (
-                  <ConnectionStateUnreadable />
+                  <ConnectionStateUnreadable error={connections.error} />
                 ) : (
                   <Item size="sm">
                     <ItemContent>

@@ -33,6 +33,7 @@ import {
   removeGithubBindingMutationOptions,
 } from "@/lib/responsibilities";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The repositories whose GitHub events can start this person's responsibilities. One per person, not
@@ -59,7 +60,7 @@ export function GithubSources() {
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {bindings.isPending || !bindings.data ? null : bindings.data.length ===
@@ -179,7 +180,7 @@ function AddRepositoryDialog({ onClose }: { onClose: () => void }) {
           </form>
           {create.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {create.error.message}
+              {failureSaid(create.error)}
             </p>
           ) : null}
         </DialogBody>

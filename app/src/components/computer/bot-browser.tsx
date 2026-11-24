@@ -47,6 +47,7 @@ import {
   stopBotBrowserRecordingMutationOptions,
 } from "@/lib/bot-browser/mutations";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /*
  * A BOT'S BROWSER, WORKED BY A PERSON (`shared/bot-browser.ts`): the bar above the Bot's screen, and Record under it.
@@ -432,7 +433,7 @@ function RecordPanel({
         </PageRows>
         {recording.error ? (
           <p className="mt-2 text-destructive text-sm" role="alert">
-            {recording.error.message}
+            {failureSaid(recording.error)}
           </p>
         ) : null}
       </div>

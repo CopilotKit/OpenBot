@@ -44,6 +44,7 @@ import {
   Details,
   ProviderTile,
 } from "./ai-connection-chooser";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Settings → General's AI model: the AI provider OpenBot's Bots run on and how OpenBot signs in to
@@ -296,7 +297,7 @@ function AiConnectionDialog({
         ) : null}
         {disconnect.error ? (
           <p className="text-destructive" role="alert">
-            {disconnect.error.message}
+            {failureSaid(disconnect.error)}
           </p>
         ) : null}
       </DialogBody>

@@ -39,6 +39,7 @@ import {
 import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import { fallbackBot, useStartChannel } from "@/lib/channels/start";
 import { useAttachmentLimits } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
 import {
@@ -129,12 +130,13 @@ function NewConversation({ composition }: { composition: string }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const navigate = Route.useNavigate();
   const { startChosen, startGroup, startPicked, pending } = useStartChannel();
-  const { data: profiles, isError: rosterError } = useQuery(
-    agentListQueryOptions(),
-  );
+  const {
+    data: profiles,
+    isError: rosterError,
+    error: rosterFailure,
+  } = useQuery(agentListQueryOptions());
   /** Who OpenBot can send to when nobody is in To:. Undefined only when the person has no Bot. */
   const fallback = fallbackBot(profiles);
-
   const [error, setError] = useState<string | null>(null);
   /** Enter or Send was pressed with no Bot to send to at all. Said until a Bot is chosen. */
   const [askedForBot, setAskedForBot] = useState(false);
@@ -180,7 +182,10 @@ function NewConversation({ composition }: { composition: string }) {
   const urlAgentDetailFailed = needsUrlAgentDetail && detailError && !fetched;
   const loadError =
     rosterError && profiles === undefined
-      ? "Couldn't load your Bots. Try again in a moment."
+      ? loadFailure(
+          rosterFailure,
+          "Couldn't load your Bots. Try again in a moment.",
+        )
       : urlAgentDetailFailed
         ? /*
            * The server's 404 sentence (agents/routes.ts `mapStoreError`) means this person cannot see
@@ -189,7 +194,10 @@ function NewConversation({ composition }: { composition: string }) {
            */
           detailFailure?.message === AGENT_NOT_FOUND
           ? "This Bot isn't available to you. It may be unpublished or not shared with you."
-          : "Couldn't load that Bot. Try again in a moment."
+          : loadFailure(
+              detailFailure,
+              "Couldn't load that Bot. Try again in a moment.",
+            )
         : null;
   /** Bots picked in the To: field, in the order they will answer; the URL's Bot until one is picked. */
   const [picked, setPicked] = useState<AgentProfile[] | null>(null);

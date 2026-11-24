@@ -33,6 +33,7 @@ import {
 import { MISSING_TEAM, teamName } from "@/lib/teams/names";
 import { type TeamSummary, teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The Teams row of an app's page and of a skill's page in Admin, and the dialog it opens.
@@ -290,7 +291,7 @@ function TeamGrantsDialog({
           )}
           {error ? (
             <p className="mt-4 text-destructive text-sm" role="alert">
-              {error.message}
+              {failureSaid(error)}
             </p>
           ) : null}
         </DialogBody>

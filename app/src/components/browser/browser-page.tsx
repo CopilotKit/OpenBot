@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { settledRefusal } from "@/lib/computers/refusal";
+import { loadFailure } from "@/lib/load-failure";
 import { recorderKeys } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
 import { TEACH_A_BOT } from "./browser-nav-item";
@@ -90,7 +91,10 @@ export function BrowserPage() {
     return (
       <PageShell title={TITLE}>
         <p className="mt-6 text-destructive text-sm" role="alert">
-          Couldn't load your browser. Try again in a moment.
+          {loadFailure(
+            state.error,
+            "Couldn't load your browser. Try again in a moment.",
+          )}
         </p>
         <YourRecordings action={<LearnedLink />} />
       </PageShell>

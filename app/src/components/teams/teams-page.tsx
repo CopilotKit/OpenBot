@@ -29,6 +29,7 @@ import {
 } from "@/lib/teams/queries";
 import { type TeamPaths, type TeamsShell, teamPaths } from "./team-paths";
 import { TEAMS_DESCRIPTION, teamFacts } from "./team-words";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The organization's teams: each one's name, what it is for, how many people are in it, whether it
@@ -84,7 +85,7 @@ function Teams({ paths }: { paths: TeamPaths }) {
       ) : null}
       {list.isPending ? null : list.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {list.error.message}
+          {failureSaid(list.error)}
         </p>
       ) : teams.length === 0 && query ? (
         <PageEmpty icon={IconSearch} title="No matches">

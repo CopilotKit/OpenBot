@@ -46,6 +46,7 @@ import type {
 import { MISSING_TEAM, teamName } from "@/lib/teams/names";
 import type { TeamSummary } from "@/lib/teams/queries";
 import { cn } from "@/lib/utils";
+import { failureSaid } from "@/lib/load-failure";
 
 /** The organization's teams, by which a change's or an answer's team id is given its name. */
 type Teams = readonly Pick<TeamSummary, "id" | "name">[];
@@ -274,7 +275,7 @@ export function PermissionsPreview({
       <Field>
         <FieldLabel>Who it changes</FieldLabel>
         <p className="text-destructive text-sm" role="alert">
-          {preview.error.message}
+          {failureSaid(preview.error)}
         </p>
       </Field>
     );

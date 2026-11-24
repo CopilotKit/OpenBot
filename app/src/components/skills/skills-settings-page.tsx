@@ -43,6 +43,7 @@ import { grantSummary } from "@/lib/agents/grant-summary";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { removeSkillMutationOptions } from "@/lib/skills/mutations";
 import { type Skill, skillListQueryOptions } from "@/lib/skills/queries";
@@ -221,7 +222,10 @@ export function SkillsSettingsPage({
         ) : null}
         {loaded && !writtenKnown ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load the skills you wrote. Try again in a moment.
+            {loadFailure(
+              [skillList.error, me.error],
+              "Couldn't load the skills you wrote. Try again in a moment.",
+            )}
           </p>
         ) : null}
 

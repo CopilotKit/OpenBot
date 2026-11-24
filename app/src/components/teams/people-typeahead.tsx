@@ -22,6 +22,7 @@ import {
   peopleSearchText,
 } from "@/lib/teams/queries";
 import { cn } from "@/lib/utils";
+import { failureSaid } from "@/lib/load-failure";
 
 /** How long typing rests before the server is asked: short enough to feel like every keystroke. */
 const DEBOUNCE_MS = 120;
@@ -290,7 +291,7 @@ export function PeopleTypeahead({
         >
           {found.error && !found.data ? (
             <p className="px-3 py-2.5 text-destructive text-sm" role="alert">
-              {found.error.message}
+              {failureSaid(found.error)}
             </p>
           ) : !answered ? (
             slow ? (

@@ -18,6 +18,7 @@ import {
   deleteRoutineMutationOptions,
   setRoutineEnabledMutationOptions,
 } from "@/lib/routines/mutations";
+import { failureSaid } from "@/lib/load-failure";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
 import { LastRunChip, RoutineRuns } from "./routine-runs";
@@ -148,7 +149,7 @@ export function GoalSchedules({
       </PageRows>
       {setEnabled.error || remove.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          {setEnabled.error?.message ?? remove.error?.message}
+          {failureSaid(setEnabled.error ?? remove.error)}
         </p>
       ) : null}
     </PageSection>

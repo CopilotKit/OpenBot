@@ -48,6 +48,7 @@ import {
   useAttachmentLimits,
 } from "@/lib/deployment/queries";
 import { editionOf } from "@/lib/edition-guard";
+import { loadFailure, unavailableSaid } from "@/lib/load-failure";
 import {
   type ConversationModelInput,
   modelCatalogueQueryOptions,
@@ -106,6 +107,7 @@ function RouteComponent() {
     data: agents,
     isPending: loading,
     isError: failed,
+    error: agentsError,
   } = useQuery(agentListQueryOptions());
   const explore = agents?.filter(isSharedWithYou);
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
@@ -348,8 +350,10 @@ function RouteComponent() {
               className="mt-2 w-full max-w-2xl text-sm text-destructive"
               role="alert"
             >
-              Couldn't load your Bots, so there's no one to send this to. Try
-              again in a moment.
+              {loadFailure(
+                agentsError,
+                "Couldn't load your Bots, so there's no one to send this to. Try again in a moment.",
+              )}
             </p>
           ) : null}
         </div>
@@ -407,10 +411,20 @@ function RouteComponent() {
             // working off that same, successfully loaded `agents`) proves.
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-[140px] border border-dashed border-destructive">
+              <Empty
+                className={
+                  // OpenBot holding off for now is not a failure (lib/load-failure.tsx).
+                  unavailableSaid(agentsError)
+                    ? "mt-4 h-[140px] border border-dashed"
+                    : "mt-4 h-[140px] border border-dashed border-destructive"
+                }
+              >
                 <EmptyHeader>
                   <EmptyTitle className="text-destructive">
-                    Couldn't load the Bots shared with you.
+                    {loadFailure(
+                      agentsError,
+                      "Couldn't load the Bots shared with you.",
+                    )}
                   </EmptyTitle>
                 </EmptyHeader>
               </Empty>

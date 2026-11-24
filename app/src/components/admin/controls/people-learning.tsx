@@ -7,7 +7,7 @@ import {
   IconUserCheck,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -47,6 +47,7 @@ import {
   sharingRequestsQueryOptions,
 } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 const CHOICES: {
   value: LearningPersonalReview;
@@ -68,7 +69,7 @@ const CHOICES: {
 ];
 
 /** What a section says when the settings it depends on did not load. */
-function SettingsError({ message }: { message?: string }) {
+function SettingsError({ message }: { message?: ReactNode }) {
   return (
     <p className="mt-4 text-destructive text-sm" role="alert">
       {message ?? "Couldn't load Learning settings. Try again in a moment."}
@@ -86,7 +87,7 @@ export function WhoApprovesSection() {
   if (settings.error || !settings.data)
     return (
       <PageSection title="Approval">
-        <SettingsError message={settings.error?.message} />
+        <SettingsError message={failureSaid(settings.error)} />
       </PageSection>
     );
   const current = settings.data.personalReview ?? "admins";
@@ -173,7 +174,7 @@ function WhoApprovesDialog({
           </PageRows>
           {save.error ? (
             <p className="mt-3 text-destructive text-sm" role="alert">
-              {save.error.message}
+              {failureSaid(save.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -220,7 +221,7 @@ export function PeopleProposalsSection() {
   if (settings.error)
     return (
       <PageSection title="From people's recordings">
-        <SettingsError message={settings.error.message} />
+        <SettingsError message={failureSaid(settings.error)} />
       </PageSection>
     );
   if (!admins) return null;
@@ -239,7 +240,7 @@ export function PeopleProposalsSection() {
     >
       {people.isPending ? null : people.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {people.error.message}
+          {failureSaid(people.error)}
         </p>
       ) : (
         <>
@@ -367,11 +368,11 @@ export function SharingRequestsSection() {
       description="Approve a request to open a skill to every Bot."
     >
       {settings.error ? (
-        <SettingsError message={settings.error.message} />
+        <SettingsError message={failureSaid(settings.error)} />
       ) : null}
       {requests.isPending ? null : requests.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {requests.error.message}
+          {failureSaid(requests.error)}
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty icon={IconShare} title="No requests to share">
@@ -419,7 +420,7 @@ export function SharingRequestsSection() {
             <>
               {decide.error ? (
                 <p className="mr-auto text-destructive text-sm" role="alert">
-                  {decide.error.message}
+                  {failureSaid(decide.error)}
                 </p>
               ) : null}
               <Button

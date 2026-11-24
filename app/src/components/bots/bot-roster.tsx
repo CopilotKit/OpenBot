@@ -34,6 +34,7 @@ import {
   botAttentionQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 
 /**
  * Every Bot the person can reach, in the one place they are listed: what needs the person first,
@@ -65,7 +66,10 @@ export function BotRoster() {
   if (agents.data === undefined) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Couldn't load your Bots. Try again in a moment.
+        {loadFailure(
+          agents.error,
+          "Couldn't load your Bots. Try again in a moment.",
+        )}
       </p>
     );
   }

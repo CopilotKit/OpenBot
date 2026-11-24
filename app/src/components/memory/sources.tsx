@@ -49,6 +49,7 @@ import {
   memorySourcesQueryOptions,
 } from "@/lib/memory";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Connected apps a Bot reads facts from. Given a Bot, only that Bot's sources, and a new one is that
@@ -119,7 +120,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
     >
       {sources.isPending ? null : sources.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {sources.error.message}
+          {failureSaid(sources.error)}
         </p>
       ) : shown.length === 0 ? (
         <PageEmpty
@@ -215,7 +216,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
       )}
       {action.error && (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {action.error.message}
+          {failureSaid(action.error)}
         </p>
       )}
       <Dialog onOpenChange={setAdding} open={adding}>
@@ -408,7 +409,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
             </form>
             {(error || add.error || tools.error) && (
               <p role="alert" className="text-destructive text-sm">
-                {error || add.error?.message || tools.error?.message}
+                {error || failureSaid(add.error ?? tools.error)}
               </p>
             )}
           </DialogBody>

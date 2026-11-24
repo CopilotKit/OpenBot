@@ -5,6 +5,7 @@ import {
   type DirectoryPlace,
 } from "@/components/plugins/broker-directory";
 import { appSetupQueryOptions } from "@/lib/apps/queries";
+import { loadFailure } from "@/lib/load-failure";
 import {
   type BrokerDirectory as Broker,
   useManagePaths,
@@ -45,7 +46,10 @@ export function BrokerDirectoryPage({
   if (setup.isError) {
     return (
       <p className="m-4 text-destructive text-sm" role="alert">
-        Couldn't load the app settings. Try again in a moment.
+        {loadFailure(
+          setup.error,
+          "Couldn't load the app settings. Try again in a moment.",
+        )}
       </p>
     );
   }

@@ -6,6 +6,7 @@ import {
   botSharedAppsQueryOptions,
   requestSharedUseMutationOptions,
 } from "@/lib/plugins/shared-use";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * What changing who can reach a Bot means for the shared accounts it uses, said BEFORE the change.
@@ -75,7 +76,7 @@ export function SharedAppNotice({
       )}
       {ask.error ? (
         <p className="text-destructive" role="alert">
-          {ask.error.message}
+          {failureSaid(ask.error)}
         </p>
       ) : null}
     </div>

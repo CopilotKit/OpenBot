@@ -41,6 +41,7 @@ import {
   Details,
   ProviderTile,
 } from "./ai-connection-chooser";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Settings → General → Your AI: the AI a person's Bots use when they work for them, on an OpenBot
@@ -200,7 +201,7 @@ function YourAiDialog({
         <p className="text-muted-foreground">{afterRemoving}</p>
         {remove.error ? (
           <p className="text-destructive" role="alert">
-            {remove.error.message}
+            {failureSaid(remove.error)}
           </p>
         ) : null}
       </DialogBody>
