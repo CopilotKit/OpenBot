@@ -1123,7 +1123,8 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         expect(path(page)).toBe("/connections/composio-fireflies");
         await shoot(page, "press-key", engine, "light", WIDE);
         await form.getByLabel("API key").fill(GOOD_KEY);
-        await form.getByRole("button", { name: "Connect" }).click();
+        // Enter sends the form: unstyled until `style`, the dialog's backdrop covers its buttons.
+        await form.getByLabel("API key").press("Enter");
         await page.waitForURL(`${ORIGIN}/reconnect`);
         await row(page, "fireflies").getByText("Reconnected").waitFor();
 
@@ -1135,7 +1136,7 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         expect(path(page)).toBe("/connections/composio-posthog");
         expect(await page.getByRole("alert").count()).toBe(0);
         await form.getByLabel("API key").fill(GOOD_KEY);
-        await form.getByRole("button", { name: "Connect" }).click();
+        await form.getByLabel("API key").press("Enter");
         await page.waitForURL(`${ORIGIN}/reconnect`);
         await row(page, "posthog").getByText("Reconnected").waitFor();
         expect(server.connects).toEqual([
