@@ -18,7 +18,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
@@ -570,4 +570,19 @@ test("a Bot's row is filled only on hover, not for being its page", async () => 
   const link = await view.findByRole("link", { name: /^Invoice Review/ });
   await waitFor(() => expect(link.getAttribute("data-status")).toBe("active"));
   expect(link.className.split(/\s+/)).not.toContain("bg-foreground/5");
+});
+
+test("right-clicking a Bot offers a new conversation with it", async () => {
+  const { view, user, router } = renderPanel();
+  const bot = await view.findByRole("link", { name: /^Old Helper/ });
+  fireEvent.contextMenu(bot);
+  await user.click(
+    await view.findByRole("menuitem", {
+      name: "New conversation with Old Helper",
+    }),
+  );
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/channel/new"),
+  );
+  expect(router.state.location.search).toEqual({ agent: "old" });
 });
