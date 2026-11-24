@@ -13,6 +13,7 @@ import { isShuttingDownPage, ShuttingDownWindow } from "./ShuttingDown";
 import { isStatusPage, StatusWindow } from "./StatusWindow";
 import "@fontsource-variable/inter";
 import "./styles.css";
+import "./setup-layout.css";
 import { UpdateOffer } from "./UpdateOffer";
 
 /**
