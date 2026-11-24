@@ -1,7 +1,6 @@
 import type { Message } from "@ag-ui/core";
 import { useEffect, useRef, useState } from "react";
 import { BotBuddy } from "@/components/agents/bot-buddy";
-import { useBotLook } from "@/components/agents/bot-look";
 import { ChooseBuddyButton } from "@/components/bot-profile/buddy";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { conversationActivity } from "@/lib/buddies/activity";
@@ -10,8 +9,8 @@ import type { BuddyActivity } from "@/lib/buddies/buddy";
 /** How long the buddy stays to celebrate a finished turn, in milliseconds. */
 const DONE_MS = 2500;
 
-/** The buddy's size beside the composer. */
-const SIZE = 88;
+/** The buddy's size in the corner. */
+const SIZE = 104;
 
 /**
  * What the Bot's buddy plays in its conversation: `conversationActivity`, and "done" for a moment
@@ -41,9 +40,9 @@ export function useConversationBuddyActivity(input: {
 }
 
 /**
- * The conversation's Bot as its buddy, standing on the composer's right end while it does something:
- * thinking, working, talking, waiting on the person, and a moment after it is done. At rest it steps
- * away, so it never sits over the end of an answer. Clicking it chooses another buddy.
+ * The conversation's Bot as its buddy, in the transcript's top right corner: the one place a Bot is
+ * drawn as its buddy, everywhere else it is its orb. It plays what the Bot is doing (thinking,
+ * working, talking, waiting on the person, done) and idles in between. Clicking it chooses another.
  */
 export function ConversationBuddy({
   bot,
@@ -52,18 +51,15 @@ export function ConversationBuddy({
   bot: Pick<AgentProfile, "id" | "name" | "avatarSeed" | "buddy">;
   activity: BuddyActivity;
 }) {
-  if (useBotLook() !== "buddy" || activity === "idle") return null;
   return (
-    <div className="fade-in-0 slide-in-from-bottom-3 animate-in duration-300">
-      <ChooseBuddyButton agent={bot}>
-        <BotBuddy
-          activity={activity}
-          bare
-          name={bot.name}
-          seed={bot.avatarSeed}
-          size={SIZE}
-        />
-      </ChooseBuddyButton>
-    </div>
+    <ChooseBuddyButton agent={bot}>
+      <BotBuddy
+        activity={activity}
+        bare
+        name={bot.name}
+        seed={bot.avatarSeed}
+        size={SIZE}
+      />
+    </ChooseBuddyButton>
   );
 }

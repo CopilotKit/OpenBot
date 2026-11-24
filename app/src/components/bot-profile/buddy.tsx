@@ -92,8 +92,7 @@ export function BotBuddyRow({
 }
 
 /**
- * The Bot's buddy as a button that opens the picker, where it is drawn large enough to click: the top
- * of its conversation and of its page, and the buddy beside the composer.
+ * The Bot's buddy as a button that opens the picker: the buddy in its conversation's corner.
  */
 export function ChooseBuddyButton({
   agent,

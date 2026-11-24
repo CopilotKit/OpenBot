@@ -10,8 +10,6 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import { BotBuddy } from "@/components/agents/bot-buddy";
-import { BotLookProvider } from "@/components/agents/bot-look";
-import { BotOrb } from "@/components/agents/bot-orb";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   automaticBuddy,
@@ -25,7 +23,7 @@ import { STOCK_BUDDIES } from "@/lib/buddies/stock";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * Where Bots are buddies, every orb is the Bot's buddy: the one the person chose for it, or the stock
+ * A Bot's buddy, as its conversation's corner draws it: the one the person chose for it, or the stock
  * buddy its seed picks. Small and resting, it is the still picture.
  */
 
@@ -58,9 +56,7 @@ function renderBot(buddy: string | null) {
   queryClient.setQueryData(ownBuddiesQueryOptions().queryKey, [made] as never);
   return render(
     <QueryClientProvider client={queryClient}>
-      <BotLookProvider value="buddy">
-        <BotOrb name="Knowledge" seed="knowledge" size={24} />
-      </BotLookProvider>
+      <BotBuddy name="Knowledge" seed="knowledge" size={24} />
     </QueryClientProvider>,
   );
 }

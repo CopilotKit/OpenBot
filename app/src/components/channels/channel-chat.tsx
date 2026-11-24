@@ -1911,8 +1911,8 @@ export function ChannelChat({
       .some((message) => message.role === "assistant");
   const botName = botProfile?.name ?? channel.name;
   /*
-   * What the Bot's buddy plays beside the composer: the turn as `busy` below has it, and the question
-   * it waits on.
+   * What the Bot's buddy plays in the conversation's corner: the turn as `busy` below has it, and the
+   * question it waits on.
    */
   const buddyActivity = useConversationBuddyActivity({
     busy: agent.isRunning || turnsInFlight > 0 || turnsAway > 0 || carryingOn,

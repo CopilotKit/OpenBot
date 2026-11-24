@@ -1,7 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useBotLook } from "@/components/agents/bot-look";
 import { BotOrb } from "@/components/agents/bot-orb";
-import { ChooseBuddyButton } from "@/components/bot-profile/buddy";
 import { Skeleton } from "@/components/ui/skeleton";
 import { shownSubtitle } from "@/lib/agents/subtitle";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -22,9 +20,7 @@ const HALO_ROOM = "@max-[52rem]:ps-6";
  * It is the first thing in the transcript's scroll content and scrolls away with it.
  *
  * The empty-state pattern sits behind the orb as a halo (`.orb-pattern` in styles.css), so it follows
- * the `--empty-pattern*` tokens and a skin that turns the pattern off turns this off too. Not behind a
- * buddy: around a character, the dots read as a broken edge rather than a glow. A buddy is a button
- * that chooses another.
+ * the `--empty-pattern*` tokens and a skin that turns the pattern off turns this off too.
  */
 export function ConversationIntro({
   agent,
@@ -35,12 +31,9 @@ export function ConversationIntro({
     title?: string | null;
     roleDescription?: string | null;
     avatarSeed?: string | null;
-    buddy?: string | null;
     visibility: "public" | "private";
   };
 }) {
-  const buddies = useBotLook() === "buddy";
-  const seed = agent.avatarSeed || agent.id;
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const about = [
@@ -52,16 +45,12 @@ export function ConversationIntro({
   return (
     <div className={`flex items-center gap-5 pt-4 pb-2 ${HALO_ROOM}`}>
       <div className="relative isolate grid shrink-0 place-items-center">
-        {buddies ? (
-          <ChooseBuddyButton agent={{ ...agent, avatarSeed: seed }}>
-            <BotOrb name={agent.name} seed={seed} size={96} />
-          </ChooseBuddyButton>
-        ) : (
-          <>
-            <div aria-hidden className="orb-pattern" />
-            <BotOrb name={agent.name} seed={seed} size={96} />
-          </>
-        )}
+        <div aria-hidden className="orb-pattern" />
+        <BotOrb
+          name={agent.name}
+          seed={agent.avatarSeed || agent.id}
+          size={96}
+        />
       </div>
       <div className="min-w-0">
         <h1 className="font-bold text-3xl tracking-tight">{agent.name}</h1>

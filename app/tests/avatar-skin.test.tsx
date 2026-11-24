@@ -18,8 +18,8 @@ import { SKINS } from "@/skins/registry";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * Bots appear as their orb or their buddy where the active skin asks for it (`botLook`). OpenBot's
- * own look draws buddies; a skin that has not opted in keeps the faces it was designed with.
+ * Bots appear as their orb where the active skin asks for it (`botLook: "orb"`). OpenBot's own look
+ * does; a skin that has not opted in keeps the faces it was designed with.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -61,13 +61,6 @@ describe.each(Object.entries(avatars))("%s", (_, Avatar) => {
     expect(view.container.querySelector("svg")).toBeNull();
   });
 
-  test("is a buddy where Bots are buddies", () => {
-    const view = renderAs("buddy", <Avatar />);
-    expect(view.container.querySelector("[data-buddy]")).not.toBeNull();
-    expect(view.container.querySelector("[data-variant]")).toBeNull();
-    expect(view.container.querySelector("svg")).toBeNull();
-  });
-
   test("is a face where they are not", () => {
     const view = renderAs("face", <Avatar />);
     expect(view.container.querySelector("svg")).not.toBeNull();
@@ -75,8 +68,8 @@ describe.each(Object.entries(avatars))("%s", (_, Avatar) => {
   });
 });
 
-test("OpenBot's own look draws Bots as buddies and the skins do not", () => {
-  expect(SKINS.openbot.botLook).toBe("buddy");
+test("OpenBot's own look opts in to orbs and the skins do not", () => {
+  expect(SKINS.openbot.botLook).toBe("orb");
   for (const id of ["openduet", "opendots", "openfuse"] as const) {
     expect(SKINS[id].botLook ?? "face").toBe("face");
   }

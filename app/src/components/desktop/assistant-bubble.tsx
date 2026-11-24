@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import {
   AnimatePresence,
   motion,
@@ -6,14 +6,10 @@ import {
   useReducedMotion,
 } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BotBuddy } from "@/components/agents/bot-buddy";
-import { useBotLook } from "@/components/agents/bot-look";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import type { AIState } from "@/components/agents/orb/ai-core";
 import { hasUnseenActivity } from "@/components/app-sidebar/conversations-panel";
 import { useWaitingCount } from "@/components/bot-profile/attention";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import type { BuddyActivity } from "@/lib/buddies/buddy";
 import {
   type ChannelSummary,
   channelListQueryOptions,
@@ -104,26 +100,6 @@ function useBubbleSignal(): BubbleSignal | undefined {
   );
 }
 
-/**
- * The Bot the bubble is drawn as where Bots are buddies: the one at work in the first conversation
- * that has one at work, or else the Bot of the person's latest conversation.
- */
-function useBubbleBot(): { name: string; seed: string } | undefined {
-  const channels = useInfiniteQuery(channelListQueryOptions());
-  const rows = channels.data;
-  const botId =
-    rows?.find(atWork)?.agentIds[0] ??
-    rows?.find((row) => row.agentIds.length > 0)?.agentIds[0];
-  const { data: bot } = useQuery({
-    ...agentListQueryOptions(),
-    select: (bots) => bots.find((candidate) => candidate.id === botId),
-  });
-  return bot ? { name: bot.name, seed: bot.avatarSeed } : undefined;
-}
-
-/** How long a new reply has the buddy talking, in milliseconds. */
-const TALKING_FOR_MS = 2500;
-
 /** A count that goes up with each new reply, and whether the Bots have just finished. */
 function useBubbleEvents(signal: BubbleSignal | undefined): {
   replies: number;
@@ -183,26 +159,6 @@ export function AssistantBubble({
   }, [replies, reduceMotion, animate, bounce]);
 
   const now = signal ?? { working: false, unread: 0, waiting: 0 };
-  const buddies = useBotLook() === "buddy";
-  const bubbleBot = useBubbleBot();
-  const [talking, setTalking] = useState(false);
-  useEffect(() => {
-    if (replies === 0) return;
-    setTalking(true);
-    const timer = setTimeout(() => setTalking(false), TALKING_FOR_MS);
-    return () => clearTimeout(timer);
-  }, [replies]);
-  // What the buddy plays: what waits on the person first, then work, then what just happened.
-  const activity: BuddyActivity =
-    now.waiting > 0
-      ? "waiting"
-      : now.working
-        ? "working"
-        : done
-          ? "done"
-          : talking
-            ? "talking"
-            : "idle";
   // How the orb moves. Its colours stay its own (`trueColors`), whatever it is doing.
   const state: AIState = now.working ? "thinking" : done ? "done" : "idle";
   const count = now.waiting > 0 ? now.waiting : now.unread;
@@ -310,22 +266,12 @@ export function AssistantBubble({
            * WebKit lets a transformed or blurred child out of a rounded `overflow: hidden`.
            */}
           <div className="grid size-full place-items-center rounded-full bg-background [clip-path:circle(50%)]">
-            {buddies && bubbleBot ? (
-              <BotBuddy
-                activity={activity}
-                still={hidden}
-                name={bubbleBot.name}
-                seed={bubbleBot.seed}
-                size={ORB}
-              />
-            ) : (
-              <AgentOrb
-                size={`${ORB}px`}
-                state={state}
-                still={hidden}
-                trueColors
-              />
-            )}
+            <AgentOrb
+              size={`${ORB}px`}
+              state={state}
+              still={hidden}
+              trueColors
+            />
           </div>
         </div>
         {count > 0 ? (

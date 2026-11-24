@@ -143,9 +143,8 @@ export function ConversationView({
    */
   intro?: ReactNode;
   /**
-   * Drawn standing on the composer's top edge at its right end, over the end of the transcript: the
-   * Bot's buddy while it works (`ConversationBuddy`). Only clicks on the thing itself land; the rest
-   * of its box lets them through to the transcript.
+   * Drawn in the transcript's top right corner, over it: the Bot's buddy (`ConversationBuddy`). Only
+   * clicks on a button in it land; the rest of its box lets them through to the transcript.
    */
   corner?: ReactNode;
   /**
@@ -172,7 +171,7 @@ export function ConversationView({
    * See `composer/queue.ts` for what this state is worth: it is memory in one tab, it does not
    * survive a reload, and it is not an outbox.
    */
-  const orbs = useBotLook() !== "face";
+  const orbs = useBotLook() === "orb";
   const [queued, setQueued] = useState<readonly QueuedMessage[]>([]);
   const queuedRef = useRef<readonly QueuedMessage[]>(queued);
 
@@ -533,7 +532,12 @@ export function ConversationView({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
+        {corner ? (
+          <div className="pointer-events-none absolute top-2 right-6 z-10 [&_button]:pointer-events-auto">
+            {corner}
+          </div>
+        ) : null}
         {/*
          * The commands and their names as one string, rather than the option objects.
          *
@@ -574,14 +578,9 @@ export function ConversationView({
        * menu, which is `position: fixed` at the caret (see `DictationSurface`).
        */}
       <div
-        className="relative mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
+        className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
         data-slot="composer-column"
       >
-        {corner ? (
-          <div className="pointer-events-none absolute right-8 bottom-full z-10 [&_button]:pointer-events-auto">
-            {corner}
-          </div>
-        ) : null}
         {notice}
         {/*
          * Notifications are offered once this person has started a task: a Bot is working for them,
