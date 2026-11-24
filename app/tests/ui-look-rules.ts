@@ -106,6 +106,11 @@ function parts(token: string): { variants: string[]; utility: string } {
   return { variants: pieces, utility };
 }
 
+/** Every class written in a source file's strings, variants and all, in order. */
+export function classes(source: string): string[] {
+  return strings(source).flatMap((text) => text.split(/\s+/).filter(Boolean));
+}
+
 /** Every class in a source file's strings that breaks a rule, by rule. */
 export function offences(source: string): Record<Rule, string[]> {
   const result: Record<Rule, string[]> = {
