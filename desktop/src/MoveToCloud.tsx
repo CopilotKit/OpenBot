@@ -400,8 +400,8 @@ type Screen =
  * 5. Done: the space freed, the apps that came across connected, the apps to reconnect (one meant
  *    to come across that OpenBot Cloud couldn't connect says why), each opening its own connect page
  *    in OpenBot Cloud in this window (`open_moved_cloud`), and Open OpenBot, which opens the list of
- *    apps to reconnect when there are any. When OpenBot Cloud still needs the person's AI (`connectAi`),
- *    Connect your AI comes first and is the only way on: the apps are named as the step after it,
+ *    apps to reconnect when there are any. When OpenBot Cloud still needs the person's AI
+ *    (`connectAi`), Connect your AI comes first and is the only way on: the apps are named as the step after it,
  *    with nothing on them to press. It names the account and organization the move went into
  *    (`account`), and where OpenBot Cloud is in a browser, with Open in browser: on 1.2.0-rc.3 a
  *    person who moved went to the website, signed in with another account and found nothing.
