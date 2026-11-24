@@ -35,6 +35,7 @@ import { ClientError, client, NoAnswerError } from "@/lib/client";
 import { watchStoppedTurn } from "@/lib/copilot/stopped-turn";
 import {
   type ProblemClock,
+  recentProblems,
   recordProblem,
   SLOW_AFTER_MS,
   setProblemClock,
@@ -448,8 +449,17 @@ test("at most 60 a minute are handed over; the rest are dropped", () => {
   expect(recorded()).toHaveLength(61);
 });
 
-test("in a browser, the same failures hand nothing over and start no timers", async () => {
+test("in a browser, the same failures are kept in the page for the troubleshooting logs, and sent nowhere", async () => {
   removeDesktopShell();
+  const sent: string[] = [];
+  const pageFetchOf = pageFetch();
+  globalThis.fetch = Object.assign(
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(String(input));
+      return pageFetchOf(input, init);
+    },
+    { preconnect: nativeFetch.preconnect },
+  ) as typeof fetch;
   installAppErrorReporting();
   const quiet = quietConsole();
   try {
@@ -483,11 +493,71 @@ test("in a browser, the same failures hand nothing over and start no timers", as
   } finally {
     quiet();
   }
-  expect(timersStarted).toBe(0);
-  // Nothing was waiting to be handed over either.
+  expect(recentProblems().map(({ problem }) => problem)).toEqual([
+    {
+      kind: "request",
+      method: "GET",
+      path: "/api/v2/people/me/organizations",
+      outcome: "failed",
+      status: 500,
+      requestId: "req_list500",
+      appVersion: VERSION,
+    },
+    {
+      kind: "request",
+      method: "GET",
+      path: "/api/things/starting",
+      outcome: "failed",
+      status: 503,
+      requestId: "req_body503",
+      appVersion: VERSION,
+    },
+    {
+      kind: "page-error",
+      message: "Error: in a browser",
+      appVersion: VERSION,
+    },
+    {
+      kind: "run",
+      message:
+        "OpenBot couldn't reach its backend, so your message wasn't sent. Try again, or quit and reopen OpenBot.",
+      requestId: "req_run500",
+      appVersion: VERSION,
+    },
+    {
+      kind: "request",
+      method: "GET",
+      path: "/api/things/gone",
+      outcome: "no-answer",
+      waitedMs: 0,
+      appVersion: VERSION,
+    },
+  ]);
+  // Only the app's own requests left the page: no problem was sent anywhere.
+  expect(sent).toEqual([
+    "/api/v2/people/me/organizations?limit=1",
+    "/api/things/starting",
+    "/api/things/one",
+  ]);
+  // Nothing was waiting to be handed over to a desktop app either.
   calls = installDesktopShell().calls;
   await settleReactWork();
   expect(calls).toEqual([]);
+});
+
+test("a page keeps the last 100 from the last 30 minutes, whatever it meets", () => {
+  removeDesktopShell();
+  for (let minute = 0; minute < 3; minute += 1) {
+    for (let at = 0; at < 50; at += 1)
+      recordProblem({ kind: "page-error", message: `Error: ${minute}.${at}` });
+    now += 60_000;
+  }
+  const kept = recentProblems();
+  expect(kept).toHaveLength(100);
+  expect(kept[0]?.problem.message).toBe("Error: 1.0");
+  expect(kept.at(-1)?.problem.message).toBe("Error: 2.49");
+  now += 30 * 60_000;
+  expect(recentProblems()).toEqual([]);
 });
 
 test("an older Desktop that refuses the command: nothing throws, nothing is retried, the app's own handling is unchanged", async () => {

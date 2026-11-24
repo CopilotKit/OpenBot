@@ -76,22 +76,22 @@ function kindOf(report: ReturnType<typeof described>): string {
   ]);
 }
 
-/** The most different errors one page hands the desktop app; past it, they are counted afresh. */
+/** The most different errors one page records; past it, they are counted afresh. */
 const MAX_RECORDED_KINDS = 500;
 const recordedErrors = new WeakSet<object>();
 const recordedKinds = new Set<string>();
 
 /**
- * Inside OpenBot Desktop, the error is also handed to the desktop app's log (`lib/desktop/problems.ts`),
- * once, as the report is: its name and message, and where it was thrown when that is known. This
- * happens before the person's organization is known too, because signing in can break as well.
+ * The error is also kept for the troubleshooting logs, and inside OpenBot Desktop handed to its log
+ * (`lib/desktop/problems.ts`), once, as the report is: its name and message, and where it was thrown
+ * when that is known. This happens before the person's organization is known too, because signing in
+ * can break as well.
  */
-function recordForDesktop(
+function recordForTroubleshooting(
   source: AppErrorSource,
   error: unknown,
   where: string | undefined,
 ): void {
-  if (desktopShell() === null) return;
   if (typeof error === "object" && error !== null) {
     if (recordedErrors.has(error)) return;
     recordedErrors.add(error);
@@ -128,7 +128,7 @@ export function reportAppError(
   error: unknown,
   where?: string,
 ): void {
-  recordForDesktop(source, error, where);
+  recordForTroubleshooting(source, error, where);
   const organization = currentOrganizationId();
   if (organization === undefined) return;
   if (typeof error === "object" && error !== null) {

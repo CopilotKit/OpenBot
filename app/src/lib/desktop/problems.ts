@@ -1,25 +1,26 @@
 /**
- * THE APP'S OWN PROBLEMS, HANDED TO OPENBOT DESKTOP FOR ITS LOG.
+ * THE APP'S OWN PROBLEMS, KEPT FOR THE TROUBLESHOOTING LOGS.
  *
- * Inside OpenBot Desktop connected to an OpenBot somewhere else, the page is shown through the
- * desktop app's relay, and nothing the page met was written anywhere the desktop app could read: a
- * reply that broke, a request that failed, an error the page threw. Get Troubleshooting Logs had
- * nothing of the app's own to list. So each one is handed to the desktop app as it happens, through
- * its page plugin's `record_problem` command, which stamps the time, bounds and scrubs every field,
- * keeps the last ones in memory and writes each to its log. The page records whether the desktop app
- * runs OpenBot on this computer or is connected to one elsewhere; the desktop app decides what to
- * keep.
+ * A reply that broke, a request that failed, an error the page threw: none of it was written
+ * anywhere a person could send in. So each one is recorded as it happens. The page keeps the latest
+ * ones from the last half hour in memory, in a browser and inside OpenBot Desktop alike, and Get
+ * troubleshooting logs writes them out (`lib/troubleshooting/logs.ts`).
+ *
+ * INSIDE OPENBOT DESKTOP each one is also handed to the desktop app, through its page plugin's
+ * `record_problem` command, which stamps the time, bounds and scrubs every field, keeps the last ones
+ * and writes each to its log. Connected to an OpenBot elsewhere, the page is shown through the
+ * desktop app's relay, and this is how the desktop app's own troubleshooting file lists them. The
+ * page records whether the desktop app runs OpenBot here or is connected; the desktop app decides.
  *
  * ONLY WHAT THE COMMAND TAKES. A request is its method, its path without the query, how it ended and
  * the request id the server gave it. An error is its name and message. Never a body, a query string,
  * a cookie, a token or an address somebody typed.
  *
- * NOTHING IN A BROWSER. Without the desktop app around the page (`desktopShell()` is null), every
- * function here returns at once: nothing is sent, no timer is started, no listener is added.
+ * BOUNDED. At most sixty a minute are recorded; the rest are dropped. The last hundred are kept, and
+ * none older than half an hour.
  *
  * NEVER WAITED ON, NEVER RETRIED. A desktop app older than the command refuses it every time, so a
- * refusal is dropped and the next problem is sent as if it had not happened. At most sixty a minute
- * are sent; the rest are dropped.
+ * refusal is dropped and the next problem is sent as if it had not happened.
  *
  * No imports that reach `lib/client.ts`, so the transport can record here without a cycle.
  */
@@ -75,10 +76,34 @@ const realClock: ProblemClock = {
 let clock = realClock;
 let sentAt: number[] = [];
 
-/** For a test: use these timers, or the real ones again when given nothing, and forget the rate. */
+/** How many of the latest problems the page keeps, and for how long. */
+export const KEPT = 100;
+export const KEPT_FOR_MS = 30 * 60_000;
+
+/** A problem the page kept, and when (milliseconds since the epoch, the page's clock). */
+export type KeptProblem = { at: number; problem: ReportedProblem };
+let kept: KeptProblem[] = [];
+
+/**
+ * For a test: use these timers, or the real ones again when given nothing, and forget the rate and
+ * what was kept.
+ */
 export function setProblemClock(replacement?: ProblemClock): void {
   clock = replacement ?? realClock;
   sentAt = [];
+  kept = [];
+}
+
+/** The problems kept from the last half hour, oldest first. */
+export function recentProblems(): KeptProblem[] {
+  const now = clock.now();
+  kept = kept.filter(({ at }) => now - at < KEPT_FOR_MS);
+  return [...kept];
+}
+
+/** The page's clock, for what is written beside the problems. */
+export function problemClockNow(): number {
+  return clock.now();
 }
 
 /** At most `max` characters, counted as the desktop app counts them (code points, not halves of one). */
@@ -87,9 +112,11 @@ export function bounded(text: string, max: number): string {
   return points.length <= max ? text : points.slice(0, max).join("");
 }
 
-/** Hand one problem to the desktop app. Never throws, never waits, never retries. */
+/**
+ * Keep one problem, and inside OpenBot Desktop hand it to the desktop app too. Never throws, never
+ * waits, never retries.
+ */
 export function recordProblem(problem: ReportedProblem): void {
-  if (desktopShell() === null) return;
   const now = clock.now();
   sentAt = sentAt.filter((at) => now - at < 60_000);
   if (sentAt.length >= MAX_PER_MINUTE) return;
@@ -105,6 +132,10 @@ export function recordProblem(problem: ReportedProblem): void {
       : { source: bounded(problem.source, MAX_SOURCE) }),
     ...(version ? { appVersion: version } : {}),
   };
+  kept = kept.filter(({ at }) => now - at < KEPT_FOR_MS);
+  if (kept.length >= KEPT) kept.shift();
+  kept.push({ at: now, problem: sent });
+  if (desktopShell() === null) return;
   invokeDesktop("record_problem", { problem: sent }).catch(() => {
     // An older desktop app has no such command. Its log is not this page's to fix, and is not retried.
   });
@@ -135,15 +166,11 @@ export type RequestWatch = {
   rejected: (error: unknown) => void;
 };
 
-/**
- * Watch one request the app makes, from just before it is sent. Null in a browser: nothing is
- * watched and no timer starts.
- */
+/** Watch one request the app makes, from just before it is sent. */
 export function watchRequest(
   path: string,
   method: string | undefined,
-): RequestWatch | null {
-  if (desktopShell() === null) return null;
+): RequestWatch {
   const request = {
     kind: "request" as const,
     method: (method ?? "GET").toUpperCase(),

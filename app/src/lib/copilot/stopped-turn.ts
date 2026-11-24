@@ -376,9 +376,10 @@ export function failureRequestId(reported: unknown): string | undefined {
 }
 
 /**
- * Inside OpenBot Desktop, a run that failed is handed to the desktop app's log as the sentence the
- * person was shown, with the server's request id when the failure carried one. The runtime's own
- * requests do not go through `lib/client.ts`, so this is how a broken reply reaches the log.
+ * A run that failed is kept for the troubleshooting logs, and inside OpenBot Desktop handed to its
+ * log, as the sentence the person was shown, with the server's request id when the failure carried
+ * one. The runtime's own requests do not go through `lib/client.ts`, so this is how a broken reply
+ * reaches the logs.
  *
  * Recorded whenever the sentence is shown. Opening a conversation replays how its last run ended,
  * with nothing that tells the replay from a run failing now, so a failure shown again is recorded
