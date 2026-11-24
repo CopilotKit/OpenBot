@@ -15,7 +15,7 @@ const skillsSearchSchema = z.object({
   new: z.boolean().optional(),
   /** The slug being edited. Absent means nothing is. */
   edit: z.string().optional(),
-  /** Installing a plugin (Agent Plugins), in the same panel. */
+  /** Installing a plugin (Agent Plugins), in a dialog over the page. */
   install: z.boolean().optional(),
 });
 

@@ -8,7 +8,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { InstallPlugin } from "@/components/skills/install-plugin";
+import { InstallPluginDialog } from "@/components/skills/install-plugin";
 import {
   MCP_SCHEMA_1_0_0,
   PLUGIN_SCHEMA_1_0_0,
@@ -102,7 +102,7 @@ test("after Install, the plugin's own new skills read as saved, not as already y
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({
-      component: () => <InstallPlugin onDone={() => undefined} />,
+      component: () => <InstallPluginDialog onClose={() => undefined} open />,
     }),
   });
   const view = render(
@@ -110,6 +110,12 @@ test("after Install, the plugin's own new skills read as saved, not as already y
       <RouterProvider router={router as never} />
     </QueryClientProvider>,
   );
+
+  // Nothing to install until a plugin has been read.
+  const before = (await view.findByRole("button", {
+    name: "Install",
+  })) as HTMLButtonElement;
+  expect(before.disabled).toBe(true);
 
   const input = (await view.findByLabelText(
     "Plugin folder",

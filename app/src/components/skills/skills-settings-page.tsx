@@ -51,7 +51,7 @@ import { removeSkillMutationOptions } from "@/lib/skills/mutations";
 import { type Skill, skillListQueryOptions } from "@/lib/skills/queries";
 import { queryClient } from "@/query-client";
 import { EditSkill } from "./edit-skill";
-import { InstallPlugin } from "./install-plugin";
+import { InstallPluginDialog } from "./install-plugin";
 import { NewSkill } from "./new-skill";
 
 /**
@@ -77,7 +77,7 @@ export function SkillsSettingsPage({
   creating: boolean;
   /** The slug being edited, or undefined. */
   editing?: string;
-  /** Installing a plugin in the panel. */
+  /** Installing a plugin, in a dialog over the page. */
   installing?: boolean;
 }) {
   const navigate = useNavigate();
@@ -98,7 +98,7 @@ export function SkillsSettingsPage({
   // Creating wins if both are somehow set: it is the more recent intent.
   const showCreate = creating;
   const showInstall = !showCreate && installing;
-  const showEdit = !showCreate && !showInstall && editing !== undefined;
+  const showEdit = !showCreate && editing !== undefined;
   const loaded = !skillList.isPending && !me.isPending;
   /** Both reads answered, so `written` is the whole truth and an empty list means none. */
   const writtenKnown = skillList.data !== undefined && me.data !== undefined;
@@ -210,19 +210,18 @@ export function SkillsSettingsPage({
       detail={
         showCreate ? (
           <NewSkill />
-        ) : showInstall ? (
-          <InstallPlugin
-            onDone={() => navigate({ to: "/skills", search: {} })}
-          />
         ) : editing ? (
           <EditSkill slug={editing} />
         ) : null
       }
-      // A plugin's review lists skills, servers and addresses side by side, so it gets more room.
-      detailWidth={showInstall ? 480 : undefined}
       onClose={() => navigate({ to: "/skills", search: {} })}
-      open={showCreate || showInstall || showEdit}
+      open={showCreate || showEdit}
     >
+      {/* A search parameter like the panel's, so it is linkable and closed by Back. */}
+      <InstallPluginDialog
+        onClose={() => navigate({ to: "/skills", search: {} })}
+        open={showInstall}
+      />
       <PageShell
         className="@container"
         description="Skills are how your Bots do a task your way. Write one, teach a Bot by showing it, or review what OpenBot proposes."

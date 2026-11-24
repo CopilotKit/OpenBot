@@ -3,12 +3,10 @@ import {
   IconBook,
   IconChevronRight,
   IconCircleCheck,
-  IconFileZip,
-  IconFolderOpen,
   IconLoader2,
-  IconPackage,
   IconPlug,
   IconPuzzle,
+  IconUpload,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -16,13 +14,14 @@ import { useEffect, useRef, useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Item,
   ItemActions,
@@ -60,8 +59,11 @@ import { skillListQueryOptions } from "@/lib/skills/queries";
 import { cn } from "@/lib/utils";
 
 /**
- * Install a plugin, in the detail panel beside Skills: drop or choose the plugin, read what it will
- * add, then install it and finish setting up whatever needs a sign-in or a key.
+ * Install a plugin, in a dialog over Skills: drop or choose the plugin, read what it will add, then
+ * install it and finish setting up whatever needs a sign-in or a key.
+ *
+ * A dialog rather than the side panel New skill uses, because installing is one decision taken on
+ * one screen, start to finish, and the list behind it has nothing to say until it is done.
  *
  * The plugin is read in the browser and installed through the two writes a person makes by hand,
  * saving a skill and adding a server by its address (`installPlugin`), so there is nothing new on
@@ -69,7 +71,37 @@ import { cn } from "@/lib/utils";
  * same rows then report how each one came out, so the screen a person pressed Install on is the
  * screen that tells them what happened.
  */
-export function InstallPlugin({ onDone }: { onDone: () => void }) {
+export function InstallPluginDialog({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  // An install in flight is not abandoned by a stray click outside or Escape: each write is real.
+  const [busy, setBusy] = useState(false);
+  return (
+    <Dialog
+      onOpenChange={(next) => {
+        if (!next && !busy) onClose();
+      }}
+      open={open}
+    >
+      <DialogContent className="gap-0 p-0 sm:max-w-xl" showCloseButton={!busy}>
+        {/* Mounted per opening, so a dialog closed partway opens fresh the next time. */}
+        {open ? <InstallFlow onBusy={setBusy} onClose={onClose} /> : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function InstallFlow({
+  onClose,
+  onBusy,
+}: {
+  onClose: () => void;
+  onBusy: (busy: boolean) => void;
+}) {
   const queryClient = useQueryClient();
   const skills = useQuery(skillListQueryOptions());
   const me = useQuery(currentUserQueryOptions());
@@ -91,6 +123,9 @@ export function InstallPlugin({ onDone }: { onDone: () => void }) {
         setProgress,
       ),
   });
+  useEffect(() => {
+    onBusy(install.isPending);
+  }, [install.isPending, onBusy]);
 
   /*
    * A server is added for the whole organization, so in the team edition only an admin adds one, as
@@ -133,30 +168,20 @@ export function InstallPlugin({ onDone }: { onDone: () => void }) {
 
   const result = install.data ?? progress?.result;
   const done = install.data !== undefined;
+  const reviewing = reading?.ok && plan;
 
   return (
-    <div className="flex min-h-full flex-col">
-      <div className="flex flex-1 flex-col gap-6 p-6">
-        <header>
-          <h1 className="font-semibold text-xl tracking-tight">
-            Install a plugin
-          </h1>
-          <p className="mt-1 text-pretty text-muted-foreground text-sm leading-relaxed">
-            Adds a plugin's skills and servers to OpenBot. No Bot gets them
-            until you choose. Plugins use the open{" "}
-            <a
-              className="underline underline-offset-4 hover:text-foreground"
-              href="https://agent-plugins.org/specification"
-              rel="noreferrer"
-              target="_blank"
-            >
-              Agent Plugins
-            </a>{" "}
-            format.
-          </p>
-        </header>
+    <>
+      <DialogHeader className="px-6 pt-6">
+        <DialogTitle>Install a plugin</DialogTitle>
+        <DialogDescription>
+          Adds a plugin's skills and servers to OpenBot. No Bot gets them until
+          you choose.
+        </DialogDescription>
+      </DialogHeader>
 
-        {reading?.ok && plan ? (
+      <DialogBody className="mt-5 px-6 pb-1">
+        {reviewing ? (
           <>
             {done && result ? <Outcome result={result} /> : null}
             <PluginReview
@@ -177,80 +202,90 @@ export function InstallPlugin({ onDone }: { onDone: () => void }) {
         ) : (
           <PluginDrop busy={opening} error={pickError} onOpen={open} />
         )}
-      </div>
+        {install.error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {install.error.message}
+          </p>
+        ) : null}
+        {skills.error && reviewing ? (
+          <p className="text-destructive text-sm" role="alert">
+            Couldn't read your skills, so nothing can be installed: a plugin's
+            skill could replace one of yours. Try again in a moment.
+          </p>
+        ) : null}
+      </DialogBody>
 
-      {reading?.ok && plan ? (
-        <footer
-          className={cn(
-            "sticky bottom-0 flex flex-col gap-2 border-border border-t px-6 py-4",
-            // Opaque, so rows scrolling under it don't show through: the docked panel's own fill.
-            "bg-background in-data-[slot=detail-pane]:bg-sidebar",
+      <DialogFooter className="mt-4 justify-between border-border border-t px-6 py-4">
+        <div>
+          {/*
+           * The other way a tool arrives: one server, by its address, where the person may add one.
+           * Hidden once an install has started, when the dialog is about this plugin only.
+           */}
+          {mayAddServers && !install.isPending && !done ? (
+            <Button
+              render={<Link to="/connections/new" />}
+              size="sm"
+              variant="ghost"
+            >
+              Add an MCP server
+            </Button>
+          ) : null}
+        </div>
+        <div className="flex gap-2">
+          {done ? (
+            <>
+              <Button
+                onClick={() => {
+                  setReading(null);
+                  install.reset();
+                  setProgress(null);
+                }}
+                variant="ghost"
+              >
+                Install another
+              </Button>
+              <Button onClick={onClose}>Done</Button>
+            </>
+          ) : (
+            <>
+              <Button
+                disabled={install.isPending}
+                onClick={onClose}
+                variant="outline"
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={
+                  !reviewing ||
+                  !ready ||
+                  install.isPending ||
+                  (plan.skills.length === 0 && plan.servers.length === 0)
+                }
+                onClick={() => {
+                  if (plan) install.mutate(plan);
+                }}
+              >
+                {install.isPending ? (
+                  <>
+                    <IconLoader2 className="motion-safe:animate-spin" />
+                    Installing…
+                  </>
+                ) : (
+                  "Install"
+                )}
+              </Button>
+            </>
           )}
-        >
-          {install.error ? (
-            <p className="text-destructive text-sm" role="alert">
-              {install.error.message}
-            </p>
-          ) : null}
-          {skills.error ? (
-            <p className="text-destructive text-sm" role="alert">
-              Couldn't read your skills, so nothing can be installed: a plugin's
-              skill could replace one of yours. Try again in a moment.
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2">
-            {done ? (
-              <>
-                <Button
-                  onClick={() => {
-                    setReading(null);
-                    install.reset();
-                    setProgress(null);
-                  }}
-                  variant="ghost"
-                >
-                  Install another
-                </Button>
-                <Button onClick={onDone}>Done</Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  disabled={install.isPending}
-                  onClick={onDone}
-                  variant="ghost"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  disabled={
-                    !ready ||
-                    install.isPending ||
-                    (plan.skills.length === 0 && plan.servers.length === 0)
-                  }
-                  onClick={() => install.mutate(plan)}
-                >
-                  {install.isPending ? (
-                    <>
-                      <IconLoader2 className="motion-safe:animate-spin" />
-                      Installing…
-                    </>
-                  ) : (
-                    "Install"
-                  )}
-                </Button>
-              </>
-            )}
-          </div>
-        </footer>
-      ) : null}
-    </div>
+        </div>
+      </DialogFooter>
+    </>
   );
 }
 
 /**
- * Where a plugin arrives: dropped on the box, or chosen with either button. Folders and `.zip`
- * files are both how plugins travel, and a browser's file picker can't offer both in one dialog.
+ * Where a plugin arrives: dropped on the box, or chosen with either link. Folders and `.zip` files
+ * are both how plugins travel, and a browser's file picker can't offer both in one dialog.
  */
 function PluginDrop({
   busy,
@@ -268,12 +303,16 @@ function PluginDrop({
   useEffect(() => {
     folder.current?.setAttribute("webkitdirectory", "");
   }, []);
+  // Underlined at rest: in a sentence, colour alone doesn't say a word can be pressed.
+  const choose =
+    "cursor-pointer rounded-sm font-medium text-primary underline decoration-primary/40 underline-offset-4 outline-none hover:decoration-primary focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50";
 
   return (
     <div className="flex flex-col gap-3">
-      <Empty
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: a drop target; both pickers are buttons inside it. */}
+      <div
         className={cn(
-          "rounded-lg border border-border border-dashed py-10 transition-colors duration-150",
+          "flex flex-col items-center gap-3 rounded-lg border border-border border-dashed px-6 py-12 text-center transition-colors duration-150",
           over && "border-primary bg-primary/5",
         )}
         onDragLeave={(event) => {
@@ -292,42 +331,52 @@ function PluginDrop({
           onOpen(droppedFiles(event.dataTransfer));
         }}
       >
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
+        {busy ? (
+          <IconLoader2 className="size-5 text-muted-foreground motion-safe:animate-spin" />
+        ) : (
+          <IconUpload className="size-5 text-muted-foreground" />
+        )}
+        <div className="flex flex-col gap-1">
+          <p className="font-medium text-sm">
             {busy ? (
-              <IconLoader2 className="motion-safe:animate-spin" />
+              "Reading the plugin…"
             ) : (
-              <IconPackage />
+              <>
+                Drop a plugin here, or choose a{" "}
+                <button
+                  className={choose}
+                  disabled={busy}
+                  onClick={() => archive.current?.click()}
+                  type="button"
+                >
+                  .zip
+                </button>{" "}
+                or a{" "}
+                <button
+                  className={choose}
+                  disabled={busy}
+                  onClick={() => folder.current?.click()}
+                  type="button"
+                >
+                  folder
+                </button>
+              </>
             )}
-          </EmptyMedia>
-          <EmptyTitle>
-            {busy ? "Reading the plugin…" : "Drop a plugin here"}
-          </EmptyTitle>
-          <EmptyDescription>Its folder, or a .zip of it.</EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <div className="flex flex-wrap justify-center gap-2">
-            <Button
-              disabled={busy}
-              onClick={() => folder.current?.click()}
-              size="sm"
-              variant="outline"
+          </p>
+          <p className="text-muted-foreground text-xs">
+            In the{" "}
+            <a
+              className="underline underline-offset-4 hover:text-foreground"
+              href="https://agent-plugins.org/specification"
+              rel="noreferrer"
+              target="_blank"
             >
-              <IconFolderOpen />
-              Choose folder
-            </Button>
-            <Button
-              disabled={busy}
-              onClick={() => archive.current?.click()}
-              size="sm"
-              variant="outline"
-            >
-              <IconFileZip />
-              Choose .zip
-            </Button>
-          </div>
-        </EmptyContent>
-      </Empty>
+              Agent Plugins
+            </a>{" "}
+            format. A .zip can be up to 50 MB.
+          </p>
+        </div>
+      </div>
       <input
         aria-label="Plugin folder"
         className="sr-only"
@@ -440,8 +489,14 @@ export function PluginReview({
             </ItemContent>
             {onReplace ? (
               <ItemActions>
-                <Button onClick={onReplace} size="sm" variant="ghost">
-                  Choose another
+                {/* One word, so the plugin's name keeps the row on a phone. */}
+                <Button
+                  aria-label="Choose another plugin"
+                  onClick={onReplace}
+                  size="sm"
+                  variant="ghost"
+                >
+                  Change
                 </Button>
               </ItemActions>
             ) : null}

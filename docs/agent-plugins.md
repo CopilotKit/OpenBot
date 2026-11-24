@@ -13,7 +13,7 @@ release-notes/
 └── mcp.json                       # MCP servers
 ```
 
-Drop the folder, or a `.zip` of it, on the panel, or choose either with its button. OpenBot lists
+Drop the folder, or a `.zip` of it, on the dialog, or choose either from it. OpenBot lists
 everything in it before anything is written: what each skill and server becomes, and why anything
 won't be installed. Each skill's instructions can be opened and read first. Nothing is installed
 until you press Install, and the same rows then say how each part came out: a server that signs
