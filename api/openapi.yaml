@@ -5656,7 +5656,7 @@ paths:
         - Apps
       operationId: updateApp
       summary: Change who may give an app to a Bot, or give it to every Bot
-      description: 'Change who may give the app to a Bot: any Bot''s owner, for their own Bot (any), only an administrator (admin), or null for the default for the app''s account. Recorded on the audit trail. When owners stop deciding, the approvals to use the app''s shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.'
+      description: 'Change who may give the app to a Bot: any Bot''s owner, for their own Bot (any), only an administrator (admin), or null for the default, which is any. Recorded on the audit trail. When owners stop deciding, the approvals to use the app''s shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.'
       security:
         - webSession: []
         - appOAuth:
@@ -7478,7 +7478,7 @@ paths:
         - Bot grants
       operationId: giveBotApp
       summary: Give your own app to a Bot you own
-      description: 'Give a Bot you own one of your apps: the actions that only read, or every action of Routines. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn''t have yet are listed in given. Recorded on the audit trail.'
+      description: 'Give a Bot you own one of your apps: every action it has. Actions that change something still ask first wherever the approval rules say so. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, which it is unless an administrator closed it, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn''t have yet are listed in given. Recorded on the audit trail.'
       security:
         - webSession: []
         - appOAuth:
@@ -7585,7 +7585,7 @@ paths:
         - Bot grants
       operationId: approveBotApp
       summary: Turn an app on and give it to a Bot
-      description: 'Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot the actions that only read, or confirm the app''s shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can''t be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.'
+      description: 'Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot every action of it, or confirm the app''s shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can''t be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.'
       security:
         - webSession: []
         - appOAuth:
@@ -7954,7 +7954,7 @@ paths:
         - App access requests
       operationId: approveAppAccessRequest
       summary: Approve a request for an app
-      description: 'Do what a request asks: turn the app on, give the Bot its actions, or confirm the app''s shared account is connected. actions names the actions to give. Without it the Bot gets the actions the request names, or, for a request that names none, only the actions that only read. The request is answered before anything changes, so a second answer loses. A change that can''t be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.'
+      description: 'Do what a request asks: turn the app on, give the Bot its actions, or confirm the app''s shared account is connected. actions names the actions to give. Without it the Bot gets the actions the request names, or, for a request that names none, every action of the app. The request is answered before anything changes, so a second answer loses. A change that can''t be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.'
       security:
         - webSession: []
         - appOAuth:
@@ -28546,7 +28546,7 @@ components:
       enum:
         - any
         - admin
-      description: 'Who may give the app to a Bot: any Bot''s owner, for their own Bot, or only an administrator.'
+      description: 'Who may give the app to a Bot: any Bot''s owner, for their own Bot, or only an administrator. Any Bot''s owner unless an administrator chose otherwise.'
     AppTool:
       type: object
       description: One action an app offers.
@@ -28701,7 +28701,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AppOwnerGrants'
             - type: 'null'
-          description: What an administrator chose for ownerGrants, or null where the default for the app's account applies.
+          description: What an administrator chose for ownerGrants, or null where the default, any, applies.
         everyBot:
           type: boolean
           description: Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.
@@ -28881,7 +28881,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AppOwnerGrants'
             - type: 'null'
-          description: Who may give the app to a Bot, or null for the default for its account.
+          description: Who may give the app to a Bot, or null for the default, which is any.
         everyBot:
           type: boolean
           description: True gives the app to every Bot in the organization, and to every Bot made later. False takes back what giving it to every Bot gave. What a Bot was given any other way stays.
@@ -30300,7 +30300,7 @@ components:
           type: array
           minItems: 1
           maxItems: 50
-          description: The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets the actions that only read.
+          description: The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app.
           items:
             type: string
             minLength: 1
@@ -30540,7 +30540,7 @@ components:
         actions:
           type: array
           maxItems: 2000
-          description: The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets only the actions that only read.
+          description: The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app.
           items:
             type: string
             minLength: 1
@@ -43587,12 +43587,12 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-            noReads:
+            noTools:
               value:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
-                detail: Notion has nothing a Bot can only read with. Ask an admin to choose what this Bot can do with it.
+                detail: Notion has nothing to give yet. Ask an admin to refresh it.
                 code: CONFLICT
                 category: conflict
                 retryable: false

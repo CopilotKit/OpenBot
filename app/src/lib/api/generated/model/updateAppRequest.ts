@@ -7,7 +7,7 @@ import type { AppOwnerGrants } from "./appOwnerGrants";
  * The changes to make. At least one.
  */
 export interface UpdateAppRequest {
-  /** Who may give the app to a Bot, or null for the default for its account. */
+  /** Who may give the app to a Bot, or null for the default, which is any. */
   ownerGrants?: AppOwnerGrants | null;
   /** True gives the app to every Bot in the organization, and to every Bot made later. False takes back what giving it to every Bot gave. What a Bot was given any other way stays. */
   everyBot?: boolean;

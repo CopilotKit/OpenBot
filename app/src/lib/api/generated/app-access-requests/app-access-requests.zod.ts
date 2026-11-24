@@ -270,7 +270,7 @@ export const DeleteAppAccessRequestHeader = zod.object({
 export const DeleteAppAccessRequestResponse = zod.void();
 
 /**
- * Do what a request asks: turn the app on, give the Bot its actions, or confirm the app's shared account is connected. actions names the actions to give. Without it the Bot gets the actions the request names, or, for a request that names none, only the actions that only read. The request is answered before anything changes, so a second answer loses. A change that can't be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.
+ * Do what a request asks: turn the app on, give the Bot its actions, or confirm the app's shared account is connected. actions names the actions to give. Without it the Bot gets the actions the request names, or, for a request that names none, every action of the app. The request is answered before anything changes, so a second answer loses. A change that can't be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.
  * @summary Approve a request for an app
  */
 
@@ -324,7 +324,7 @@ export const ApproveAppAccessRequestBody = zod.object({
     .max(approveAppAccessRequestBodyActionsMax)
     .optional()
     .describe(
-      "The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets only the actions that only read.",
+      "The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app.",
     ),
 });
 

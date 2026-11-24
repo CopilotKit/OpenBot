@@ -789,7 +789,7 @@ export const getUpdateAppUrl = (organizationId: string, appId: string) => {
 };
 
 /**
- * Change who may give the app to a Bot: any Bot's owner, for their own Bot (any), only an administrator (admin), or null for the default for the app's account. Recorded on the audit trail. When owners stop deciding, the approvals to use the app's shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.
+ * Change who may give the app to a Bot: any Bot's owner, for their own Bot (any), only an administrator (admin), or null for the default, which is any. Recorded on the audit trail. When owners stop deciding, the approvals to use the app's shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.
  * @summary Change who may give an app to a Bot, or give it to every Bot
  */
 export const updateApp = async (

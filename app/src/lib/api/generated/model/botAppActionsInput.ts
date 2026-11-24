@@ -4,7 +4,7 @@
 
 export interface BotAppActionsInput {
   /**
-   * The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets the actions that only read.
+   * The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app.
    * @minItems 1
    * @maxItems 50
    * @items.minLength 1

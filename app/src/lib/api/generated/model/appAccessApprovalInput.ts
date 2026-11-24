@@ -4,7 +4,7 @@
 
 export interface AppAccessApprovalInput {
   /**
-   * The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets only the actions that only read.
+   * The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app.
    * @maxItems 2000
    * @items.minLength 1
    * @items.maxLength 300

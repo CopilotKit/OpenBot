@@ -487,10 +487,12 @@ paths:
       operationId: giveBotApp
       summary: Give your own app to a Bot you own
       description: >-
-        Give a Bot you own one of your apps: the actions that only read, or
-        every action of Routines. They run on the account of whoever asks the
-        Bot. The app must be turned on and open to owners, and an
-        administrator must not have turned this off for you. A Bot that
+        Give a Bot you own one of your apps: every action it has. Actions
+        that change something still ask first wherever the approval rules
+        say so. They run on the account of whoever asks the Bot. The app must
+        be turned on and open to owners, which it is unless an administrator
+        closed it, and an administrator must not have turned this off for
+        you. A Bot that
         already has the app gets nothing more, and given is empty. With
         actions, the Bot is given those actions of the app instead, and only
         the ones it doesn't have yet are listed in given. Recorded on the
@@ -600,8 +602,8 @@ paths:
       summary: Turn an app on and give it to a Bot
       description: >-
         Do in one step what approving a request for this app on this Bot would
-        do: turn the app on if it is off, give the Bot the actions that only
-        read, or confirm the app's shared account is connected. With actions,
+        do: turn the app on if it is off, give the Bot every action of it, or
+        confirm the app's shared account is connected. With actions,
         the Bot is given those actions of the app instead, including to a Bot
         that already has some of the app. The audit trail reads as a request
         filed and approved by the same administrator. When it can't be done
@@ -994,8 +996,8 @@ paths:
         Do what a request asks: turn the app on, give the Bot its actions, or
         confirm the app's shared account is connected. actions names the
         actions to give. Without it the Bot gets the actions the request
-        names, or, for a request that names none, only the actions that only
-        read. The request is answered before anything changes, so a second
+        names, or, for a request that names none, every action of the app.
+        The request is answered before anything changes, so a second
         answer loses. A change that can't be made puts the request back to
         wait, and the answer says what is missing. Recorded on the audit
         trail. Only an administrator may approve.
@@ -1844,7 +1846,7 @@ components:
           maxItems: 50
           description: >-
             The actions of the app to give the Bot, written <app id>/<action
-            name>. Left out, the Bot gets the actions that only read.
+            name>. Left out, the Bot gets every action of the app.
           items:
             type: string
             minLength: 1
@@ -1859,7 +1861,7 @@ components:
           maxItems: 2000
           description: >-
             The actions to give the Bot, written <app id>/<action name>. Left
-            out, the Bot gets only the actions that only read.
+            out, the Bot gets every action of the app.
           items:
             type: string
             minLength: 1
@@ -2124,12 +2126,12 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-            noReads:
+            noTools:
               value:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
-                detail: Notion has nothing a Bot can only read with. Ask an admin to choose what this Bot can do with it.
+                detail: Notion has nothing to give yet. Ask an admin to refresh it.
                 code: CONFLICT
                 category: conflict
                 retryable: false

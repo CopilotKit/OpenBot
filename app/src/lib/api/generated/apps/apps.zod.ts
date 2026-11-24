@@ -150,19 +150,19 @@ export const ListAppsResponse = zod.object({
           ownerGrants: zod
             .enum(["any", "admin"])
             .describe(
-              "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+              "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
             ),
           ownerGrantsChosen: zod
             .union([
               zod
                 .enum(["any", "admin"])
                 .describe(
-                  "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+                  "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
                 ),
               zod.null(),
             ])
             .describe(
-              "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+              "What an administrator chose for ownerGrants, or null where the default, any, applies.",
             ),
           everyBot: zod
             .boolean()
@@ -479,19 +479,19 @@ export const CreateAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose for ownerGrants, or null where the default, any, applies.",
       ),
     everyBot: zod
       .boolean()
@@ -704,19 +704,19 @@ export const GetAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose for ownerGrants, or null where the default, any, applies.",
       ),
     everyBot: zod
       .boolean()
@@ -989,19 +989,19 @@ export const ReplaceAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose for ownerGrants, or null where the default, any, applies.",
       ),
     everyBot: zod
       .boolean()
@@ -1088,7 +1088,7 @@ export const ReplaceAppResponse = zod
   );
 
 /**
- * Change who may give the app to a Bot: any Bot's owner, for their own Bot (any), only an administrator (admin), or null for the default for the app's account. Recorded on the audit trail. When owners stop deciding, the approvals to use the app's shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.
+ * Change who may give the app to a Bot: any Bot's owner, for their own Bot (any), only an administrator (admin), or null for the default, which is any. Recorded on the audit trail. When owners stop deciding, the approvals to use the app's shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.
  * @summary Change who may give an app to a Bot, or give it to every Bot
  */
 
@@ -1132,13 +1132,13 @@ export const UpdateAppBody = zod
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
           ),
         zod.null(),
       ])
       .optional()
       .describe(
-        "Who may give the app to a Bot, or null for the default for its account.",
+        "Who may give the app to a Bot, or null for the default, which is any.",
       ),
     everyBot: zod
       .boolean()
@@ -1250,19 +1250,19 @@ export const UpdateAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose for ownerGrants, or null where the default, any, applies.",
       ),
     everyBot: zod
       .boolean()
@@ -1527,19 +1527,19 @@ export const RefreshAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Any Bot's owner unless an administrator chose otherwise.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose for ownerGrants, or null where the default, any, applies.",
       ),
     everyBot: zod
       .boolean()
