@@ -44,8 +44,8 @@ import {
  * to bundle and load in a browser. The real conversation view draws the real card from the
  * `show_app_access` answer, with this page playing the server.
  *
- * The app has listed none of its tools yet. `?server=refuses` answers the press as the server did
- * before it let an admin's own press through without tools: 409, "Notion has no tools to give yet".
+ * The app has listed none of its tools yet. `?server=refuses` answers the press as the server does
+ * when it still can't go on: 409, "Couldn't get Notion ready for this Bot. Try again in a moment."
  * Otherwise the press turns the app on with nothing given, and once `window.__signIn()` has recorded
  * the admin's account, the next press gives its read-only tools. `?app=gmail` is Gmail in place of
  * Notion. `?on=1` starts with the app already on, `?theme=dark` draws it dark. What the page does is
@@ -120,7 +120,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       live = notion({ state: "not_granted" });
       return Response.json(
         {
-          detail: `${TITLE} has no tools to give yet. Open its page under Apps to see why, then try again.`,
+          detail: `Couldn't get ${TITLE} ready for this Bot. Try again in a moment.`,
         },
         { status: 409 },
       );

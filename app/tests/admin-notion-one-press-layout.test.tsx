@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Browser, BrowserType, Page } from "playwright-core";
+import type { Browser, BrowserType, Locator, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { botAppPath } from "./bot-grants-api";
 import { myConnectionPath } from "./connections-api";
@@ -218,6 +218,17 @@ const events = async (page: Page, key: string) =>
     )
   ).filter((event) => event.includes(key) || event.startsWith("tab "));
 
+/**
+ * The words the admin read and didn't understand: told to ask an admin, "no tools to give", and sent
+ * away to the app's page. The card shown to an admin never says any of them.
+ */
+async function neverSaysTheOldWords(drawn: Locator) {
+  const said = await drawn.innerText();
+  expect(said).not.toContain("Only an admin");
+  expect(said).not.toContain("tools to give");
+  expect(said).not.toContain("Open its page under Apps");
+}
+
 /** The two apps, both from the directory: Notion and Gmail. */
 const APPS = [
   {
@@ -249,7 +260,7 @@ describe.skipIf(!asked)("an app's card for an admin", () => {
             expect(await drawn.innerText()).toContain(
               `${app.title} isn't turned on yet.`,
             );
-            expect(await drawn.innerText()).not.toContain("Only an admin");
+            await neverSaysTheOldWords(drawn);
             expect(await fits(page)).toEqual({ inside: true, sideways: false });
 
             await drawn
@@ -264,6 +275,7 @@ describe.skipIf(!asked)("an app's card for an admin", () => {
             await shoot(page, step("signing-in"), name);
             expect(await fits(page)).toEqual({ inside: true, sideways: false });
             expect(await drawn.getByRole("alert").count()).toBe(0);
+            await neverSaysTheOldWords(drawn);
 
             // The admin finishes the app's sign-in in the other tab.
             await page.evaluate(() =>
@@ -300,6 +312,7 @@ describe.skipIf(!asked)("an app's card for an admin", () => {
             expect(await drawn.innerText()).toContain(
               `This Bot hasn't been given ${app.title} yet.`,
             );
+            await neverSaysTheOldWords(drawn);
             await drawn
               .getByRole("button", {
                 name: `Give ${app.title} to General Assistant`,
@@ -311,16 +324,17 @@ describe.skipIf(!asked)("an app's card for an admin", () => {
             await style(page);
             await shoot(page, step("on-signing-in"), name);
             expect(await drawn.getByRole("alert").count()).toBe(0);
+            await neverSaysTheOldWords(drawn);
           } finally {
             await page.close();
           }
         }, 90_000);
 
         /*
-         * Against the server as rc.3 runs it, which refuses the press for want of tools: the card
-         * still says what is missing and shows the server's sentence beside the button, inside it.
+         * Where the press still can't go on (the admin signed in and the app answered nothing), the
+         * card says so in plain words with the one thing to do, beside the button, inside the card.
          */
-        test(`${app.title}: a press the server refuses shows its sentence inside the card, in ${engine}, ${theme}`, async () => {
+        test(`${app.title}: a press the server can't carry out says why in plain words, in ${engine}, ${theme}`, async () => {
           const page = await open(
             engine,
             theme,
@@ -337,8 +351,9 @@ describe.skipIf(!asked)("an app's card for an admin", () => {
             await style(page);
             await shoot(page, step("refused"), name);
             expect(await drawn.getByRole("alert").innerText()).toBe(
-              `${app.title} has no tools to give yet. Open its page under Apps to see why, then try again.`,
+              `Couldn't get ${app.title} ready for this Bot. Try again in a moment.`,
             );
+            await neverSaysTheOldWords(drawn);
             expect(await fits(page)).toEqual({ inside: true, sideways: false });
           } finally {
             await page.close();

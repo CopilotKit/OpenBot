@@ -650,14 +650,19 @@ test("in the personal edition, the card says what is missing rather than who to 
 test("an admin's press that cannot be carried out says what is missing", async () => {
   const { view } = mounted(
     appAccess({ state: "not_granted", requestKind: "grant" }),
-    { status: 409, body: { error: "Gmail has no tools to give yet." } },
+    {
+      status: 409,
+      body: {
+        error: "Couldn't get Gmail ready for this Bot. Try again in a moment.",
+      },
+    },
     { admin: true },
   );
   fireEvent.click(
     await view.findByRole("button", { name: "Give Gmail to Expenses" }),
   );
   expect((await view.findByRole("alert")).textContent).toBe(
-    "Gmail has no tools to give yet.",
+    "Couldn't get Gmail ready for this Bot. Try again in a moment.",
   );
 });
 

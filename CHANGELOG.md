@@ -227,7 +227,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   yet". An app that has listed none of its tools yet is asked again once you've signed in, and the
   press stopped before your sign-in. It now turns the app on, opens your sign-in, and gives the app
   to the Bot once you're in. On OpenBot Cloud that is the admin of their own organization. A card or
-  a Bot's Apps row shown to an admin says what is missing, never to ask an admin.
+  a Bot's Apps row shown to an admin says what is missing, never to ask an admin. Where the press
+  still can't go on, the card says "Couldn't get Notion ready for this Bot. Try again in a moment."
 
 ### API
 
