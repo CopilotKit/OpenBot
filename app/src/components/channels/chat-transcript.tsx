@@ -117,13 +117,13 @@ import {
   folderStepBody,
   folderStepSubject,
 } from "@/lib/folders/folder-steps";
+import { type Failure, failureSaid, isHeld } from "@/lib/load-failure";
 import {
   BotMarkdown,
   markdownComponents,
   markdownPlugins,
   replyRemarkPluginsFor,
 } from "@/lib/markdown";
-import { type Failure, failureSaid, isHeld } from "@/lib/load-failure";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import {
   RESEARCH_RESULTS_LABELS,
@@ -1102,7 +1102,10 @@ const TranscriptMessage = memo(function TranscriptMessage({
             className={isUser ? undefined : "w-full"}
           >
             <BubbleContent
-              className={cn("text-[1rem]/[1.5]", !isUser && "w-full")}
+              className={cn(
+                "text-(length:--text-conversation)/(--text-conversation--line-height)",
+                !isUser && "w-full",
+              )}
             >
               {isUser ? (
                 // A person's own message is shown exactly as they typed it. Rendering it as markdown
