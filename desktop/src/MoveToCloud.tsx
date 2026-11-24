@@ -394,19 +394,20 @@ type Screen =
  *    next update when it followed a failed move (`onKeep`). Between them,
  *    OpenBot for Business as the first screen draws it, which books a demo (`BusinessBooker`) and
  *    moves nothing: while it is picked there is no Continue and no Keep.
- * 2. What moves, from the OpenBot running here (`move_preview`): the apps connected with a key,
- *    which come across connected (`carried`), and the apps the person signed in to, which can't
- *    move, by name, to reconnect in OpenBot Cloud. Settings opens here. Offered at launch, before
- *    OpenBot started (`here`), it starts now (`onGetReady`), and the figures arrive once it is up.
+ * 2. What moves, from the OpenBot running here (`move_preview`). What the person acts on comes
+ *    first: the apps they signed in to, which can't move, by name, to reconnect in OpenBot Cloud,
+ *    then bringing the AI key. The apps connected with a key, which come across connected
+ *    (`carried`), come last. Settings opens here. Offered at launch, before OpenBot started
+ *    (`here`), it starts now (`onGetReady`), and the figures arrive once it is up.
  * 3. The move (`move_to_cloud`): sign in through the browser, pack up, send, add, check, and only
  *    then remove OpenBot from this computer, each a row (`move:progress`).
  * 4. A move that stopped removed nothing: the sentence, Try again, or keep OpenBot here.
- * 5. Done: the space freed, the apps that came across connected, the apps to reconnect (one meant
- *    to come across that OpenBot Cloud couldn't connect says why), each opening its own connect page
- *    in OpenBot Cloud in this window (`open_moved_cloud`), and Open OpenBot, which opens the list of
- *    apps to reconnect when there are any. When OpenBot Cloud still needs the person's AI
- *    (`connectAi`), Connect your AI comes first and is the only way on: the apps are named as the step after it,
- *    with nothing on them to press. It names the account and organization the move went into
+ * 5. Done: the space freed, the apps to reconnect (one meant to come across that OpenBot Cloud
+ *    couldn't connect says why), each opening its own connect page in OpenBot Cloud in this window
+ *    (`open_moved_cloud`), then the apps that came across connected, and Open OpenBot, which opens
+ *    the list of apps to reconnect when there are any. When OpenBot Cloud still needs the person's
+ *    AI (`connectAi`), Connect your AI comes first and is the only way on: the apps are named as the
+ *    step after it, with nothing on them to press. It names the account and organization the move went into
  *    (`account`), and where OpenBot Cloud is in a browser, with Open in browser: on 1.2.0-rc.3 a
  *    person who moved went to the website, signed in with another account and found nothing.
  */
@@ -867,17 +868,7 @@ function Confirm({
               ))}
             </ul>
           )}
-          {/* Calm, in the bordered group: nothing to do for these. */}
-          {carried.length > 0 && (
-            <section
-              className="move-then"
-              aria-labelledby="move-carried-heading"
-            >
-              <h2 id="move-carried-heading">{CARRIED_HEADING}</h2>
-              <p>{CARRIED_SEALED}</p>
-              <AppList apps={carried} label="Apps that move connected" />
-            </section>
-          )}
+          {/* What the person acts on first: the apps to sign in to again, then the AI key. */}
           {preview.apps.length > 0 && (
             <section
               className="local-alert needs move-apps-notice"
@@ -911,6 +902,17 @@ function Confirm({
             <p className="move-key-said move-key-none">
               You'll connect your AI in OpenBot Cloud after the move.
             </p>
+          )}
+          {/* Last, calm, in the bordered group: nothing to do for these. */}
+          {carried.length > 0 && (
+            <section
+              className="move-then"
+              aria-labelledby="move-carried-heading"
+            >
+              <h2 id="move-carried-heading">{CARRIED_HEADING}</h2>
+              <p>{CARRIED_SEALED}</p>
+              <AppList apps={carried} label="Apps that move connected" />
+            </section>
           )}
         </>
       )}
@@ -1078,13 +1080,6 @@ function Done({ moved }: { moved: Moved }) {
           </p>
         </section>
       )}
-      {carried.length > 0 && (
-        <section className="move-then" aria-labelledby="moved-carried-heading">
-          <h2 id="moved-carried-heading">{CARRIED_DONE_HEADING}</h2>
-          <p>{CARRIED_DONE_SAID}</p>
-          <AppList apps={carried} label="Apps that came across connected" />
-        </section>
-      )}
       {moved.apps.length > 0 &&
         (aiFirst ? (
           <section className="move-then" aria-labelledby="moved-apps-heading">
@@ -1117,6 +1112,14 @@ function Done({ moved }: { moved: Moved }) {
             />
           </section>
         ))}
+      {/* After what the person acts on: nothing to do for these. */}
+      {carried.length > 0 && (
+        <section className="move-then" aria-labelledby="moved-carried-heading">
+          <h2 id="moved-carried-heading">{CARRIED_DONE_HEADING}</h2>
+          <p>{CARRIED_DONE_SAID}</p>
+          <AppList apps={carried} label="Apps that came across connected" />
+        </section>
+      )}
       {notices.length > 0 && (
         <div className="move-notice" role="status">
           {notices.map((said) => (

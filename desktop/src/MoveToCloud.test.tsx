@@ -575,11 +575,17 @@ test("before the move, the apps that come across connected are said apart from t
       name: "You'll reconnect these apps in OpenBot Cloud",
     }),
   ).toBeTruthy();
-  // Connected first, then the ones to do something about, then the button.
-  expect(
-    carried.compareDocumentPosition(reconnect) &
-      Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
+  // What the person acts on first: the apps to sign in to again, then the AI key, then the apps
+  // that come across connected, with nothing to do for them.
+  const follows = (first: Node, then: Node) =>
+    Boolean(
+      first.compareDocumentPosition(then) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  const key = view.getByRole("checkbox", {
+    name: /Bring my AI key to OpenBot Cloud/,
+  });
+  expect(follows(reconnect, key)).toBe(true);
+  expect(follows(key, carried)).toBe(true);
   // Without the AI key, the apps still come across connected: the move is asked as before.
   await userEvent.click(
     view.getByRole("checkbox", { name: /Bring my AI key to OpenBot Cloud/ }),
@@ -632,6 +638,15 @@ test("a finished move says which apps came across connected, and one it couldn't
   );
   expect(
     view.getByText("Sign-ins can't move, so sign in to each one again."),
+  ).toBeTruthy();
+  // The apps to reconnect first, then the ones that came across connected, then the notices.
+  expect(
+    reconnect.compareDocumentPosition(carried) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    carried.compareDocumentPosition(view.getByText(MOVED.notes[0] as string)) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   expect(
     view
