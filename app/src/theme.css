@@ -42,7 +42,8 @@
   --sidebar-border: oklch(0.894 0.014 286.1);
   --sidebar-ring: oklch(0.644 0.167 276.1);
   /* end of tokens/src/scheme.ts */
-  --radius: 0.625rem;
+  /* Every corner comes from this (docs/app-guidelines.md, "The look"): 8px cards, 6.4px controls. */
+  --radius: 0.5rem;
   /*
    * The pattern behind empty states, in three parts so a customer can change each without touching
    * a component: the tile (an SVG used as a mask, so only its shapes' opacity matters), its colour
@@ -194,6 +195,15 @@ body {
   }
   html {
     @apply font-sans;
+  }
+
+  /*
+   * Tabler draws every outline icon with a `stroke-width="2"` attribute unless it is given a
+   * `stroke`, and a CSS property outranks an SVG attribute. So this lightens the default line only;
+   * an icon given its own `stroke` keeps it (docs/app-guidelines.md, "The look").
+   */
+  .tabler-icon[stroke-width="2"] {
+    stroke-width: 1.75;
   }
 
   ::-webkit-scrollbar {
