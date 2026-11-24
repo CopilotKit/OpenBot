@@ -26,6 +26,7 @@ import {
   trialUsedUpAnnounced,
 } from "@/lib/plan/card-needed";
 import {
+  employeeTrialUsedUp,
   needsCard,
   planKeys,
   planQueryOptions,
@@ -54,6 +55,10 @@ import { queryClient } from "@/query-client";
  * refusal while the plan as last read still says runs are left, who it is talking to comes from the
  * refusal, which carries the payment page only for an owner or an admin: an admin never reads the
  * member's line while the plan is read again.
+ *
+ * A CopilotKit employee's runs are never refused for want of a plan. Once their trial is used up it
+ * opens by itself once with the same words, plus a thank-you in place of the way to pay. Nothing
+ * stops their AI actions (`needsCard` is false for them), so it never opens again on one.
  */
 export function CardNeededDialog() {
   const open = useSyncExternalStore(
@@ -93,9 +98,13 @@ export function CardNeededDialog() {
     if (runs) hideCardNeeded();
   }, [open, plan, read.dataUpdatedAt]);
 
-  // The plan once it says a card is needed; until then, what the refusal that opened it said.
-  const addCardUrl =
-    plan && needsCard(plan) ? plan.addCardUrl : refusalAddCardUrl();
+  // The plan once it says a card is needed; until then, what the refusal that opened it said. A
+  // CopilotKit employee never pays, so they get no way to pay, only a way to close.
+  const addCardUrl = employeeTrialUsedUp(plan)
+    ? null
+    : plan && needsCard(plan)
+      ? plan.addCardUrl
+      : refusalAddCardUrl();
   const words = stoppedWords(plan, addCardUrl);
   return (
     <Dialog

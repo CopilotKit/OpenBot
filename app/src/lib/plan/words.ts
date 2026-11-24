@@ -1,4 +1,4 @@
-import { type PlanStatus, trialUsedUp } from "./queries";
+import { employeeTrialUsedUp, type PlanStatus, trialUsedUp } from "./queries";
 
 /** The date in the person's own words: "20 Dec 2026". */
 function onDate(at: string): string {
@@ -11,6 +11,13 @@ function onDate(at: string): string {
 
 /** What OpenBot costs once the free trial is used up, as every screen says it. */
 export const PRICE = "$5 a month for each member of this organization";
+
+/**
+ * Said to a CopilotKit employee once their free trial is used up, in place of the way to pay: their
+ * runs are free. Kept word for word as it was asked for.
+ */
+export const COPILOTKIT_EMPLOYEE_LINE =
+  "Free because you're a CopilotKit employee. Thanks, Uncle Atai!";
 
 /** The button that takes an admin to add or update the card. */
 export function cardAction(plan: PlanStatus): string {
@@ -98,8 +105,11 @@ export function stoppedWords(
         ? `Your free trial was ${allowance.toLocaleString()} Bot runs, and they're all used.`
         : "All the Bot runs in your free trial are used."
     } From now on, OpenBot is ${PRICE}.`,
-    next: admin
-      ? "Add a card to keep your Bots running."
-      : "Ask an admin of this organization to add a card.",
+    // The same words as everyone's, but a CopilotKit employee never pays: no card, nobody to ask.
+    next: employeeTrialUsedUp(plan)
+      ? COPILOTKIT_EMPLOYEE_LINE
+      : admin
+        ? "Add a card to keep your Bots running."
+        : "Ask an admin of this organization to add a card.",
   };
 }

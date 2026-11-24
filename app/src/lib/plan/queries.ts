@@ -73,12 +73,27 @@ export function needsCard(plan: PlanStatus | undefined): boolean {
 
 /**
  * Whether the person has used up their free trial: the server sends the allowance's size only from
- * then on (`freeRunsAllowance`), so the number never shows before.
+ * then on (`freeRunsAllowance`), so the number never shows before. A CopilotKit employee's too,
+ * though their runs go on (`employeeTrialUsedUp`).
  */
 export function trialUsedUp(plan: PlanStatus | undefined): boolean {
   return (
+    (plan?.required === true &&
+      plan.status === "none" &&
+      typeof plan.freeRunsAllowance === "number") ||
+    employeeTrialUsedUp(plan)
+  );
+}
+
+/**
+ * Whether the person is a CopilotKit employee who has used up the free trial. Their own runs are
+ * never refused for want of a plan, so the plan stays `free` (no card, never blocked): the dialog
+ * says the trial is used up once, with a thank-you in place of the way to pay.
+ */
+export function employeeTrialUsedUp(plan: PlanStatus | undefined): boolean {
+  return (
     plan?.required === true &&
-    plan.status === "none" &&
+    plan.copilotKitEmployee === true &&
     typeof plan.freeRunsAllowance === "number"
   );
 }
