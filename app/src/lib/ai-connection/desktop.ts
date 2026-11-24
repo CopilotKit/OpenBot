@@ -1,6 +1,7 @@
 import type {
   AiConnectionLogin,
   AiConnectionProvider,
+  AiConnectionProviderAnswer,
 } from "@/lib/api/generated/model";
 import { invokeDesktop } from "@/lib/desktop/queries";
 
@@ -151,7 +152,8 @@ export function prepareAiConnection(
  * the default's stops.
  */
 export function settleAiConnection(connection: {
-  provider: AiConnectionProvider;
+  /** As the server answered it, so possibly a provider this app doesn't know: Desktop says so. */
+  provider: AiConnectionProviderAnswer;
   login: AiConnectionLogin;
   model?: string | null;
   endpointHost?: string | null;

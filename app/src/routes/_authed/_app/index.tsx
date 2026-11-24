@@ -24,7 +24,6 @@ import { StarterSuggestions } from "@/components/starter-tour/starter-suggestion
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
-import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import {
   type AgentProfile,
   agentListQueryOptions,
@@ -33,7 +32,7 @@ import {
 } from "@/lib/agents/queries";
 import { firstConversationGreeting } from "@/lib/auth/greeting";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { whyNoModelChoice } from "@/lib/bot-agents/queries";
+import { takesNoModelChoice } from "@/lib/bot-agents/queries";
 import {
   beginPendingStart,
   endPendingStart,
@@ -43,11 +42,7 @@ import {
   takeFailedStart,
 } from "@/lib/channels/pending-start";
 import { channelListQueryOptions } from "@/lib/channels/queries";
-import {
-  CoworkerRoutingRefusedError,
-  routeMessage,
-} from "@/lib/channels/route";
-import { useStartChannel } from "@/lib/channels/start";
+import { fallbackBot, useStartChannel } from "@/lib/channels/start";
 import {
   deploymentCapabilitiesQueryOptions,
   useAttachmentLimits,
@@ -68,20 +63,15 @@ const EXPLORE_SHOWN = 4;
 
 /**
  * Said when the Bot a message went to takes no model pick, so the pick was not saved. The person
- * picked before OpenBot picked the Bot, and a pick that silently does nothing is a surprise. It
- * offers nothing to open: the Bot's Agents page, where what it runs on is shown, is hidden for now.
+ * picked before OpenBot picked the Bot, and a pick that silently does nothing is a surprise. Whatever
+ * the reason (a Bot connected from outside OpenBot, or one set to hand work out), the person reads
+ * the same thing: the Bot picks its own model.
  */
-function sayModelNotUsed(
-  bot: AgentProfile,
-  why: "own-agent" | "hands-to-agents",
-) {
+function sayModelNotUsed(bot: AgentProfile) {
   toast.add({
     id: "home-model-not-used",
     type: "info",
-    title:
-      why === "hands-to-agents"
-        ? `${bot.name} hands work to agents, so it doesn't use the model you picked.`
-        : `${bot.name} runs on its own agent, so it doesn't use the model you picked.`,
+    title: `${bot.name} picks its own model, so it doesn't use the one you picked.`,
   });
 }
 
@@ -126,7 +116,7 @@ function RouteComponent() {
    * not true of it. A Bots list that fails to load is said under the composer already.
    */
   const personal = capabilities.data?.edition === "personal";
-  const { start, startChosen, pending } = useStartChannel();
+  const { startChosen, startPicked, pending } = useStartChannel();
   const router = useRouter();
   const navigate = useNavigate();
   // A start that failed behind its placeholder comes back here: its words in the box, its reason
@@ -165,10 +155,7 @@ function RouteComponent() {
   const { commands: skillCommands } = useAnyBotSkillCommands(
     agents?.map((agent) => agent.id) ?? [],
   );
-  const fallback = defaultAgentProfile(
-    agents,
-    agents?.find((agent) => agent.visibility === "public"),
-  );
+  const fallback = fallbackBot(agents);
   /*
    * The model and thinking effort to run on, picked before OpenBot has picked the Bot. It starts on
    * the catalogue's default and is saved with the conversation the Bot answers in, before the first
@@ -179,7 +166,7 @@ function RouteComponent() {
 
   /**
    * The pick to save with a new conversation with `agentId`, and the line to say once it has started
-   * when that Bot takes no pick (`whyNoModelChoice`). Nothing to save, and nothing to say, while the
+   * when that Bot takes no pick (`takesNoModelChoice`). Nothing to save, and nothing to say, while the
    * pick is the default. A Bot that could not be read takes the pick, as the hook reads it.
    */
   const pickFor = async (
@@ -192,11 +179,10 @@ function RouteComponent() {
       (await queryClient
         .fetchQuery(agentQueryOptions(agentId))
         .catch(() => undefined));
-    const why = bot ? await whyNoModelChoice(queryClient, bot) : null;
-    if (!bot || !why) return { pick };
+    if (!bot || !(await takesNoModelChoice(queryClient, bot))) return { pick };
     return {
       pick: null,
-      notUsed: () => sayModelNotUsed(bot, why),
+      notUsed: () => sayModelNotUsed(bot),
     };
   };
 
@@ -230,25 +216,15 @@ function RouteComponent() {
         notUsed?.();
         return;
       }
-      let agentId: string | undefined;
-      try {
-        agentId = (await routeMessage(draft.text, undefined, draft.commandIds))
-          .agentId;
-      } catch (caught) {
-        if (
-          draft.commandIds.length ||
-          caught instanceof CoworkerRoutingRefusedError
-        )
-          throw caught;
-        agentId = fallback?.id;
-      }
-      if (!agentId)
-        throw new Error(
-          "There's no Bot to send this to. Try again in a moment.",
-        );
-      const { pick, notUsed } = await pickFor(agentId);
-      await start(agentId, draft.text, pick, pendingId, draft.attachments);
-      notUsed?.();
+      // OpenBot picks, as it does for a new conversation started with nobody in To:.
+      await startPicked({
+        text: draft.text,
+        skills: draft.commandIds,
+        roster: agents,
+        files: draft.attachments,
+        pendingId,
+        pickFor,
+      });
     } catch (caught) {
       stashFailedStart({
         text: draft.text,

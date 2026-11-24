@@ -1,12 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { Navigate } from "@tanstack/react-router";
-import { BrokerDirectory } from "@/components/plugins/broker-directory";
+import {
+  BrokerDirectory,
+  type DirectoryPlace,
+} from "@/components/plugins/broker-directory";
+import { appSetupQueryOptions } from "@/lib/apps/queries";
 import {
   type BrokerDirectory as Broker,
   useManagePaths,
 } from "@/lib/manage-paths";
 import { directoryRouteDecision } from "@/lib/plugins/provider-vocabulary";
-import { appSetupQueryOptions } from "@/lib/apps/queries";
 
 /**
  * A broker's directory, searched rather than listed, behind its guard: it answers only on a
@@ -24,7 +27,14 @@ import { appSetupQueryOptions } from "@/lib/apps/queries";
  * asking, so a person's own connection is what makes their own mail or messages readable — which is
  * made on their settings page, not here.
  */
-export function BrokerDirectoryPage({ provider }: { provider: Broker }) {
+export function BrokerDirectoryPage({
+  provider,
+  place = "admin",
+}: {
+  provider: Broker;
+  /** Opened from Connections, where a press connects or asks; or from Admin, where it adds. */
+  place?: DirectoryPlace;
+}) {
   const paths = useManagePaths();
   const setup = useQuery(appSetupQueryOptions());
   /*
@@ -40,7 +50,12 @@ export function BrokerDirectoryPage({ provider }: { provider: Broker }) {
     );
   }
   const decision = directoryRouteDecision(provider, setup.data);
-  if (decision === "redirect") return <Navigate replace {...paths.plugins()} />;
+  if (decision === "redirect")
+    return place === "connections" ? (
+      <Navigate replace to="/connections" />
+    ) : (
+      <Navigate replace {...paths.plugins()} />
+    );
   if (decision === "pending") return null;
-  return <BrokerDirectory provider={provider} />;
+  return <BrokerDirectory place={place} provider={provider} />;
 }

@@ -33,6 +33,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
+import { settingsToolCardFor } from "@/components/settings-tools/settings-tool-card";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
 import {
   type FolderNames,
@@ -190,6 +191,8 @@ function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {
    * card would land inside a group and then jump out of it.
    */
   if (name === SHOW_APP_ACCESS_TOOL) return false;
+  // An OpenBot settings tool with a card of its own is drawn as that card, never inside a fold.
+  if (settingsToolCardFor(name)) return false;
   return !asksThePerson(item.result);
 }
 
@@ -239,7 +242,12 @@ export function asksThePerson(result: string | undefined): boolean {
   return readTeamBotConsent(body) !== null || readConnectPrompt(body) !== null;
 }
 
-/** The app a tool item draws a card for, or null when it draws none. */
+/**
+ * The card a tool item draws, as the Bot and app it is about, or null when it draws none.
+ *
+ * The Bot is part of it because a conversation several Bots answer in may show one app's card for
+ * each of them, and those are different questions with different buttons.
+ */
 function cardApp(item: ToolItem): string | null {
   if (item.result === undefined) return null;
   const answer = asText(item.result);
@@ -248,30 +256,44 @@ function cardApp(item: ToolItem): string | null {
     : item.toolCall.function.name === SHOW_APP_ACCESS_TOOL
       ? readConnectPrompt(answer)
       : null;
-  return prompt?.serverId ?? null;
+  return prompt ? `${prompt.agentId ?? ""}\u0000${prompt.serverId}` : null;
 }
 
 /**
- * One card per app per turn.
+ * One card per app in a conversation: the first one the latest reply drew for it.
  *
- * A refused call already draws the app's card, and a Bot told to show the card for an app it cannot
- * use often calls `show_app_access` for the same app straight after, which drew the same card again.
- * The refused call is kept, because it is what the Bot did; a later `show_app_access` for an app
- * whose card that turn already drew is dropped. A person's next message starts a new turn.
+ * WITHIN A REPLY. Every call to an app the person cannot use yet is refused with the app's card,
+ * and so is `show_app_access`. A Bot that searched and found two Google Ads tools called both, and
+ * both were refused, so the reply showed the same Google Ads card twice (reported in dogfooding,
+ * 1.2.0-rc.3). The second card adds nothing and reads as a second thing to do. The first card the
+ * reply drew stays where it was drawn; every later one for the same app is left out, whichever
+ * call drew it.
+ *
+ * ACROSS REPLIES. A card asks the server for the app's state when it is drawn, so two cards for
+ * one app always say the same thing and pressing either settles both. Two of them on screen still
+ * read as two things to do. When a later reply draws the app's card again, that one is kept, under
+ * the reply that is asking now, and the earlier one is left out.
  */
 export function dropRepeatedAppCards(
   items: readonly VisibleChatItem[],
 ): VisibleChatItem[] {
+  const turnOf: number[] = [];
+  const latestTurn = new Map<string, number>();
+  let turn = 0;
+  for (const item of items) {
+    if (item.kind === "text" && item.role === "user") turn += 1;
+    turnOf.push(turn);
+    const app = item.kind === "tool" ? cardApp(item) : null;
+    if (app !== null) latestTurn.set(app, turn);
+  }
   const drawn = new Set<string>();
-  return items.filter((item) => {
-    if (item.kind === "text" && item.role === "user") drawn.clear();
+  return items.filter((item, index) => {
     if (item.kind !== "tool") return true;
     const app = cardApp(item);
     if (app === null) return true;
-    const repeat =
-      drawn.has(app) && item.toolCall.function.name === SHOW_APP_ACCESS_TOOL;
+    if (latestTurn.get(app) !== turnOf[index] || drawn.has(app)) return false;
     drawn.add(app);
-    return !repeat;
+    return true;
   });
 }
 
@@ -742,11 +764,7 @@ export function StepStatus({
   if (step.refused)
     return <span className="shrink-0 text-destructive">Blocked</span>;
   if (step.failed)
-    return (
-      <span className="shrink-0 text-amber-600 dark:text-amber-500">
-        Didn't work
-      </span>
-    );
+    return <span className="shrink-0 text-warning">Didn't work</span>;
   return null;
 }
 

@@ -355,8 +355,11 @@ jobs:
       # one color in the sidebar, on its page and at the top of its conversation, a conversation
       # row's orbs whole in their avatar, compact and detailed, Record on
       # screen with a Bot's page in a window of any width, the team screens and a Bot's
-      # Publish dialog holding their layout wide, narrow and on a phone, and the Admin screens
-      # where a rule or a grant names a team holding theirs wide and on a phone, an unticked
+      # Publish dialog holding their layout wide, narrow and on a phone, the composer's model picker
+      # naming every model whole on a phone, and the Admin screens
+      # where a rule or a grant names a team holding theirs wide and on a phone, an admin setting a
+      # team's models and a member reading them, wide and on a phone, a refused turn read as the
+      # app's notice with no rail beside a conversation that fits, an unticked
       # tickbox's edge standing 3:1 from what it is drawn on in light and dark, a Needs you row read
       # whole at a phone's width and a chat's with its answers on a line of their own, a Bot's maths
       # drawn as formulas in KaTeX's font with a wide one scrolling in its own block, a delegated
@@ -381,7 +384,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 \
             "$PLAYWRIGHT_IMAGE" \
-            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/compact-avatar-layout.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx app/tests/audit-computer-limit-layout.test.tsx app/tests/ai-connection-dialog.test.tsx app/tests/connect-your-ai.test.tsx app/tests/admin-providers-connection.test.tsx app/tests/admin-people-remove-layout.test.tsx
+            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/compact-avatar-layout.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/team-models-screens-layout.test.tsx app/tests/conversation-refusal-layout.test.tsx app/tests/model-picker-phone-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx app/tests/audit-computer-limit-layout.test.tsx app/tests/ai-connection-dialog.test.tsx app/tests/connect-your-ai.test.tsx app/tests/admin-providers-connection.test.tsx app/tests/admin-people-remove-layout.test.tsx
 
   # Dictation in the Desktop window on a Mac whose recognizer has no English (United Kingdom) on
   # the device, in Chromium and in WebKit, the engine the Mac window draws with: it listens in the
@@ -391,7 +394,24 @@ jobs:
   # And the terms on OpenBot Cloud: the gate holding a person at them from anywhere until they tick
   # the box and agree, asking again when they change, and never shown where there are none, in the
   # engine the Mac window draws with too. And Settings' Move to OpenBot Cloud row and its dialog,
-  # in both engines. In the image, as above: WebKit's
+  # in both engines, and after a move the bar that says which organization holds the moved Bots and
+  # the account a connected app is signed in as. And a message sent from home that gets no answer, said in OpenBot's words and
+  # never the engine's own ("Load failed" in WebKit). And Routines lit on the strip on its own page,
+  # chosen again after the Bots panel was opened over it. And Organization settings' Members list,
+  # where only an owner is offered Remove on another owner's row. And an admin's settings changes
+  # drawn as their cards in a conversation, waiting and answered, beside the Admin screens they
+  # change, and the cards for a Bot changing a person's settings or Bots, each beside the screen it
+  # changes, and the cards for a Bot reading them, every one opening its screen with the same link,
+  # and each change waiting on the person titled in plain words. And the chat card's one Connect for an app nobody has turned on, which goes straight
+  # to the key form or to the sign-in in a tab claimed on the click, and an admin's one press on
+  # an app that has listed nothing yet, which signs them in and then gives it to the Bot. And a part of the app whose
+  # file didn't load (a release replaced the page's build, or the connection dropped) fetched again
+  # by loading the page once, else OpenBot's own error screen with Reload, the details and the log
+  # folder. And a Bot's answer reading as stored after the person switches to another conversation
+  # while it is written and comes back, in both engines. And the lists of people with a long name in
+  # them, whose words stay clear of the row's controls. And every list of people paging and
+  # searching on the server (Members, Invitations, Teams, a team's people), and each place a person
+  # is picked offering only the organization's own members. In the image, as above: WebKit's
   # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
   app-browser-webkit:
     name: app (real browser, WebKit)
@@ -415,7 +435,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
-            bun test app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx
+            bun test app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/settings-tool-cards-core.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx app/tests/people-lists.test.tsx
       # Connect your AI's sign-in code, copied with one press and read back from WebKit's clipboard.
       # Only that test: the rest of the file runs in Chromium in the job above.
       - run: |
@@ -425,6 +445,15 @@ jobs:
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=webkit \
             "$PLAYWRIGHT_IMAGE" \
             bun test app/tests/connect-your-ai.test.tsx -t "copies with one press"
+      # The Reconnect list after a move to OpenBot Cloud, in both engines: one press of Reconnect is
+      # the whole connect (the sign-in, or the key form), and back to the list once it's connected.
+      - run: |
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test app/tests/moved-apps-reconnect.test.tsx
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own
@@ -732,28 +761,27 @@ jobs:
   # Built, not pushed, and one architecture: this answers whether the Dockerfile resolves. Whether
   # it resolves on arm64 too is answered at release time, on an arm64 runner.
   #
-  # No registry cache, so a release builds these a second time. `type=gha` needs ACTIONS_* in the
-  # environment, which `build-push-action` injects and a plain `run:` step does not have, and
-  # reaching for another action to export them would buy minutes in a job that runs rarely at the
-  # price of a dependency in the one workflow whose inputs are a security boundary.
-  component-dockerfiles:
-    name: component dockerfiles
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
-    # Minutes rather than seconds, so on a pull request it runs only when an admin adds the
-    # `full-ci` label, the point at which the PR is actually a merge candidate. On main and through
-    # the release's workflow_call it always runs. `verify` treats a skipped job as passing.
+  # Minutes rather than seconds, so on a pull request these run only when an admin adds the
+  # `full-ci` label, the point at which the PR is actually a merge candidate. On main and through
+  # the release's workflow_call they always run. `verify` treats a skipped job as passing.
+  #
+  # A Dockerfile the release does not publish is one a machine would build from source, so the
+  # list and the tree have to agree. Checked here rather than trusted, because the failure is
+  # silent: the release succeeds and a laptop somewhere builds the image. The management agent
+  # is not a harness: its image is published with OpenBot's server images. The list it checks is
+  # the one the builds below fan out over.
+  component-list:
+    name: component list
+    runs-on: ubuntu-latest
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'full-ci')
+    outputs:
+      components: ${{ steps.list.outputs.components }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      # A Dockerfile the release does not publish is one a machine would build from source, so the
-      # list and the tree have to agree. Checked here rather than trusted, because the failure is
-      # silent: the release succeeds and a laptop somewhere builds the image. The management agent
-      # is not a harness: its image is published with OpenBot's server images.
       - name: Every buildable service is published
         run: |
           set -euo pipefail
@@ -766,14 +794,43 @@ jobs:
             diff <(echo "$published") <(echo "$found") || true
             exit 1
           fi
-      - name: They build
-        run: |
-          set -euo pipefail
-          while read -r image; do
-            echo "::group::$image"
-            docker buildx build --file "$image/Dockerfile" --platform linux/amd64 .
-            echo "::endgroup::"
-          done < <(jq -r '.[]' .github/published-images.json)
+      - id: list
+        run: echo "components=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
+
+  # One runner per image, so the check takes as long as the slowest image rather than all of them
+  # one after another. Each reads the build cache images.yml writes for the same image and
+  # architecture (`<image>-amd64`), and a run on main writes it back, so main keeps the release's
+  # cache warm and the release's builds reuse what main already built. None of the Dockerfiles
+  # declares the OPENBOT_BUILD_* args images.yml passes, so leaving them out here changes no layer.
+  # A pull request reads that cache but never writes it: a labelled PR's cache could only be read
+  # by that PR, and would push main's out of the repository's cache quota.
+  component-dockerfiles:
+    name: component dockerfile (${{ matrix.image }})
+    needs: component-list
+    runs-on: ubuntu-latest
+    strategy:
+      # Every image is built to the end, so one red run names every Dockerfile that broke.
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.component-list.outputs.components) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # build-push-action rather than `docker buildx build` in a `run:` step: the gha cache needs the
+      # runner's ACTIONS_* values, which this action hands to buildx and a plain step does not have.
+      # It is the action images.yml publishes with, pinned the same, so nothing new is trusted here.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64
+          push: false
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=${{ matrix.image }}-amd64
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=max,ignore-error=true,scope={0}-amd64', matrix.image) || '' }}
+          provenance: false
 
   # One check for branch protection to require. A new job above is covered by this without anybody
   # remembering to add it to a list, and a job that was skipped for the wrong reason is not a pass.
@@ -783,7 +840,7 @@ jobs:
     name: verify
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     if: always()
-    needs: [changes, static, api, mobile, app-browser, app-browser-webkit, app-browser-desktop, test, test-total, changed-tests, startup, langgraph-ts, python-harness, python-harness-compose, build, component-dockerfiles]
+    needs: [changes, static, api, mobile, app-browser, app-browser-webkit, app-browser-desktop, test, test-total, changed-tests, startup, langgraph-ts, python-harness, python-harness-compose, build, component-list, component-dockerfiles]
     steps:
       - name: Require every check
         env:

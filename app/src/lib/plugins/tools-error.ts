@@ -1,4 +1,5 @@
 import { readConnectPrompt } from "@openbot/shared/connect-prompt";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
 
 /**
  * What an app's empty tool list says about the last time its tools were asked for.
@@ -21,6 +22,6 @@ export function toolsListError(
   if (!prompt) return lastError;
   if (!reader.personal) return prompt.message || null;
   return prompt.reason === "reconnect"
-    ? `Your ${reader.title} access was withdrawn. Reconnect it above to list its tools.`
-    : `Connect your ${reader.title} account above to list its tools.`;
+    ? `Your ${vendorNameOf(reader.title)} access was withdrawn. Reconnect it above to list its tools.`
+    : `Connect your ${vendorNameOf(reader.title)} account above to list its tools.`;
 }

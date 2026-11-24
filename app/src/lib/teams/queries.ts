@@ -1,13 +1,15 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { everyPage } from "@/lib/api/every-page";
 import type {
   OrganizationMember,
   Team,
   TeamMember,
+  TeamModels,
 } from "@/lib/api/generated/model";
 import { listOrganizationMembers } from "@/lib/api/generated/organizations/organizations";
 import {
   getTeam,
+  getTeamModels,
   listTeamMembers,
   listTeams,
 } from "@/lib/api/generated/teams/teams";
@@ -28,6 +30,13 @@ export type TeamPerson = TeamMember;
 /** One member of the organization, for choosing who to add to a team. */
 export type OrganizationPerson = OrganizationMember;
 
+/**
+ * The models a team's people may run: the API's `TeamModels`. `models` is null when the team sets
+ * none, so its people run whatever the organization allows; otherwise each is `provider/model`, and
+ * one the organization no longer allows stays listed and lets nobody run it.
+ */
+export type TeamModelList = TeamModels;
+
 /** The organization's teams, and the server's verdict on whether this person may create one. */
 export type TeamList = {
   /** In the order they were created. */
@@ -47,8 +56,17 @@ export type TeamList = {
 export const teamKeys = {
   all: ["teams"] as const,
   list: () => ["teams", "list"] as const,
+  /** One search of the teams, a page at a time: under `list`, so what refreshes it refreshes this. */
+  listPages: (search = "") => ["teams", "list", { search }] as const,
   detail: (teamId: string) => ["teams", "detail", teamId] as const,
   members: (teamId: string) => ["teams", "members", teamId] as const,
+  models: (teamId: string) => ["teams", "models", teamId] as const,
+  /** One search of a team's people, a page at a time, under `members`. */
+  memberPages: (teamId: string, search = "") =>
+    ["teams", "members", teamId, { search }] as const,
+  /** Who of the people matching a search for somebody to add is in the team already. */
+  memberMatches: (teamId: string, search: string) =>
+    ["teams", "members", teamId, "matches", { search }] as const,
   /** The organization's members matching what was typed, keyed by it as sent. */
   peopleSearch: (search: string) => ["teams", "people", { search }] as const,
 };
@@ -88,6 +106,37 @@ export function teamListQueryOptions() {
   });
 }
 
+/** One page of the organization's teams, where the next one starts, and whether a team may be created. */
+export type TeamListPage = TeamList & { nextCursor: string | null };
+
+/**
+ * The organization's teams, a page at a time, for the Teams list. With a search, only the teams
+ * whose name holds it: the server's search, so a team past the first page is found. Pickers that
+ * choose a team keep reading every team (teamListQueryOptions).
+ */
+export function teamListPagesQueryOptions(search = "") {
+  return infiniteQueryOptions({
+    queryKey: teamKeys.listPages(search),
+    initialPageParam: "",
+    queryFn: async ({ pageParam, signal }): Promise<TeamListPage> => {
+      const page = await listTeams(
+        organizationId(),
+        {
+          ...(search ? { search } : {}),
+          ...(pageParam ? { cursor: pageParam as string } : {}),
+        },
+        { signal, fallback: FALLBACK },
+      );
+      return {
+        teams: page.teams,
+        canCreate: page.canCreate,
+        nextCursor: page.nextCursor,
+      };
+    },
+    getNextPageParam: (page: TeamListPage) => page.nextCursor ?? undefined,
+  });
+}
+
 export function teamQueryOptions(teamId: string) {
   return queryOptions({
     queryKey: teamKeys.detail(teamId),
@@ -112,6 +161,95 @@ export function teamMembersQueryOptions(teamId: string) {
         return { items: page.members, nextCursor: page.nextCursor };
       }),
   });
+}
+
+/** The models the team's people may run, or null models when it sets none. Anybody may read it. */
+export function teamModelsQueryOptions(teamId: string) {
+  return queryOptions({
+    queryKey: teamKeys.models(teamId),
+    queryFn: ({ signal }): Promise<TeamModelList> =>
+      getTeamModels(organizationId(), teamId, {
+        signal,
+        fallback: "Couldn't load this team's models. Try again in a moment.",
+      }),
+  });
+}
+
+/** One page of a team's people, and where the next one starts. */
+export type TeamPeoplePage = {
+  members: TeamPerson[];
+  nextCursor: string | null;
+};
+
+/**
+ * The people in a team, a page at a time, in the order they joined it. With a search, only those
+ * whose name or address holds it: the server's search, so somebody past the first page is found.
+ */
+export function teamMemberPagesQueryOptions(teamId: string, search = "") {
+  return infiniteQueryOptions({
+    queryKey: teamKeys.memberPages(teamId, search),
+    initialPageParam: "",
+    queryFn: async ({ pageParam, signal }): Promise<TeamPeoplePage> => {
+      const page = await listTeamMembers(
+        organizationId(),
+        teamId,
+        {
+          ...(search ? { search } : {}),
+          ...(pageParam ? { cursor: pageParam as string } : {}),
+        },
+        { signal, fallback: FALLBACK },
+      );
+      return { members: page.members, nextCursor: page.nextCursor };
+    },
+    getNextPageParam: (page: TeamPeoplePage) => page.nextCursor ?? undefined,
+  });
+}
+
+/**
+ * Who in a team matches what was typed when adding somebody to it, by id: the team's own search
+ * with the same words, so the people the organization's search offers can be marked as in the team
+ * already. One page of the most the API gives (100). Choosing somebody checks again on its own
+ * (isInTeam), so a team bigger than that page never has a maintainer added over as a member.
+ */
+export function teamMemberMatchesQueryOptions(teamId: string, search: string) {
+  return queryOptions({
+    queryKey: teamKeys.memberMatches(teamId, search),
+    queryFn: async ({ signal }): Promise<ReadonlySet<string>> => {
+      const page = await listTeamMembers(
+        organizationId(),
+        teamId,
+        { search, limit: 100 },
+        { signal, fallback: SEARCH_FALLBACK },
+      );
+      return new Set(page.members.map((member) => member.id));
+    },
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Whether somebody chosen to add is in the team already, asked of the server just before they are
+ * added: adding is a PUT of their role, which would make a maintainer a member again.
+ */
+export async function isInTeam(
+  teamId: string,
+  person: OrganizationPerson,
+): Promise<boolean> {
+  const search = person.email.trim() || person.name?.trim();
+  // Somebody with neither has nothing to find them by, and nobody in a team has neither.
+  if (!search) return false;
+  for (let cursor: string | undefined, seen = 0; seen < 20; seen += 1) {
+    const page = await listTeamMembers(
+      organizationId(),
+      teamId,
+      { search, limit: 100, ...(cursor ? { cursor } : {}) },
+      { fallback: SEARCH_FALLBACK },
+    );
+    if (page.members.some((member) => member.id === person.id)) return true;
+    if (!page.nextCursor) return false;
+    cursor = page.nextCursor;
+  }
+  return false;
 }
 
 /** How many people a search for somebody to add offers at once: enough to choose from, few enough to read. */

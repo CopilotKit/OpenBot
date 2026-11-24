@@ -521,7 +521,7 @@ export const RemoveOrganizationMemberHeader = zod.object({
 export const RemoveOrganizationMemberResponse = zod.void();
 
 /**
- * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. search narrows the list to the invitations whose address holds it, ignoring case; it finds only this organization's invitations. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List the invitations an organization has sent
  */
 
@@ -534,6 +534,11 @@ export const ListOrganizationInvitationsParams = zod.object({
     ),
 });
 
+export const listOrganizationInvitationsQuerySearchMax = 200;
+
+export const listOrganizationInvitationsQuerySearchRegExp = new RegExp(
+  "^[^\\x00]*$",
+);
 export const listOrganizationInvitationsQueryLimitDefault = 50;
 export const listOrganizationInvitationsQueryLimitMax = 100;
 
@@ -544,6 +549,14 @@ export const listOrganizationInvitationsQueryCursorRegExp = new RegExp(
 );
 
 export const ListOrganizationInvitationsQueryParams = zod.object({
+  search: zod
+    .string()
+    .max(listOrganizationInvitationsQuerySearchMax)
+    .regex(listOrganizationInvitationsQuerySearchRegExp)
+    .optional()
+    .describe(
+      "Part of an address, matched without regard to case. Leading and trailing spaces are ignored; empty lists every invitation.",
+    ),
   limit: zod
     .int()
     .min(1)
@@ -738,7 +751,7 @@ export const CancelOrganizationInvitationHeader = zod.object({
 export const CancelOrganizationInvitationResponse = zod.void();
 
 /**
- * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
+ * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands for the caller: on the free allowance with runs left, on the plan, behind on a payment, or needing a card. The free allowance is a number of runs each person gets, across every organization they are in, so freeRunsUsedPercent is the caller's own. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
  * @summary Read an organization's plan
  */
 
@@ -751,6 +764,9 @@ export const GetOrganizationPlanParams = zod.object({
     ),
 });
 
+export const getOrganizationPlanResponseFreeRunsUsedPercentMin = 0;
+export const getOrganizationPlanResponseFreeRunsUsedPercentMax = 100;
+
 export const getOrganizationPlanResponseAddCardUrlMax = 2048;
 
 export const GetOrganizationPlanResponse = zod
@@ -758,18 +774,33 @@ export const GetOrganizationPlanResponse = zod
     required: zod
       .boolean()
       .describe(
-        "True when this OpenBot runs an organization's Bots only while it is on a plan or its free trial.",
+        "True when this OpenBot runs an organization's Bots only while it is on a plan, or while the person the run counts against has free runs left.",
       ),
     status: zod
       .string()
       .describe(
-        "not_required when this OpenBot needs no plan. trialing during the free trial, which a card on file starts. active on the plan. past_due when a payment failed and the card needs updating. none when the organization has no plan or trial yet, or its plan ended. unknown when the plan couldn't be read just now; Bots keep running meanwhile.",
+        "not_required when this OpenBot needs no plan. free when the organization isn't on the plan and the person reading has free runs left. active on the plan. past_due when a payment failed and the card needs updating. none when a card is needed: the person's free runs are used up, or there are none, or the plan ended. trialing during a free trial that ends on a date (trialEndsAt); OpenBot Cloud's free allowance is counted in runs and doesn't use it. unknown when the plan couldn't be read just now; Bots keep running meanwhile.",
+      ),
+    freeRunsUsedPercent: zod
+      .int()
+      .min(getOrganizationPlanResponseFreeRunsUsedPercentMin)
+      .max(getOrganizationPlanResponseFreeRunsUsedPercentMax)
+      .optional()
+      .describe(
+        "How much of the reading person's free allowance is used, from 0 to 100. The allowance is the person's own, across every organization they are in. Rounded down, so it reads 100 only once every free run is used. Present only while required is true and status is neither active nor trialing; absent otherwise. The count of runs is never sent.",
+      ),
+    freeRunsAllowance: zod
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "How many free runs each person gets. Present only once the reading person has used them all (freeRunsUsedPercent is 100 and status is none), so the number is never shown while runs are left; absent otherwise.",
       ),
     trialEndsAt: zod.iso
       .datetime({ offset: true })
       .nullable()
       .describe(
-        "When the free trial ends, while status is trialing. Null otherwise.",
+        "When a free trial that ends on a date ends, while status is trialing. Null otherwise. OpenBot Cloud's free allowance is counted in runs and doesn't use it.",
       ),
     renewsAt: zod.iso
       .datetime({ offset: true })
@@ -782,11 +813,11 @@ export const GetOrganizationPlanResponse = zod
       .max(getOrganizationPlanResponseAddCardUrlMax)
       .nullable()
       .describe(
-        "Where an owner or an admin goes in the browser to add a card, start the free trial or update the card. A page to open, not an API call. Null for a member, and when the organization needs no card.",
+        "Where an owner or an admin goes in the browser to add a card, or to update it after a failed payment. A page to open, not an API call. Null for a member, and when the organization needs no card.",
       ),
   })
   .describe(
-    "Whether this OpenBot needs the organization to be on a plan, and where the organization stands. When required is true, its Bots run only while status is trialing or active.",
+    "Whether this OpenBot needs the organization to be on a plan, and where the organization stands for the person reading it. When required is true, a run starts only while status is free, trialing or active.",
   );
 
 /**

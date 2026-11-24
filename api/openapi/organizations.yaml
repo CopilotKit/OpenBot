@@ -241,12 +241,14 @@ paths:
       summary: Read an organization's plan
       description: >-
         Say whether this OpenBot needs an organization to be on a plan before
-        its Bots run, and where this organization stands: on its free trial,
-        on the plan, behind on a payment, or on no plan yet. An OpenBot that
-        needs no plan (every self-hosted install and OpenBot Desktop) answers
-        not_required. Any member can read it. addCardUrl is where an owner or
-        an admin goes, in the browser, to add a card and start or keep the
-        plan; it is null for everyone else.
+        its Bots run, and where this organization stands for the caller: on
+        the free allowance with runs left, on the plan, behind on a payment,
+        or needing a card. The free allowance is a number of runs each person
+        gets, across every organization they are in, so freeRunsUsedPercent is
+        the caller's own. An OpenBot that needs no plan (every self-hosted
+        install and OpenBot Desktop) answers not_required. Any member can read
+        it. addCardUrl is where an owner or an admin goes, in the browser, to
+        add a card and start or keep the plan; it is null for everyone else.
       security:
         - webSession: []
         - appOAuth: [organizations:read]
@@ -262,12 +264,16 @@ paths:
               schema:
                 $ref: '#/components/schemas/OrganizationPlan'
               examples:
-                trialing:
-                  $ref: '#/components/examples/OrganizationPlanTrialing'
-                noPlan:
-                  $ref: '#/components/examples/OrganizationPlanNone'
+                free:
+                  $ref: '#/components/examples/OrganizationPlanFree'
+                freeRunsUsedUp:
+                  $ref: '#/components/examples/OrganizationPlanFreeRunsUsedUp'
+                active:
+                  $ref: '#/components/examples/OrganizationPlanActive'
                 notRequired:
                   $ref: '#/components/examples/OrganizationPlanNotRequired'
+                trialing:
+                  $ref: '#/components/examples/OrganizationPlanTrialing'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -451,13 +457,25 @@ paths:
         Return one page of the organization's invitations that have not been
         accepted or canceled, the newest first: the ones still waiting, the
         ones that expired and the ones that were declined. Only an owner or an
-        admin of this organization can read it. A missing cursor starts at the
-        first page and nextCursor null ends the list.
+        admin of this organization can read it. search narrows the list to
+        the invitations whose address holds it, ignoring case; it finds only
+        this organization's invitations. A missing cursor starts at the
+        first page and nextCursor null ends the list. A cursor belongs to the
+        search that made it, so changing the search starts again without one.
       security:
         - webSession: []
         - appOAuth: [organizations:read]
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: >-
+            Part of an address, matched without regard to case. Leading and
+            trailing spaces are ignored; empty lists every invitation.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:
@@ -1082,29 +1100,55 @@ components:
       type: object
       description: >-
         Whether this OpenBot needs the organization to be on a plan, and where
-        the organization stands. When required is true, its Bots run only
-        while status is trialing or active.
+        the organization stands for the person reading it. When required is
+        true, a run starts only while status is free, trialing or active.
       required: [required, status, trialEndsAt, renewsAt, addCardUrl]
       properties:
         required:
           type: boolean
           description: >-
             True when this OpenBot runs an organization's Bots only while it
-            is on a plan or its free trial.
+            is on a plan, or while the person the run counts against has free
+            runs left.
         status:
           type: string
-          x-extensible-enum: [not_required, trialing, active, past_due, none, unknown]
+          x-extensible-enum: [not_required, free, trialing, active, past_due, none, unknown]
           description: >-
-            not_required when this OpenBot needs no plan. trialing during the
-            free trial, which a card on file starts. active on the plan.
-            past_due when a payment failed and the card needs updating. none
-            when the organization has no plan or trial yet, or its plan ended.
-            unknown when the plan couldn't be read just now; Bots keep running
-            meanwhile.
+            not_required when this OpenBot needs no plan. free when the
+            organization isn't on the plan and the person reading has free
+            runs left. active on the plan. past_due when a payment failed and
+            the card needs updating. none when a card is needed: the person's
+            free runs are used up, or there are none, or the plan ended.
+            trialing during a free trial that ends on a date (trialEndsAt);
+            OpenBot Cloud's free allowance is counted in runs and doesn't use
+            it. unknown when the plan couldn't be read just now; Bots keep
+            running meanwhile.
+        freeRunsUsedPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >-
+            How much of the reading person's free allowance is used, from 0 to
+            100. The allowance is the person's own, across every organization
+            they are in. Rounded down, so it reads 100 only once every free
+            run is used. Present only while required is true and status is
+            neither active nor trialing; absent otherwise. The count of runs
+            is never sent.
+        freeRunsAllowance:
+          type: integer
+          minimum: 1
+          description: >-
+            How many free runs each person gets. Present only once the reading
+            person has used them all (freeRunsUsedPercent is 100 and status is
+            none), so the number is never shown while runs are left; absent
+            otherwise.
         trialEndsAt:
           type: [string, 'null']
           format: date-time
-          description: When the free trial ends, while status is trialing. Null otherwise.
+          description: >-
+            When a free trial that ends on a date ends, while status is
+            trialing. Null otherwise. OpenBot Cloud's free allowance is
+            counted in runs and doesn't use it.
         renewsAt:
           type: [string, 'null']
           format: date-time
@@ -1114,10 +1158,9 @@ components:
           format: uri-reference
           maxLength: 2048
           description: >-
-            Where an owner or an admin goes in the browser to add a card,
-            start the free trial or update the card. A page to open, not an
-            API call. Null for a member, and when the organization needs no
-            card.
+            Where an owner or an admin goes in the browser to add a card, or
+            to update it after a failed payment. A page to open, not an API
+            call. Null for a member, and when the organization needs no card.
   responses:
     InvalidOrganization:
       description: The name or the slug is missing or malformed, or the Idempotency-Key is.
@@ -1466,22 +1509,41 @@ components:
                 requestId: req_example
                 traceId: trace_example
   examples:
+    OrganizationPlanFree:
+      summary: On the free allowance, 42% of it used, read by an admin.
+      value:
+        required: true
+        status: free
+        freeRunsUsedPercent: 42
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: null
+    OrganizationPlanFreeRunsUsedUp:
+      summary: Every free run used and no plan yet, read by an admin.
+      value:
+        required: true
+        status: none
+        freeRunsUsedPercent: 100
+        freeRunsAllowance: 500
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+    OrganizationPlanActive:
+      summary: An organization on the plan.
+      value:
+        required: true
+        status: active
+        trialEndsAt: null
+        renewsAt: '2026-12-23T09:30:00Z'
+        addCardUrl: null
     OrganizationPlanTrialing:
-      summary: An organization on its free trial, read by an admin.
+      summary: A free trial that ends on a date. OpenBot Cloud's free allowance doesn't use it.
       value:
         required: true
         status: trialing
         trialEndsAt: '2026-12-20T09:30:00Z'
         renewsAt: null
-        addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
-    OrganizationPlanNone:
-      summary: An organization with no plan yet, read by an admin.
-      value:
-        required: true
-        status: none
-        trialEndsAt: null
-        renewsAt: null
-        addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+        addCardUrl: null
     OrganizationPlanNotRequired:
       summary: An OpenBot that needs no plan.
       value:

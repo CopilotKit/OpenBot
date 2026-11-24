@@ -130,6 +130,13 @@ async function answer(request: Request): Promise<Response> {
     });
   if (path === `/api/v2/organizations/${ORGANIZATION}/shortened-tool-names`)
     return NativeResponse.json({ tools: [] });
+  // No terms to agree to, as an OpenBot that isn't OpenBot Cloud answers.
+  if (path === `/api/v2/organizations/${ORGANIZATION}/people/me/terms`)
+    return NativeResponse.json({
+      current: null,
+      accepted: null,
+      acceptanceNeeded: false,
+    });
   return NOT_FOUND();
 }
 

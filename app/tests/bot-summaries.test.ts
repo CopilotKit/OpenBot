@@ -28,10 +28,10 @@ test("sharing names the audience", () => {
   );
 });
 
-test("setup names where it runs", () => {
+test("setup names where a connected Bot runs, and says nothing for one that runs inside OpenBot", () => {
   expect(
     setupSummary({ builtIn: true, endpoint: "http://localhost:4201/ag-ui" }),
-  ).toBe("Built in");
+  ).toBe("");
   expect(
     setupSummary({
       builtIn: false,
@@ -41,7 +41,7 @@ test("setup names where it runs", () => {
   expect(setupSummary({ builtIn: false, endpoint: "not a url" })).toBe(
     "not a url",
   );
-  expect(setupSummary({ builtIn: false, endpoint: null })).toBe("Built in");
+  expect(setupSummary({ builtIn: false, endpoint: null })).toBe("");
 });
 
 /*
@@ -70,7 +70,7 @@ test("the personal edition names what runs a Bot instead of its address", () => 
       { builtIn: true, endpoint: null, framework: "OpenBot" },
       "personal",
     ),
-  ).toBe("Built in");
+  ).toBe("");
 });
 
 test("a public Bot nobody published is still open to everyone, not 'Not shared'", () => {

@@ -57,7 +57,26 @@ const { countLines, formatSpace, reconnectPage } = await import(
   "./MoveToCloud"
 );
 
-beforeAll(() => GlobalRegistrator.register());
+/*
+ * OpenBot for Business's booking calendar is never fetched from Calendly: its frame gets an empty
+ * page, as `App.test.tsx` gives it, and a test of the window goes nowhere on the web.
+ */
+beforeAll(() =>
+  GlobalRegistrator.register({
+    settings: {
+      fetch: {
+        interceptor: {
+          beforeAsyncRequest: async ({ request, window }) =>
+            new URL(request.url).hostname === "calendly.com"
+              ? new window.Response("<!doctype html><title></title>", {
+                  headers: { "content-type": "text/html" },
+                })
+              : undefined,
+        },
+      },
+    },
+  }),
+);
 afterAll(() => GlobalRegistrator.unregister());
 
 let before: string | undefined;
@@ -211,6 +230,142 @@ test("after the update, OpenBot (Self-Contained) asks once, before showing OpenB
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await view.findByRole("heading", { name: "Move to OpenBot Cloud" });
   expect(called("move_preview")).toHaveLength(1);
+});
+
+/*
+ * A Mac with two older installs of OpenBot on its disk: the question waited 15 seconds for the size
+ * of OpenBot's files. The shell answers at once now, without the size, and measures it on its own.
+ * The question shows straight away without it, and the size joins it once measured.
+ */
+test("the question shows at once without the size, and the size joins it once measured", async () => {
+  selfContainedRunning({ due: true });
+  answers.move_offer = { due: true, fromSettings: false, footprintBytes: null };
+  let measured!: (bytes: number | null) => void;
+  answers.move_footprint = new Promise((resolve) => {
+    measured = resolve;
+  });
+  const view = await launch();
+  await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+  const cloud = view.getByRole("radio", {
+    name: /^OpenBot Cloud/,
+  }) as HTMLInputElement;
+  const said = () => cloud.closest("label")?.textContent ?? "";
+  expect(said()).toContain(
+    "Your Bots, conversations, memory, skills, routines and files move to your OpenBot Cloud account.",
+  );
+  expect(said()).not.toContain("This removes about");
+  expect(called("move_footprint")).toHaveLength(1);
+  await act(async () => measured(GB));
+  await waitFor(() =>
+    expect(said()).toContain(
+      "This removes about 18.4 GB of OpenBot files from this computer.",
+    ),
+  );
+});
+
+/*
+ * FOUND IN A MAC UPGRADE CHECK of 1.2: the choice and the next screen said two sizes for what the
+ * move removes. Offered over the OpenBot running here, nothing starts or updates between them, so
+ * the next screen says the figure the choice said, however its own measure rounds.
+ */
+test("offered over OpenBot running, the next screen says the size the choice said", async () => {
+  selfContainedRunning({ due: true });
+  answers.move_preview = { ...PREVIEW, footprintBytes: GB + 120_000_000 };
+  const view = await launch();
+  await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+  const cloud = view.getByRole("radio", { name: /^OpenBot Cloud/ });
+  expect(cloud.closest("label")?.textContent).toContain(
+    "This removes about 18.4 GB of OpenBot files from this computer.",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByText("3 Bots");
+  expect(
+    view.getByText(
+      /Removes about 18\.4 GB of OpenBot files\. Nothing is removed/,
+    ),
+  ).toBeTruthy();
+  expect(document.body.textContent).not.toContain("18.5 GB");
+});
+
+/*
+ * A company that wants OpenBot on its own cloud learns it can, on the move screen too: OpenBot for
+ * Business, between OpenBot Cloud and OpenBot (Self-Contained), as the first screen draws it. It
+ * books a demo and moves nothing. Before, the move screen offered only the other two.
+ */
+test("the move screen offers OpenBot for Business between Cloud and Self-Contained, which books a demo and moves nothing", async () => {
+  selfContainedRunning({ due: true });
+  const view = await launch();
+  await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+  // Three choices, in this order on screen, for the keyboard and for a screen reader.
+  const names = view
+    .getAllByRole("radio")
+    .map(
+      (radio) =>
+        radio.closest("label")?.querySelector(".tile-name")?.textContent,
+    );
+  expect(names).toEqual([
+    "OpenBot Cloud Recommended",
+    "OpenBot for Business",
+    "OpenBot (Self-Contained)",
+  ]);
+  const cloud = view.getByRole("radio", {
+    name: /^OpenBot Cloud/,
+  }) as HTMLInputElement;
+  const business = view.getByRole("radio", {
+    name: /^OpenBot for Business/,
+  }) as HTMLInputElement;
+  expect(cloud.checked).toBe(true);
+  expect(business.checked).toBe(false);
+  // The first screen's row: its words and the clouds it runs on.
+  const row = business.closest("label") as HTMLElement;
+  expect(row.textContent).toContain("Your own cloud or on-prem. Book a demo.");
+  expect(
+    [...row.querySelectorAll(".cloud-mark img")].map((mark) =>
+      mark.getAttribute("alt"),
+    ),
+  ).toEqual(["AWS", "Azure", "Google Cloud", "Kubernetes"]);
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+
+  // Picked: what it adds and the calendar to book a demo, and nothing that moves or keeps.
+  await userEvent.click(business);
+  expect(business.checked).toBe(true);
+  expect(
+    view.getByText(
+      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
+    ),
+  ).toBeTruthy();
+  expect(view.getByRole("heading", { name: "Book a demo" })).toBeTruthy();
+  expect(view.getByTitle("Booking calendar")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
+  expect(
+    view.queryByRole("button", { name: "Keep OpenBot on this computer" }),
+  ).toBeNull();
+  expect(view.queryByText(/Nothing is removed/)).toBeNull();
+  expect(
+    view.queryByText("You can still move to OpenBot Cloud later in Settings."),
+  ).toBeNull();
+
+  // OpenBot Cloud again: Continue and the promise, exactly as before, and no calendar.
+  await userEvent.click(cloud);
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+  expect(view.getByRole("button", { name: "Continue" })).toBeTruthy();
+  view.getByText(
+    "Nothing is removed from this computer until everything has arrived in OpenBot Cloud and been checked.",
+  );
+  // OpenBot (Self-Contained): Keep and its note, as before.
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  );
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Keep OpenBot on this computer" }),
+  ).toBeTruthy();
+  view.getByText("You can still move to OpenBot Cloud later in Settings.");
+  // Looking at OpenBot for Business moved, kept and started nothing.
+  expect(called("move_preview")).toEqual([]);
+  expect(called("move_to_cloud")).toEqual([]);
+  expect(called("keep_self_contained")).toEqual([]);
+  expect(called("show_openbot")).toEqual([]);
 });
 
 test("a launch that isn't due shows OpenBot straight away, and a connected app is never asked", async () => {
@@ -445,6 +600,57 @@ test("a finished move says what it removed and one Reconnect per app, each openi
   await userEvent.click(view.getByRole("button", { name: "Open OpenBot" }));
   // Opening already: the window is on its way to OpenBot Cloud.
   expect(called("open_moved_cloud")).toHaveLength(1);
+});
+
+/**
+ * Seen on 1.2.0-rc.3: after a move the person found nothing that said where OpenBot Cloud was or
+ * which account held their Bots, went to the website, signed in with another account and found an
+ * empty OpenBot. The result names the account and organization the move went into, says where
+ * OpenBot Cloud is in a browser, and opens it there.
+ */
+test("a finished move names the account and organization it went into, and opens OpenBot Cloud in the browser", async () => {
+  const view = await atConfirm();
+  answers.move_to_cloud = {
+    ...MOVED,
+    connectAi: false,
+    account: { email: "sam@example.com", organization: "Sam's organization" },
+  };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  expect(
+    view.getByText(
+      /You're signed in as sam@example\.com, in Sam's organization\./,
+    ),
+  ).toBeTruthy();
+  expect(
+    view.getByText(
+      "In a browser, OpenBot Cloud is at my.open.bot. Sign in there as sam@example.com.",
+    ),
+  ).toBeTruthy();
+  const browser = view.getByRole("link", { name: "Open in browser" });
+  expect(browser.getAttribute("href")).toBe("https://my.open.bot");
+  await userEvent.click(browser);
+  expect(called("plugin:opener|open_url").map((call) => call.args)).toEqual([
+    { url: "https://my.open.bot" },
+  ]);
+  // The window's own way on is still there, and the browser didn't take it.
+  expect(called("open_moved_cloud")).toHaveLength(0);
+  expect(view.getByRole("button", { name: "Open OpenBot" })).toBeTruthy();
+});
+
+test("a finished move an older shell answered without the account still says where OpenBot Cloud is", async () => {
+  const view = await atConfirm();
+  answers.move_to_cloud = { ...MOVED, connectAi: false };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  expect(view.queryByText(/You're signed in as/)).toBe(null);
+  expect(
+    view.getByText("In a browser, OpenBot Cloud is at my.open.bot."),
+  ).toBeTruthy();
 });
 
 test("Open OpenBot after a move that left apps to reconnect opens the list of them", async () => {

@@ -1,5 +1,5 @@
-import { IconMail, IconMailPlus } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { IconMail, IconMailPlus, IconSearch } from "@tabler/icons-react";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useId, useState } from "react";
 import {
   PageEmpty,
@@ -52,13 +52,14 @@ import {
 import {
   type OrganizationSummary,
   type SentInvitation,
-  sentInvitationsQueryOptions,
+  sentInvitationPagesQueryOptions,
 } from "@/lib/organizations/queries";
 import {
   invitationLink,
   roleName,
   sentInvitationLine,
 } from "@/lib/organizations/words";
+import { SEARCH_MAX } from "@/lib/people/queries";
 import { queryClient } from "@/query-client";
 
 /** The API's cap on an address, so the field stops where the server does. */
@@ -108,14 +109,26 @@ function CopyLinkButton({
 
 /**
  * The invitations this organization sent that nobody has accepted: waiting, expired or declined.
- * Drawn only for its owner and admins, who are the ones the server lets read them.
+ * Drawn only for its owner and admins, who are the ones the server lets read them. A page at a
+ * time, with a search by address above them that asks the server, as Admin's People does.
  */
 export function SentInvitationsSection({
   organization,
 }: {
   organization: OrganizationSummary;
 }) {
-  const invitations = useQuery(sentInvitationsQueryOptions(organization.id));
+  const [search, setSearch] = useState("");
+  // Debounced, so typing an address is one request rather than one per keystroke.
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const invitations = useInfiniteQuery(
+    sentInvitationPagesQueryOptions(organization.id, query),
+  );
+  const rows =
+    invitations.data?.pages.flatMap((page) => page.invitations) ?? [];
   const [inviting, setInviting] = useState(false);
   /*
    * A hosted OpenBot: an invitation is an email from OpenBot by CopilotKit, accepted from that email.
@@ -135,28 +148,58 @@ export function SentInvitationsSection({
       description="Invite somebody by email. An invitation lasts 7 days."
       title="Invitations"
     >
+      {/*
+        Server-side search, as on Admin's People: filtering what already arrived would only search
+        the first page. Shown once there is an invitation to search, or something typed.
+      */}
+      {search || query || rows.length > 0 ? (
+        <Input
+          aria-label="Search invitations"
+          className="mt-4"
+          maxLength={SEARCH_MAX}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search by address"
+          value={search}
+        />
+      ) : null}
       {invitations.isPending ? null : invitations.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {invitations.error.message}
         </p>
-      ) : invitations.data.length === 0 ? (
+      ) : rows.length === 0 && query ? (
+        <PageEmpty icon={IconSearch} title="No matches">
+          {`No invitation matches "${query}".`}
+        </PageEmpty>
+      ) : rows.length === 0 ? (
         <PageEmpty icon={IconMail} title="No invitations">
           An invitation shows here until the person accepts it.
         </PageEmpty>
       ) : (
         <PageRows>
-          {invitations.data.map((invitation, index) => (
+          {rows.map((invitation, index) => (
             <Fragment key={invitation.id}>
               <SentInvitationRow
                 hosted={hosted}
                 invitation={invitation}
                 organizationId={organization.id}
               />
-              {index !== invitations.data.length - 1 && <Separator />}
+              {index !== rows.length - 1 && <Separator />}
             </Fragment>
           ))}
         </PageRows>
       )}
+      {/* Only when the server says there is another page, as on Admin's People. */}
+      {invitations.hasNextPage ? (
+        <Button
+          className="mt-4"
+          disabled={invitations.isFetchingNextPage}
+          onClick={() => invitations.fetchNextPage()}
+          size="sm"
+          variant="outline"
+        >
+          {invitations.isFetchingNextPage ? "Loading…" : "Show more"}
+        </Button>
+      ) : null}
       <InviteDialog
         hosted={hosted}
         onOpenChange={setInviting}
@@ -195,7 +238,8 @@ function SentInvitationRow({
           </ItemTitle>
           <ItemDescription>{sentInvitationLine(invitation)}</ItemDescription>
         </ItemContent>
-        <ItemActions>
+        {/* On a phone the buttons take a line under the address, as they do on a team's people. */}
+        <ItemActions className="max-sm:basis-full">
           {invitation.status === "pending" && !hosted ? (
             <CopyLinkButton
               label={`Copy link for ${invitation.email}`}

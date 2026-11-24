@@ -1413,7 +1413,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     const view = await renderApp();
     const radios = view.getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
-      "OpenBot CloudUse OpenBot here. Your Bots run in our cloud.",
+      "OpenBot CloudYour Bots run in our cloud. Free usage-based trial.",
       "OpenBot for BusinessYour own cloud or on-prem. Book a demo.",
     ]);
     expect(radios.map((radio) => [radio.value, radio.checked])).toEqual([
@@ -4962,6 +4962,71 @@ describe("the move to OpenBot Cloud, due at a launch that would update OpenBot",
     ).toBe(false);
   });
 
+  /*
+   * FOUND IN A MAC UPGRADE CHECK of 1.2: "Move to OpenBot Cloud?" said the move removes about
+   * 23.1 GB, and the next screen 26.6 GB, measured after the update the start for the move ran had
+   * added the new release's files. One figure now: the choice says none, since the update is still
+   * to come, and the next screen says the one measured from the updated OpenBot, and no other.
+   */
+  test("offered before the update, the choice and the next screen never say two sizes", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-one-size",
+      localStatus("ready", "valid"),
+    );
+    const updating = deferred<unknown>();
+    withOlderDeployment(() => updating.promise);
+    const preview = withMoveDue();
+    const due = invokeHandler;
+    invokeHandler = async (command, args) => {
+      if (command === "move_offer")
+        return {
+          due: true,
+          fromSettings: false,
+          footprintBytes: 23_100_000_000,
+        };
+      if (command === "move_footprint") return 23_100_000_000;
+      return due(command, args);
+    };
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    const cloud = view.getByRole("radio", { name: /^OpenBot Cloud/ });
+    const choice = cloud.closest("label")?.textContent ?? "";
+    expect(choice).toContain(
+      "Your Bots, conversations, memory, skills, routines and files move to your OpenBot Cloud account.",
+    );
+    expect(choice).not.toMatch(/GB/);
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud" });
+    // While OpenBot updates and starts, no figure yet.
+    await view.findByText(
+      "Getting your Bots ready to move. This can take a few minutes.",
+    );
+    expect(document.body.textContent).not.toMatch(/GB/);
+    await act(async () =>
+      updating.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+    );
+    await waitFor(() =>
+      expect(invokeCalls.some((call) => call.command === "move_preview")).toBe(
+        true,
+      ),
+    );
+    await act(async () =>
+      preview.resolve({
+        counts: [{ kind: "bots", count: 3 }],
+        apps: [],
+        footprintBytes: 26_600_000_000,
+        modelKeysAvailable: false,
+      }),
+    );
+    await view.findByText("3 Bots");
+    expect(
+      view.getByText(
+        /Removes about 26\.6 GB of OpenBot files\. Nothing is removed/,
+      ),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("23.1 GB");
+  });
+
   test("Keep: OpenBot updates and opens as it always has", async () => {
     setupConnectedLocalStack(
       "/tmp/local-eval-move-keep",
@@ -5030,6 +5095,77 @@ describe("the move to OpenBot Cloud, due at a launch that would update OpenBot",
     expect(
       view.queryByRole("heading", { name: "Move to OpenBot Cloud" }),
     ).toBeNull();
+  });
+
+  /*
+   * FOUND ON 1.2.0-rc.2: the move failed its last check, the person kept OpenBot here, and the next
+   * release never asked again. The shell keeps a Keep that followed a failed move, and says the move
+   * is due at the first launch of another release (main.rs,
+   * `a_keep_after_a_failed_move_is_offered_again_after_an_update`). The window asks it then as it
+   * asked the first time, before anything starts.
+   */
+  test("a Keep after a failed move: the launch after the update asks again", async () => {
+    // One release: the move fails its check, and the person keeps OpenBot here.
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-again",
+      localStatus("ready", "valid"),
+    );
+    withOlderDeployment({ from: "v0.3.0", to: "v0.3.1", moved: true });
+    const preview = withMoveDue();
+    const due = invokeHandler;
+    invokeHandler = async (command, args) => {
+      if (command === "move_to_cloud")
+        throw {
+          said: "Some of your things didn't arrive in OpenBot Cloud, so OpenBot stays on this computer. Try again.",
+          detail: "OpenBot Cloud's check didn't match; messages: 1331 of 1369",
+          kind: "move-mismatch",
+        };
+      return due(command, args);
+    };
+    const first = await renderApp();
+    await first.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    await userEvent.click(first.getByRole("button", { name: "Continue" }));
+    await act(async () =>
+      preview.resolve({
+        counts: [{ kind: "bots", count: 3 }],
+        apps: [],
+        footprintBytes: 20_200_000_000,
+        modelKeysAvailable: false,
+      }),
+    );
+    await first.findByText("3 Bots");
+    await userEvent.click(
+      first.getByRole("button", { name: "Move to OpenBot Cloud" }),
+    );
+    await first.findByRole("heading", { name: "Not everything arrived" });
+    await userEvent.click(
+      first.getByRole("button", { name: "Keep OpenBot on this computer" }),
+    );
+    await waitFor(() =>
+      expect(
+        invokeCalls.some((call) => call.command === "keep_self_contained"),
+      ).toBe(true),
+    );
+    const commands = invokeCalls.map((call) => call.command);
+    expect(commands.indexOf("move_to_cloud")).toBeLessThan(
+      commands.indexOf("keep_self_contained"),
+    );
+    first.unmount();
+    invokeCalls = [];
+
+    // The next release's first launch: the shell says the move is due again.
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-again",
+      localStatus("ready", "valid"),
+    );
+    withOlderDeployment(() => new Promise(() => {}));
+    withMoveDue();
+    const next = await renderApp();
+    await next.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    expect(startsOrUpdates()).toEqual([]);
+    expect(
+      invokeCalls.some((call) => call.command === "keep_self_contained"),
+    ).toBe(false);
   });
 });
 
@@ -6158,6 +6294,34 @@ test("a Start that waits for the install it asked for carries on with the saved 
   expect(
     invokeCalls.filter((call) => call.command === "show_openbot"),
   ).toHaveLength(1);
+  expect(
+    invokeCalls.filter((call) => call.command === "prepare_installation"),
+  ).toHaveLength(1);
+});
+
+/**
+ * An image list something outside OpenBot deleted: Start says it is an unfinished install, the
+ * window installs (which downloads only the list again) and starts, with no "does not include the
+ * Bot you picked" and nothing for the person to choose.
+ */
+test("a Start refused for a missing image list installs it again and starts", async () => {
+  const root = "/tmp/installed-image-list-gone";
+  const { view, installed } = await reopenAfterUpdate(root, (starts) => {
+    if (starts === 1)
+      throw {
+        ...INSTALL_AGAIN,
+        detail: `The image list ${root}/container-images.json is missing. Install downloads it again.`,
+      };
+    return null;
+  });
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByText(/does not include/)).toBeNull();
+
+  await act(async () => installed.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByText(/does not include/)).toBeNull();
+  expect(startsMade()).toHaveLength(2);
   expect(
     invokeCalls.filter((call) => call.command === "prepare_installation"),
   ).toHaveLength(1);

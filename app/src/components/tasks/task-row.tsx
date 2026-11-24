@@ -21,6 +21,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import type { ListedTask } from "@/lib/tasks/groups";
 import { taskLine } from "@/lib/tasks/line";
@@ -54,13 +55,13 @@ const ICONS: Partial<Record<TaskStatus, typeof IconProgress>> = {
 };
 
 /**
- * The dot on a task's icon, as Activity draws one on work under way: green and pulsing while it
- * runs, amber while it waits on the person, red when it couldn't finish. A resolved task has none.
+ * The dot on a task's icon, as Activity draws one on work under way: success and pulsing while it
+ * runs, warning while it waits on the person, destructive when it couldn't finish. A resolved task has none.
  */
 const DOT: Partial<Record<TaskStatus, string>> = {
-  working: "animate-pulse bg-emerald-500",
-  needs_input: "bg-amber-500",
-  ready_for_review: "bg-amber-500",
+  working: "animate-pulse bg-success",
+  needs_input: "bg-warning",
+  ready_for_review: "bg-warning",
   failed: "bg-destructive",
 };
 
@@ -240,7 +241,11 @@ export function TaskRow({
           {canTryAgain({ ...task, status }) ? (
             <Button
               disabled={busy}
-              onClick={() => again.mutate(task.id)}
+              onClick={() => {
+                // Bots can't run until a card is added: the dialog says why, in place of a run.
+                if (stopIfNeedsCard()) return;
+                again.mutate(task.id);
+              }}
               size="sm"
             >
               {again.isPending ? "Starting…" : "Try again"}
@@ -431,7 +436,11 @@ export function TaskBoardRow({
         canTryAgain({ ...task, status }) ? (
           <Button
             disabled={busy}
-            onClick={() => again.mutate(task.id)}
+            onClick={() => {
+              // Bots can't run until a card is added: the dialog says why, in place of a run.
+              if (stopIfNeedsCard()) return;
+              again.mutate(task.id);
+            }}
             size="sm"
           >
             {again.isPending ? "Starting…" : "Try again"}

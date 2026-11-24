@@ -263,7 +263,7 @@ export const CapabilityId = {
 } as const;
 
 /**
- * The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.
+ * The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.
  */
 export type AiConnectionProvider =
   (typeof AiConnectionProvider)[keyof typeof AiConnectionProvider];
@@ -274,6 +274,7 @@ export const AiConnectionProvider = {
   google: "google",
   xai: "xai",
   unbiased: "unbiased",
+  trustedrouter: "trustedrouter",
   "openai-compatible": "openai-compatible",
 } as const;
 
@@ -327,7 +328,7 @@ export interface Problem {
   /** On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below was raised because of a security problem in older releases. */
   security?: boolean;
   /**
-   * On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card and start the organization's free trial, or to update the card. Null for a member, who asks an admin.
+   * On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card, or to update it after a failed payment. Null for a member, who asks an admin.
    * @maxLength 2048
    * @nullable
    */

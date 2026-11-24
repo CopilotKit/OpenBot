@@ -277,6 +277,52 @@ test("clicking the open Conversations icon hides its panel, and clicking it agai
   expect(sidebarState(view)).toBe("expanded");
 });
 
+/*
+ * Found in dogfooding: on Routines, the Routines icon could not be chosen. Bots on the strip opened
+ * Conversations' panel instead (opening the panel on a page with none asked for Conversations, and
+ * that came last), and once Bots was open, Routines' own icon did nothing: its link went to the page
+ * already open, so the page never took the strip back. Bots stayed lit beside Routines.
+ */
+test("on Routines, Bots and then Routines lights Routines and folds the panel away", async () => {
+  const { view, router, user } = renderApp("/routines");
+  await user.click(await view.findByRole("button", { name: "Bots" }));
+  await view.findByRole("heading", { level: 2, name: "Bots" });
+  expect(
+    view.getByRole("button", { name: "Bots" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(sidebarState(view)).toBe("expanded");
+  await user.click(view.getByRole("link", { name: "Routines" }));
+  expect(router.state.location.pathname).toBe("/routines");
+  const routines = view.getByRole("link", { name: "Routines" });
+  expect(routines.hasAttribute("data-active")).toBe(true);
+  expect(routines.getAttribute("aria-current")).toBe("page");
+  expect(
+    view.getByRole("button", { name: "Bots" }).getAttribute("aria-pressed"),
+  ).toBe("false");
+  expect(sidebarState(view)).toBe("collapsed");
+  // And back again: Bots lights and shows its panel once more.
+  await user.click(view.getByRole("button", { name: "Bots" }));
+  expect(
+    view.getByRole("button", { name: "Bots" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(sidebarState(view)).toBe("expanded");
+});
+
+test("on Routines, with Bots opened by way of Conversations, Routines lights Routines again", async () => {
+  const { view, user } = renderApp("/routines");
+  await user.click(await view.findByRole("button", { name: "Conversations" }));
+  await user.click(view.getByRole("button", { name: "Bots" }));
+  await view.findByRole("heading", { level: 2, name: "Bots" });
+  await user.click(view.getByRole("link", { name: "Routines" }));
+  expect(
+    view.getByRole("link", { name: "Routines" }).hasAttribute("data-active"),
+  ).toBe(true);
+  expect(
+    view.getByRole("button", { name: "Bots" }).getAttribute("aria-pressed"),
+  ).toBe("false");
+  expect(sidebarState(view)).toBe("collapsed");
+});
+
 test("Bots on the strip shows the Bots panel and stays on the page", async () => {
   const { view, router, user } = renderApp("/");
   await user.click(await view.findByRole("button", { name: "Bots" }));

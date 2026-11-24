@@ -226,10 +226,15 @@ paths:
         each can think, the one a run uses when nobody picked, and who serves
         them. The models come from whatever serves OpenBot's model, the
         provider or a gateway in front of it, read in the background. They
-        are narrowed only once an administrator turns on the model allowlist
-        and allows at least one; an empty allowlist means every model. With
+        are narrowed for the caller in two ways. The organization's: only
+        once an administrator turns on the model allowlist and allows at
+        least one; an empty allowlist means every model. And the caller's
+        teams': when any team they are in, or a team above one, lists models
+        (getTeamModels), only the models one of those lists names, within
+        what the organization allows. The default is then one of those when
+        any can run, and nothing is left to pick when none can. With
         view=all, every
-        model listed before that narrowing, for an administrator choosing
+        model listed before either narrowing, for an administrator choosing
         which to allow. When the listing can't be read, the catalogue holds
         the deployment's own model and nothing to pick. Where several
         providers are connected (getAiConnections), it holds the models of
@@ -1770,17 +1775,27 @@ components:
       description: >-
         The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic:
         Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI.
+        trustedrouter: TrustedRouter. openai-compatible: any server that
+        speaks OpenAI's API, at an address given.
+      enum: [openai, anthropic, google, xai, unbiased, trustedrouter, openai-compatible]
+    AiConnectionProviderAnswer:
+      type: string
+      x-extensible-enum: [openai, anthropic, google, xai, unbiased, trustedrouter, openai-compatible]
+      description: >-
+        The AI provider OpenBot's Bots run on, as the server answers it.
+        openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai:
+        xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter.
         openai-compatible: any server that speaks OpenAI's API, at an address
-        given.
-      enum: [openai, anthropic, google, xai, unbiased, openai-compatible]
+        given. The list can grow: a client shows a provider it doesn't know
+        by its id. A request still names one of AiConnectionProvider.
     AiConnectionLogin:
       type: string
       description: >-
         How OpenBot signs in to the provider. plan: the person's Claude or
         ChatGPT plan (openai, anthropic). api-key: a key from the provider
         (openai, anthropic). endpoint: an address and, where it asks for one,
-        a key (google, xai, unbiased, openai-compatible). oauth: the person's
-        Google or xAI sign-in (google, xai).
+        a key (google, xai, unbiased, trustedrouter, openai-compatible).
+        oauth: the person's Google or xAI sign-in (google, xai).
       enum: [plan, api-key, endpoint, oauth]
     AiConnectionSaved:
       type: object
@@ -1790,7 +1805,7 @@ components:
       required: [provider, login, endpointHost]
       properties:
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         login:
           $ref: '#/components/schemas/AiConnectionLogin'
         endpointHost:
@@ -1816,7 +1831,7 @@ components:
         provider:
           description: The provider. Null while none is chosen yet.
           oneOf:
-            - $ref: '#/components/schemas/AiConnectionProvider'
+            - $ref: '#/components/schemas/AiConnectionProviderAnswer'
             - type: 'null'
         login:
           description: How OpenBot signs in to it. Null while none is chosen yet.
@@ -1894,8 +1909,9 @@ components:
       additionalProperties: false
       description: >-
         The connection to switch to. openai and anthropic take plan or
-        api-key; google and xai take endpoint or oauth; unbiased and
-        openai-compatible take endpoint. Any other pair is refused.
+        api-key; google and xai take endpoint or oauth; unbiased,
+        trustedrouter and openai-compatible take endpoint. Any other pair is
+        refused.
       required: [provider, login]
       properties:
         provider:
@@ -2081,7 +2097,7 @@ components:
             this server is set up for it. Each still connects with a key or an
             address too, and every provider not listed connects only that way.
           items:
-            $ref: '#/components/schemas/AiConnectionProvider'
+            $ref: '#/components/schemas/AiConnectionProviderAnswer'
     OrganizationAiSummary:
       type: object
       description: >-
@@ -2095,7 +2111,7 @@ components:
         provider:
           description: The organization's provider. Null while it has none.
           oneOf:
-            - $ref: '#/components/schemas/AiConnectionProvider'
+            - $ref: '#/components/schemas/AiConnectionProviderAnswer'
             - type: 'null'
     AiSignInInput:
       type: object
@@ -2154,7 +2170,7 @@ components:
           pattern: ^[A-Za-z0-9_-]+$
           description: The sign-in's id, for reading where it stands.
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         url:
           type: string
           format: uri
@@ -2191,7 +2207,7 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         status:
           type: string
           x-extensible-enum: [pending, approved, failed, expired]

@@ -23,6 +23,7 @@ import type {
   ListTaskTurnsParams,
   ListTasksParams,
   OrganizationNotFoundResponse,
+  PlanRequiredResponse,
   ReopenTaskHeaders,
   ResolveTaskHeaders,
   RetryTaskHeaders,
@@ -1061,6 +1062,7 @@ export const getRetryTaskMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | TaskNotFoundResponse
     | TaskConflictResponse
@@ -1110,6 +1112,7 @@ export type RetryTaskMutationResult = NonNullable<
 export type RetryTaskMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
+  | PlanRequiredResponse
   | ForbiddenResponse
   | TaskNotFoundResponse
   | TaskConflictResponse
@@ -1129,6 +1132,7 @@ export const useRetryTask = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | TaskNotFoundResponse
     | TaskConflictResponse

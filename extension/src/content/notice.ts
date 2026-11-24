@@ -1,41 +1,36 @@
+import { type Mode, scheme, type Token } from "@openbot/tokens/scheme";
+
 /**
  * The 50-action notice, drawn in the page. A page cannot load the extension's stylesheet into its own document, so the
- * colours are copied from app/src/theme.css (`:root` and `.dark`) and a test keeps them equal. The recording mark
- * (indicator.ts) draws with the same ones. The shadow root is open
+ * colours come from OpenBot's scheme (tokens/src/scheme.ts), the one the app's theme.css is written from. The recording
+ * mark (indicator.ts) draws with the same ones. The shadow root is open
  * so the end-to-end test can drive it, which means a page script can reach the buttons too: every handler acts only on
  * trusted events.
  */
 
 export const NOTICE_TAG = "openbot-recorder-notice";
 
-export const NOTICE_TOKENS = {
-  light: {
-    "--background": "oklch(0.983 0.003 286.4)",
-    "--foreground": "oklch(0.108 0.015 220.9)",
-    "--card": "oklch(1 0 0)",
-    "--card-foreground": "oklch(0.108 0.015 220.9)",
-    "--border": "oklch(0.894 0.014 286.1)",
-    "--primary": "oklch(0.108 0.015 220.9)",
-    "--primary-foreground": "oklch(1 0 0)",
-    "--secondary": "oklch(0.956 0.005 286.3)",
-    "--muted-foreground": "oklch(0.506 0.013 285.9)",
-    "--destructive": "oklch(0.504 0.178 22.9)",
-    "--ring": "oklch(0.644 0.167 276.1)",
-  },
-  dark: {
-    "--background": "oklch(0.182 0.023 296.6)",
-    "--foreground": "oklch(0.956 0.005 286.3)",
-    "--card": "oklch(0.212 0.028 297.1)",
-    "--card-foreground": "oklch(0.956 0.005 286.3)",
-    "--border": "oklch(0.28 0.035 298.6)",
-    "--primary": "oklch(0.956 0.005 286.3)",
-    "--primary-foreground": "oklch(0.108 0.015 220.9)",
-    "--secondary": "oklch(0.253 0.032 297.6)",
-    "--muted-foreground": "oklch(0.69 0.017 285.9)",
-    "--destructive": "oklch(0.792 0.121 16.4)",
-    "--ring": "oklch(0.713 0.151 277.7)",
-  },
-} as const;
+/** The scheme's colours the notice and the recording mark draw with. */
+const NOTICE_COLORS = [
+  "background",
+  "foreground",
+  "card",
+  "card-foreground",
+  "border",
+  "primary",
+  "primary-foreground",
+  "secondary",
+  "muted-foreground",
+  "destructive",
+  "ring",
+] as const satisfies readonly Token[];
+
+const custom = (mode: Mode) =>
+  Object.fromEntries(
+    NOTICE_COLORS.map((name) => [`--${name}`, scheme[mode][name]]),
+  ) as Record<`--${(typeof NOTICE_COLORS)[number]}`, string>;
+
+export const NOTICE_TOKENS = { light: custom("light"), dark: custom("dark") };
 
 export const RADIUS = "0.625rem";
 

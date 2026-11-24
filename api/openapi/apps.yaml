@@ -60,19 +60,22 @@ paths:
       description: >-
         Add an app in one of two ways. With from=directory, add an entry of
         listAppDirectory: a catalogue entry, with the instance host or vault
-        credential it needs, or an app from the wider directory. Only an
-        administrator may. With from=address, add a server by its HTTPS
-        address, and anybody signed in may. OpenBot asks the server how it is
-        reached first. It refuses an address the MCP allowlist doesn't
-        approve, a server that needs a key nobody gave, and an address already
-        added, naming that app in the problem's appId. Only an administrator
-        may give a server a key, because every Bot that uses the server uses
-        it. A server that signs each person in answers with signIn true, and
+        credential it needs, or an app from the wider directory. With
+        from=address, add a server by its HTTPS address. Either way only an
+        administrator may, because the app is added for everyone in the
+        organization; anybody else is answered 403 PERMISSION_DENIED. OpenBot
+        asks a server added by its address how it is reached first. It refuses
+        an address the MCP allowlist doesn't approve, a server that needs a key
+        nobody gave, and an address already added, naming that app in the
+        problem's appId. A server that signs each person in answers with signIn true, and
         each person then connects their own account. Answers 201 with the app.
         Adding a directory entry that is already added updates that app with
-        what the request names, and answers it the same way. A repeated
-        request with the same Idempotency-Key and body returns the first
-        result.
+        what the request names, and answers it the same way. An entry
+        listAppDirectory offers as a sign-in in place of its key (keyVersion)
+        is added as that sign-in; with connectsWith key it is added with its
+        key instead, as its own app, and each person then connects it with
+        their key. A repeated request with the same Idempotency-Key and body
+        returns the first result.
       security:
         - webSession: []
         - appOAuth: [apps:write]
@@ -97,6 +100,14 @@ paths:
                 value:
                   from: directory
                   directoryEntryId: directory:linear
+              directoryWithKey:
+                summary: >-
+                  An app the directory offers as a sign-in, added with its key
+                  instead.
+                value:
+                  from: directory
+                  directoryEntryId: directory:posthog
+                  connectsWith: key
               address:
                 summary: A server added by its address.
                 value:
@@ -536,12 +547,14 @@ paths:
         OpenBot's own catalogue (source catalogue) in the catalogue's own
         order, then apps from the wider directory (source directory) by title,
         ignoring case, and then by id. appId names the app an entry was added
-        as, or is null. search narrows the list to entries whose name or
-        description holds it, ignoring case.
-        source narrows it to one kind. Anybody signed in may read the
-        catalogue. Only an administrator sees the wider directory, so anybody
-        else's list holds catalogue entries only, and asking for
-        source=directory is refused. Where no directory is set up, the list
+        as, or is null. An app that connects with a key but signs in through
+        its vendor is listed once, as the sign-in, with keyVersion naming the
+        same app connected with its key. search narrows the list to entries
+        whose name or description holds it, ignoring case.
+        source narrows it to one kind. Anybody signed in may read it, the
+        wider directory included, so a person can find an app and ask an
+        administrator to add it (createAppAccessRequest). Only an
+        administrator adds one. Where no directory is set up, the list
         holds the catalogue only and source=directory is unavailable. In the
         personal edition the catalogue leaves out entries meant for a team,
         unless they're already added. A missing cursor starts at the first
@@ -997,6 +1010,14 @@ components:
           maxLength: 200
           pattern: ^(catalogue|directory):\S
           description: The entry's id, as listAppDirectory answers it.
+        connectsWith:
+          type: string
+          enum: [key]
+          description: >-
+            Add an app from the wider directory with its key, for an entry
+            listAppDirectory offers as a sign-in in place of its key
+            (keyVersion). Absent adds the entry as listed. Refused for a
+            catalogue entry and for an app that has no key to connect with.
         instanceHost:
           type: string
           minLength: 1
@@ -1291,6 +1312,31 @@ components:
           type: string
           enum: [sign-in, key, nothing]
           description: How a person connects the app once it is added.
+        keyVersion:
+          $ref: '#/components/schemas/DirectoryKeyVersion'
+    DirectoryKeyVersion:
+      type: object
+      description: >-
+        The same app connected with a key, for an app the directory offers as
+        a sign-in in place of its key. Add it with createApp and connectsWith
+        key. Absent for any other app.
+      required: [appId, title, actionCount]
+      properties:
+        appId:
+          type:
+            - string
+            - 'null'
+          description: The app the key version was added as, or null.
+        title:
+          type: string
+          description: >-
+            What the key version is called once added, so it reads apart from
+            the sign-in beside it: the app's own name followed by (key), as in
+            PostHog (key).
+        actionCount:
+          type: integer
+          minimum: 0
+          description: How many actions the key version offers.
     AppDirectoryEntry:
       description: One app that can be added, by where it comes from.
       oneOf:

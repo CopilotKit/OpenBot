@@ -179,6 +179,8 @@ function ProviderDialog({
   );
   const name = described?.provider ?? connection.provider ?? "This provider";
   const busy = disconnect.isPending || makeDefault.isPending;
+  // The server can name a provider this app doesn't know: that one can't be removed or made default here.
+  const known = providerById(connection.provider)?.id;
   const failure = disconnect.error ?? makeDefault.error;
   if (step.at === "done")
     return (
@@ -237,8 +239,8 @@ function ProviderDialog({
             className="mr-auto"
             disabled={busy}
             onClick={() =>
-              connection.provider &&
-              disconnect.mutate(connection.provider, {
+              known &&
+              disconnect.mutate(known, {
                 onSuccess: () => onClose(),
               })
             }
@@ -257,8 +259,8 @@ function ProviderDialog({
           <Button
             disabled={busy}
             onClick={() =>
-              connection.provider &&
-              makeDefault.mutate(connection.provider, {
+              known &&
+              makeDefault.mutate(known, {
                 onSuccess: () => onClose(),
               })
             }

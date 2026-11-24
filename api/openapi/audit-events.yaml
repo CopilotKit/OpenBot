@@ -17,8 +17,17 @@ paths:
         happens to the organization itself is on its trail too:
         organization.created, organization.renamed,
         organization.member_invited, organization.invitation_canceled,
-        organization.member_joined, organization.member_removed and
-        organization.member_role_changed.
+        organization.member_joined, organization.member_removed,
+        organization.member_role_changed and organization.deleted, and its
+        teams: team.created, team.updated, team.deleted, team.member_added,
+        team.member_role_changed, team.member_removed and
+        team.models_changed (the models before and after, each null when the
+        team set none). A run refused on its model is model.refused: its
+        payload names the model (provider/model), its source, and the rule
+        that refused it (organization or team); when the rule is team, teams
+        lists the teams whose lists applied to the person then, each with its
+        id and its name as it was then ({ id, name }). An event written before
+        this has no teams.
         Each filter narrows the events, and a filter that takes
         several values separated by commas matches any of them. A value that
         names nothing in the trail matches no event rather than being refused.

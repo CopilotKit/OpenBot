@@ -1,15 +1,14 @@
-import {
-  ErrorComponent,
-  type ErrorComponentProps,
-} from "@tanstack/react-router";
+import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { CompanySignInPage } from "@/components/auth/company-sign-in-page";
+import { RouteError } from "@/components/layout/route-error";
 import { NoOrganizationPage } from "@/components/organizations/no-organization-page";
 import type { AppErrorSource } from "@/lib/api/generated/model";
 import { recordAppError } from "@/lib/api/generated/product-events/product-events";
 import { idempotencyKey } from "@/lib/api/request";
 import { heldOutBySso } from "@/lib/auth/held-out";
 import { desktopShell } from "@/lib/desktop/shell";
+import { appVersion } from "@/lib/error-details";
 import { currentOrganizationId } from "@/lib/organizations/current";
 import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 
@@ -27,20 +26,6 @@ import { inNoOrganization } from "@/lib/organizations/in-no-organization";
  * twice, and a caught render error can also reach `window`), and a page sends at most ten. Before
  * the person's organization is known (signing in) there is nobody to send it for, so nothing is.
  */
-
-declare const __OPENBOT_APP_VERSION__: string | undefined;
-
-/** The release this build was made for, from the image's OPENBOT_BUILD_VERSION, when it was given one. */
-function appVersion(): string | undefined {
-  const version =
-    typeof __OPENBOT_APP_VERSION__ === "string"
-      ? __OPENBOT_APP_VERSION__
-      : undefined;
-  return version &&
-    /^v?\d+(?:\.\d+){1,3}(?:-[a-z]+(?:\.\d{1,9})?)?$/.test(version)
-    ? version
-    : undefined;
-}
 
 const MAX_REPORTS = 10;
 const MAX_MESSAGE = 2048;
@@ -122,7 +107,11 @@ export function installAppErrorReporting(): void {
   });
 }
 
-/** The router's own error screen, as before, reporting the error it shows once. */
+/**
+ * The app's error screen for a route, reporting the error it shows once. OpenBot's own screen
+ * (`components/layout/route-error.tsx`), which first loads again a part of the app that couldn't be
+ * fetched, never the router's "Something went wrong!" box.
+ */
 export function ReportedErrorComponent(props: ErrorComponentProps) {
   const { error } = props;
   const none = inNoOrganization(error);
@@ -135,5 +124,5 @@ export function ReportedErrorComponent(props: ErrorComponentProps) {
   // Wherever it was found, it is answered with its own page, never the router's error screen.
   if (heldOut) return <CompanySignInPage refusal={error.message} />;
   if (none) return <NoOrganizationPage />;
-  return <ErrorComponent {...props} />;
+  return <RouteError {...props} />;
 }

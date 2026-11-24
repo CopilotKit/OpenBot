@@ -92,6 +92,20 @@ const team = (id: string, name: string): Team => ({
 const SALES = team("Tm4Qx8LpV2nWc7RbY1sKd0Ze", "Sales");
 const SUPPORT = team("Sp9Lk3QwE7rTy1UiO5pAs2Df", "Support");
 const TEAMS_PATH = "/api/v2/organizations/default/teams";
+const MEMBERS_PATH = "/api/v2/organizations/default/members";
+
+/** The organization's members, as the API lists them: who a Bot can be published to. */
+const MEMBERS = [
+  { id: "ana", email: "a@example.test", name: "Ana Ruiz" },
+  { id: "bo", email: "bo@example.test", name: "Bo Lind" },
+].map((one) => ({
+  ...one,
+  image: null,
+  role: "member" as const,
+  joinedAt: "2026-11-01T09:00:00.000Z",
+  removable: true,
+  assignableRoles: [],
+}));
 
 /**
  * The published Bots, the organization's teams and the person asking. Every write is answered as
@@ -116,6 +130,18 @@ function serving(
     if (listed) return listed;
     if (sent.path.split("?")[0] === TEAMS_PATH)
       return Response.json({ teams, canCreate: false, nextCursor: null });
+    // The organization's members, searched as somebody to publish it to is typed.
+    if (sent.path.split("?")[0] === MEMBERS_PATH) {
+      const typed = (
+        new URL(sent.path, "http://openbot.invalid").searchParams.get(
+          "search",
+        ) ?? ""
+      ).toLowerCase();
+      return Response.json({
+        members: MEMBERS.filter((one) => one.email.includes(typed)),
+        nextCursor: null,
+      });
+    }
     if (url.includes("/shared-use/bot/")) return Response.json({ apps: [] });
     if (url.includes("/shared-use")) return Response.json({ requests: [] });
     return meResponse({
@@ -193,7 +219,14 @@ test("publishing to a team ticks it in the organization's teams and sends the te
   expect(view.queryByLabelText("Groups")).toBeNull();
   expect(view.queryByText("Directory groups")).toBeNull();
   await user.click(within(teams).getByRole("checkbox", { name: "Sales" }));
-  await user.type(view.getByLabelText("People, by email"), "a@example.test");
+  // A person is found among the organization's members as their name or address is typed.
+  await user.type(view.getByRole("combobox", { name: "People" }), "a@");
+  await user.click(await view.findByRole("option", { name: /^Ana Ruiz,/ }));
+  expect(
+    within(
+      view.getByRole("list", { name: "People it is published to" }),
+    ).getByText("a@example.test"),
+  ).toBeTruthy();
   await user.click(view.getByRole("button", { name: "Publish" }));
   await waitFor(() =>
     expect(writes).toEqual([

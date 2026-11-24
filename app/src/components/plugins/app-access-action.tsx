@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import {
   type ConnectInNewTab,
@@ -49,12 +49,14 @@ import { queryClient } from "@/query-client";
 
 /**
  * What the person is told about one app, in words that say whose move it is. `bot` is the Bot's name,
- * for the one state that asks the person a question about it.
+ * for the one state that asks the person a question about it. `admin` is whether the person looking
+ * is an admin, who is offered the step itself (`AdminAction`) and so is never told to ask one.
  */
 export function appAccessSentence(
   access: AppAccess,
   bot?: string,
   edition: "team" | "personal" = "team",
+  admin = false,
 ): string {
   const name = access.displayName;
   const owners = access.accountHolder === "owner";
@@ -69,6 +71,14 @@ export function appAccessSentence(
         (access.unavailable === null || access.unavailable === "absent")))
   )
     return `${name} isn't connected yet.`;
+  /*
+   * An admin's own step: the button beside this takes it (`AdminAction`), so the sentence says what
+   * is missing. "Only an admin can give it" told the admin of their own organization to ask an admin.
+   */
+  if (admin && edition === "team") {
+    const missing = adminSentence(access);
+    if (missing) return missing;
+  }
   switch (access.state) {
     case "ready":
       if (owners)
@@ -95,6 +105,33 @@ export function appAccessSentence(
       const ask = `Let ${bot ?? "this Bot"} use ${yours}?`;
       return access.needsConnect ? `${ask} Connect it first.` : ask;
     }
+  }
+}
+
+/**
+ * What is missing, said to the admin whose button beside it fixes it, for the states `AdminAction`
+ * offers the step for. Null for every other state, which reads the same for everybody.
+ */
+function adminSentence(access: AppAccess): string | null {
+  const name = access.displayName;
+  switch (access.state) {
+    case "not_granted":
+      return `This Bot hasn't been given ${name} yet.`;
+    case "shared_not_connected":
+      return `Your organization's ${name} account isn't connected yet.`;
+    case "disabled":
+      switch (access.unavailable) {
+        case "directory_unavailable":
+          return `${name} isn't set up yet.`;
+        case "scheme_unreadable":
+        case "oauth_client_missing":
+        case "token_missing":
+          return `${name} isn't fully set up yet.`;
+        default:
+          return `${name} isn't turned on yet.`;
+      }
+    default:
+      return null;
   }
 }
 
@@ -136,9 +173,9 @@ function disabledSentence(
  * - `reconnect` on an account the Bot's owner holds — nothing. Only the owner can reconnect their
  *   own account, and nobody else's press could do it for them.
  * - `not_connected` / `reconnect` — the person's own connection. Connect starts it in a new tab
- *   with the connect route Settings presses; an app connected with a typed key, and a Composio app
- *   that already has a row (which the connect route refuses until it is disconnected), go to the
- *   app's own page in Settings instead, where the form and Disconnect are.
+ *   with the connect route Settings presses; an app connected with a typed key goes to the app's own
+ *   page with the key form open, and a Composio app that already has a row (which the connect route
+ *   refuses until it is disconnected) goes to that page as it is, where Disconnect is.
  * - the three an administrator fixes — Request access, which files the request the server decides
  *   the kind of, and then Requested with a way to withdraw it. Pressed by an administrator, it would
  *   be a request to themselves, so they get the fix itself instead: see `AdminAction`.
@@ -165,6 +202,15 @@ export function AppAccessAction({
    */
   const tab = useConnectInNewTab();
   /*
+   * A PRESS THAT TURNED OUT TO NEED A KEY goes to where the key is typed, with the form open. The
+   * connect route answers a key app with the fields to fill in rather than a sign-in, and the
+   * button that pressed it may have been swapped by then, so the tab's answer is watched here.
+   */
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (tab.needsKey) void navigate(keyForm(access.key));
+  }, [tab.needsKey, navigate, access.key]);
+  /*
    * OpenBot's step before a sign-in, in OpenBot Desktop's window. Drawn whichever button is: the
    * one that pressed Connect can be swapped for another while the step is on screen.
    */
@@ -173,6 +219,110 @@ export function AppAccessAction({
       {appAccessButton({ access, agentId, personal, role: me?.role, tab })}
       {tab.consentStep}
     </>
+  );
+}
+
+/** An app's page with its key form open (`?connect=true`), which is where a key is typed. */
+function keyForm(app: string) {
+  return {
+    to: "/connections/$key" as const,
+    params: { key: app },
+    search: { connect: true as const },
+  };
+}
+
+/**
+ * THE REST OF CONNECTING, ON THE PRESS THAT TURNED THE APP ON OR GAVE IT.
+ *
+ * An app nobody has turned on may not say how it connects yet (its directory listing was not
+ * available), so once the press has turned it on the app is read again and the person is taken to
+ * whatever is left: the key form for an app that takes a key, the sign-in for one that signs in,
+ * and nothing for one that is ready. These presses used to stop at on, and the card swapped to a
+ * second Connect the person had to find and press: for a key app like Fireflies, and for a sign-in
+ * app the directory had not described yet, like Slack.
+ *
+ * THE SIGN-IN TAB IS CLAIMED ON THE CLICK whenever the press might end in a sign-in, because a
+ * browser only opens a tab while the click is recent, and turning the app on and reading it again
+ * can take longer than that. The claimed tab is pointed at the sign-in once the app says it signs
+ * in, and closed if it turns out to take a key or need nothing. A press known to end at a key form
+ * claims no tab (`withoutTab`).
+ */
+function useConnectOnceOn(agentId: string, tab: ConnectInNewTab) {
+  const navigate = useNavigate();
+
+  /**
+   * What is left once the app is on: the app to sign in to, or the step that takes the sign-in's
+   * place. The grants a Bot is offered are read per conversation, so every query is read again.
+   */
+  const whatIsLeft = async (
+    app: string,
+  ): Promise<{ signIn: string } | { next: () => Promise<unknown> }> => {
+    const now = await queryClient.fetchQuery({
+      ...botAppQueryOptions(agentId, app),
+      staleTime: 0,
+    });
+    // On, and nothing given yet because its tools come with the sign-in: Notion's case.
+    if (now.state === "not_granted" && signsInFirst(now))
+      return { signIn: now.key };
+    if (now.state !== "not_connected")
+      return { next: () => queryClient.invalidateQueries() };
+    if (now.connect === "key")
+      return {
+        next: () => {
+          void queryClient.invalidateQueries();
+          return navigate(keyForm(now.key));
+        },
+      };
+    return { signIn: now.key };
+  };
+
+  return {
+    /** Claim the tab on the click, turn the app on, then sign in there or close it unused. */
+    claimingTab: (app: string, turnOn: () => Promise<unknown>) => {
+      tab.stopWaiting();
+      let instead: (() => Promise<unknown>) | null = null;
+      void tab
+        .openAfter(async () => {
+          try {
+            await turnOn();
+            const left = await whatIsLeft(app);
+            if ("signIn" in left) return left.signIn;
+            instead = left.next;
+            return null;
+          } catch (thrown) {
+            // A refusal is drawn from the mutation's error; a failed read leaves the card's state.
+            void queryClient.invalidateQueries();
+            throw thrown;
+          }
+        })
+        // Once the unused tab is closed: the key form, or the card reads the app as ready.
+        .then(() => instead?.());
+    },
+    /** For an app known to take a key: turn it on, then the key form, with no tab. */
+    withoutTab: (app: string, turnOn: () => Promise<unknown>) => {
+      turnOn()
+        .then(() => whatIsLeft(app))
+        .then((left) => {
+          if (!("signIn" in left)) return left.next();
+          tab.stopWaiting();
+          tab.open(left.signIn);
+        })
+        .catch(() => queryClient.invalidateQueries());
+    },
+  };
+}
+
+/**
+ * Whether the app runs on the person's own account, signs in, and they haven't signed in. Notion
+ * lists its tools only once somebody has, so a Bot can't be given it before then: an admin's press
+ * signs them in first and gives it after (`AdminAction`).
+ */
+function signsInFirst(access: AppAccess): boolean {
+  return (
+    access.account === "personal" &&
+    access.accountHolder !== "owner" &&
+    (access.connect === "oauth" || access.connect === "consent") &&
+    access.connectedAt === null
   );
 }
 
@@ -209,7 +359,7 @@ function appAccessButton({
   if (access.state === "owner_grantable")
     return <OwnerGiveAction access={access} agentId={agentId} tab={tab} />;
   if (isOrganizationAdmin(role))
-    return <AdminAction agentId={agentId} access={access} />;
+    return <AdminAction agentId={agentId} access={access} tab={tab} />;
   return <RequestAction agentId={agentId} access={access} />;
 }
 
@@ -221,6 +371,15 @@ function appAccessButton({
  * the same checks, the read-only actions only, and the same trail. Anything that sends or writes is
  * still chosen on the Bot's page.
  *
+ * AND THEN THE ADMIN'S OWN ACCOUNT, ON THE SAME PRESS. Once it is on and given, an app the admin
+ * still has to connect goes straight on to its key form or its sign-in (`useConnectOnceOn`). The
+ * card asked because the admin's own task needed the app, so connecting it is the next step.
+ *
+ * SIGNED IN FIRST WHERE THE TOOLS COME WITH THE SIGN-IN. Notion lists its tools only for somebody
+ * who has signed in, so there is nothing to give a Bot before the admin has. The press turns it on
+ * with nothing given, opens the admin's sign-in, and once their account is connected gives it on
+ * the same press, the way `OwnerGiveAction` connects first and gives after.
+ *
  * A LINK WHERE IT CANNOT. A broker with no key, a set-up somebody left unfinished and a team account
  * nobody connected all need something only typed or consented to on the app's admin page. That page
  * opens in a new tab so the conversation stays where it is, and the card reads the app again when
@@ -229,15 +388,43 @@ function appAccessButton({
 function AdminAction({
   agentId,
   access,
+  tab,
 }: {
   agentId: string;
   access: AppAccess;
+  tab: ConnectInNewTab;
 }) {
   const paths = useManagePaths();
   const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
   const approve = useMutation(approveBotAppMutationOptions(queryClient));
   const setup = useQuery(appSetupQueryOptions()).data;
+  const connectOnceOn = useConnectOnceOn(agentId, tab);
   const name = access.displayName;
+  const { waiting, stopWaiting } = tab;
+  /** Pressed before the admin had signed in: give it as soon as they have. */
+  const pending = useRef(false);
+
+  // Watched as `ConnectAction` watches: the card reads the app again until the account is there.
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: appAccessKeys.all });
+    }, 2_000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+
+  const signedIn = access.connectedAt !== null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the admin's account appears, once per press.
+  useEffect(() => {
+    if (!pending.current || !signedIn || access.state !== "not_granted") return;
+    pending.current = false;
+    stopWaiting();
+    // Its tools are listed now, so this press gives them. A refusal is drawn from `approve.error`.
+    approve
+      .mutateAsync({ agentId, app: access.key })
+      .then(() => queryClient.invalidateQueries())
+      .catch(() => queryClient.invalidateQueries());
+  }, [signedIn, access.state]);
 
   const oneClick =
     access.state === "not_granted" ||
@@ -252,29 +439,62 @@ function AdminAction({
     const spoken = disabled
       ? `Turn on ${name} and give it to ${bot}`
       : `Give ${name} to ${bot}`;
+    const error = approve.error?.message ?? tab.error;
     return (
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {approve.error ? (
+        {error ? (
           <p className="text-destructive text-xs" role="alert">
-            {approve.error.message}
+            {error}
+          </p>
+        ) : null}
+        {tab.blockedUrl ? (
+          <p className="text-xs" role="status">
+            This browser blocked the tab.{" "}
+            <a
+              className="underline underline-offset-2"
+              href={tab.blockedUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Open {name}'s sign-in
+            </a>
+            .
+          </p>
+        ) : waiting ? (
+          <p className="text-muted-foreground text-xs" role="status">
+            Finish in the tab that opened.
           </p>
         ) : null}
         <Button
-          aria-label={approve.isPending ? undefined : spoken}
-          disabled={approve.isPending}
-          onClick={() =>
-            approve.mutate(
-              { agentId, app: access.key },
-              /*
-               * The grants a Bot is offered are read per conversation, so the turn after this has
-               * to be asked against a store that knows about them. See `ConnectAction`.
-               */
-              { onSuccess: () => void queryClient.invalidateQueries() },
-            )
+          aria-label={
+            approve.isPending || waiting || tab.pending ? undefined : spoken
           }
+          disabled={approve.isPending || tab.pending}
+          onClick={() => {
+            approve.reset();
+            pending.current = signsInFirst(access);
+            /*
+             * Awaited, not given callbacks: turning it on refetches this app and can swap this
+             * button for another, and TanStack Query drops a `mutate()` callback once nothing is
+             * listening. A refusal is drawn from `approve.error`.
+             */
+            const turnOn = () =>
+              approve.mutateAsync({ agentId, app: access.key });
+            if (access.connect === "key")
+              connectOnceOn.withoutTab(access.key, turnOn);
+            else connectOnceOn.claimingTab(access.key, turnOn);
+          }}
           size="sm"
         >
-          {approve.isPending ? (disabled ? "Turning on…" : "Giving…") : label}
+          {waiting
+            ? `Waiting for ${name}…`
+            : approve.isPending
+              ? disabled
+                ? "Turning on…"
+                : "Giving…"
+              : tab.pending
+                ? "Opening sign-in…"
+                : label}
         </Button>
       </div>
     );
@@ -446,11 +666,16 @@ function OwnerGiveAction({
 }
 
 /**
- * The personal edition's one press, for an app the one person hasn't turned on yet: turn it on and,
- * where it signs in, start the sign-in in a new tab, all on the same press. Turning it on goes
- * through the same approval an administrator's "Turn on and give it" does, catalogue and broker
- * apps alike, and the server then gives every Bot every tool (`personal-defaults.ts`). An app that
- * needs a key typed opens its page instead, which is where the key goes.
+ * The personal edition's one press, for an app the one person hasn't turned on yet: Connect turns it
+ * on and goes straight on to what is left, all on the same press. An app that signs in opens its
+ * sign-in in a new tab; an app that takes a key opens its page with the key form, in this tab; an
+ * app that needs nothing is ready. Turning it on goes through the same approval an administrator's
+ * "Turn on and give it" does, catalogue and broker apps alike, and the server then gives every Bot
+ * every tool (`personal-defaults.ts`).
+ *
+ * ALWAYS CONNECT, never Turn on: the press is for using the app, and switching it on is only the
+ * first half of that. It said Turn on where the app did not yet say how it connects, and then a
+ * second Connect was what took the person to their key.
  */
 function PersonalConnectAction({
   agentId,
@@ -476,39 +701,20 @@ function PersonalConnectAction({
   }, [waiting]);
 
   const turnOn = () => approve.mutateAsync({ agentId, app: access.key });
+  const connectOnceOn = useConnectOnceOn(agentId, tab);
 
   /*
-   * TURNED ON IS NOT DONE WHEN IT TURNS OUT TO SIGN IN. An app nobody has turned on may not say how
-   * it connects yet (its directory listing was not available), so the press reads the app again
-   * once it is on, and starts the sign-in itself if one is what is left. This press used to stop at
-   * on, and the card swapped to a second Connect the person had to find and press.
+   * Turned on, and the connect route then asked for a key: `AppAccessAction` has already gone to
+   * the key form. Left here, this is the way back to it.
    */
-  const turnOnThenSignIn = async () => {
-    await turnOn();
-    const now = await queryClient.fetchQuery({
-      ...botAppQueryOptions(agentId, access.key),
-      staleTime: 0,
-    });
-    if (
-      now.state === "not_connected" &&
-      (now.connect === "oauth" || now.connect === "consent")
-    ) {
-      tab.stopWaiting();
-      tab.open(now.key);
-      return;
-    }
-    // Nothing to sign in to: on is ready, and every query is read again for the next turn.
-    await queryClient.invalidateQueries();
-  };
-
-  if (access.connect === "key" || tab.needsKey)
+  if (tab.needsKey)
     return (
       <Button
-        render={<Link params={{ key: access.key }} to="/connections/$key" />}
-        aria-label={`Set up ${name}`}
+        render={<Link {...keyForm(access.key)} />}
+        aria-label={`Connect ${name}`}
         size="sm"
       >
-        Set up
+        Connect
       </Button>
     );
 
@@ -542,18 +748,21 @@ function PersonalConnectAction({
         aria-label={
           waiting || approve.isPending || tab.pending
             ? undefined
-            : `${signsIn ? "Connect" : "Turn on"} ${name}`
+            : `Connect ${name}`
         }
         disabled={approve.isPending || tab.pending}
         onClick={() => {
           approve.reset();
+          // Known to sign in: the tab is claimed on the click, before turning it on.
           if (signsIn) {
             tab.stopWaiting();
             tab.open(access.key, turnOn);
             return;
           }
-          // A refusal is drawn from `approve.error`; a failed read leaves the card's own state.
-          turnOnThenSignIn().catch(() => queryClient.invalidateQueries());
+          // Known to take a key: no tab. Not known yet: the tab is claimed in case it signs in.
+          if (access.connect === "key")
+            connectOnceOn.withoutTab(access.key, turnOn);
+          else connectOnceOn.claimingTab(access.key, turnOn);
         }}
         size="sm"
       >
@@ -563,9 +772,7 @@ function PersonalConnectAction({
             ? "Turning on…"
             : tab.pending
               ? "Opening sign-in…"
-              : signsIn
-                ? "Connect"
-                : "Turn on"}
+              : "Connect"}
       </Button>
     </div>
   );
@@ -615,10 +822,23 @@ function ConnectAction({
     access.connect === "key" ||
     (access.state === "reconnect" && access.connect !== "oauth") ||
     tab.needsKey;
+  /*
+   * A key to type opens the page with its form open, so Connect goes straight to the key. A
+   * connection to repair opens the page as it is, where Disconnect is.
+   */
+  const typesKey =
+    access.state === "not_connected" &&
+    (access.connect === "key" || tab.needsKey);
   if (viaSettings)
     return (
       <Button
-        render={<Link params={{ key: access.key }} to="/connections/$key" />}
+        render={
+          typesKey ? (
+            <Link {...keyForm(access.key)} />
+          ) : (
+            <Link params={{ key: access.key }} to="/connections/$key" />
+          )
+        }
         aria-label={`${label} ${access.displayName}`}
         size="sm"
         variant="outline"

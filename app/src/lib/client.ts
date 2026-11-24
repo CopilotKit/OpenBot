@@ -21,6 +21,7 @@ import {
 } from "@/lib/auth/renewal";
 import { noteRefusal } from "@/lib/client-version/refusal";
 import { noteAnswer, noteNoAnswer } from "@/lib/desktop/reachability";
+import { PLAN_REQUIRED, showCardNeeded } from "@/lib/plan/card-needed";
 
 /**
  * This app as it names itself to its OpenBot: `web/<release>`, the release it was built from
@@ -80,6 +81,26 @@ export type ClientOptions = {
   headers?: Record<string, string>;
 };
 
+/** What a person reads when a request got no answer at all. */
+export const NO_ANSWER =
+  "Couldn't reach OpenBot. Check your connection and try again.";
+
+/**
+ * A request that got no answer: the network failed, or OpenBot wasn't there. The browser's own
+ * error says so in its words ("Load failed" in Safari and the Mac window, "Failed to fetch" in
+ * Chromium), which a screen would show as they are. This carries OpenBot's sentence instead, and
+ * the browser's error as its cause.
+ *
+ * Still a TypeError, as `fetch`'s own is, so whatever tells a lost connection by that
+ * (`lib/desktop/reachability.ts`) keeps telling it.
+ */
+export class NoAnswerError extends TypeError {
+  constructor(cause: unknown) {
+    super(NO_ANSWER, { cause });
+    this.name = "NoAnswerError";
+  }
+}
+
 /**
  * The one `fetch`. Each outcome is reported to `lib/desktop/reachability.ts`, which is how the app
  * knows the OpenBot it is connected to stopped answering, and answers again.
@@ -102,6 +123,8 @@ async function request(path: string, init: RequestInit): Promise<Response> {
     });
   } catch (error) {
     noteNoAnswer(error);
+    // A request the page gave up on (an AbortError) is not this, and is handed back as it is.
+    if (error instanceof TypeError) throw new NoAnswerError(error);
     throw error;
   }
   const noted = noteAnswer(response);
@@ -201,6 +224,11 @@ async function refusal(
       ? (body as Record<string, unknown>)
       : undefined,
   );
+  /*
+   * A run refused for want of a plan, from whichever screen asked for it: the one dialog that says
+   * why opens, so an action no screen checked first still tells the person (`lib/plan/card-needed.ts`).
+   */
+  if (error.code === PLAN_REQUIRED) showCardNeeded(error.body ?? {});
   /*
    * A hosted OpenBot's sign-in needing renewal, which is never being signed out: renewed in the
    * background, and the write it interrupted is sent again once the page is back.

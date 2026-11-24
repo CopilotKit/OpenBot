@@ -13,14 +13,26 @@ paths:
       description: >-
         Return one page of the organization's teams, in the order they were
         created. Any member of the organization can read it. Each team says
-        the caller's own role in it and whether the caller may manage it. A
-        missing cursor starts at the first page and nextCursor null ends the
-        list.
+        the caller's own role in it and whether the caller may manage it.
+        search narrows the list to the teams whose name holds it, ignoring
+        case; it finds only this organization's teams. A missing cursor starts
+        at the first page and nextCursor null ends the list. A cursor belongs
+        to the search that made it, so changing the search starts again
+        without one.
       security:
         - webSession: []
         - appOAuth: [organizations:read]
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: >-
+            Part of a team's name, matched without regard to case. Leading and
+            trailing spaces are ignored; empty lists every team.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:
@@ -248,13 +260,27 @@ paths:
       description: >-
         Return one page of the people in a team, in the order they joined
         it. Any member of the organization can read it. People who are only
-        in a team beneath this one are not listed. A missing cursor starts at
-        the first page and nextCursor null ends the list.
+        in a team beneath this one are not listed, and nor is anybody who is
+        not a member of the organization now: somebody removed from it is
+        listed again once they are restored. search narrows the list to the
+        people whose address or name holds it, ignoring case. A missing cursor
+        starts at the first page and nextCursor null ends the list. A cursor
+        belongs to the search that made it, so changing the search starts
+        again without one.
       security:
         - webSession: []
         - appOAuth: [organizations:read]
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: >-
+            Part of an address or a name, matched without regard to case.
+            Leading and trailing spaces are ignored; empty lists everybody.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:
@@ -376,6 +402,147 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/teams/{teamId}/models:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TeamId'
+    get:
+      tags: [Teams]
+      operationId: getTeamModels
+      summary: Read which models a team's people may run
+      description: >-
+        Return the models a team allows its people to run, or null when the
+        team sets none. A person in teams with lists may run any model one
+        of those lists names (their teams' parents' lists included), within
+        what the organization allows: its model allowlist when that narrows
+        anything, otherwise every model. A team with no list sets nothing,
+        and a person in no team with a list runs what the organization
+        allows. Admins and owners are held to it like anyone else. Any
+        member of the organization can read it. A team of another
+        organization is not found.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [organizations:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The team's models, or that it sets none.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamModels'
+              examples:
+                limited:
+                  $ref: '#/components/examples/LimitedTeamModels'
+                none:
+                  $ref: '#/components/examples/NoTeamModels'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Teams]
+      operationId: replaceTeamModels
+      summary: Set which models a team's people may run
+      description: >-
+        Replace the models a team allows its people to run. At least one,
+        each one the organization's model catalogue offers
+        (getModelCatalogue with view=all), named as the organization's model
+        allowlist names models: provider/model. A model the organization's
+        allowlist leaves out may be listed, and runs only once the
+        organization allows it too. From the next request, the team's
+        people (and the people of the teams beneath it) run only models one
+        of their teams allows. Only an owner or an admin of the
+        organization can, for a team made here or one from the company's
+        directory alike. A repeated request with the same Idempotency-Key
+        and body returns the first result.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamModelsInput'
+            examples:
+              two:
+                value:
+                  models: [openai/gpt-5.6-terra, anthropic/claude-sonnet-5]
+      responses:
+        '200':
+          description: The team's models, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamModels'
+              examples:
+                limited:
+                  $ref: '#/components/examples/LimitedTeamModels'
+        '400':
+          $ref: '#/components/responses/InvalidTeamModels'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamModelsAdminOnly'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Teams]
+      operationId: deleteTeamModels
+      summary: Stop limiting a team's models
+      description: >-
+        Clear a team's models, so the team sets none again and its people
+        run what their other teams and the organization allow. Only an owner
+        or an admin of the organization can. Clearing a team that sets none
+        changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The team sets no models.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamModelsAdminOnly'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
     TeamId:
@@ -452,7 +619,9 @@ components:
         memberCount:
           type: integer
           minimum: 0
-          description: How many people are in the team itself.
+          description: >-
+            How many people are in the team itself: the people its members
+            list shows.
         role:
           oneOf:
             - $ref: '#/components/schemas/TeamRole'
@@ -607,6 +776,55 @@ components:
       properties:
         role:
           $ref: '#/components/schemas/TeamRole'
+    TeamModelId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
+      description: >-
+        A model, as provider/model: the organization's model allowlist names
+        models this way, from the catalogue's provider and a model's id
+        (getModelCatalogue).
+      example: openai/gpt-5.6-terra
+    TeamModels:
+      type: object
+      description: >-
+        The models a team allows its people to run. models null: the team
+        sets none, and its people run what their other teams and the
+        organization allow.
+      required: [models, updatedBy, updatedAt]
+      properties:
+        models:
+          type: [array, 'null']
+          description: >-
+            The models, as provider/model, in the order they were saved. Null
+            when the team sets none.
+          items:
+            $ref: '#/components/schemas/TeamModelId'
+        updatedBy:
+          type: [string, 'null']
+          description: >-
+            The id of the person who last set them. Null when the team sets
+            none, or that person's account is gone.
+        updatedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When they were last set. Null when the team sets none.
+    TeamModelsInput:
+      type: object
+      additionalProperties: false
+      required: [models]
+      properties:
+        models:
+          type: array
+          minItems: 1
+          maxItems: 200
+          uniqueItems: true
+          description: >-
+            The models the team's people may run, as provider/model. Each one
+            the organization's model catalogue offers.
+          items:
+            $ref: '#/components/schemas/TeamModelId'
   responses:
     InvalidTeam:
       description: >-
@@ -753,6 +971,71 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    InvalidTeamModels:
+      description: >-
+        The models are missing, empty, repeated or malformed, one is not a
+        model the organization's catalogue offers, or the Idempotency-Key is
+        malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unknown:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: openai/claude-x isn't a model this organization offers.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            empty:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose at least one model.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TeamModelsAdminOnly:
+      description: >-
+        The caller is not an owner or an admin of the organization: a team's
+        maintainers don't change its models. Or the organization requires
+        signing in through the company's identity provider and the caller
+        hasn't (SSO_REQUIRED).
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin of this organization can change a team's models.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     TeamConflict:
       description: >-
         Another team of the organization has that name. Or the
@@ -847,6 +1130,18 @@ components:
             isCaller: false
             joinedAt: '2026-11-15T09:20:05.000Z'
         nextCursor: null
+    LimitedTeamModels:
+      summary: A team whose people run two models.
+      value:
+        models: [openai/gpt-5.6-terra, anthropic/claude-sonnet-5]
+        updatedBy: 8kq2m4x7p1rvz3a9c5d0
+        updatedAt: '2026-11-23T10:04:12.000Z'
+    NoTeamModels:
+      summary: A team that sets no models.
+      value:
+        models: null
+        updatedBy: null
+        updatedAt: null
     AddedTeamMember:
       summary: Somebody put in a team.
       value:

@@ -90,6 +90,14 @@ export function readToolName(given: string, running = false): ToolName {
 const ROUTINES_APP = "routines";
 
 /**
+ * OpenBot's own apps whose names are not their keys in words: `openbot-settings` would read
+ * "Openbot Settings". Named as the catalogue names them.
+ */
+const OWN_APP_NAMES: Readonly<Record<string, string>> = {
+  "openbot-settings": "OpenBot settings",
+};
+
+/**
  * One app's tool, from its server key and the tool's own name: what `readToolName` reads out of an
  * `mcp__server__tool` name, and what an approval is asked about as `server/tool`.
  */
@@ -163,7 +171,9 @@ export function appToolName(server: string, tool: string): ToolName {
   const serverWords = wordsOf(server).map(singular);
   const named = containsPhrase(wordsActedOn, serverWords);
   const said = nameInWords(label);
-  return named ? { label: said } : { label: said, detail: server };
+  return named
+    ? { label: said }
+    : { label: said, detail: OWN_APP_NAMES[server] ?? server };
 }
 
 /**
@@ -171,6 +181,8 @@ export function appToolName(server: string, tool: string): ToolName {
  * Drive", and a broker's "composio-airtable" or "arcade-Gmail" as the app alone.
  */
 export function connectorName(server: string): string {
+  const own = OWN_APP_NAMES[server];
+  if (own) return own;
   return wordsOf(brokeredApp(server) ?? server)
     .map((word) => word[0]?.toUpperCase() + word.slice(1))
     .join(" ");
@@ -219,7 +231,66 @@ export function approvalPhrase(action: {
   args?: unknown;
 }): string {
   const { action: words, place, joiner } = approvalParts(action);
+  if (joiner === null) return words;
   return joiner ? `${words} ${joiner} ${place}` : `${words} ${place}`;
+}
+
+/** OpenBot's own settings app (`SETTINGS_APP` on the server). */
+const SETTINGS_APP = "openbot-settings";
+
+/**
+ * What a change to OpenBot's settings asks to do, said whole: "change your settings", "change
+ * Scout's settings", "invite someone to your organization". The card's body says what exactly.
+ *
+ * The app's name is never added. Read as any other app's tool, the card said "Update my settings on
+ * OpenBot settings": the tool's own name, written for the model in the Bot's voice, then the app.
+ * Undefined for a tool this doesn't know, which is then named as any app's tool is.
+ */
+function settingsAsk(
+  tool: string,
+  args: unknown,
+  target: unknown,
+): string | undefined {
+  const asked =
+    args && typeof args === "object"
+      ? (args as { action?: unknown }).action
+      : undefined;
+  switch (tool) {
+    case "update_my_settings":
+      return "change your settings";
+    case "update_my_bot": {
+      // The Bot it changes, by the name its preview gives (`change.bot`).
+      const change =
+        target && typeof target === "object"
+          ? (target as { change?: { bot?: { name?: unknown } } }).change
+          : undefined;
+      const name =
+        typeof change?.bot?.name === "string" ? change.bot.name.trim() : "";
+      return name ? `change ${name}'s settings` : "change a Bot's settings";
+    }
+    case "update_organization_settings":
+      return "change your organization's settings";
+    case "manage_people":
+      return (
+        {
+          invite: "invite someone to your organization",
+          change_role: "change someone's role in your organization",
+          remove: "remove someone from your organization",
+        }[String(asked)] ?? "change people in your organization"
+      );
+    case "manage_teams":
+      return (
+        {
+          create: "create a team",
+          rename: "rename a team",
+          move: "move a team",
+          add_member: "add someone to a team",
+          remove_member: "take someone out of a team",
+        }[String(asked)] ?? "change your organization's teams"
+      );
+    default:
+      return undefined;
+  }
 }
 
 function approvalParts(action: {
@@ -228,7 +299,22 @@ function approvalParts(action: {
   target?: unknown;
   account?: string;
   args?: unknown;
-}): { action: string; place: string; joiner: "on" | "in" | "" } {
+}): {
+  action: string;
+  place: string;
+  /** Null when the action says where on its own, so nothing is added to it. */
+  joiner: "on" | "in" | "" | null;
+} {
+  // A change to OpenBot's own settings, in its own words: "change your settings".
+  if (action.toolRef.startsWith(`${SETTINGS_APP}/`)) {
+    const ask = settingsAsk(
+      action.toolRef.slice(SETTINGS_APP.length + 1),
+      action.args,
+      action.target,
+    );
+    if (ask)
+      return { action: ask, place: connectorName(SETTINGS_APP), joiner: null };
+  }
   /*
    * Sharing something private with other people, by who it goes to: "share private information with
    * Pipeline Bot". It read "openbot/share private information on handoff:" and a person's id.
@@ -380,6 +466,12 @@ export function ruleTitle(rule: { toolRef: string; scope: string }): {
     if (tool === "*")
       return { title: `Any action on ${connectorName(app)}`, place: named };
     if (tool.includes("*")) return { title: rule.toolRef, place: false };
+    // A rule for a settings change is titled as its card was: "Change your settings".
+    const ask =
+      app === SETTINGS_APP
+        ? settingsAsk(tool, undefined, undefined)
+        : undefined;
+    if (ask) return { title: upper(ask), place: named };
     const { action, place } = approvalWords({ toolRef: ref, scope: app });
     return { title: `${upper(action)} on ${place}`, place: named };
   }

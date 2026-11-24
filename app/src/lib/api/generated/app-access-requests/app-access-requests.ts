@@ -313,7 +313,7 @@ export const getCreateAppAccessRequestUrl = (organizationId: string) => {
 };
 
 /**
- * Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app's state: turning it on, giving it to the Bot, or connecting its shared account. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask.
+ * Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app's state: turning it on, giving it to the Bot, or connecting its shared account. Leave botId out to ask for an app nobody has added yet, for everyone in the organization: the request is to turn it on, and its botId is null. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask, and anybody signed in may ask for an app alone.
  * @summary Ask an administrator for an app
  */
 export const createAppAccessRequest = async (

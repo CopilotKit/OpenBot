@@ -112,7 +112,7 @@ export const getGetModelCatalogueUrl = (
 };
 
 /**
- * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. With view=all, every model listed before that narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick. Where several providers are connected (getAiConnections), it holds the models of every one of them, each naming the connection that serves it, with the person's own connections ahead of the organization's.
+ * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed for the caller in two ways. The organization's: only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. And the caller's teams': when any team they are in, or a team above one, lists models (getTeamModels), only the models one of those lists names, within what the organization allows. The default is then one of those when any can run, and nothing is left to pick when none can. With view=all, every model listed before either narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick. Where several providers are connected (getAiConnections), it holds the models of every one of them, each naming the connection that serves it, with the person's own connections ahead of the organization's.
  * @summary Read the models Bots can run on
  */
 export const getModelCatalogue = async (
@@ -1444,6 +1444,7 @@ export const getReplaceAiProviderConnectionUrl = (
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible",
 ) => {
   return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connections/${encodeURIComponent(String(aiProvider))}`;
@@ -1461,6 +1462,7 @@ export const replaceAiProviderConnection = async (
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible",
   aiProviderConnectionInput: AiProviderConnectionInput,
   headers: ReplaceAiProviderConnectionHeaders,
@@ -1580,6 +1582,7 @@ export type ReplaceAiProviderConnectionMutationVariables = {
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible";
   data: AiProviderConnectionInput;
   headers: ReplaceAiProviderConnectionHeaders;
@@ -1630,6 +1633,7 @@ export const getDeleteAiProviderConnectionUrl = (
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible",
 ) => {
   return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connections/${encodeURIComponent(String(aiProvider))}`;
@@ -1647,6 +1651,7 @@ export const deleteAiProviderConnection = async (
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible",
   headers: DeleteAiProviderConnectionHeaders,
   options?: Parameters<typeof apiRequest>[1],
@@ -1755,6 +1760,7 @@ export type DeleteAiProviderConnectionMutationVariables = {
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible";
   headers: DeleteAiProviderConnectionHeaders;
 };
@@ -2750,6 +2756,7 @@ export const getReplacePersonalAiProviderConnectionUrl = (
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible",
 ) => {
   return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/ai-connections/${encodeURIComponent(String(aiProvider))}`;
@@ -2768,6 +2775,7 @@ export const replacePersonalAiProviderConnection = async (
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible",
   aiProviderConnectionInput: AiProviderConnectionInput,
   headers: ReplacePersonalAiProviderConnectionHeaders,
@@ -2892,6 +2900,7 @@ export type ReplacePersonalAiProviderConnectionMutationVariables = {
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible";
   data: AiProviderConnectionInput;
   headers: ReplacePersonalAiProviderConnectionHeaders;
@@ -2942,6 +2951,7 @@ export const getDeletePersonalAiProviderConnectionUrl = (
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible",
 ) => {
   return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/ai-connections/${encodeURIComponent(String(aiProvider))}`;
@@ -2960,6 +2970,7 @@ export const deletePersonalAiProviderConnection = async (
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible",
   headers: DeletePersonalAiProviderConnectionHeaders,
   options?: Parameters<typeof apiRequest>[1],
@@ -3074,6 +3085,7 @@ export type DeletePersonalAiProviderConnectionMutationVariables = {
     | "google"
     | "xai"
     | "unbiased"
+    | "trustedrouter"
     | "openai-compatible";
   headers: DeletePersonalAiProviderConnectionHeaders;
 };

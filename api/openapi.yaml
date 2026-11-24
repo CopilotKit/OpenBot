@@ -439,7 +439,7 @@ paths:
         - Audit events
       operationId: listAuditEvents
       summary: List audit events
-      description: 'Return one page of the organization''s audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.invitation_canceled, organization.member_joined, organization.member_removed and organization.member_role_changed. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.'
+      description: 'Return one page of the organization''s audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.invitation_canceled, organization.member_joined, organization.member_removed, organization.member_role_changed and organization.deleted, and its teams: team.created, team.updated, team.deleted, team.member_added, team.member_role_changed, team.member_removed and team.models_changed (the models before and after, each null when the team set none). A run refused on its model is model.refused: its payload names the model (provider/model), its source, and the rule that refused it (organization or team); when the rule is team, teams lists the teams whose lists applied to the person then, each with its id and its name as it was then ({ id, name }). An event written before this has no teams. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.'
       security:
         - webSession: []
         - appOAuth:
@@ -2014,7 +2014,7 @@ paths:
         - Organization settings
       operationId: updateOrganizationSettings
       summary: Change the organization's settings
-      description: 'Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization''s own rule: its members sign in through an identity provider, and saving it signs out only this organization''s members who signed in another way. Where it keeps only one organization, that organization''s rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), single sign-on can''t be required: sending ssoRequired true answers 409 with the code HOSTED_SIGN_IN_ONLY.'
+      description: 'Change the settings sent and keep the rest. The settings sent are saved all or none: if any one is refused, none is saved. context is read-only, and sending it answers 400 with nothing saved. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization''s own rule: its members sign in through an identity provider, and saving it signs out only this organization''s members who signed in another way. Where it keeps only one organization, that organization''s rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), single sign-on can''t be required: sending ssoRequired true answers 409 with the code HOSTED_SIGN_IN_ONLY.'
       security:
         - webSession: []
         - appOAuth:
@@ -3526,6 +3526,56 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/refused-turns:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      tags:
+        - Conversations
+      operationId: listRefusedTurns
+      summary: List the caller's turns in a conversation that were refused
+      description: 'Return one page of the caller''s own turns in the conversation that were refused before they ran, newest first: a model they may not run (MODEL_NOT_ALLOWED), a permission they don''t have (CAPABILITY_REQUIRED), no OpenBot plan (PLAN_REQUIRED). Each says what the turn was for (the person''s message, or what a routine or a task asked) and why it was refused, in the words the refusal said. Nothing of a refused turn reaches the conversation''s thread, so a client draws these into the transcript itself: each after the message named by afterMessageId, or after the thread''s messages where that is null. botId narrows the list to one Bot''s. A missing cursor starts at the newest page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      parameters:
+        - name: botId
+          in: query
+          description: Only the turns of this Bot. Leave it out for every Bot's.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of refused turns.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefusedTurnPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/RefusedTurnPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/attachments:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -3622,6 +3672,8 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/PlanRequired'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -4193,6 +4245,8 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/PlanRequired'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -4514,7 +4568,7 @@ paths:
         - Models
       operationId: getModelCatalogue
       summary: Read the models Bots can run on
-      description: Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. With view=all, every model listed before that narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick. Where several providers are connected (getAiConnections), it holds the models of every one of them, each naming the connection that serves it, with the person's own connections ahead of the organization's.
+      description: 'Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot''s model, the provider or a gateway in front of it, read in the background. They are narrowed for the caller in two ways. The organization''s: only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. And the caller''s teams'': when any team they are in, or a team above one, lists models (getTeamModels), only the models one of those lists names, within what the organization allows. The default is then one of those when any can run, and nothing is left to pick when none can. With view=all, every model listed before either narrowing, for an administrator choosing which to allow. When the listing can''t be read, the catalogue holds the deployment''s own model and nothing to pick. Where several providers are connected (getAiConnections), it holds the models of every one of them, each naming the connection that serves it, with the person''s own connections ahead of the organization''s.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -5596,7 +5650,7 @@ paths:
         - Apps
       operationId: createApp
       summary: Add an app
-      description: 'Add an app in one of two ways. With from=directory, add an entry of listAppDirectory: a catalogue entry, with the instance host or vault credential it needs, or an app from the wider directory. Only an administrator may. With from=address, add a server by its HTTPS address, and anybody signed in may. OpenBot asks the server how it is reached first. It refuses an address the MCP allowlist doesn''t approve, a server that needs a key nobody gave, and an address already added, naming that app in the problem''s appId. Only an administrator may give a server a key, because every Bot that uses the server uses it. A server that signs each person in answers with signIn true, and each person then connects their own account. Answers 201 with the app. Adding a directory entry that is already added updates that app with what the request names, and answers it the same way. A repeated request with the same Idempotency-Key and body returns the first result.'
+      description: 'Add an app in one of two ways. With from=directory, add an entry of listAppDirectory: a catalogue entry, with the instance host or vault credential it needs, or an app from the wider directory. With from=address, add a server by its HTTPS address. Either way only an administrator may, because the app is added for everyone in the organization; anybody else is answered 403 PERMISSION_DENIED. OpenBot asks a server added by its address how it is reached first. It refuses an address the MCP allowlist doesn''t approve, a server that needs a key nobody gave, and an address already added, naming that app in the problem''s appId. A server that signs each person in answers with signIn true, and each person then connects their own account. Answers 201 with the app. Adding a directory entry that is already added updates that app with what the request names, and answers it the same way. An entry listAppDirectory offers as a sign-in in place of its key (keyVersion) is added as that sign-in; with connectsWith key it is added with its key instead, as its own app, and each person then connects it with their key. A repeated request with the same Idempotency-Key and body returns the first result.'
       security:
         - webSession: []
         - appOAuth:
@@ -5622,6 +5676,12 @@ paths:
                 value:
                   from: directory
                   directoryEntryId: directory:linear
+              directoryWithKey:
+                summary: An app the directory offers as a sign-in, added with its key instead.
+                value:
+                  from: directory
+                  directoryEntryId: directory:posthog
+                  connectsWith: key
               address:
                 summary: A server added by its address.
                 value:
@@ -6018,7 +6078,7 @@ paths:
         - Apps
       operationId: listAppDirectory
       summary: List the apps that can be added
-      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue) in the catalogue''s own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read the catalogue. Only an administrator sees the wider directory, so anybody else''s list holds catalogue entries only, and asking for source=directory is refused. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
+      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue) in the catalogue''s own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. An app that connects with a key but signs in through its vendor is listed once, as the sign-in, with keyVersion naming the same app connected with its key. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included, so a person can find an app and ask an administrator to add it (createAppAccessRequest). Only an administrator adds one. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
       security:
         - webSession: []
         - appOAuth:
@@ -7815,7 +7875,7 @@ paths:
         - App access requests
       operationId: createAppAccessRequest
       summary: Ask an administrator for an app
-      description: 'Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app''s state: turning it on, giving it to the Bot, or connecting its shared account. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask.'
+      description: 'Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app''s state: turning it on, giving it to the Bot, or connecting its shared account. Leave botId out to ask for an app nobody has added yet, for everyone in the organization: the request is to turn it on, and its botId is null. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask, and anybody signed in may ask for an app alone.'
       security:
         - webSession: []
         - appOAuth:
@@ -7834,6 +7894,9 @@ paths:
                 value:
                   botId: research-assistant
                   appId: notion
+              appAlone:
+                value:
+                  appId: slack
       responses:
         '200':
           description: The request, filed now or already waiting.
@@ -10036,6 +10099,8 @@ paths:
           $ref: '#/components/responses/InvalidRoutine'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/PlanRequired'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -10309,6 +10374,8 @@ paths:
           $ref: '#/components/responses/InvalidCheckIn'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/PlanRequired'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -10395,6 +10462,8 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/PlanRequired'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -10441,6 +10510,8 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/PlanRequired'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -10893,6 +10964,8 @@ paths:
           $ref: '#/components/responses/InvalidGoal'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/PlanRequired'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -11820,13 +11893,20 @@ paths:
         - Organizations
       operationId: listOrganizationInvitations
       summary: List the invitations an organization has sent
-      description: 'Return one page of the organization''s invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the organization''s invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. search narrows the list to the invitations whose address holds it, ignoring case; it finds only this organization''s invitations. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.'
       security:
         - webSession: []
         - appOAuth:
             - organizations:read
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: Part of an address, matched without regard to case. Leading and trailing spaces are ignored; empty lists every invitation.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
@@ -11954,7 +12034,7 @@ paths:
       operationId: getOrganizationPlan
       x-openbot-singleton: true
       summary: Read an organization's plan
-      description: 'Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.'
+      description: 'Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands for the caller: on the free allowance with runs left, on the plan, behind on a payment, or needing a card. The free allowance is a number of runs each person gets, across every organization they are in, so freeRunsUsedPercent is the caller''s own. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.'
       security:
         - webSession: []
         - appOAuth:
@@ -11971,12 +12051,16 @@ paths:
               schema:
                 $ref: '#/components/schemas/OrganizationPlan'
               examples:
-                trialing:
-                  $ref: '#/components/examples/OrganizationPlanTrialing'
-                noPlan:
-                  $ref: '#/components/examples/OrganizationPlanNone'
+                free:
+                  $ref: '#/components/examples/OrganizationPlanFree'
+                freeRunsUsedUp:
+                  $ref: '#/components/examples/OrganizationPlanFreeRunsUsedUp'
+                active:
+                  $ref: '#/components/examples/OrganizationPlanActive'
                 notRequired:
                   $ref: '#/components/examples/OrganizationPlanNotRequired'
+                trialing:
+                  $ref: '#/components/examples/OrganizationPlanTrialing'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -12151,13 +12235,20 @@ paths:
         - Teams
       operationId: listTeams
       summary: List an organization's teams
-      description: Return one page of the organization's teams, in the order they were created. Any member of the organization can read it. Each team says the caller's own role in it and whether the caller may manage it. A missing cursor starts at the first page and nextCursor null ends the list.
+      description: Return one page of the organization's teams, in the order they were created. Any member of the organization can read it. Each team says the caller's own role in it and whether the caller may manage it. search narrows the list to the teams whose name holds it, ignoring case; it finds only this organization's teams. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
       security:
         - webSession: []
         - appOAuth:
             - organizations:read
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: Part of a team's name, matched without regard to case. Leading and trailing spaces are ignored; empty lists every team.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
@@ -12370,13 +12461,20 @@ paths:
         - Teams
       operationId: listTeamMembers
       summary: List a team's members
-      description: Return one page of the people in a team, in the order they joined it. Any member of the organization can read it. People who are only in a team beneath this one are not listed. A missing cursor starts at the first page and nextCursor null ends the list.
+      description: 'Return one page of the people in a team, in the order they joined it. Any member of the organization can read it. People who are only in a team beneath this one are not listed, and nor is anybody who is not a member of the organization now: somebody removed from it is listed again once they are restored. search narrows the list to the people whose address or name holds it, ignoring case. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.'
       security:
         - webSession: []
         - appOAuth:
             - organizations:read
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: Part of an address or a name, matched without regard to case. Leading and trailing spaces are ignored; empty lists everybody.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
@@ -12481,6 +12579,131 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/TeamForbidden'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/teams/{teamId}/models:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TeamId'
+    get:
+      tags:
+        - Teams
+      operationId: getTeamModels
+      summary: Read which models a team's people may run
+      description: 'Return the models a team allows its people to run, or null when the team sets none. A person in teams with lists may run any model one of those lists names (their teams'' parents'' lists included), within what the organization allows: its model allowlist when that narrows anything, otherwise every model. A team with no list sets nothing, and a person in no team with a list runs what the organization allows. Admins and owners are held to it like anyone else. Any member of the organization can read it. A team of another organization is not found.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The team's models, or that it sets none.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamModels'
+              examples:
+                limited:
+                  $ref: '#/components/examples/LimitedTeamModels'
+                none:
+                  $ref: '#/components/examples/NoTeamModels'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    put:
+      tags:
+        - Teams
+      operationId: replaceTeamModels
+      summary: Set which models a team's people may run
+      description: 'Replace the models a team allows its people to run. At least one, each one the organization''s model catalogue offers (getModelCatalogue with view=all), named as the organization''s model allowlist names models: provider/model. A model the organization''s allowlist leaves out may be listed, and runs only once the organization allows it too. From the next request, the team''s people (and the people of the teams beneath it) run only models one of their teams allows. Only an owner or an admin of the organization can, for a team made here or one from the company''s directory alike. A repeated request with the same Idempotency-Key and body returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamModelsInput'
+            examples:
+              two:
+                value:
+                  models:
+                    - openai/gpt-5.6-terra
+                    - anthropic/claude-sonnet-5
+      responses:
+        '200':
+          description: The team's models, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamModels'
+              examples:
+                limited:
+                  $ref: '#/components/examples/LimitedTeamModels'
+        '400':
+          $ref: '#/components/responses/InvalidTeamModels'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamModelsAdminOnly'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Teams
+      operationId: deleteTeamModels
+      summary: Stop limiting a team's models
+      description: Clear a team's models, so the team sets none again and its people run what their other teams and the organization allow. Only an owner or an admin of the organization can. Clearing a team that sets none changes nothing.
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The team sets no models.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamModelsAdminOnly'
         '404':
           $ref: '#/components/responses/TeamNotFound'
         '409':
@@ -26108,7 +26331,7 @@ components:
             - 'null'
           format: uri-reference
           maxLength: 2048
-          description: On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card and start the organization's free trial, or to update the card. Null for a member, who asks an admin.
+          description: On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card, or to update it after a failed payment. Null for a member, who asks an admin.
     ConversationJoinToken:
       type: object
       description: 'What a client needs to watch a conversation live: a token, and the socket and topic to use it on (the threadStream channel of api/asyncapi.yaml).'
@@ -27209,6 +27432,99 @@ components:
         queued:
           type: boolean
           description: True when the message is waiting for its answer. False when the same message was already accepted.
+    RefusedTurnMessage:
+      type: object
+      description: The message a refused turn was for.
+      required:
+        - id
+        - text
+      properties:
+        id:
+          type:
+            - string
+            - 'null'
+          description: The message's id, as the app that sent it named it. Null for what a routine or a task asked.
+        text:
+          type: string
+          description: What it said.
+    RefusedTurn:
+      type: object
+      description: 'One of the caller''s turns that was refused before it ran, so nothing of it is in the conversation''s thread: what it was for, and why.'
+      required:
+        - id
+        - botId
+        - threadId
+        - afterMessageId
+        - message
+        - initiator
+        - code
+        - detail
+        - model
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The refused turn's id. Opaque.
+        botId:
+          type: string
+          description: The Bot the turn was for.
+        threadId:
+          type: string
+          description: The thread the turn would have run in.
+        afterMessageId:
+          type:
+            - string
+            - 'null'
+          description: 'The id of the thread''s message the turn came after, as the app that sent it held the thread. Null where nothing says (a routine''s or a task''s turn, or the first turn of a thread): draw it after the thread''s messages.'
+        message:
+          oneOf:
+            - $ref: '#/components/schemas/RefusedTurnMessage'
+            - type: 'null'
+          description: 'What the turn was for: the person''s message, or what a routine or a task asked. Null when nothing was said.'
+        initiator:
+          type: string
+          x-extensible-enum:
+            - person
+            - routine
+            - task
+          description: 'Who started the turn: the person (person), a routine, check-in or goal (routine), or a task a Bot handed the work to (task).'
+        code:
+          type: string
+          x-extensible-enum:
+            - MODEL_NOT_ALLOWED
+            - CAPABILITY_REQUIRED
+            - PLAN_REQUIRED
+          description: Why it was refused, as the refusal's problem code.
+        detail:
+          type: string
+          description: The refusal, in the words the person was told.
+        model:
+          type:
+            - string
+            - 'null'
+          description: The model it was refused on, as provider/model, for MODEL_NOT_ALLOWED. Null otherwise.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was refused.
+    RefusedTurnPage:
+      type: object
+      required:
+        - refusedTurns
+        - nextCursor
+      properties:
+        refusedTurns:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/RefusedTurn'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
     AttachmentUpload:
       type: object
       required:
@@ -27697,13 +28013,14 @@ components:
           description: What was said.
     AiConnectionProvider:
       type: string
-      description: 'The AI provider OpenBot''s Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI''s API, at an address given.'
+      description: 'The AI provider OpenBot''s Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI''s API, at an address given.'
       enum:
         - openai
         - anthropic
         - google
         - xai
         - unbiased
+        - trustedrouter
         - openai-compatible
     ModelCatalogueConnection:
       type: object
@@ -27747,9 +28064,20 @@ components:
         label:
           type: string
           description: Its name, as a model picker shows it.
+    AiConnectionProviderAnswer:
+      type: string
+      x-extensible-enum:
+        - openai
+        - anthropic
+        - google
+        - xai
+        - unbiased
+        - trustedrouter
+        - openai-compatible
+      description: 'The AI provider OpenBot''s Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI''s API, at an address given. The list can grow: a client shows a provider it doesn''t know by its id. A request still names one of AiConnectionProvider.'
     AiConnectionLogin:
       type: string
-      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person''s Google or xAI sign-in (google, xai).'
+      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person''s Google or xAI sign-in (google, xai).'
       enum:
         - plan
         - api-key
@@ -27764,7 +28092,7 @@ components:
         - endpointHost
       properties:
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         login:
           $ref: '#/components/schemas/AiConnectionLogin'
         endpointHost:
@@ -27807,7 +28135,7 @@ components:
         provider:
           description: The provider. Null while none is chosen yet.
           oneOf:
-            - $ref: '#/components/schemas/AiConnectionProvider'
+            - $ref: '#/components/schemas/AiConnectionProviderAnswer'
             - type: 'null'
         login:
           description: How OpenBot signs in to it. Null while none is chosen yet.
@@ -27859,7 +28187,7 @@ components:
     AiConnectionInput:
       type: object
       additionalProperties: false
-      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased and openai-compatible take endpoint. Any other pair is refused.
+      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused.
       required:
         - provider
         - login
@@ -27971,7 +28299,7 @@ components:
         provider:
           description: The organization's provider. Null while it has none.
           oneOf:
-            - $ref: '#/components/schemas/AiConnectionProvider'
+            - $ref: '#/components/schemas/AiConnectionProviderAnswer'
             - type: 'null'
     PersonalAiConnection:
       type: object
@@ -28005,7 +28333,7 @@ components:
           type: array
           description: 'The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), Google and xAI sign-ins, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.'
           items:
-            $ref: '#/components/schemas/AiConnectionProvider'
+            $ref: '#/components/schemas/AiConnectionProviderAnswer'
     AiSignInInput:
       type: object
       additionalProperties: false
@@ -28043,7 +28371,7 @@ components:
           pattern: ^[A-Za-z0-9_-]+$
           description: The sign-in's id, for reading where it stands.
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         url:
           type: string
           format: uri
@@ -28083,7 +28411,7 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         status:
           type: string
           x-extensible-enum:
@@ -28362,6 +28690,11 @@ components:
           maxLength: 200
           pattern: ^(catalogue|directory):\S
           description: The entry's id, as listAppDirectory answers it.
+        connectsWith:
+          type: string
+          enum:
+            - key
+          description: Add an app from the wider directory with its key, for an entry listAppDirectory offers as a sign-in in place of its key (keyVersion). Absent adds the entry as listed. Refused for a catalogue entry and for an app that has no key to connect with.
         instanceHost:
           type: string
           minLength: 1
@@ -28609,6 +28942,26 @@ components:
         oneStep:
           type: boolean
           description: 'Whether connecting needs nothing typed first: no account at all, or a vendor OpenBot registers itself with.'
+    DirectoryKeyVersion:
+      type: object
+      description: The same app connected with a key, for an app the directory offers as a sign-in in place of its key. Add it with createApp and connectsWith key. Absent for any other app.
+      required:
+        - appId
+        - title
+        - actionCount
+      properties:
+        appId:
+          type:
+            - string
+            - 'null'
+          description: The app the key version was added as, or null.
+        title:
+          type: string
+          description: 'What the key version is called once added, so it reads apart from the sign-in beside it: the app''s own name followed by (key), as in PostHog (key).'
+        actionCount:
+          type: integer
+          minimum: 0
+          description: How many actions the key version offers.
     DirectoryAppEntry:
       type: object
       description: An app from the wider app directory.
@@ -28680,6 +29033,8 @@ components:
             - key
             - nothing
           description: How a person connects the app once it is added.
+        keyVersion:
+          $ref: '#/components/schemas/DirectoryKeyVersion'
     AppDirectoryEntry:
       description: One app that can be added, by where it comes from.
       oneOf:
@@ -30050,7 +30405,6 @@ components:
       type: object
       additionalProperties: false
       required:
-        - botId
         - appId
       properties:
         botId:
@@ -30058,12 +30412,13 @@ components:
           minLength: 1
           maxLength: 200
           pattern: \S
+          description: The Bot the app is for. Left out, the request is for an app nobody has added yet, to turn it on for everyone.
         appId:
           type: string
           minLength: 1
           maxLength: 200
           pattern: \S
-          description: The app's id, or its name.
+          description: The app's id, or its name. For an app from the directory that nobody has added yet, the slug of its directory entry (the part of its entry id after directory:).
     AppAccessApprovalInput:
       type: object
       additionalProperties: false
@@ -32925,7 +33280,7 @@ components:
           description: How the person hears of it. emailed when OpenBot sent them an email. link when it could not or is not set up to, so the inviter passes the invitation's link on themselves. Either way the person sees the invitation in OpenBot when they sign in.
     OrganizationPlan:
       type: object
-      description: Whether this OpenBot needs the organization to be on a plan, and where the organization stands. When required is true, its Bots run only while status is trialing or active.
+      description: Whether this OpenBot needs the organization to be on a plan, and where the organization stands for the person reading it. When required is true, a run starts only while status is free, trialing or active.
       required:
         - required
         - status
@@ -32935,23 +33290,33 @@ components:
       properties:
         required:
           type: boolean
-          description: True when this OpenBot runs an organization's Bots only while it is on a plan or its free trial.
+          description: True when this OpenBot runs an organization's Bots only while it is on a plan, or while the person the run counts against has free runs left.
         status:
           type: string
           x-extensible-enum:
             - not_required
+            - free
             - trialing
             - active
             - past_due
             - none
             - unknown
-          description: not_required when this OpenBot needs no plan. trialing during the free trial, which a card on file starts. active on the plan. past_due when a payment failed and the card needs updating. none when the organization has no plan or trial yet, or its plan ended. unknown when the plan couldn't be read just now; Bots keep running meanwhile.
+          description: 'not_required when this OpenBot needs no plan. free when the organization isn''t on the plan and the person reading has free runs left. active on the plan. past_due when a payment failed and the card needs updating. none when a card is needed: the person''s free runs are used up, or there are none, or the plan ended. trialing during a free trial that ends on a date (trialEndsAt); OpenBot Cloud''s free allowance is counted in runs and doesn''t use it. unknown when the plan couldn''t be read just now; Bots keep running meanwhile.'
+        freeRunsUsedPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: How much of the reading person's free allowance is used, from 0 to 100. The allowance is the person's own, across every organization they are in. Rounded down, so it reads 100 only once every free run is used. Present only while required is true and status is neither active nor trialing; absent otherwise. The count of runs is never sent.
+        freeRunsAllowance:
+          type: integer
+          minimum: 1
+          description: How many free runs each person gets. Present only once the reading person has used them all (freeRunsUsedPercent is 100 and status is none), so the number is never shown while runs are left; absent otherwise.
         trialEndsAt:
           type:
             - string
             - 'null'
           format: date-time
-          description: When the free trial ends, while status is trialing. Null otherwise.
+          description: When a free trial that ends on a date ends, while status is trialing. Null otherwise. OpenBot Cloud's free allowance is counted in runs and doesn't use it.
         renewsAt:
           type:
             - string
@@ -32964,7 +33329,7 @@ components:
             - 'null'
           format: uri-reference
           maxLength: 2048
-          description: Where an owner or an admin goes in the browser to add a card, start the free trial or update the card. A page to open, not an API call. Null for a member, and when the organization needs no card.
+          description: Where an owner or an admin goes in the browser to add a card, or to update it after a failed payment. A page to open, not an API call. Null for a member, and when the organization needs no card.
     Invitation:
       type: object
       description: An invitation as the person it was sent to sees it. status is the server's verdict.
@@ -33092,7 +33457,7 @@ components:
         memberCount:
           type: integer
           minimum: 0
-          description: How many people are in the team itself.
+          description: 'How many people are in the team itself: the people its members list shows.'
         role:
           oneOf:
             - $ref: '#/components/schemas/TeamRole'
@@ -33259,6 +33624,53 @@ components:
       properties:
         member:
           $ref: '#/components/schemas/TeamMember'
+    TeamModelId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
+      description: 'A model, as provider/model: the organization''s model allowlist names models this way, from the catalogue''s provider and a model''s id (getModelCatalogue).'
+      example: openai/gpt-5.6-terra
+    TeamModels:
+      type: object
+      description: 'The models a team allows its people to run. models null: the team sets none, and its people run what their other teams and the organization allow.'
+      required:
+        - models
+        - updatedBy
+        - updatedAt
+      properties:
+        models:
+          type:
+            - array
+            - 'null'
+          description: The models, as provider/model, in the order they were saved. Null when the team sets none.
+          items:
+            $ref: '#/components/schemas/TeamModelId'
+        updatedBy:
+          type:
+            - string
+            - 'null'
+          description: The id of the person who last set them. Null when the team sets none, or that person's account is gone.
+        updatedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When they were last set. Null when the team sets none.
+    TeamModelsInput:
+      type: object
+      additionalProperties: false
+      required:
+        - models
+      properties:
+        models:
+          type: array
+          minItems: 1
+          maxItems: 200
+          uniqueItems: true
+          description: The models the team's people may run, as provider/model. Each one the organization's model catalogue offers.
+          items:
+            $ref: '#/components/schemas/TeamModelId'
     ApprovalStatus:
       type: string
       description: Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.
@@ -41352,24 +41764,35 @@ components:
                 minimumVersion: 1.2.0
                 security: true
     PlanRequired:
-      description: This OpenBot runs an organization's Bots only while it is on a plan or its free trial, and this organization is on neither, or its last payment failed (PLAN_REQUIRED). An owner or an admin adds a card at addCardUrl.
+      description: This OpenBot runs an organization's Bots only while it is on a plan, or while the person the run counts against has free runs left. This organization isn't on the plan and those free runs are used up, or its last payment failed (PLAN_REQUIRED). An owner or an admin adds a card at addCardUrl.
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
-            noPlan:
+            freeRunsUsedUp:
               value:
                 type: https://open.bot/errors/plan-required
                 title: This organization needs a plan.
                 status: 402
-                detail: Bots in this organization can't run until a card is added. Add a card to start your 30-day free trial.
+                detail: You've used your free trial. Add a card to keep your Bots running for $5 a month.
                 code: PLAN_REQUIRED
                 category: permission
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
                 addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+            freeRunsUsedUpMember:
+              value:
+                type: https://open.bot/errors/plan-required
+                title: This organization needs a plan.
+                status: 402
+                detail: You've used your free trial. Ask an admin to add a card to keep your Bots running.
+                code: PLAN_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ConversationNotFound:
       description: The conversation does not exist, was removed, or the caller is not in it, or the organization does not exist.
       content:
@@ -44151,6 +44574,64 @@ components:
                 detail: They aren't a member of this organization. Add them to the organization first.
                 code: PERSON_NOT_FOUND
                 category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidTeamModels:
+      description: The models are missing, empty, repeated or malformed, one is not a model the organization's catalogue offers, or the Idempotency-Key is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unknown:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: openai/claude-x isn't a model this organization offers.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            empty:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose at least one model.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TeamModelsAdminOnly:
+      description: 'The caller is not an owner or an admin of the organization: a team''s maintainers don''t change its models. Or the organization requires signing in through the company''s identity provider and the caller hasn''t (SSO_REQUIRED).'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin of this organization can change a team's models.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
+                category: permission
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
@@ -47568,6 +48049,23 @@ components:
       value:
         id: m1
         queued: true
+    RefusedTurnPageLast:
+      summary: A message refused on a model the person's team doesn't allow.
+      value:
+        refusedTurns:
+          - id: 6f1c2b7e-3a4d-4e9b-8c21-5d0a9e7f4b13
+            botId: research-assistant
+            threadId: thread_9k2m
+            afterMessageId: msg_7d1e
+            message:
+              id: msg_8a2f
+              text: Summarize the Q3 pipeline.
+            initiator: person
+            code: MODEL_NOT_ALLOWED
+            detail: This Bot uses GPT-4.1, which your team's models don't include. Ask an admin to change your team's models.
+            model: openai/gpt-4.1
+            createdAt: '2026-11-23T16:20:05.000Z'
+        nextCursor: null
     AttachmentExample:
       summary: A spreadsheet held for the next message.
       value:
@@ -49543,28 +50041,47 @@ components:
           createdAt: '2026-11-15T09:20:05.000Z'
           expiresAt: '2026-11-22T09:20:05.000Z'
         delivery: link
-    OrganizationPlanTrialing:
-      summary: An organization on its free trial, read by an admin.
+    OrganizationPlanFree:
+      summary: On the free allowance, 42% of it used, read by an admin.
       value:
         required: true
-        status: trialing
-        trialEndsAt: '2026-12-20T09:30:00Z'
+        status: free
+        freeRunsUsedPercent: 42
+        trialEndsAt: null
         renewsAt: null
-        addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
-    OrganizationPlanNone:
-      summary: An organization with no plan yet, read by an admin.
+        addCardUrl: null
+    OrganizationPlanFreeRunsUsedUp:
+      summary: Every free run used and no plan yet, read by an admin.
       value:
         required: true
         status: none
+        freeRunsUsedPercent: 100
+        freeRunsAllowance: 500
         trialEndsAt: null
         renewsAt: null
         addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+    OrganizationPlanActive:
+      summary: An organization on the plan.
+      value:
+        required: true
+        status: active
+        trialEndsAt: null
+        renewsAt: '2026-12-23T09:30:00Z'
+        addCardUrl: null
     OrganizationPlanNotRequired:
       summary: An OpenBot that needs no plan.
       value:
         required: false
         status: not_required
         trialEndsAt: null
+        renewsAt: null
+        addCardUrl: null
+    OrganizationPlanTrialing:
+      summary: A free trial that ends on a date. OpenBot Cloud's free allowance doesn't use it.
+      value:
+        required: true
+        status: trialing
+        trialEndsAt: '2026-12-20T09:30:00Z'
         renewsAt: null
         addCardUrl: null
     InvitationPageLast:
@@ -49683,6 +50200,20 @@ components:
           role: member
           isCaller: false
           joinedAt: '2026-11-15T09:20:05.000Z'
+    LimitedTeamModels:
+      summary: A team whose people run two models.
+      value:
+        models:
+          - openai/gpt-5.6-terra
+          - anthropic/claude-sonnet-5
+        updatedBy: 8kq2m4x7p1rvz3a9c5d0
+        updatedAt: '2026-11-23T10:04:12.000Z'
+    NoTeamModels:
+      summary: A team that sets no models.
+      value:
+        models: null
+        updatedBy: null
+        updatedAt: null
     ApprovalPageExample:
       summary: One approval waiting, on the last page.
       value:

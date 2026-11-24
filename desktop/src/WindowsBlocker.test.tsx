@@ -78,8 +78,8 @@ test("a fix with no restart checks the machine again, with no click", async () =
   answer = async () => "done";
   render(
     <WindowsBlocker
-      blocker="wsl-one"
-      instruction="Run `wsl --set-default-version 2`."
+      blocker="wsl-no-kernel"
+      instruction="Run `wsl --update`."
       onRestartNeeded={noRestart}
       onCleared={() => {
         cleared = true;
