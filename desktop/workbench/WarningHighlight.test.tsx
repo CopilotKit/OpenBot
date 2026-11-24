@@ -202,6 +202,24 @@ test("a Spacing warning boxes the element, shades the window buttons and labels 
   );
 });
 
+test("a Spinners highlight boxes all the spinners and shades each one", () => {
+  const warning: Warning = {
+    kind: "spinners",
+    at: 0,
+    label: '2 spinners: "Installing OpenBot", <p class="status-line">',
+    count: 2,
+    boxes: [
+      { x: 20, y: 100, width: 14, height: 14 },
+      { x: 20, y: 300, width: 14, height: 14 },
+    ],
+    box: { x: 20, y: 100, width: 14, height: 214 },
+  };
+  const shapes = highlightShapes(warning, { x: 0, y: 0, scale: 1 }, VIEWPORT);
+  expect(shapes.box).toEqual(warning.box);
+  expect(shapes.shaded).toEqual(warning.boxes);
+  expect(highlightLabel(warning)).toBe("2 spinners at once");
+});
+
 test("the highlight takes its colors from the app's tokens: a problem is destructive, a move the ring", () => {
   const box = (warning: Warning) => {
     const view = render(

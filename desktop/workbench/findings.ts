@@ -24,6 +24,7 @@ export type FindingKind =
   | "clipped"
   | "outside"
   | "spacing"
+  | "spinners"
   | "no-answer"
   | "app-error"
   | "stalled"
@@ -34,6 +35,7 @@ export const FINDING_KINDS: readonly FindingKind[] = [
   "clipped",
   "outside",
   "spacing",
+  "spinners",
   "no-answer",
   "app-error",
   "stalled",
@@ -46,6 +48,7 @@ export const KIND_LABELS: Record<FindingKind, string> = {
   clipped: "Cut off",
   outside: "Outside",
   spacing: "Spacing",
+  spinners: "Spinners",
   "no-answer": "No answer",
   "app-error": "App error",
   stalled: "Stalled",
@@ -55,12 +58,13 @@ export const KIND_LABELS: Record<FindingKind, string> = {
 /** The kinds that are layout warnings: they have an element and a box in the window. */
 export function isLayoutKind(
   kind: FindingKind,
-): kind is "moved" | "clipped" | "outside" | "spacing" {
+): kind is "moved" | "clipped" | "outside" | "spacing" | "spinners" {
   return (
     kind === "moved" ||
     kind === "clipped" ||
     kind === "outside" ||
-    kind === "spacing"
+    kind === "spacing" ||
+    kind === "spinners"
   );
 }
 
@@ -73,7 +77,16 @@ export const SPACING_RULE =
 export const SPACING_WHY =
   "macOS draws the buttons over the page at a fixed place (TRAFFIC_LIGHTS in main.rs). A panel's corner or an icon jammed against them, or buttons that miss the column's middle, reads as a page that does not know the window it is in. Little details matter.";
 
-/** The severity of a problem of the run: higher than any layout warning in a window. */
+/**
+ * The Spinners class: what the rule checks and why, as the Findings page shows it. A Spinners
+ * finding always shows, and `workbench:check` fails on it.
+ */
+export const SPINNERS_RULE =
+  "A window shows at most one spinner at any moment. The step's own wait is the one that spins. Anything else running beside it (the background install in the sidebar, a row of the Start) is marked and held still.";
+export const SPINNERS_WHY =
+  "Two spinners read as two waits, and a person cannot tell which one to watch.";
+
+/** The severity of a problem of the run, and of two spinners at once: higher than any other layout warning. */
 export const PROBLEM_SEVERITY = 10_000;
 
 /** Moves are merged when their deltas fall in the same bucket of this many pixels. */
@@ -162,6 +175,8 @@ export function occurrenceSize(occurrence: Occurrence): number | null {
       return Math.round(w.overBy);
     case "spacing":
       return Math.round(w.size);
+    case "spinners":
+      return w.count;
   }
 }
 
@@ -196,6 +211,7 @@ export function findingKey(occurrence: Occurrence): string {
   else if (w.kind === "moved") delta = `${bucket(w.dx)},${bucket(w.dy)}`;
   else if (w.kind === "spacing")
     delta = `${w.rule},${bucket(occurrenceSize(occurrence) ?? 0)}`;
+  else if (w.kind === "spinners") delta = String(w.count);
   else delta = String(bucket(occurrenceSize(occurrence) ?? 0));
   return `${w.kind}|${element}|${file}|${delta}`;
 }
@@ -247,9 +263,18 @@ export function occurrenceTitle(occurrence: Occurrence): string {
         return `${w.label} is ${size} px outside the window`;
       case "spacing":
         return w.text;
+      case "spinners":
+        return spinnersText(w);
     }
   }
   return shorten(occurrence.label, MAX_TITLE_MESSAGE);
+}
+
+/** The sentence for a Spinners warning, for example `2 spinners at once: "Installing OpenBot", <p class="status-line">`. */
+export function spinnersText(
+  w: Extract<Warning, { kind: "spinners" }>,
+): string {
+  return w.label.replace(/^(\d+) spinners: /, "$1 spinners at once: ");
 }
 
 /** The scene order of the check, then time: the order of a finding's occurrences. */
@@ -329,7 +354,9 @@ export function buildFindings(occurrences: readonly Occurrence[]): Finding[] {
         movement?.class === "jitter" && first.warning
           ? `${first.warning.label} moves back and forth, up to ${size} px`
           : occurrenceTitle(first),
-      severity: size === null ? PROBLEM_SEVERITY : size,
+      // Two spinners fail the check, as a problem of the run does.
+      severity:
+        size === null || first.kind === "spinners" ? PROBLEM_SEVERITY : size,
       size,
       element: first.warning ? first.warning.label : null,
       component: componentOf(first.chain),
@@ -765,9 +792,10 @@ export function warningMark(warning: Warning): string {
 
 export function parseMark(text: string | null): Mark | null {
   if (!text) return null;
-  const m = /^(moved|clipped|outside|spacing)\|(\d+(?:\.\d+)?)\|(.+)$/s.exec(
-    text,
-  );
+  const m =
+    /^(moved|clipped|outside|spacing|spinners)\|(\d+(?:\.\d+)?)\|(.+)$/s.exec(
+      text,
+    );
   if (!m) return null;
   return {
     kind: m[1] as Mark["kind"],

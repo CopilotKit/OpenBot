@@ -11,6 +11,8 @@ import {
   type Snapshot,
   screenOf,
   snapshot,
+  spinnerWarnings,
+  visibleSpinners,
   WHOLE_PAGE,
 } from "./layoutWatch";
 
@@ -501,4 +503,80 @@ test("the screen is the route and the main heading, and the focus is the focused
   expect(screenOf(document)).toBe(
     `${location.pathname}${location.hash} · Status`,
   );
+});
+
+// --- One spinner at a time ----------------------------------------------------------------------
+
+test("one spinner is no warning", () => {
+  withBoxes(() => {
+    mount(`
+      <ol aria-label="Setup progress">
+        <li aria-label="Installing OpenBot"><span aria-hidden="true"><span class="step-spinner"></span></span></li>
+      </ol>
+      <aside><li aria-label="Background install"><span aria-hidden="true"><span class="step-current"></span></span></li></aside>
+    `);
+    expect(spinnerWarnings(document, 4)).toEqual([]);
+  });
+});
+
+test("two spinners at once are one warning that names where each is", () => {
+  withBoxes(() => {
+    mount(`
+      <li aria-label="Installing OpenBot"><span aria-hidden="true"><span class="step-spinner" data-box="20 100 14 14"></span></span></li>
+      <p class="status-line" role="status"><span class="step-spinner" aria-hidden="true" data-box="20 300 14 14"></span><span>Starting OpenBot</span></p>
+    `);
+    expect(spinnerWarnings(document, 7)).toEqual([
+      {
+        kind: "spinners",
+        at: 7,
+        label: '2 spinners: "Installing OpenBot", <p class="status-line">',
+        count: 2,
+        boxes: [
+          { x: 20, y: 100, width: 14, height: 14 },
+          { x: 20, y: 300, width: 14, height: 14 },
+        ],
+        box: { x: 20, y: 100, width: 14, height: 214 },
+      },
+    ]);
+  });
+});
+
+test("the app's spinning icon counts as a spinner, an icon inside it does not count twice", () => {
+  withBoxes(() => {
+    mount(`
+      <span class="step-spinner" aria-hidden="true"></span>
+      <button>Saving<svg class="animate-spin" aria-hidden="true"><path class="animate-spin"></path></svg></button>
+    `);
+    expect(visibleSpinners(document)).toHaveLength(2);
+    expect(spinnerWarnings(document, 1).map((w) => w.label)).toEqual([
+      "2 spinners: <body>, <button>",
+    ]);
+  });
+});
+
+test("a spinner a person does not see is not counted", () => {
+  withBoxes(() => {
+    mount(`
+      <span class="step-spinner"></span>
+      <div hidden><span class="step-spinner"></span></div>
+      <div style="display: none"><span class="step-spinner"></span></div>
+      <div style="opacity: 0"><span class="step-spinner"></span></div>
+      <span class="step-spinner" style="visibility: hidden"></span>
+      <span class="step-spinner" data-box="0 0 0 0"></span>
+      <span style="${SR_ONLY}" data-box="0 0 1 1"><span class="step-spinner"></span></span>
+    `);
+    expect(visibleSpinners(document)).toHaveLength(1);
+    expect(spinnerWarnings(document, 1)).toEqual([]);
+  });
+});
+
+test("a held-still mark (step-current, step-waiting) is not a spinner", () => {
+  withBoxes(() => {
+    mount(`
+      <span class="step-spinner"></span>
+      <span class="step-current"></span>
+      <span class="step-waiting"></span>
+    `);
+    expect(spinnerWarnings(document, 1)).toEqual([]);
+  });
 });
