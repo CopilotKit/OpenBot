@@ -6,6 +6,7 @@ import type {
   AppTeamGrants,
   AppTeamGrantsInput,
   BotApp,
+  BotAppActionsInput,
   BotAppGiven,
   BotAppPage,
   BotAppTakenBack,
@@ -18,6 +19,7 @@ import type {
   BotGrantPage,
   BotGrantReplay,
   BotGrantTranslation,
+  GetBotAppParams,
   GiveableAppPage,
   ListBotAppsParams,
   ListBotGrantsParams,
@@ -345,24 +347,41 @@ export const getGetBotAppUrl = (
   organizationId: string,
   botId: string,
   appId: string,
+  params?: GetBotAppParams,
 ) => {
-  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/bots/${encodeURIComponent(String(botId))}/apps/${encodeURIComponent(String(appId))}`;
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/bots/${encodeURIComponent(String(botId))}/apps/${encodeURIComponent(String(appId))}?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/bots/${encodeURIComponent(String(botId))}/apps/${encodeURIComponent(String(appId))}`;
 };
 
 /**
- * Return one app as it stands for the person asking on this Bot, whether or not the Bot was given it, so a client can say it is turned off or not given and offer the step that fixes it. The app's name is read too, as well as its id. Anybody who can use the Bot may read it.
+ * Return one app as it stands for the person asking on this Bot, whether or not the Bot was given it, so a client can say it is turned off or not given and offer the step that fixes it. The app's name is read too, as well as its id. With actions, the app is read for those actions: a Bot that was given the app but not every one of them reads as not_granted, or owner_grantable where the person asking may give them, and requestKind is grant. Anybody who can use the Bot may read it.
  * @summary Read one app as a Bot has it
  */
 export const getBotApp = async (
   organizationId: string,
   botId: string,
   appId: string,
+  params?: GetBotAppParams,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<BotApp> => {
-  return apiRequest<BotApp>(getGetBotAppUrl(organizationId, botId, appId), {
-    ...options,
-    method: "GET",
-  });
+  return apiRequest<BotApp>(
+    getGetBotAppUrl(organizationId, botId, appId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
 export const getGiveBotAppUrl = (
@@ -374,20 +393,47 @@ export const getGiveBotAppUrl = (
 };
 
 /**
- * Give a Bot you own one of your apps: the actions that only read, or every action of Routines. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. Recorded on the audit trail.
+ * Give a Bot you own one of your apps: the actions that only read, or every action of Routines. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn't have yet are listed in given. Recorded on the audit trail.
  * @summary Give your own app to a Bot you own
  */
 export const giveBotApp = async (
   organizationId: string,
   botId: string,
   appId: string,
+  botAppActionsInput?: BotAppActionsInput,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<BotAppGiven> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return apiRequest<BotAppGiven>(
     getGiveBotAppUrl(organizationId, botId, appId),
     {
       ...options,
       method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(botAppActionsInput),
     },
   );
 };
@@ -428,20 +474,47 @@ export const getApproveBotAppUrl = (
 };
 
 /**
- * Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot the actions that only read, or confirm the app's shared account is connected. The audit trail reads as a request filed and approved by the same administrator. When it can't be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.
+ * Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot the actions that only read, or confirm the app's shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can't be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.
  * @summary Turn an app on and give it to a Bot
  */
 export const approveBotApp = async (
   organizationId: string,
   botId: string,
   appId: string,
+  botAppActionsInput?: BotAppActionsInput,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<AppAccessApproval> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return apiRequest<AppAccessApproval>(
     getApproveBotAppUrl(organizationId, botId, appId),
     {
       ...options,
       method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(botAppActionsInput),
     },
   );
 };

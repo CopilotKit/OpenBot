@@ -126,6 +126,8 @@ export type AppAccessRequest = {
   createdAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;
+  /** The actions asked for, written `<app id>/<action name>`. Empty asks for the app itself. */
+  actions: string[];
 };
 
 /** The administrator's inbox: the requests asked for, and a count per app for the Plugins list. */
@@ -191,6 +193,8 @@ export function accessRequestOf(
     createdAt: request.createdAt,
     resolvedAt: request.resolvedAt,
     resolvedBy: request.resolvedBy,
+    // A server from before requests named actions answers without the field.
+    actions: request.actions ?? [],
   };
 }
 
@@ -254,17 +258,31 @@ export function botAppsQueryOptions(agentId: string) {
 
 /**
  * One app, by key or by name, whether or not this Bot holds it — what a card in a conversation
- * asks, so it never draws a stale state.
+ * asks, so it never draws a stale state. With `actions`, the app as it stands for those actions: a
+ * Bot that holds the app but not all of them reads as not given (getBotApp's `actions`).
  */
-export function botAppQueryOptions(agentId: string, app: string) {
+export function botAppQueryOptions(
+  agentId: string,
+  app: string,
+  actions?: readonly string[],
+) {
+  const named = actions && actions.length > 0 ? [...actions] : undefined;
   return queryOptions({
-    queryKey: appAccessKeys.app(agentId, app),
+    queryKey: named
+      ? ([...appAccessKeys.app(agentId, app), { actions: named }] as const)
+      : appAccessKeys.app(agentId, app),
     queryFn: async ({ signal }): Promise<AppAccess> =>
       appAccessOf(
-        await getBotApp(organizationId(), agentId, app, {
-          signal,
-          fallback: `What ${app} is for this Bot could not be loaded.`,
-        }),
+        await getBotApp(
+          organizationId(),
+          agentId,
+          app,
+          named ? { actions: named } : undefined,
+          {
+            signal,
+            fallback: `What ${app} is for this Bot could not be loaded.`,
+          },
+        ),
       ),
   });
 }

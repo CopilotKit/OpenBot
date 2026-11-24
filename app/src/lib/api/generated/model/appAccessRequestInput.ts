@@ -17,4 +17,13 @@ export interface AppAccessRequestInput {
    * @pattern \S
    */
   appId: string;
+  /**
+   * Actions of the app the Bot needs, written <app id>/<action name>, for a Bot that was given the app but not these. Needs botId.
+   * @minItems 1
+   * @maxItems 50
+   * @items.minLength 1
+   * @items.maxLength 300
+   * @items.pattern \S
+   */
+  actions?: string[];
 }

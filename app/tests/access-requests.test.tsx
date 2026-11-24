@@ -67,6 +67,7 @@ const request = (
   createdAt: new Date(Date.now() - 5 * 60_000).toISOString(),
   resolvedAt: null,
   resolvedBy: null,
+  actions: [],
   ...overrides,
 });
 
