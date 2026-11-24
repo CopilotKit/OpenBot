@@ -12,6 +12,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { loadFailure } from "@/lib/load-failure";
 import {
   CONFIRM_WINDOW_MS,
   connectRefusalSentence,
@@ -173,8 +174,10 @@ export function ThisBrowser({
     <PageSection title="This browser">
       {connections.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't check whether this browser is connected. Try again in a
-          moment.
+          {loadFailure(
+            connections.error,
+            "Couldn't check whether this browser is connected. Try again in a moment.",
+          )}
         </p>
       ) : detected === undefined ? null : (
         <PageRows>

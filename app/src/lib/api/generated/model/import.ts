@@ -13,6 +13,8 @@ export interface Import {
   /** waiting-for-bundle: no part has arrived. receiving: part 1 has arrived and others are still to come. ready: every part arrived; apply it. importing: being imported. imported: done; read the summary, then verify. failed: it stopped; error says why, and applying again goes on from there. A later OpenBot may add a status; read one you don't know as importing. */
   status: string;
   sourceName?: string;
+  /** For a move from another of the caller's organizations (ImportInput.fromOrganizationId), that organization's id. */
+  fromOrganizationId?: string;
   createdAt: string;
   finishedAt?: string;
   recipientKey: MoveRecipientKey;

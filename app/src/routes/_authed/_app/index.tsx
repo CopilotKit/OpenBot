@@ -25,7 +25,6 @@ import { StarterSuggestions } from "@/components/starter-tour/starter-suggestion
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
-import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import {
   type AgentProfile,
   agentListQueryOptions,
@@ -44,16 +43,13 @@ import {
   takeFailedStart,
 } from "@/lib/channels/pending-start";
 import { channelListQueryOptions } from "@/lib/channels/queries";
-import {
-  CoworkerRoutingRefusedError,
-  routeMessage,
-} from "@/lib/channels/route";
-import { useStartChannel } from "@/lib/channels/start";
+import { fallbackBot, useStartChannel } from "@/lib/channels/start";
 import {
   deploymentCapabilitiesQueryOptions,
   useAttachmentLimits,
 } from "@/lib/deployment/queries";
 import { editionOf } from "@/lib/edition-guard";
+import { loadFailure, unavailableSaid } from "@/lib/load-failure";
 import {
   type ConversationModelInput,
   modelCatalogueQueryOptions,
@@ -113,6 +109,7 @@ function RouteComponent() {
     data: agents,
     isPending: loading,
     isError: failed,
+    error: agentsError,
   } = useQuery(agentListQueryOptions());
   const explore = agents?.filter(isSharedWithYou);
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
@@ -123,7 +120,7 @@ function RouteComponent() {
    * not true of it. A Bots list that fails to load is said under the composer already.
    */
   const personal = capabilities.data?.edition === "personal";
-  const { start, startChosen, pending } = useStartChannel();
+  const { startChosen, startPicked, pending } = useStartChannel();
   const router = useRouter();
   const navigate = useNavigate();
   // A start that failed behind its placeholder comes back here: its words in the box, its reason
@@ -165,10 +162,7 @@ function RouteComponent() {
   const { commands: skillCommands } = useAnyBotSkillCommands(
     agents?.map((agent) => agent.id) ?? [],
   );
-  const fallback = defaultAgentProfile(
-    agents,
-    agents?.find((agent) => agent.visibility === "public"),
-  );
+  const fallback = fallbackBot(agents);
   /*
    * The model and thinking effort to run on, picked before OpenBot has picked the Bot. It starts on
    * the catalogue's default and is saved with the conversation the Bot answers in, before the first
@@ -229,25 +223,15 @@ function RouteComponent() {
         notUsed?.();
         return;
       }
-      let agentId: string | undefined;
-      try {
-        agentId = (await routeMessage(draft.text, undefined, draft.commandIds))
-          .agentId;
-      } catch (caught) {
-        if (
-          draft.commandIds.length ||
-          caught instanceof CoworkerRoutingRefusedError
-        )
-          throw caught;
-        agentId = fallback?.id;
-      }
-      if (!agentId)
-        throw new Error(
-          "There's no Bot to send this to. Try again in a moment.",
-        );
-      const { pick, notUsed } = await pickFor(agentId);
-      await start(agentId, draft.text, pick, pendingId, draft.attachments);
-      notUsed?.();
+      // OpenBot picks, as it does for a new conversation started with nobody in To:.
+      await startPicked({
+        text: draft.text,
+        skills: draft.commandIds,
+        roster: agents,
+        files: draft.attachments,
+        pendingId,
+        pickFor,
+      });
     } catch (caught) {
       stashFailedStart({
         text: draft.text,
@@ -381,8 +365,10 @@ function RouteComponent() {
               className="mt-2 w-full max-w-2xl text-sm text-destructive"
               role="alert"
             >
-              Couldn't load your Bots, so there's no one to send this to. Try
-              again in a moment.
+              {loadFailure(
+                agentsError,
+                "Couldn't load your Bots, so there's no one to send this to. Try again in a moment.",
+              )}
             </p>
           ) : null}
         </div>
@@ -440,10 +426,20 @@ function RouteComponent() {
             // working off that same, successfully loaded `agents`) proves.
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-36 border border-dashed border-destructive">
+              <Empty
+                className={
+                  // OpenBot holding off for now is not a failure (lib/load-failure.tsx).
+                  unavailableSaid(agentsError)
+                    ? "mt-4 h-36 border border-dashed"
+                    : "mt-4 h-36 border border-dashed border-destructive"
+                }
+              >
                 <EmptyHeader>
                   <EmptyTitle className="text-destructive">
-                    Couldn't load the Bots shared with you.
+                    {loadFailure(
+                      agentsError,
+                      "Couldn't load the Bots shared with you.",
+                    )}
                   </EmptyTitle>
                 </EmptyHeader>
               </Empty>

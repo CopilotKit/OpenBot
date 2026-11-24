@@ -73,8 +73,20 @@ test("the personal edition names what runs a Bot instead of its address", () => 
   ).toBe("");
 });
 
-test("a public Bot nobody published is still open to everyone, not 'Not shared'", () => {
-  expect(sharingSummary(undefined, "public")).toBe("Everyone (public)");
+test("a public Bot nobody published is open to everyone in the organization, not 'Not shared'", () => {
+  expect(sharingSummary(undefined, "public")).toBe(
+    "Everyone in the organization (public)",
+  );
+  expect(
+    sharingSummary(undefined, "public", { organizationName: "Acme" }),
+  ).toBe("Everyone in Acme (public)");
+  // The organization's only member is told it's only them.
+  expect(
+    sharingSummary(undefined, "public", {
+      organizationName: "Sam's organization",
+      alone: true,
+    }),
+  ).toBe("Only you (public)");
 });
 
 test("reach names the places a Bot continues the conversation", () => {

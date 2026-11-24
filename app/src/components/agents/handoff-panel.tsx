@@ -24,6 +24,7 @@ import {
   agentListQueryOptions,
 } from "@/lib/agents/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Which Bots this one may hand work to.
@@ -97,7 +98,7 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
 
       {setGrant.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {setGrant.error.message}
+          {failureSaid(setGrant.error)}
         </p>
       ) : null}
 

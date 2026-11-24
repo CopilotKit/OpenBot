@@ -390,6 +390,18 @@ export const ALLOWED: Allowed[] = [
     why: "OAuth's discovery document, which names the sign-in's addresses",
   },
   {
+    file: "desktop/src-tauri/src/connected/about.rs",
+    what: "/health",
+    rule: "before-sign-in",
+    why: "whether the OpenBot the app is connected to answers, for Get Troubleshooting Logs…, asked with no credential",
+  },
+  {
+    file: "desktop/src-tauri/src/connected/about.rs",
+    what: /^\/api\/v2\/(people\/me\/organizations|organizations\/\{organization\}\/(people\/me|deployment))$/,
+    rule: "hand-built-v2",
+    why: "what the OpenBot the app is connected to says about itself for Get Troubleshooting Logs… (getPerson, getDeployment), from Rust, which has no generated client",
+  },
+  {
     file: "desktop/src-tauri/src/connected/sign_in.rs",
     what: "/api/copilotkit/info",
     rule: "runtime",

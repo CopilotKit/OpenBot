@@ -56,10 +56,11 @@ import {
 } from "@/lib/agents/form";
 import {
   ISOLATION_NOT_ALLOWED,
-  ISOLATION_UNAVAILABLE,
   isolatedExplained,
+  isolationUnavailable,
 } from "@/lib/agents/isolation";
 import { createAgentMutationOptions } from "@/lib/agents/mutations";
+import { publicVisibilityWords } from "@/lib/agents/public-words";
 import { testAgentConnection } from "@/lib/agents/queries";
 import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
@@ -72,6 +73,8 @@ import { isComposing } from "@/lib/composing";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
 import { type PluginServer, pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -495,6 +498,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                     checked: isolated,
                     available: isolationAvailable,
                     allowed: isolationAllowed,
+                    cloud: capabilities?.hostedSignIn === true,
                     onChange: setIsolated,
                   }}
                   onInstructions={setInstructions}
@@ -547,7 +551,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
         {createAgent.error ? (
           <p className="mt-6 text-destructive text-sm" role="alert">
-            {createAgent.error.message}
+            {failureSaid(createAgent.error)}
           </p>
         ) : null}
       </div>
@@ -663,7 +667,7 @@ type Visibility = AgentFormValues["visibility"];
 const VISIBILITY_OPTIONS: Array<{
   value: Visibility;
   title: string;
-  description: string;
+  description?: string;
   icon: typeof IconLock;
 }> = [
   {
@@ -675,7 +679,7 @@ const VISIBILITY_OPTIONS: Array<{
   {
     value: "public",
     title: "Public",
-    description: "Everyone in your company can find and use it.",
+    // No sentence of its own: said for the organization the person is in (`publicVisibilityWords`).
     icon: IconUsers,
   },
 ];
@@ -716,6 +720,8 @@ function AboutStep({
   isolation: IsolationChoice;
   personal: boolean;
 }) {
+  // Public is everyone in this organization, by name where the app knows it.
+  const everyone = publicVisibilityWords(useOrganizationAudience());
   return (
     <FieldGroup>
       <Field>
@@ -779,7 +785,7 @@ function AboutStep({
                         {option.title}
                       </span>
                       <span className="block text-pretty text-muted-foreground text-xs">
-                        {option.description}
+                        {option.description ?? everyone}
                       </span>
                     </span>
                   </button>
@@ -856,7 +862,7 @@ function EveryAppList({
       </FieldDescription>
       {turnedOn.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your apps.
+          {loadFailure(turnedOn.error, "Couldn't load your apps.")}
         </p>
       ) : servers.length > 0 ? (
         <ul aria-label="Apps it can use" className="grid gap-2 sm:grid-cols-2">
@@ -888,6 +894,8 @@ type IsolationChoice = {
   available: boolean;
   /** Whether an administrator lets this person ask for one ("Isolated Bots"). */
   allowed: boolean;
+  /** Whether this is OpenBot Cloud (`hostedSignIn`), which gives each person one computer. */
+  cloud: boolean;
   onChange: (checked: boolean) => void;
 };
 
@@ -909,11 +917,12 @@ function IsolatedOption({
   checked,
   available,
   allowed,
+  cloud,
   isPublic,
   onChange,
 }: IsolationChoice & { isPublic: boolean }) {
   const reason = !available
-    ? ISOLATION_UNAVAILABLE
+    ? isolationUnavailable(cloud)
     : !allowed
       ? ISOLATION_NOT_ALLOWED
       : null;
@@ -965,6 +974,9 @@ function IsolatedOption({
           >
             {reason ?? "A computer of its own, instead of sharing yours."}
           </p>
+          {cloud && !available ? (
+            <BusinessComputerLink className="text-xs" />
+          ) : null}
         </div>
       </div>
     </FieldSet>

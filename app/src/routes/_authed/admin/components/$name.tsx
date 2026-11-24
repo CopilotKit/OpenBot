@@ -62,6 +62,7 @@ import {
   PLAYGROUND_KIND,
 } from "@/lib/components/queries";
 import { RENDERABLE_NAMES } from "@/lib/copilot/gallery-registry";
+import { loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /**
@@ -109,7 +110,10 @@ function RouteComponent() {
     return (
       <PageShell backButton={BACK} title="Components">
         <p className="mt-8 text-destructive text-sm" role="alert">
-          Couldn't load components. Try again in a moment.
+          {loadFailure(
+            components.error,
+            "Couldn't load components. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );

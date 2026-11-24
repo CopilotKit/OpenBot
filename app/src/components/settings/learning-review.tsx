@@ -33,6 +33,7 @@ import {
   personalReviewQueryOptions,
 } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** What a proposal would do to the Skills, in the person's words. */
 function operationLabel(proposal: LearningProposal): string {
@@ -190,7 +191,7 @@ export function LearningReview() {
   if (!review.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        {review.error?.message}
+        {failureSaid(review.error)}
       </p>
     );
   }
@@ -385,7 +386,7 @@ export function LearningReview() {
       )}
       {saveAutoApprove.error && (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {saveAutoApprove.error.message}
+          {failureSaid(saveAutoApprove.error)}
         </p>
       )}
       {unavailable && (

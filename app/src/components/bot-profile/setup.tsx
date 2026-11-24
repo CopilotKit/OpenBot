@@ -54,18 +54,20 @@ import {
 import {
   ISOLATED_MAKING_PUBLIC,
   ISOLATED_PUBLIC_SHARES_LOGINS,
-  ISOLATION_GONE,
   ISOLATION_NOT_ALLOWED,
-  ISOLATION_UNAVAILABLE,
   ISOLATION_WITHDRAWN,
   isolatedExplained,
+  isolationGone,
+  isolationUnavailable,
 } from "@/lib/agents/isolation";
 import { updateAgentMutationOptions } from "@/lib/agents/mutations";
+import { publicVisibilityWords } from "@/lib/agents/public-words";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { shownSubtitle } from "@/lib/agents/subtitle";
 import { isComposing } from "@/lib/composing";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 
 type TextField = "name" | "title" | "roleDescription" | "instructions";
@@ -262,6 +264,8 @@ function VisibilityRow({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Public is everyone in this organization, by name where the app knows it.
+  const everyone = publicVisibilityWords(useOrganizationAudience());
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -276,8 +280,8 @@ function VisibilityRow({
                 ? `Only you can see it and start conversations with it. ${ISOLATED_MAKING_PUBLIC}`
                 : "Only you can see it and start conversations with it."
               : agent.isolationActive
-                ? `Everyone on OpenBot can find and use it. ${ISOLATED_PUBLIC_SHARES_LOGINS}`
-                : "Everyone on OpenBot can find and use it.")}
+                ? `${everyone} ${ISOLATED_PUBLIC_SHARES_LOGINS}`
+                : everyone)}
         </ItemDescription>
       </ItemContent>
       <ItemActions>
@@ -346,6 +350,8 @@ function IsolatedRow({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const available = capabilities?.isolatedBots ?? false;
+  // OpenBot Cloud gives each person one computer; the row says so and where a Bot can have its own.
+  const cloud = capabilities?.hostedSignIn === true;
   const allowed = mine?.capabilities.isolatedComputers !== false;
   const isPublic = agent.visibility === "public";
   // A Bot that comes with OpenBot belongs to nobody, and the switch is a person's.
@@ -354,6 +360,10 @@ function IsolatedRow({
     !agent.systemOwned &&
     (agent.isolated || (available && allowed));
 
+  // Whether the row says this OpenBot can't give a Bot a computer of its own.
+  const deploymentCant = agent.isolated
+    ? !agent.isolationActive && agent.isolationOffReason === "deployment"
+    : !available;
   const summary = agent.systemOwned
     ? "Comes with OpenBot, so it runs on the computer of whoever is using it."
     : agent.isolated
@@ -362,10 +372,10 @@ function IsolatedRow({
         : agent.isolationOffReason === "admin"
           ? ISOLATION_WITHDRAWN
           : agent.isolationOffReason === "deployment"
-            ? ISOLATION_GONE
+            ? isolationGone(cloud)
             : sharedSummary(isPublic)
       : !available
-        ? ISOLATION_UNAVAILABLE
+        ? isolationUnavailable(cloud)
         : !allowed && agent.canManage
           ? ISOLATION_NOT_ALLOWED
           : sharedSummary(isPublic);
@@ -380,6 +390,9 @@ function IsolatedRow({
         <ItemDescription className="line-clamp-none">
           {error ?? summary}
         </ItemDescription>
+        {cloud && deploymentCant && !agent.systemOwned && !error ? (
+          <BusinessComputerLink className="text-xs" />
+        ) : null}
       </ItemContent>
       <ItemActions>
         {agent.canManage && !agent.systemOwned ? (

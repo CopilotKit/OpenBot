@@ -44,6 +44,7 @@ import {
 } from "@/lib/computers/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * A computer's saved copies, on a Bot's Computer page, and restoring one.
@@ -134,7 +135,7 @@ export function RestoreComputerDialog({
         <DialogBody className="mt-4">
           {snapshots.isPending ? null : snapshots.error ? (
             <p className={DESTRUCTIVE_NOTICE} role="alert">
-              {snapshots.error.message}
+              {failureSaid(snapshots.error)}
             </p>
           ) : !snapshots.data.available ? (
             <p className="text-muted-foreground text-sm">
@@ -300,7 +301,7 @@ function SnapshotsBody({
                 className="mr-auto min-w-0 flex-1 basis-48 text-destructive text-sm"
                 role="alert"
               >
-                {restore.error.message}
+                {failureSaid(restore.error)}
               </p>
             ) : null}
             <Button onClick={close} size="sm" variant="ghost">

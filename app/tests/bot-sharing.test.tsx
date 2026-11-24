@@ -470,12 +470,21 @@ test("an admin sees who a Bot is assigned to by name, and removes a team and a d
   );
 });
 
-test("a public Bot that is not published says everyone can already use it", async () => {
+test("a public Bot that is not published says everyone in the organization can use it, never 'not published'", async () => {
   serving([], "user");
   const view = draw({ ...BOT, visibility: "public" });
   expect(
-    await view.findByText(/everyone on OpenBot can already use it/),
+    await view.findByText("Everyone in the organization can use it"),
   ).toBeTruthy();
+  expect(view.getByText("It's public.")).toBeTruthy();
+  // Its owner can still publish it, which never says only those it's published to can use it.
+  expect(
+    view.getByText("It's public already. Publish it to get a link to share."),
+  ).toBeTruthy();
+  expect(view.getByText("Choose who to publish it to")).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/Only the people and teams/);
+  expect(document.body.textContent).not.toMatch(/on OpenBot/);
+  expect(document.body.textContent).not.toMatch(/Not published/);
   expect(view.queryByText(/Only you can use it/)).toBeNull();
 });
 

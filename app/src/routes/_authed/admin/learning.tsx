@@ -25,13 +25,6 @@ import {
 } from "@/components/layout/page-shell";
 import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { ProposalDialog } from "@/components/learning/proposal-dialog";
-import {
-  containerIdFor,
-  containerName,
-  containerNameLimit,
-  containerTitle,
-  skillTitle,
-} from "@/lib/learning/display";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -54,6 +47,13 @@ import { Separator } from "@/components/ui/separator";
 import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
+  containerIdFor,
+  containerName,
+  containerNameLimit,
+  containerTitle,
+  skillTitle,
+} from "@/lib/learning/display";
+import {
   createLearningContainer,
   type LearningParticipation,
   reviewLearningProposalMutationOptions,
@@ -73,6 +73,7 @@ import {
   learningRunsQueryOptions,
   learningSettingsQueryOptions,
 } from "@/lib/learning/queries";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { useCurrentOrganizationName } from "@/lib/organizations/queries";
 import { queryClient as appQueryClient } from "@/query-client";
 
@@ -249,7 +250,7 @@ function ContainerSetup({
       )}
       {(create.error || automatic.createError) && (
         <p role="alert" className="text-destructive">
-          {create.error?.message ?? automatic.createError}
+          {create.error ? failureSaid(create.error) : automatic.createError}
         </p>
       )}
       {automatic.instructions && (
@@ -342,7 +343,7 @@ export function LearningPage() {
         )}
         {settingsError && (
           <p role="alert" className="mt-4 text-destructive">
-            {settingsError.message}
+            {failureSaid(settingsError)}
           </p>
         )}
         {settings && (
@@ -394,8 +395,10 @@ export function LearningPage() {
               </legend>
               {(agents.error || hiddenAgents.error) && (
                 <p role="alert" className="text-destructive">
-                  Couldn't load the Bot list. Saved settings for each Bot are
-                  below.
+                  {loadFailure(
+                    [agents.error, hiddenAgents.error],
+                    "Couldn't load the Bot list. Saved settings for each Bot are below.",
+                  )}
                 </p>
               )}
               {botIds.map((id) => {
@@ -477,7 +480,7 @@ export function LearningPage() {
             </div>
             {save.error && (
               <p role="alert" className="text-destructive">
-                {save.error.message}
+                {failureSaid(save.error)}
               </p>
             )}
           </form>
@@ -522,7 +525,7 @@ export function LearningPage() {
           {overview.isPending && <p role="status">Checking the backend…</p>}
           {overview.error && (
             <p role="alert" className="text-destructive">
-              {overview.error.message}
+              {failureSaid(overview.error)}
             </p>
           )}
           {snapshot && organizationSpace.isSuccess && (
@@ -599,7 +602,7 @@ export function LearningPage() {
               {delivery.isPending ? (
                 <p>Checking delivery…</p>
               ) : delivery.error ? (
-                <p role="alert">{delivery.error.message}</p>
+                <p role="alert">{failureSaid(delivery.error)}</p>
               ) : (
                 delivery.data && (
                   <>
@@ -622,7 +625,7 @@ export function LearningPage() {
                       </p>
                     )}
                     {delivery.data.error && (
-                      <p role="alert">{delivery.data.error.message}</p>
+                      <p role="alert">{failureSaid(delivery.data.error)}</p>
                     )}
                   </>
                 )
@@ -712,12 +715,12 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
       )}
       {learnNow.error && (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {learnNow.error.message}
+          {failureSaid(learnNow.error)}
         </p>
       )}
       {proposals.isPending ? null : proposals.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {proposals.error.message}
+          {failureSaid(proposals.error)}
         </p>
       ) : !containerId ? (
         <PageEmpty icon={IconSparkles} title="No container">
@@ -874,7 +877,7 @@ function AnalysisRuns({ agentId }: { agentId?: string }) {
     >
       {runs.isPending ? null : runs.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {runs.error.message}
+          {failureSaid(runs.error)}
         </p>
       ) : !runs.data.containerId ? (
         <PageEmpty icon={IconHistory} title="No container">
@@ -926,7 +929,7 @@ function PublishedSkills({ agentId }: { agentId?: string }) {
     >
       {skills.isPending ? null : skills.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {skills.error.message}
+          {failureSaid(skills.error)}
         </p>
       ) : !skills.data.containerId ? (
         <PageEmpty icon={IconSparkles} title="No container">

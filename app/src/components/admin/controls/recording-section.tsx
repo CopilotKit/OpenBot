@@ -12,6 +12,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { actionRecordsQueryOptions } from "@/lib/enterprise/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { ControlsSection } from "./controls-section";
 
 /** Admin, Audit: Action Recording, its recent commands, and the OpenTelemetry export. */
@@ -80,7 +81,10 @@ function RecordedActions() {
   if (actions.error)
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load recorded actions. Try again in a moment.
+        {loadFailure(
+          actions.error,
+          "Couldn't load recorded actions. Try again in a moment.",
+        )}
       </p>
     );
   if (actions.data.length === 0)

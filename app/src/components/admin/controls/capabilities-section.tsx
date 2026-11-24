@@ -7,6 +7,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,13 +37,14 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { ISOLATION_UNAVAILABLE } from "@/lib/agents/isolation";
+import { isolationUnavailable } from "@/lib/agents/isolation";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { setCapabilityMutationOptions } from "@/lib/enterprise/mutations";
 import type {
   CapabilitySetting,
   EnterpriseOverview,
 } from "@/lib/enterprise/queries";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { MISSING_TEAM } from "@/lib/teams/names";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
@@ -61,6 +63,8 @@ export function CapabilitiesSection() {
    */
   const { data: deployment } = useQuery(deploymentCapabilitiesQueryOptions());
   const noIsolation = deployment?.isolatedBots === false;
+  // OpenBot Cloud gives each person one computer: the row says so, with where a Bot can have its own.
+  const cloud = deployment?.hostedSignIn === true;
   return (
     <ControlsSection>
       {({ data, setCapability, saving }) => {
@@ -89,11 +93,14 @@ export function CapabilitiesSection() {
                         <ItemTitle>{capability.title}</ItemTitle>
                         <ItemDescription>
                           {unavailable
-                            ? ISOLATION_UNAVAILABLE
+                            ? isolationUnavailable(cloud)
                             : effective
                               ? capability.description
                               : "Off for everybody, unless a role or team turns it on."}
                         </ItemDescription>
+                        {unavailable && cloud ? (
+                          <BusinessComputerLink className="text-xs" />
+                        ) : null}
                       </ItemContent>
                       <ItemActions>
                         <Switch
@@ -279,7 +286,10 @@ function OverridesDialog({
           </Select>
           {teams.error ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't load teams. Try again in a moment.
+              {loadFailure(
+                teams.error,
+                "Couldn't load teams. Try again in a moment.",
+              )}
             </p>
           ) : null}
           <p className="text-muted-foreground text-xs">
@@ -343,7 +353,7 @@ function OverridesDialog({
             : null}
           {setCapability.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {setCapability.error.message}
+              {failureSaid(setCapability.error)}
             </p>
           ) : null}
         </DialogBody>

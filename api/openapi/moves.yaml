@@ -44,6 +44,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -108,6 +110,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -153,6 +157,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -186,6 +192,9 @@ paths:
       responses:
         '204':
           description: The export is gone.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '404':
@@ -236,6 +245,8 @@ paths:
               $ref: '#/components/headers/PartETag'
             Accept-Ranges:
               $ref: '#/components/headers/AcceptRanges'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/octet-stream:
               schema:
@@ -253,6 +264,8 @@ paths:
               schema:
                 type: string
               example: bytes 1048576-33554431/33554432
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/octet-stream:
               schema:
@@ -293,6 +306,18 @@ paths:
         dropped one) adds only what isn't here yet and duplicates nothing.
         Served only by OpenBot Cloud; elsewhere it answers 404 with the code
         MOVE_UNAVAILABLE. A person starts at most 10 imports a day.
+
+
+        With fromOrganizationId, the import moves what the caller has in
+        another of their organizations into this one, and OpenBot Cloud packs
+        it up there itself: no part is uploaded, the import answers ready, and
+        applyImport starts it. See ImportInput.
+
+
+        Moving in follows this organization's own rules: a caller it doesn't
+        let use Bots is answered 403 with the code MOVE_NOT_ALLOWED before
+        anything moves. The caller's list of organizations says this ahead of
+        time (Organization.canMoveIn).
       security:
         - webSession: []
         - appOAuth: [imports:write]
@@ -311,6 +336,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -322,6 +349,8 @@ paths:
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MoveNotAllowed'
         '404':
           $ref: '#/components/responses/MoveUnavailable'
         '409':
@@ -353,6 +382,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -394,6 +425,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -450,6 +483,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -503,6 +538,15 @@ paths:
         organization that isn't on it, is left out. A model key in the bundle
         becomes the caller's own AI connection, unless they have one here
         already, which is kept.
+
+
+        For a move from another organization (fromOrganizationId), applying
+        packs up what the caller has there, imports it here and checks it
+        here as getImportVerification does. Only once that check says
+        everything arrived is it removed from the other organization, and
+        only then is the import imported. A check that doesn't match leaves
+        the other organization as it was, and the import failed: applying
+        again goes on from there and adds nothing twice.
       security:
         - webSession: []
         - appOAuth: [imports:write]
@@ -515,6 +559,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -558,6 +604,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -869,7 +917,29 @@ components:
           type: string
           minLength: 1
           maxLength: 200
-          description: A name for where the bundle comes from, such as the computer's name, shown in the list of imports.
+          description: >-
+            A name for where the bundle comes from, such as the computer's
+            name, shown in the list of imports. For a move from another
+            organization, that organization's name when absent.
+        fromOrganizationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Move what the caller has in another of their organizations (its
+            id or slug) into this one, instead of a bundle from their own
+            computer: their own Bots, each with its conversations and their
+            history, routines, goals, check-ins, memories, skills and files,
+            by the same rules and the same verification as a move from their
+            computer. A starter Bot lands on this organization's own. Apps
+            are connected again here (reconnect). Routines, goals and
+            check-ins don't run in either organization until the move is
+            checked. Once getImportVerification here says everything arrived,
+            all of it is removed from the other organization, apart from a
+            conversation other people are in, which stays there for them. Any
+            organization the caller belongs to other than this one; another
+            is refused with 400.
     Import:
       type: object
       required: [id, status, createdAt, recipientKey, maxBundleBytes, maxPartBytes, receivedParts]
@@ -889,6 +959,11 @@ components:
             status; read one you don't know as importing.
         sourceName:
           type: string
+        fromOrganizationId:
+          type: string
+          description: >-
+            For a move from another of the caller's organizations
+            (ImportInput.fromOrganizationId), that organization's id.
         createdAt:
           type: string
           format: date-time
@@ -1003,10 +1078,38 @@ components:
           items:
             $ref: '#/components/schemas/ReconnectApp'
   responses:
+    MoveNotAllowed:
+      description: >-
+        This organization doesn't let the caller use Bots, so nothing can
+        move into it (MOVE_NOT_ALLOWED). Or the caller holds no role in it,
+        or it requires signing in through the company's identity provider
+        and the caller hasn't (SSO_REQUIRED).
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAllowed:
+              value:
+                type: https://open.bot/errors/move-not-allowed
+                title: You can't move Bots into this organization.
+                status: 403
+                detail: An admin of Acme hasn't let you use Bots there, so your Bots can't move in. Ask an admin of Acme to turn on Use Bots for you.
+                code: MOVE_NOT_ALLOWED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     MoveUnavailable:
       description: >-
         Moving isn't served here: exports only by an OpenBot on the person's
         own computer, imports only by OpenBot Cloud.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1025,6 +1128,9 @@ components:
                 traceId: trace_example
     ExportNotFound:
       description: The export doesn't exist, has been removed, or isn't the caller's.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1043,6 +1149,9 @@ components:
                 traceId: trace_example
     ExportNotReady:
       description: The export is still being written, or failed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1061,6 +1170,9 @@ components:
                 traceId: trace_example
     RangeNotSatisfiable:
       description: The Range asked for lies outside the part.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1079,6 +1191,9 @@ components:
                 traceId: trace_example
     ImportNotFound:
       description: The import doesn't exist, or isn't the caller's.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1102,6 +1217,9 @@ components:
         (IMPORT_MANIFEST_MISSING), a part is missing (IMPORT_INCOMPLETE), the
         import hasn't finished (IMPORT_NOT_FINISHED), or the Idempotency-Key
         was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1134,6 +1252,9 @@ components:
         Part 1 isn't a bundle this OpenBot reads: not a bundle at all, a
         format newer than it reads (IMPORT_FORMAT_UNSUPPORTED), larger than
         maxBundleBytes, or a model key sealed to another import's key.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1158,6 +1279,8 @@ components:
           schema:
             type: integer
             minimum: 1
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:

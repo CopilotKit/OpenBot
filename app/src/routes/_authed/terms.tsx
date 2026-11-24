@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Item, ItemContent, ItemMedia } from "@/components/ui/item";
 import { ClientError } from "@/lib/client";
 import { appConfig } from "@/lib/generated/application-config";
+import { loadFailure } from "@/lib/load-failure";
 import { acceptServiceTermsMutationOptions } from "@/lib/service-terms/mutations";
 import {
   afterTerms,
@@ -85,7 +86,10 @@ function TermsScreen() {
         className="text-sm text-center text-destructive lg:text-left"
         role="alert"
       >
-        Couldn't load the terms. Try again to continue.
+        {loadFailure(
+          terms.error,
+          "Couldn't load the terms. Try again to continue.",
+        )}
       </p>
       <Button
         disabled={terms.isFetching}

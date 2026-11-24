@@ -48,11 +48,17 @@ export function requestAppAccessMutationOptions(queryClient: QueryClient) {
     mutationFn: async (variables: {
       agentId: string;
       app: string;
+      /** The actions asked for, for a Bot that holds the app and needs these too. */
+      actions?: string[];
     }): Promise<{ request: AppAccessRequest }> => ({
       request: accessRequestOf(
         await createAppAccessRequest(
           organizationId(),
-          { botId: variables.agentId, appId: variables.app },
+          {
+            botId: variables.agentId,
+            appId: variables.app,
+            ...actionsBody(variables.actions),
+          },
           { "Idempotency-Key": idempotencyKey() },
           { fallback: FALLBACK },
         ),
@@ -139,6 +145,8 @@ export function approveBotAppMutationOptions(queryClient: QueryClient) {
     mutationFn: async (variables: {
       agentId: string;
       app: string;
+      /** The actions to give, for a Bot that holds the app and needs these too. */
+      actions?: string[];
     }): Promise<{
       request: AppAccessRequest;
       enabled: boolean;
@@ -150,6 +158,7 @@ export function approveBotAppMutationOptions(queryClient: QueryClient) {
           variables.agentId,
           variables.app,
           { "Idempotency-Key": idempotencyKey() },
+          actionsBody(variables.actions),
           { fallback: "Couldn't turn that app on. Try again." },
         ),
       ),
@@ -165,12 +174,15 @@ export function approveBotAppMutationOptions(queryClient: QueryClient) {
 export async function giveBotApp(variables: {
   agentId: string;
   app: string;
+  /** The actions to give, for a Bot that holds the app and needs these too. */
+  actions?: string[];
 }): Promise<{ granted: string[] }> {
   const given = await giveBotAppOperation(
     organizationId(),
     variables.agentId,
     variables.app,
     { "Idempotency-Key": idempotencyKey() },
+    actionsBody(variables.actions),
     { fallback: "Couldn't give that app to this Bot." },
   );
   return { granted: given.given };
@@ -220,4 +232,9 @@ export function dismissAppAccessRequestMutationOptions(
       ),
     onSettled: () => refresh(queryClient),
   });
+}
+
+/** The body naming the actions a press gives, or none: the server then gives the read-only ones. */
+function actionsBody(actions: string[] | undefined) {
+  return actions && actions.length > 0 ? { actions } : undefined;
 }

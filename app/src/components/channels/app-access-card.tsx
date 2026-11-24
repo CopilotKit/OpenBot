@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   AppAccessAction,
   appAccessSentence,
+  namesAnAdmin,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,8 @@ import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useDeclaredBotId } from "@/lib/copilot/active-bot";
 import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { type AdminName, withAdmins } from "@/lib/organizations/admin-names";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { ConnectAppCard } from "./connect-app-card";
 
 /**
@@ -37,6 +40,12 @@ import { ConnectAppCard } from "./connect-app-card";
  * `reconnect` or `shared` refusal over a live `ready` is drawn as the refusal says — unless the
  * account was connected after the refusal, which is the reconnection. Anything else live is newer
  * than the refusal and is drawn as it is.
+ *
+ * ACTIONS THE BOT WASN'T GIVEN. A Bot that holds an app but needs more of it than it was given (it
+ * may read a calendar, and the task is to recolour an event) asks with a `tools` prompt naming the
+ * actions and what they are for. The card reads the app for exactly those actions, so a Bot that
+ * holds the app but not them reads as not given, and every button below gives, or asks for, exactly
+ * those. The sentence says what the Bot can't do yet, in its own words, not the actions' names.
  *
  * AND THEN THE TASK CARRIES ON. Once the app is ready — connected in the other tab, switched on and
  * given by an admin — the card sends the conversation on by itself, or offers Continue where it was
@@ -69,8 +78,13 @@ function LiveAppAccessCard({
   place: CardPlace | undefined;
   prompt: ConnectPrompt;
 }) {
+  // Only a `tools` prompt names actions; any other reason reads the app as a whole.
+  const actions =
+    prompt.reason === "tools" && prompt.actions?.length
+      ? prompt.actions
+      : undefined;
   const live = useQuery({
-    ...botAppQueryOptions(agentId, prompt.serverId),
+    ...botAppQueryOptions(agentId, prompt.serverId, actions),
     /*
      * Read again whenever this tab has the focus back. What changes the state usually happens in
      * another tab — a consent screen, an admin's page for the app — and the person returning here
@@ -85,8 +99,14 @@ function LiveAppAccessCard({
   const edition =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition ?? "team";
   // An admin is offered the step itself, so the sentence never tells them to ask one.
-  const admin = isOrganizationAdmin(
-    useQuery(currentUserQueryOptions()).data?.role,
+  const me = useQuery(currentUserQueryOptions());
+  const admin = isOrganizationAdmin(me.data?.role);
+  /*
+   * Who a member is told to go to, read only where the sentence says only an admin can do it, and
+   * only once it is known the person is not an admin themselves.
+   */
+  const admins = useOrganizationAdmins(
+    me.isSuccess && access !== null && namesAnAdmin(access, edition, admin),
   );
   const { carried, offer } = useCarryOn({
     place,
@@ -123,12 +143,19 @@ function LiveAppAccessCard({
           {live.isPending ? null : access ? (
             <p className="text-muted-foreground text-sm">
               {access.state !== "ready"
-                ? refusedSentence(access, prompt, bot, edition, admin)
+                ? refusedSentence(access, prompt, bot, edition, admin, admins)
                 : carried || offer
                   ? `${name} is ready now.`
                   : prompt.reason !== "access"
                     ? `${name} is ready now. Ask again and the Bot can use it.`
-                    : refusedSentence(access, prompt, bot, edition, admin)}
+                    : refusedSentence(
+                        access,
+                        prompt,
+                        bot,
+                        edition,
+                        admin,
+                        admins,
+                      )}
             </p>
           ) : (
             <p className="text-muted-foreground text-sm" role="alert">
@@ -139,7 +166,11 @@ function LiveAppAccessCard({
       </div>
       {access && access.state !== "ready" ? (
         <div className="flex justify-end">
-          <AppAccessAction access={access} agentId={agentId} />
+          <AppAccessAction
+            access={access}
+            actions={actions}
+            agentId={agentId}
+          />
         </div>
       ) : offer ? (
         <div className="flex justify-end">
@@ -196,7 +227,21 @@ function refusedSentence(
   bot: string | undefined,
   edition: "team" | "personal",
   admin: boolean,
+  admins: readonly AdminName[],
 ): string {
+  /*
+   * Actions the Bot wasn't given, of an app it holds: what it can't do yet, and for a person who
+   * can't give them, who can. An admin, the Bot's owner where the app is theirs to give, and the one
+   * person of a personal OpenBot have the button beside this, so they are never told to ask.
+   */
+  if (
+    prompt.reason === "tools" &&
+    (access.state === "not_granted" || access.state === "owner_grantable")
+  ) {
+    const gives =
+      access.state === "owner_grantable" || admin || edition === "personal";
+    return toolsSentence(access.displayName, prompt.need, bot, gives, admins);
+  }
   if (
     access.state === "shared_not_connected" &&
     prompt.reason === "shared" &&
@@ -204,6 +249,47 @@ function refusedSentence(
   )
     return admin
       ? `Your organization's ${access.displayName} account needs reconnecting.`
-      : `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`;
-  return appAccessSentence(access, bot, edition, admin);
+      : withAdmins(
+          `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`,
+          admins,
+        );
+  return appAccessSentence(access, bot, edition, admin, admins);
+}
+
+/**
+ * "Calendar Bot can't change an event's colour yet.", from the Bot's own few words for what the
+ * actions do. Without them, the app is named instead. A person who can't give the actions is told
+ * who can, by name where the admins are known.
+ */
+function toolsSentence(
+  app: string,
+  need: string | undefined,
+  bot: string | undefined,
+  gives: boolean,
+  admins: readonly AdminName[],
+): string {
+  const who = bot ?? "This Bot";
+  const doing = plainNeed(need);
+  const first = doing
+    ? `${who} can't ${doing} yet.`
+    : `${who} needs more of ${app} for this.`;
+  return gives
+    ? first
+    : withAdmins(`${first} Only an admin can give it that.`, admins);
+}
+
+/**
+ * The need as the middle of a sentence: trimmed, with no leading "to" and no closing stop, and a
+ * capital dropped unless it starts an acronym ("Change an event" reads "change an event", "PDF"
+ * stays). Empty when nothing is left.
+ */
+function plainNeed(need: string | undefined): string {
+  const words = (need ?? "")
+    .trim()
+    .replace(/^to\s+/i, "")
+    .replace(/[\s.!;:,]+$/, "")
+    .trim();
+  return /^[A-Z][^A-Z]/.test(words)
+    ? words.charAt(0).toLowerCase() + words.slice(1)
+    : words;
 }

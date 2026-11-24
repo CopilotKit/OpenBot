@@ -43,6 +43,7 @@ import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { appsQueryOptions, catalogueQueryOptions } from "@/lib/apps/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   grantPlugin,
@@ -240,7 +241,10 @@ export function PluginBotPage({
         title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load apps. Try again in a moment.
+          {loadFailure(
+            plugins.error,
+            "Couldn't load apps. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );

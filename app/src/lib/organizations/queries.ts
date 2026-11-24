@@ -19,6 +19,7 @@ import {
   listOrganizations,
 } from "@/lib/api/generated/organizations/organizations";
 import { renewalRequired } from "@/lib/auth/renewal";
+import { knownRole } from "@/lib/auth/roles";
 import { ClientError, client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
@@ -26,8 +27,13 @@ import {
   tellDesktopTheOrganization,
 } from "@/lib/desktop/organization";
 import { editionOf } from "@/lib/edition-guard";
-import { currentOrganizationId, setCurrentOrganization } from "./current";
+import {
+  currentOrganizationId,
+  setCurrentOrganization,
+  useCurrentOrganizationId,
+} from "./current";
 import { InNoOrganization } from "./in-no-organization";
+import { noteLeftOrganization } from "./left";
 
 /** One of the person's organizations, with the server's verdicts: their role in it, and `active`. */
 export type OrganizationSummary = Organization;
@@ -60,9 +66,15 @@ export const organizationKeys = {
   mine: () => ["organizations", "mine"] as const,
   members: (organizationId: string) =>
     ["organizations", "members", organizationId] as const,
+  /** Whether anybody besides the person is a member: under `members`, so what refreshes them refreshes it. */
+  others: (organizationId: string) =>
+    ["organizations", "members", organizationId, "others"] as const,
   /** One search of the members, a page at a time: under `members`, so what refreshes them refreshes it. */
   memberPages: (organizationId: string, search = "") =>
     ["organizations", "members", organizationId, { search }] as const,
+  /** Its owners and admins, who a member is told to go to: under `members`, so a role change refreshes it. */
+  admins: (organizationId: string) =>
+    ["organizations", "members", organizationId, "admins"] as const,
   sentInvitations: (organizationId: string) =>
     ["organizations", "sent-invitations", organizationId] as const,
   /** One search of the sent invitations, a page at a time, under `sentInvitations`. */
@@ -277,6 +289,34 @@ export function ownOrganizationsQueryOptions() {
 }
 
 /**
+ * After a refusal that may mean the person was removed from the organization they work in
+ * (`refusedInOrganization`, ./left.ts): their organizations are read again. When the one they work
+ * in is gone from the list, reading it has already moved the session to one they are still in, and
+ * the app follows from home (`follow`); the notice says why. Anything else changes nothing: the
+ * refusal was about something else, and the screen says so in its own words.
+ */
+export async function askWhetherStillMember(
+  queryClient: QueryClient,
+): Promise<void> {
+  const known = currentOrganizationId();
+  const before = queryClient.getQueryData<OwnOrganizations | null>(
+    organizationKeys.mine(),
+  );
+  // An OpenBot that keeps one organization lists none, and there is nowhere else to go.
+  if (known === undefined || !before || before.organizations.length === 0)
+    return;
+  const mine = await queryClient
+    .fetchQuery({ ...ownOrganizationsQueryOptions(), staleTime: 0 })
+    .catch(() => undefined);
+  if (!mine || mine.organizations.some((one) => one.id === known)) return;
+  noteLeftOrganization({
+    leftName: before.organizations.find((one) => one.id === known)?.name,
+    nowId: mine.currentId,
+    nowName: mine.organizations.find((one) => one.id === mine.currentId)?.name,
+  });
+}
+
+/**
  * The organization the app is working in, read from the server when it is not known yet. Undefined
  * when nobody is signed in.
  */
@@ -350,6 +390,97 @@ export function organizationMembersQueryOptions(organizationId: string) {
         return { items: page.members, nextCursor: page.nextCursor };
       }),
   });
+}
+
+/**
+ * An organization's owners, then its admins, each in the order they joined: who a member is told to
+ * go to when only an admin can take a step. Any member can read the members. A role the app doesn't
+ * know is read as a member's (`knownRole`), so it is never named as an admin.
+ */
+export function organizationAdminsQueryOptions(organizationId: string) {
+  return queryOptions({
+    queryKey: organizationKeys.admins(organizationId),
+    queryFn: async ({ signal }): Promise<OrganizationMemberSummary[]> => {
+      const members = await everyPage(async (cursor) => {
+        const page = await listOrganizationMembers(
+          organizationId,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { signal, fallback: MEMBERS_FALLBACK },
+        );
+        return { items: page.members, nextCursor: page.nextCursor };
+      });
+      const withRole = (role: string) =>
+        members.filter((one) => knownRole(one.role) === role);
+      return [...withRole("owner"), ...withRole("admin")];
+    },
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * The organization's owners and admins, for a member told that only an admin can take a step. Read
+ * only while `enabled` (the screen is showing a member such a sentence), and only in the team edition,
+ * which is the one with admins. Empty while they are read and if they can't be: the sentence then
+ * stands on its own.
+ */
+export function useOrganizationAdmins(
+  enabled: boolean,
+): OrganizationMemberSummary[] {
+  const team =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "team";
+  const current = useCurrentOrganizationId();
+  const admins = useQuery({
+    ...organizationAdminsQueryOptions(current ?? ""),
+    enabled: enabled && team && current !== undefined,
+  });
+  return enabled && team ? (admins.data ?? []) : [];
+}
+
+/**
+ * Whether an organization has a member besides the person asking, who is one of them. The first two
+ * members answer it, so a large organization is never read through.
+ */
+export function organizationHasOthersQueryOptions(organizationId: string) {
+  return queryOptions({
+    queryKey: organizationKeys.others(organizationId),
+    queryFn: async ({ signal }): Promise<boolean> => {
+      const page = await listOrganizationMembers(
+        organizationId,
+        { limit: 2 },
+        { signal, fallback: MEMBERS_FALLBACK },
+      );
+      return page.members.length > 1 || page.nextCursor !== null;
+    },
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Who "everyone" is for a public Bot, as a screen says it: the organization by name where the app
+ * knows it, and whether the person is its only member. `alone` is undefined until the members have
+ * answered, and when they can't be read; a screen then says "everyone in the organization".
+ */
+export type OrganizationAudience = {
+  organizationName: string | undefined;
+  alone: boolean | undefined;
+  /** Whether the members are still being read. */
+  pending: boolean;
+};
+
+export function useOrganizationAudience(): OrganizationAudience {
+  const team =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "team";
+  const organizationName = useCurrentOrganizationName();
+  const current = useCurrentOrganizationId();
+  const others = useQuery({
+    ...organizationHasOthersQueryOptions(current ?? ""),
+    enabled: team && current !== undefined,
+  });
+  return {
+    organizationName,
+    alone: others.data === undefined ? undefined : !others.data,
+    pending: team && current !== undefined && others.isPending,
+  };
 }
 
 /** One page of an organization's members, and where the next one starts. */

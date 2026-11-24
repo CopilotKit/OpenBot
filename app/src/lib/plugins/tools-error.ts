@@ -20,7 +20,9 @@ export function toolsListError(
   if (lastError === null) return null;
   const prompt = readConnectPrompt(lastError);
   if (!prompt) return lastError;
-  if (!reader.personal) return prompt.message || null;
+  // Actions a Bot wasn't given are not about connecting, so connecting is never the advice.
+  if (!reader.personal || prompt.reason === "tools")
+    return prompt.message || null;
   return prompt.reason === "reconnect"
     ? `Your ${vendorNameOf(reader.title)} access was withdrawn. Reconnect it above to list its tools.`
     : `Connect your ${vendorNameOf(reader.title)} account above to list its tools.`;

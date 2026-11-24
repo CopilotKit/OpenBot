@@ -39,6 +39,7 @@ import {
   accountMenuClassName,
   accountMenuItemClassName,
 } from "./account-label";
+import { TroubleshootingLogsMenuItem } from "./troubleshooting-logs-item";
 import { useSignOut } from "./use-sign-out";
 
 /**
@@ -146,7 +147,10 @@ function PageItem({ item }: { item: NavigationLink }) {
   );
 }
 
-/** The account at the strip's foot, and the menu it opens: organizations, the account's pages, Sign out. */
+/**
+ * The account at the strip's foot, and the menu it opens: organizations, the account's pages, Get
+ * troubleshooting logs, Sign out.
+ */
 function StripAccount() {
   const navigation = useNavigationItems();
   const signOut = useSignOut();
@@ -199,6 +203,7 @@ function StripAccount() {
               <BrandName>{item.label}</BrandName>
             </DropdownMenuItem>
           ))}
+        <TroubleshootingLogsMenuItem className={accountMenuItemClassName} />
         {signOutOffered ? (
           <DropdownMenuItem
             className={accountMenuItemClassName}

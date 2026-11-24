@@ -28,24 +28,41 @@ import {
 } from "@/lib/plugins/form";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 type Refusal = Extract<AddServerByUrlOutcome, { added: false }>;
 
 /**
- * Connections, Add server: an MCP server OpenBot doesn't list, added by its address.
+ * Connections, Add custom MCP: an MCP server OpenBot doesn't list, added by its address.
  *
  * Its own screen rather than a dialog over the tiles, because it takes a name, an address and, for
  * some servers, a key (the layout skill's Procedure 5). The server decides the rest. OpenBot asks it
  * how it is reached: one that signs people in sends this person straight to its sign-in page, and
  * one that needs nothing opens on its tools. A refusal it can offer a step for (a key, an admin's
  * approval) is drawn under the form with that step beside it.
+ *
+ * `from` is the list it was opened from: Connections, or Admin's Apps page, which offers the same
+ * form so an admin finds it where the apps are set up. Back, Cancel and a server added with nothing
+ * more to do go to that list, and a server's own page is that list's page for it.
  */
-export function AddServerPage() {
+export function AddServerPage({
+  from = "connections",
+}: {
+  from?: "connections" | "admin";
+} = {}) {
   const navigate = useNavigate();
-  const back = {
-    label: "Connections",
-    linkProps: { to: "/connections" as const },
-  };
+  const admin = from === "admin";
+  const back = admin
+    ? { label: "Apps", linkProps: { to: "/admin/plugins" as const } }
+    : { label: "Connections", linkProps: { to: "/connections" as const } };
+  /** A server's own page, under the list this form was opened from. */
+  const openServer = (key: string) =>
+    admin
+      ? navigate({ to: "/admin/plugins/$key", params: { key } })
+      : navigate({ to: "/connections/$key", params: { key } });
+  /** Added with nothing more to do: Connections opens it, Admin goes back to Apps, where it's listed. */
+  const added = (key: string) =>
+    admin ? navigate({ to: "/admin/plugins" }) : openServer(key);
   const me = useQuery(currentUserQueryOptions()).data;
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
@@ -57,7 +74,10 @@ export function AddServerPage() {
   const mayGiveKey = personal || isOrganizationAdmin(me?.role);
   const mayAdd = mayGiveKey || me === undefined;
   const add = useMutation(addServerByUrlMutationOptions(queryClient));
-  const connect = useMutation(connectAccountMutationOptions("settings"));
+  // The sign-in comes back to the server's page under the same list.
+  const connect = useMutation(
+    connectAccountMutationOptions(admin ? "admin" : "settings"),
+  );
   const approve = useMutation(setEnterpriseSettingMutationOptions(queryClient));
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [signingIn, setSigningIn] = useState<string | null>(null);
@@ -74,7 +94,7 @@ export function AddServerPage() {
       return;
     }
     if (!start || !("authorizationUrl" in start)) {
-      await navigate({ to: "/connections/$key", params: { key: serverId } });
+      await openServer(serverId);
       return;
     }
     /*
@@ -82,7 +102,7 @@ export function AddServerPage() {
      * waits on the server's page; the sign-in hands the person back to it when they are done.
      */
     if (desktopShell()) {
-      await navigate({ to: "/connections/$key", params: { key: serverId } });
+      await openServer(serverId);
     }
     window.location.href = start.authorizationUrl;
   }
@@ -104,10 +124,7 @@ export function AddServerPage() {
       await signIn(outcome.server.id, outcome.server.title);
       return;
     }
-    await navigate({
-      to: "/connections/$key",
-      params: { key: outcome.server.id },
-    });
+    await added(outcome.server.id);
   }
 
   const defaultValues: AddServerFormValues = { title: "", url: "", token: "" };
@@ -138,7 +155,7 @@ export function AddServerPage() {
 
   if (!mayAdd)
     return (
-      <PageShell backButton={back} title="Add server">
+      <PageShell backButton={back} title="Add custom MCP">
         <PageCard>
           <p className="text-sm" data-testid="add-server-admin-only">
             Only an admin can add a server, because it's added for everyone in
@@ -152,7 +169,7 @@ export function AddServerPage() {
     <PageShell
       backButton={back}
       description="Give your Bots the tools of an MCP server OpenBot doesn't list, from its address. If it asks you to sign in, you'll go to its sign-in page next."
-      title="Add server"
+      title="Add custom MCP"
     >
       <form
         noValidate
@@ -165,7 +182,7 @@ export function AddServerPage() {
           footer={
             <>
               <Button
-                render={(props) => <Link {...props} to="/connections" />}
+                render={(props) => <Link {...props} {...back.linkProps} />}
                 variant="outline"
               >
                 Cancel
@@ -182,7 +199,7 @@ export function AddServerPage() {
                       ? "Opening sign-in…"
                       : isSubmitting || add.isPending
                         ? "Adding…"
-                        : "Add server"}
+                        : "Add custom MCP"}
                   </Button>
                 )}
               </form.Subscribe>
@@ -285,6 +302,7 @@ export function AddServerPage() {
 
           {refusal ? (
             <RefusalNotice
+              admin={admin}
               busy={busy}
               mayGiveKey={mayGiveKey}
               onApprove={() => void approveAndAdd()}
@@ -293,7 +311,7 @@ export function AddServerPage() {
           ) : null}
           {approve.error ? (
             <p className="mt-5 text-destructive text-sm" role="alert">
-              {approve.error.message}
+              {failureSaid(approve.error)}
             </p>
           ) : null}
           {signingIn && desktopShell() ? (
@@ -310,11 +328,14 @@ export function AddServerPage() {
 /** Why the server wasn't added, and the one step that would let it be, where there is one. */
 function RefusalNotice({
   refusal,
+  admin,
   mayGiveKey,
   busy,
   onApprove,
 }: {
   refusal: Refusal;
+  /** Opened from Admin's Apps page, so "Open it" opens the server's page there. */
+  admin: boolean;
   mayGiveKey: boolean;
   busy: boolean;
   onApprove: () => void;
@@ -347,7 +368,7 @@ function RefusalNotice({
             <Link
               {...props}
               params={{ key: refusal.serverId ?? "" }}
-              to="/connections/$key"
+              to={admin ? "/admin/plugins/$key" : "/connections/$key"}
             />
           )}
           size="sm"
