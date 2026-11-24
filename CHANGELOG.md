@@ -412,6 +412,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   its page under Connections with the key form open, and a sign-in app opens its sign-in in a new
   tab. An admin's Turn on and give it carries on the same way.
 - Reconnecting an app after moving to OpenBot Cloud takes one press.
+- A Bot shows one connect card per app, and no longer says an app's tools are ready before it's
+  connected.
 - **A Bot asked for an app it doesn't hold puts up that app's card first.** Asked to find a
   Fireflies recording, a Bot that held only Gmail and Slack searched them for Fireflies' emails and
   said it couldn't reach Fireflies, and showed the Fireflies card only when asked why. Any app the
