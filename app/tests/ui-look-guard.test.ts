@@ -122,9 +122,9 @@ describe("the rules", () => {
     expect(offences("const a = 'rounded-sm';").cornerStep).toEqual([
       "rounded-sm",
     ]);
-    expect(offences("const a = `p-2 ${b} shadow-md`;").shadowStep).toEqual([
-      "shadow-md",
-    ]);
+    // A source text holding a template literal with an expression in it.
+    const template = "const a = `p-2 $" + "{b} shadow-md`;";
+    expect(offences(template).shadowStep).toEqual(["shadow-md"]);
   });
 });
 
