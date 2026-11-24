@@ -222,6 +222,7 @@ test.each(["user", "admin"] as const)(
       .map((item) => item.textContent?.trim());
     expect(items).toEqual([
       ...expected(role, "account").map((item) => item.label),
+      "Get troubleshooting logs",
       "Sign out",
     ]);
     expect(links(menu)).toEqual(expected(role, "account"));

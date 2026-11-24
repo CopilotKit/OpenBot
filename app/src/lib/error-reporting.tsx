@@ -7,6 +7,7 @@ import type { AppErrorSource } from "@/lib/api/generated/model";
 import { recordAppError } from "@/lib/api/generated/product-events/product-events";
 import { idempotencyKey } from "@/lib/api/request";
 import { heldOutBySso } from "@/lib/auth/held-out";
+import { recordProblem } from "@/lib/desktop/problems";
 import { desktopShell } from "@/lib/desktop/shell";
 import { appVersion } from "@/lib/error-details";
 import { currentOrganizationId } from "@/lib/organizations/current";
@@ -34,10 +35,16 @@ let sentCount = 0;
 const seenErrors = new WeakSet<object>();
 const seenKinds = new Set<string>();
 
-/** For a test: forget what this page has sent. */
+/**
+ * For a test: forget what this page has sent, and stop listening, so the next test's page (a test
+ * file's own DOM) is listened on afresh.
+ */
 export function resetAppErrorReports(): void {
   sentCount = 0;
   seenKinds.clear();
+  recordedKinds.clear();
+  uninstall?.();
+  uninstall = null;
 }
 
 function described(error: unknown): {
@@ -60,8 +67,68 @@ function described(error: unknown): {
   return { type: "Error", message: `A ${typeof error} was thrown` };
 }
 
-/** Tell OpenBot about an error the app did not handle. Never throws, never waits. */
-export function reportAppError(source: AppErrorSource, error: unknown): void {
+/** Which error this is, for sending one report however many times it surfaces. */
+function kindOf(report: ReturnType<typeof described>): string {
+  return JSON.stringify([
+    report.type,
+    report.message,
+    report.stack?.split("\n")[1] ?? "",
+  ]);
+}
+
+/** The most different errors one page records; past it, they are counted afresh. */
+const MAX_RECORDED_KINDS = 500;
+const recordedErrors = new WeakSet<object>();
+const recordedKinds = new Set<string>();
+
+/**
+ * The error is also kept for the troubleshooting logs, and inside OpenBot Desktop handed to its log
+ * (`lib/desktop/problems.ts`), once, as the report is: its name and message, and where it was thrown
+ * when that is known. This happens before the person's organization is known too, because signing in
+ * can break as well.
+ */
+function recordForTroubleshooting(
+  source: AppErrorSource,
+  error: unknown,
+  where: string | undefined,
+): void {
+  if (typeof error === "object" && error !== null) {
+    if (recordedErrors.has(error)) return;
+    recordedErrors.add(error);
+  }
+  const report = described(error);
+  const kind = kindOf(report);
+  if (recordedKinds.has(kind)) return;
+  if (recordedKinds.size >= MAX_RECORDED_KINDS) recordedKinds.clear();
+  recordedKinds.add(kind);
+  recordProblem({
+    kind:
+      source === "unhandled_rejection" ? "unhandled-rejection" : "page-error",
+    message: `${report.type}: ${report.message}`,
+    ...(where ? { source: where } : {}),
+  });
+}
+
+/**
+ * Where an error the page threw was thrown, as "file:line:column", when the browser said. The file's
+ * query and fragment are left out.
+ */
+export function thrownAt(event: ErrorEvent): string | undefined {
+  const file = (event.filename ?? "").split(/[?#]/, 1)[0] ?? "";
+  if (!file) return undefined;
+  return event.lineno ? `${file}:${event.lineno}:${event.colno ?? 0}` : file;
+}
+
+/**
+ * Tell OpenBot about an error the app did not handle. Never throws, never waits. `where` is where it
+ * was thrown, when known (`thrownAt`).
+ */
+export function reportAppError(
+  source: AppErrorSource,
+  error: unknown,
+  where?: string,
+): void {
+  recordForTroubleshooting(source, error, where);
   const organization = currentOrganizationId();
   if (organization === undefined) return;
   if (typeof error === "object" && error !== null) {
@@ -69,11 +136,7 @@ export function reportAppError(source: AppErrorSource, error: unknown): void {
     seenErrors.add(error);
   }
   const report = described(error);
-  const kind = JSON.stringify([
-    report.type,
-    report.message,
-    report.stack?.split("\n")[1] ?? "",
-  ]);
+  const kind = kindOf(report);
   if (seenKinds.has(kind) || sentCount >= MAX_REPORTS) return;
   seenKinds.add(kind);
   sentCount += 1;
@@ -93,18 +156,26 @@ export function reportAppError(source: AppErrorSource, error: unknown): void {
   });
 }
 
-let installed = false;
+/** Stops the listening `installAppErrorReporting` started, or null while it has not. */
+let uninstall: (() => void) | null = null;
 
 /** Listens, once per page, for errors the page threw and promises nobody handled. */
 export function installAppErrorReporting(): void {
-  if (installed || typeof window === "undefined") return;
-  installed = true;
-  window.addEventListener("error", (event) => {
-    reportAppError("window_error", event.error ?? event.message);
-  });
-  window.addEventListener("unhandledrejection", (event) => {
+  if (uninstall || typeof window === "undefined") return;
+  const onError = (event: ErrorEvent) =>
+    reportAppError(
+      "window_error",
+      event.error ?? event.message,
+      thrownAt(event),
+    );
+  const onRejection = (event: PromiseRejectionEvent) =>
     reportAppError("unhandled_rejection", event.reason);
-  });
+  window.addEventListener("error", onError);
+  window.addEventListener("unhandledrejection", onRejection);
+  uninstall = () => {
+    window.removeEventListener("error", onError);
+    window.removeEventListener("unhandledrejection", onRejection);
+  };
 }
 
 /**

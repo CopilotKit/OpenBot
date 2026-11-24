@@ -20,6 +20,7 @@ import {
   SIGN_IN_HEADER,
 } from "@/lib/auth/renewal";
 import { noteRefusal } from "@/lib/client-version/refusal";
+import { watchRequest } from "@/lib/desktop/problems";
 import { noteAnswer, noteNoAnswer } from "@/lib/desktop/reachability";
 import { PLAN_REQUIRED, showCardNeeded } from "@/lib/plan/card-needed";
 
@@ -111,8 +112,14 @@ export class NoAnswerError extends TypeError {
  * Every request names this app ({@link CLIENT_NAME}). A 400 is read before it is handed back too, so
  * a refusal for being too old an app is known before the request fails, and the update screen shows
  * in place of whatever failed (`lib/client-version/refusal.ts`).
+ *
+ * A request answered with a failure, one that got no answer, and one with no answer yet after 30
+ * seconds are each kept for the troubleshooting logs, and inside OpenBot Desktop handed to its log
+ * (`lib/desktop/problems.ts`): its method, its path without the query, and the server's request id.
  */
 async function request(path: string, init: RequestInit): Promise<Response> {
+  // A request that fails, gets no answer, or is slow is kept for the troubleshooting logs.
+  const watch = watchRequest(path, init.method);
   let response: Response;
   try {
     response = await fetch(path, {
@@ -122,11 +129,13 @@ async function request(path: string, init: RequestInit): Promise<Response> {
       credentials: init.credentials ?? "include",
     });
   } catch (error) {
+    watch.rejected(error);
     noteNoAnswer(error);
     // A request the page gave up on (an AbortError) is not this, and is handed back as it is.
     if (error instanceof TypeError) throw new NoAnswerError(error);
     throw error;
   }
+  watch.answered(response);
   const noted = noteAnswer(response);
   if (response.status === 502) await noted;
   if (response.status === 400) await noteRefusal(response);
