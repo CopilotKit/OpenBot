@@ -11,7 +11,8 @@ import { compile } from "tailwindcss";
  * and OpenBot's own model carries its Default tag: the model's name was cut to "GPT-6…." there.
  * Drawn in a real browser, because whether a name fits its row is the browser's layout to decide:
  * each model's name is read whole (nothing clipped across or down), the Default tag and the check
- * stay clear of it, and the popup fits the window. In light and dark, at 390 and at 1440.
+ * stay clear of it, and the popup fits the window, the page's 16px gutter from either side. In
+ * light and dark, at 390 and at 1440.
  *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/model-picker-phone-layout.test.tsx
  *
@@ -170,21 +171,42 @@ async function measured(page: Page) {
           .filter((rect) => rect.width > 0 && rect.left > box.left);
         return {
           name: name.textContent,
+          // How many lines the name takes: a short one fits one, never "GPT-" over "6.1".
+          lines: Math.round(
+            box.height / Number.parseFloat(getComputedStyle(name).lineHeight),
+          ),
           whole:
             name.scrollWidth <= name.clientWidth + 0.5 &&
             name.scrollHeight <= name.clientHeight + 0.5,
-          clear: others.every((rect) => rect.left >= box.right - 0.5),
+          // Beside the name or on a line under it, never over it.
+          clear: others.every(
+            (rect) =>
+              rect.left >= box.right - 0.5 || rect.top >= box.bottom - 0.5,
+          ),
         };
       },
     );
     const rect = popup?.getBoundingClientRect();
+    // The composer's box the picker's button sits in.
+    const box = document
+      .querySelector(".rounded-2xl.border")
+      ?.getBoundingClientRect();
     return {
       rows,
+      // Within the message box's sides, as the app's other popups keep to what opened them.
+      alongTheBox:
+        rect && box
+          ? rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5
+          : false,
       inside: rect
         ? rect.left >= -0.5 &&
           rect.right <= innerWidth + 0.5 &&
           rect.top >= -0.5 &&
           rect.bottom <= innerHeight + 0.5
+        : false,
+      // The page's 16px gutter between the popup and each side of the window.
+      gutter: rect
+        ? Math.round(Math.min(rect.left, innerWidth - rect.right)) >= 16
         : false,
       sideways: document.documentElement.scrollWidth > innerWidth,
     };
@@ -192,67 +214,85 @@ async function measured(page: Page) {
 }
 
 describe.skipIf(!asked)("the composer's model picker", () => {
-  for (const engine of engines)
-    for (const theme of THEMES)
-      for (const window of WINDOWS)
-        test(`names every model whole in ${engine}, ${theme}, ${window.width}px`, async () => {
-          const browser = browsers.get(engine);
-          if (!browser) throw new Error(`no ${engine}`);
-          const page = await browser.newPage({
-            viewport: window,
-            colorScheme: theme,
-            reducedMotion: "reduce",
-          });
-          page.on("pageerror", (error) => console.error(error));
-          const inter = join(packageDir("@fontsource-variable/inter"), "files");
-          await page.route(`${ORIGIN}/**`, (route) => {
-            const path = new URL(route.request().url()).pathname;
-            if (path === "/screens.js")
-              return route.fulfill({
-                contentType: "text/javascript",
-                body: script,
-              });
-            const font = join(inter, path.split("/").pop() ?? "");
-            if (path.startsWith("/files/") && existsSync(font))
-              return route.fulfill({ path: font });
-            return route.fulfill({
-              contentType: "text/html",
-              body: `<!doctype html><html lang="en" class="${theme}" style="color-scheme: ${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div><script type="module" src="/screens.js"></script></body></html>`,
+  /*
+   * With a model that thinks, the popup is two columns (the models and the thinking levels); with
+   * none, the models alone, a narrow column, which is where it hung past the message box.
+   */
+  for (const alone of [false, true])
+    for (const engine of engines)
+      for (const theme of THEMES)
+        for (const window of WINDOWS)
+          test(`names every model whole${alone ? ", the models alone," : ""} in ${engine}, ${theme}, ${window.width}px`, async () => {
+            const browser = browsers.get(engine);
+            if (!browser) throw new Error(`no ${engine}`);
+            const page = await browser.newPage({
+              viewport: window,
+              colorScheme: theme,
+              reducedMotion: "reduce",
             });
-          });
-          try {
-            await page.goto(`${ORIGIN}/`);
-            const trigger = page.getByRole("combobox", { name: /^Model:/ });
-            await trigger.waitFor();
-            await restyle(page);
-            await page.evaluate(() => document.fonts.ready);
-            await trigger.click();
-            await page.getByRole("option", { name: /GPT-4\.1 Mini/ }).waitFor();
-            // Off the trigger, so its tooltip isn't drawn over the popup's corner.
-            await page.mouse.move(0, 0);
-            await restyle(page);
-            if (shots) {
-              mkdirSync(shots, { recursive: true });
-              await page.screenshot({
-                path: join(
-                  shots,
-                  `model-picker-${engine}-${theme}-${window.width}.png`,
-                ),
+            page.on("pageerror", (error) => console.error(error));
+            const inter = join(
+              packageDir("@fontsource-variable/inter"),
+              "files",
+            );
+            await page.route(`${ORIGIN}/**`, (route) => {
+              const path = new URL(route.request().url()).pathname;
+              if (path === "/screens.js")
+                return route.fulfill({
+                  contentType: "text/javascript",
+                  body: script,
+                });
+              const font = join(inter, path.split("/").pop() ?? "");
+              if (path.startsWith("/files/") && existsSync(font))
+                return route.fulfill({ path: font });
+              return route.fulfill({
+                contentType: "text/html",
+                body: `<!doctype html><html lang="en" class="${theme}" style="color-scheme: ${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div><script type="module" src="/screens.js"></script></body></html>`,
               });
+            });
+            try {
+              await page.goto(`${ORIGIN}/${alone ? "?thinking=none" : ""}`);
+              const trigger = page.getByRole("combobox", { name: /^Model:/ });
+              await trigger.waitFor();
+              await restyle(page);
+              await page.evaluate(() => document.fonts.ready);
+              await trigger.click();
+              await page
+                .getByRole("option", { name: /GPT-4\.1 Mini/ })
+                .waitFor();
+              // Off the trigger, so its tooltip isn't drawn over the popup's corner.
+              await page.mouse.move(0, 0);
+              await restyle(page);
+              if (shots) {
+                mkdirSync(shots, { recursive: true });
+                await page.screenshot({
+                  path: join(
+                    shots,
+                    `model-picker${alone ? "-alone" : ""}-${engine}-${theme}-${window.width}.png`,
+                  ),
+                });
+              }
+              const drawn = await measured(page);
+              expect(drawn.rows.map((row) => row.name)).toEqual([
+                "GPT-6.1 Terra",
+                "GPT-4.1 Mini",
+                "GPT-4.1",
+                "Claude Sonnet 4.5 (September 2025)",
+              ]);
+              expect(drawn.rows.filter((row) => !row.whole)).toEqual([]);
+              // A short name keeps one line; the Default tag goes under it where both don't fit.
+              expect(drawn.rows.slice(0, 3).map((row) => row.lines)).toEqual([
+                1, 1, 1,
+              ]);
+              expect(drawn.rows.filter((row) => !row.clear)).toEqual([]);
+              expect(drawn.inside).toBe(true);
+              // Never nearer a side of the window than the page's own gutter: at 5px it was.
+              expect(drawn.gutter).toBe(true);
+              // Never hanging past the message box: started from the button's left, it did by 150px.
+              expect(drawn.alongTheBox).toBe(true);
+              expect(drawn.sideways).toBe(false);
+            } finally {
+              await page.close();
             }
-            const drawn = await measured(page);
-            expect(drawn.rows.map((row) => row.name)).toEqual([
-              "GPT-6.1 Terra",
-              "GPT-4.1 Mini",
-              "GPT-4.1",
-              "Claude Sonnet 4.5 (September 2025)",
-            ]);
-            expect(drawn.rows.filter((row) => !row.whole)).toEqual([]);
-            expect(drawn.rows.filter((row) => !row.clear)).toEqual([]);
-            expect(drawn.inside).toBe(true);
-            expect(drawn.sideways).toBe(false);
-          } finally {
-            await page.close();
-          }
-        }, 60_000);
+          }, 60_000);
 });

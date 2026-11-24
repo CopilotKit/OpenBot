@@ -11,6 +11,7 @@ import type {
 import { personBody } from "./accounts-api";
 import { deploymentBody, overviewResponse } from "./admin-settings-api";
 import { approvalInboxResponse } from "./approvals-api";
+import { marksPlugin } from "./marks-plugin";
 import { screenLinkLooks } from "./screen-link-style";
 import { CALLS, waitingRequests } from "./settings-tool-cards-admin.calls";
 
@@ -184,6 +185,9 @@ function answer(path: string): unknown {
     };
   if (path === `${ORGANIZATION}/teams`)
     return { teams: TEAMS, canCreate: true, nextCursor: null };
+  // No team here limits its models.
+  if (/\/teams\/[^/]+\/models$/.test(path))
+    return { models: null, updatedBy: null, updatedAt: null };
   const one = /\/teams\/([^/]+)(\/members)?$/.exec(path);
   if (one) {
     const found = TEAMS.find((candidate) => candidate.id === one[1]);
@@ -233,6 +237,8 @@ async function bundle(): Promise<string> {
     ],
     target: "browser",
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    // A team's Models dialog draws each model's maker.
+    plugins: [marksPlugin],
   });
   if (!built.success) throw new AggregateError(built.logs, "bundle failed");
   const script = built.outputs.find((output) => output.kind === "entry-point");

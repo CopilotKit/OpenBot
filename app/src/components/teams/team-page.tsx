@@ -66,6 +66,7 @@ import { SEARCH_MAX } from "@/lib/people/queries";
 import { NO_PARENT, teamDetailsFrom } from "@/lib/teams/form";
 import {
   deleteTeamMutationOptions,
+  forgetTeam,
   putTeamMemberMutationOptions,
   removeTeamMemberMutationOptions,
   updateTeamMutationOptions,
@@ -84,6 +85,7 @@ import {
 import { queryClient } from "@/query-client";
 import { parentLabels } from "./new-team-page";
 import { PeopleTypeahead } from "./people-typeahead";
+import { TeamModelsRow } from "./team-models";
 import {
   backToTeams,
   type TeamPaths,
@@ -213,6 +215,8 @@ function TeamDetail({
               </ItemActions>
             ) : null}
           </Item>
+          <Separator />
+          <TeamModelsRow team={team} />
         </PageRows>
       </PageSection>
 
@@ -855,7 +859,11 @@ function DeleteDialog({
             disabled={remove.isPending}
             onClick={() =>
               remove.mutate(team.id, {
-                onSuccess: () => void navigate(paths.list()),
+                // To the list, then drop the team's reads: its page never reads it again.
+                onSuccess: () =>
+                  void navigate(paths.list()).then(() =>
+                    forgetTeam(queryClient, team.id),
+                  ),
               })
             }
             size="sm"

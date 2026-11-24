@@ -241,10 +241,11 @@ test("Providers shows who serves the models and what the Bots ran on, without th
   const view = await draw(ProvidersPage);
   expect(await view.findByText("OpenAI")).toBeTruthy();
   expect(
-    await view.findByText("Default gpt-5.6-terra · 2 models listed"),
+    await view.findByText("Default GPT-5.6 Terra · 2 models listed"),
   ).toBeTruthy();
   expect(await view.findByText("Every listed model")).toBeTruthy();
-  expect(await view.findByText("openai/gpt-5.6-terra")).toBeTruthy();
+  // Usage names the model as the provider lists it, not by its id.
+  expect(await view.findByText("GPT-5.6 Terra")).toBeTruthy();
   expect(view.getByText(/3 runs by 1 person/)).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();
   expect(view.queryByText(FOR_A_TEAM)).toBeNull();

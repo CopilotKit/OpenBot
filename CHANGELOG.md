@@ -207,6 +207,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Admin
 
+- **Models per team.** A team's page has a Models row: everything the organization allows, or the
+  models an admin ticks for the team. Someone in several teams can run any model one of their teams
+  allows, within the organization's allowlist. Only an owner or an admin sets or clears a team's
+  list; everybody else reads it. A model on a team's list that the organization no longer allows
+  shows greyed, saying why. Providers names the teams that have their own list, each linking to its
+  team.
 - **Providers changes, disconnects and connects the organization's AI.** It showed Connected with
   no way to change it, and on OpenBot Cloud it could show an admin's own plan as the organization's.
   It now reads the organization's connection and opens the same chooser as Settings: Change, and a

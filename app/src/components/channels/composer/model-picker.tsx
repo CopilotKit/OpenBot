@@ -319,7 +319,12 @@ function Picker({
         <TooltipContent side="top">{shown}</TooltipContent>
       </Tooltip>
       <ComboboxContent
-        align="start"
+        /*
+         * Lined up with the trigger's own edge on the side it sits: a settings field's left, and in
+         * the composer, where the trigger sits at the box's right end, its right. Started from the
+         * composer's trigger, the popup hung about 150px past the message box.
+         */
+        align={showValue ? "start" : "end"}
         className={cn(
           // A grid: the search over the models on the left, the efforts down the right.
           "grid grid-rows-[auto_minmax(0,1fr)] *:data-[slot=input-group]:m-2 *:data-[slot=input-group]:mb-1",
@@ -337,6 +342,11 @@ function Picker({
         }}
         side={showValue ? "bottom" : "top"}
         sideOffset={8}
+        /*
+         * The page's own gutter (16px, as the composer and a dialog keep from the window's edge). At
+         * Base UI's default 5px the popup ran to within 4px of a phone's edge, past the composer.
+         */
+        collisionPadding={16}
       >
         <ComboboxInput
           // On the efforts alone there is no model to search for: it stays only to keep the keys.
@@ -380,15 +390,22 @@ function Picker({
                          * share the popup with the Thinking column, and the Default tag beside
                          * OpenBot's own model left room for "GPT-6…" alone.
                          */}
-                        <span
-                          className="min-w-0 break-words"
-                          data-slot="model-name"
-                        >
-                          {choice.model.label}
+                        {/*
+                         * The name and its Default tag wrap as a pair: where both don't fit on a
+                         * line, the tag goes under the name, so the name keeps the row's width and
+                         * isn't broken at its hyphen ("GPT-" over "6.1" over "Terra").
+                         */}
+                        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <span
+                            className="min-w-0 break-words"
+                            data-slot="model-name"
+                          >
+                            {choice.model.label}
+                          </span>
+                          {choice.model.id === defaultModel ? (
+                            <DefaultTag />
+                          ) : null}
                         </span>
-                        {choice.model.id === defaultModel ? (
-                          <DefaultTag />
-                        ) : null}
                       </ComboboxItem>
                     ) : null
                   }

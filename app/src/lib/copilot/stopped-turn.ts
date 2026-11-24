@@ -134,6 +134,21 @@ const REST_REQUEST_FAILED = /^REST (\w+) request failed\b:?\s*/;
 const OPENBOT_PROBLEM = "https://open.bot/errors/";
 
 /**
+ * Whether a run failed because OpenBot's server refused it for the person, on a rule they can't
+ * change by sending again (a model their teams don't allow, a switch an admin turned off, a card
+ * the organization needs): its own problem, with a sentence for them. See `refusalForPerson`.
+ */
+export function refusedForPerson(reported: unknown): boolean {
+  const said =
+    reported instanceof Error
+      ? reported.message
+      : typeof reported === "string"
+        ? reported
+        : "";
+  return refusalForPerson(said) !== null;
+}
+
+/**
  * The sentence OpenBot's server wrote for the person, when a REST failure is its refusal.
  *
  * The server refuses a run it may not start (an admin's model allowlist, a switch that is off) with
