@@ -4088,6 +4088,10 @@ describe.skipIf(!asked)("approved layout: account", () => {
             .waitFor();
           await shot("checking");
           const initial = await check();
+          expect(await page.locator(".sign-in-wait h3").count()).toBe(0);
+          expect(
+            await page.locator(".sign-in-wait .step-spinner").count(),
+          ).toBe(1);
           await reachable(".sign-in-wait button");
           await page.evaluate(() =>
             globalThis.__workbench!.setAnswer("copilotkit_sign_in_page", {
@@ -4110,7 +4114,20 @@ describe.skipIf(!asked)("approved layout: account", () => {
             const box = element.getBoundingClientRect();
             const row = element.parentElement!.getBoundingClientRect();
             const group = element.closest(".sign-in-wait")!;
+            const instruction = group.querySelector<HTMLElement>("h3")!;
+            const status = group.querySelector<HTMLElement>(".status-line")!;
             return {
+              instruction: instruction.textContent,
+              status: status.textContent,
+              spinners: group.querySelectorAll(".step-spinner").length,
+              instructionSize: Number.parseFloat(
+                getComputedStyle(instruction).fontSize,
+              ),
+              statusSize: Number.parseFloat(getComputedStyle(status).fontSize),
+              instructionBottom: instruction.getBoundingClientRect().bottom,
+              statusTop: status.getBoundingClientRect().top,
+              statusBottom: status.getBoundingClientRect().bottom,
+              codeTop: row.top,
               left: box.left,
               right: box.right,
               rowLeft: row.left,
@@ -4123,6 +4140,14 @@ describe.skipIf(!asked)("approved layout: account", () => {
               ),
             };
           });
+          expect(code.instruction).toBe(
+            "Finish signing in to OpenBot in your browser…",
+          );
+          expect(code.status).toBe("Waiting for you to finish signing in…");
+          expect(code.spinners).toBe(1);
+          expect(code.instructionSize).toBeGreaterThan(code.statusSize);
+          expect(code.instructionBottom).toBeLessThanOrEqual(code.statusTop);
+          expect(code.statusBottom).toBeLessThanOrEqual(code.codeTop);
           expect(code.left).toBeGreaterThanOrEqual(code.rowLeft);
           expect(code.right).toBeLessThanOrEqual(code.rowRight);
           expect(code.width).toBeLessThanOrEqual(code.client + 1);
