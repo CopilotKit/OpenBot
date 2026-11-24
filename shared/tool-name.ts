@@ -586,6 +586,11 @@ const OWN_TOOLS: Record<string, OwnTool> = {
   copilotkit_load_skill: { running: "Using a skill", done: "Used a skill" },
   // A skill the person saved, loaded by the Bot when the request matched it (the skill library).
   load_skill: { running: "Using a skill", done: "Used a skill" },
+  // OpenBot Desktop on a Mac: the person's own screen, keyboard and mouse (PC control).
+  person_computer: {
+    running: "Using your computer",
+    done: "Used your computer",
+  },
   // Code Mode: a short program over the Bot's actions that read, run in a sandbox.
   execute_typescript: { running: "Running code", done: "Ran code" },
   discover_tools: {
