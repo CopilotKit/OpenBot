@@ -230,8 +230,8 @@ things are drawn, not how big they are.
    Nothing else has a shadow, and none is written by hand.
 6. **Sizes.** Heights, padding and spacing come from the primitives and `PageShell`. A screen
    writes no size by hand (`h-[43px]`); it uses the nearest Tailwind step, never a smaller one.
-7. **Rows.** One card of rows with hairline dividers (`PageRows`). The leading icon is bare, in
-   `muted-foreground`, in the space a 32px tile would take.
+7. **Rows.** One card of rows with hairline dividers (`PageRows`). The leading icon is a 16px
+   glyph in `muted-foreground` on a 32px tile with a hairline ring.
 8. **The message box** is a flat card at rest. While someone types in it, it glows in `ring`. It
    is the only thing that glows.
 9. **Icons.** Tabler, at their usual sizes. The default line is 1.75, set once in `theme.css`. An

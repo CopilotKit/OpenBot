@@ -8,8 +8,7 @@ import { settleReactWork } from "./settle-react-work";
 
 /*
  * Cards and rows in the web app's look (docs/app-guidelines.md, "The look"): a card is flat with a
- * hairline border in both themes, and a row's icon is bare but keeps the space its tile took, so a
- * row's words don't move.
+ * hairline border in both themes, and a row's icon sits on a small tile.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -39,7 +38,7 @@ test("a Card is a flat hairline card", () => {
   expect(classes.filter((name) => name.startsWith("dark:"))).toEqual([]);
 });
 
-test("a row's icon is bare and keeps its space", () => {
+test("a row's icon sits on a tile", () => {
   const view = render(
     <ItemMedia variant="icon">
       <svg />
@@ -48,11 +47,17 @@ test("a row's icon is bare and keeps its space", () => {
   const classes = classesOf(
     view.container.querySelector("[data-slot=item-media]"),
   );
+  // A 32px tile behind a 16px glyph: Guido asked for the tiles back on 2026-11-24.
   expect(classes).toEqual(
-    expect.arrayContaining(["size-8", "text-muted-foreground"]),
+    expect.arrayContaining([
+      "size-8",
+      "rounded-md",
+      "bg-background",
+      "ring-1",
+      "ring-border",
+      "text-muted-foreground",
+    ]),
   );
-  for (const tile of ["ring-1", "ring-border", "bg-background", "rounded-md"])
-    expect(classes).not.toContain(tile);
 });
 
 test("rows and cards keep their border in dark", () => {
