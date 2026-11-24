@@ -12,6 +12,11 @@
 //! And Open log folder (`open_logs`): the folder of this app's log file, in the system's file
 //! manager. The page never names a path; the shell opens its own log folder and nothing else.
 //!
+//! And the page's own problems as they happen (`record_problem`): a request that failed or got no
+//! answer, an error it threw, a promise nobody handled, a run that failed, for Get Troubleshooting
+//! Logs… (`page_problems`). Connected to an OpenBot elsewhere, this is the only way they reach a
+//! file on this computer.
+//!
 //! And Settings' AI model row (`ai_connection`, `change_ai_connection`): which provider and sign-in
 //! OpenBot starts with, never a key, and Change, which stops OpenBot and opens the setup window at
 //! its AI screen. Kept for a page on an older server, which cannot change the connection itself.
@@ -55,7 +60,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 38] = [
+pub const PERMISSIONS: [&str; 39] = [
     "openbot-desktop:allow-connection",
     "openbot-desktop:allow-sign-out",
     "openbot-desktop:allow-change-connection",
@@ -74,6 +79,7 @@ pub const PERMISSIONS: [&str; 38] = [
     "openbot-desktop:allow-speech-stop",
     "openbot-desktop:allow-speech-abort",
     "openbot-desktop:allow-open-logs",
+    "openbot-desktop:allow-record-problem",
     "openbot-desktop:allow-notify",
     "openbot-desktop:allow-ai-connection",
     "openbot-desktop:allow-change-ai-connection",
@@ -294,6 +300,18 @@ async fn speech_abort(session: u64) {
 #[tauri::command]
 async fn open_logs(app: tauri::AppHandle) -> Result<(), String> {
     crate::open_log_folder_now(&app)
+}
+
+/// A problem the page saw as it happened: a request that failed or got no answer, an error it threw,
+/// a promise nobody handled, a run that failed. Kept for Get Troubleshooting Logs… and written to the
+/// log (`page_problems`), checked, cut to length and redacted whatever the page sent. Answered on
+/// this computer at once; the page never waits on it.
+#[tauri::command]
+pub async fn record_problem<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    problem: openbot_desktop_lib::page_problems::Reported,
+) -> Result<(), String> {
+    crate::record_page_problem(&app, &problem)
 }
 
 /// A Bot's notification: shown by the system, and opening OpenBot at `path` when it is clicked,
@@ -554,6 +572,7 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             speech_stop,
             speech_abort,
             open_logs,
+            record_problem,
             notify,
             ai_connection,
             change_ai_connection,

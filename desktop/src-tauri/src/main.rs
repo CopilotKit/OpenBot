@@ -134,6 +134,9 @@ struct Shell {
     /// The app connected to an OpenBot that runs somewhere else: its relay and sign-in while the
     /// window shows it. See `desktop_connected`.
     connected: desktop_connected::State,
+    /// The app's own recent problems, as OpenBot's page records them (`record_problem`), for Get
+    /// Troubleshooting Logs…. See `page_problems`.
+    page_problems: openbot_desktop_lib::page_problems::Recorder,
     /// The move from OpenBot (Self-Contained) to OpenBot Cloud. See `desktop_move`.
     moving: desktop_move::State,
     /// The last security floor this app verified (`security_floor`).
@@ -9864,6 +9867,16 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     failure: Option<String>,
 ) -> Result<(), String> {
+    let saved = write_troubleshooting_logs(app, failure)?;
+    reveal_saved_logs(app, saved);
+    Ok(())
+}
+
+/// The logs gathered and saved in the log folder, and where.
+fn write_troubleshooting_logs<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    failure: Option<String>,
+) -> Result<PathBuf, String> {
     use time::macros::format_description;
     let text = gather_troubleshooting_logs(app, failure);
     let folder = logging::folder(app)
@@ -9880,8 +9893,7 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
     // The stamp, not the file name: the log's own scrubbing takes a name that long and mixed for a
     // key.
     log::info!("[logs] saved troubleshooting logs in the log folder, stamped {stamp}");
-    reveal_saved_logs(app, saved);
-    Ok(())
+    Ok(saved)
 }
 
 /**
@@ -9937,6 +9949,10 @@ fn reveal_through<Reveal>(
 /// `tauri_plugin_opener::reveal_item_in_dir`. On macOS an Objective-C exception from AppKit is
 /// caught and returned as the error, so even on the main thread a reveal cannot take the app down.
 fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
+    // A test never opens the file manager on the computer it runs on.
+    if cfg!(test) {
+        return Ok(());
+    }
     #[cfg(target_os = "macos")]
     let revealed = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
         tauri_plugin_opener::reveal_item_in_dir(path)
@@ -9976,6 +9992,9 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     failure: Option<String>,
 ) -> String {
+    if desktop_connected::is_connected(app) {
+        return gather_connected_troubleshooting_logs(app, failure);
+    }
     let home = logging::home_folder();
     let folder = logging::folder(app).ok();
     // The engine the back end runs on; before setup has chosen one, whichever is answering.
@@ -10017,15 +10036,7 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
         })
     };
     let text = troubleshooting::gather(troubleshooting::Sources {
-        desktop: format!(
-            "OpenBot Desktop {} ({})",
-            desktop_version(app),
-            build_description(
-                env!("OPENBOT_BUILD_COMMIT"),
-                env!("OPENBOT_BUILD_BRANCH"),
-                env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
-            )
-        ),
+        desktop: desktop_description(app),
         failure,
         log_folder: folder.as_deref(),
         home: home.as_deref(),
@@ -10035,6 +10046,66 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
     });
     log::info!("[logs] gathered troubleshooting logs");
     text
+}
+
+/// `OpenBot Desktop 1.2.0 (Built … from …)`, as the launch line says it.
+fn desktop_description<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    format!(
+        "OpenBot Desktop {} ({})",
+        desktop_version(app),
+        build_description(
+            env!("OPENBOT_BUILD_COMMIT"),
+            env!("OPENBOT_BUILD_BRANCH"),
+            env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
+        )
+    )
+}
+
+/**
+Get Troubleshooting Logs while the app is connected to an OpenBot that runs elsewhere: what the app
+saw of it, within `troubleshooting::LIMIT` however slow it is (`troubleshooting::gather_connected`).
+Nothing of an installation on this computer is asked: none runs here.
+
+Before, a connected app's menus had no such item, and its log held only the relay's lines: a reply
+that broke on OpenBot Cloud left nothing a person could send. Now the file has the app's own recent
+problems as its page recorded them (`record_problem`), each failed request with the request id that
+finds it in that OpenBot's logs.
+*/
+fn gather_connected_troubleshooting_logs<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    failure: Option<String>,
+) -> String {
+    let home = logging::home_folder();
+    let folder = logging::folder(app).ok();
+    let shell = app.state::<Shell>();
+    let text = troubleshooting::gather_connected(troubleshooting::ConnectedSources {
+        desktop: desktop_description(app),
+        failure,
+        log_folder: folder.as_deref(),
+        home: home.as_deref(),
+        address: desktop_connected::address_now(app),
+        signed_in: desktop_connected::connected_address(app).is_some(),
+        front_end: shell.page_problems.front_end(),
+        about: desktop_connected::about(app),
+        problems: shell.page_problems.recent(),
+        limit: troubleshooting_limit(),
+    });
+    log::info!("[logs] gathered troubleshooting logs while connected");
+    text
+}
+
+/**
+A problem OpenBot's page recorded as it happened (`page_problems`): kept for Get Troubleshooting
+Logs… and written to the log. Only OpenBot's own page can ask (`desktop_page::record_problem`).
+*/
+pub(crate) fn record_page_problem<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    reported: &openbot_desktop_lib::page_problems::Reported,
+) -> Result<(), String> {
+    let home = logging::home_folder();
+    app.state::<Shell>()
+        .page_problems
+        .record(reported, home.as_deref())
 }
 
 /**
@@ -13406,18 +13477,20 @@ fn settle_menu_stop(shell: &Shell, fallback_root: &Path, stopped: Stopped) -> Op
 fn chose(app: &tauri::AppHandle, item: &str) {
     match item {
         "open" => show_whichever_applies(app),
-        // The two a connected app's menus carry in place of Status and the troubleshooting logs.
+        // The two a connected app's menus carry in place of Status.
         CONNECTED_SIGN_OUT_MENU_ID => desktop_connected::sign_out_from_menu(app.clone()),
         CONNECTED_LOG_FOLDER_MENU_ID => {
             let _ = open_log_folder_now(app);
         }
-        // Stop, Status and the engine's logs are about OpenBot on this computer. A connected app's
-        // menus do not carry them, and a shortcut or a stale menu does not reach them either.
-        "stop" | "status" | "logs" if desktop_connected::is_connected(app) => {}
+        // Stop and Status are about OpenBot on this computer. A connected app's menus do not carry
+        // them, and a shortcut or a stale menu does not reach them either.
+        "stop" | "status" if desktop_connected::is_connected(app) => {}
         // Stop without quitting: the stack is what costs something to leave running, and somebody
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone(), AskedFrom::Menu),
         "status" => show_status_window(app),
+        // Connected or not: connected, the file says what the app saw of the OpenBot it is
+        // connected to (`gather_connected_troubleshooting_logs`).
         "logs" => save_troubleshooting_logs_from_menu(app.clone()),
         app_update::MENU_ID => check_for_updates_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
@@ -13690,7 +13763,7 @@ const TROUBLESHOOTING_MENU_LABEL: &str = "Get Troubleshooting Logs…";
 const TROUBLESHOOTING_MENU_GATHERING: &str = "Gathering Logs…";
 
 /// The menus' Sign Out and Open Log Folder while the app is connected to an OpenBot that runs
-/// elsewhere. See `desktop_connected`.
+/// elsewhere, beside Get Troubleshooting Logs…. See `desktop_connected`.
 const CONNECTED_SIGN_OUT_MENU_ID: &str = "sign-out";
 const CONNECTED_SIGN_OUT_MENU_LABEL: &str = "Sign Out";
 const CONNECTED_LOG_FOLDER_MENU_ID: &str = "log-folder";
@@ -13717,8 +13790,9 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
     // The menu bar menu follows the system's appearance; its icons are drawn for each.
     let dark = system_is_dark(app);
     let running = app.state::<Shell>().root.lock().unwrap().is_some();
-    // Connected to an OpenBot that runs elsewhere: Show Window, the app's log folder, Sign Out and
-    // Quit. Nothing here starts, stops or reports on OpenBot, because none runs on this computer.
+    // Connected to an OpenBot that runs elsewhere: Show Window, the app's log folder, the
+    // troubleshooting logs, Sign Out and Quit. Nothing here starts, stops or reports on an OpenBot
+    // on this computer, because none runs here; the logs say what the app saw of the one it shows.
     let connected = desktop_connected::is_connected(app);
     // Check for Updates… only in a build offered updates: anywhere else it could only say no.
     let updates = app_update_feed(app).is_some();
@@ -13761,6 +13835,13 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
                     CONNECTED_LOG_FOLDER_MENU_ID,
                     CONNECTED_LOG_FOLDER_MENU_LABEL,
                     true,
+                    None::<&str>,
+                )?),
+                MenuEntry::Plain(MenuItem::with_id(
+                    app,
+                    "logs",
+                    logs_label,
+                    logs_enabled,
                     None::<&str>,
                 )?),
                 MenuEntry::Plain(MenuItem::with_id(
@@ -13877,6 +13958,13 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
                 CONNECTED_LOG_FOLDER_MENU_ID,
                 CONNECTED_LOG_FOLDER_MENU_LABEL,
                 true,
+                None::<&str>,
+            )?));
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
+                app,
+                "logs",
+                logs_label,
+                logs_enabled,
                 None::<&str>,
             )?));
             entries.push(MenuEntry::Plain(MenuItem::with_id(

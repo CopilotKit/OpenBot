@@ -169,6 +169,44 @@ pub fn connected_address<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option
         .map(|live| live.session.address().to_owned())
 }
 
+/// The address of the OpenBot the app is connected to: the one it shows, or else the one on record.
+pub fn address_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
+    connected_address(app).or_else(|| chosen(app).connected_to().map(str::to_owned))
+}
+
+/**
+What that OpenBot says about itself, for Get Troubleshooting Logs…, asked by the gathering's
+deadline (`connected::about`): through the app's sign-in while it shows that OpenBot, and only
+whether it answers while it doesn't. The organization is the one the app works in there.
+*/
+pub fn about<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> openbot_desktop_lib::troubleshooting::Ask<openbot_desktop_lib::connected::about::About> {
+    let address = address_now(app);
+    let organization = chosen(app).organization_id;
+    let session = state(app)
+        .connected
+        .live
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|live| live.session.clone());
+    Box::new(move |deadline| {
+        let Some(address) = address else {
+            return Ok(None);
+        };
+        let token = session.map(|session| move || session.access().map_err(|problem| problem.said));
+        Ok(Some(openbot_desktop_lib::connected::about::ask(
+            &address,
+            organization.as_deref(),
+            token
+                .as_ref()
+                .map(|token| token as openbot_desktop_lib::connected::about::Token),
+            deadline,
+        )))
+    })
+}
+
 /// Whether `url` is a page the relay serves: OpenBot's own, from the OpenBot it is connected to.
 pub fn is_relay_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> bool {
     relay_origin(app).is_some_and(|origin| origin == url.origin().ascii_serialization())

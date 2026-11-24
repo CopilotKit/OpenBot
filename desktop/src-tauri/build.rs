@@ -63,6 +63,9 @@ fn main() {
                     "speech_abort",
                     // Open log folder: the shell's own log folder. See `src/logging.rs`.
                     "open_logs",
+                    // The page's own problems as they happen, for Get Troubleshooting Logs…. See
+                    // `src/page_problems.rs`.
+                    "record_problem",
                     // A Bot's notification, opening OpenBot at a page when clicked. See `src/notice.rs`.
                     "notify",
                     // Settings' AI model row, and its Change. See `src/ai_connection.rs`.

@@ -3087,6 +3087,12 @@
           "markdownDescription": "Enables the quit command without any pre-configured scope."
         },
         {
+          "description": "Enables the record_problem command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-record-problem",
+          "markdownDescription": "Enables the record_problem command without any pre-configured scope."
+        },
+        {
           "description": "Enables the restart command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-restart",
@@ -3313,6 +3319,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-quit",
           "markdownDescription": "Denies the quit command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the record_problem command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-record-problem",
+          "markdownDescription": "Denies the record_problem command without any pre-configured scope."
         },
         {
           "description": "Denies the restart command without any pre-configured scope.",
