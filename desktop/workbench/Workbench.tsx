@@ -1818,6 +1818,7 @@ export function WorkbenchLoaded({
               frameKey={frameKey}
               host={host}
               address={liveRoute ?? appScene?.start.route}
+              titled={!config}
               width={state.window.width}
               height={state.window.height}
               os={state.window.os}

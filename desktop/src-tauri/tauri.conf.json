@@ -17,8 +17,10 @@
         "height": 800,
         "minWidth": 720,
         "minHeight": 560,
-        "resizable": true,
-        "titleBarStyle": "Transparent",
+        "resizable": false,
+        "maximizable": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "backgroundThrottling": "disabled",
         "dragDropEnabled": false,
         "create": false

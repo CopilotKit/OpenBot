@@ -11,8 +11,9 @@ export type Host = "desktop" | "browser";
  *
  * - The window is built with `.traffic_light_position(TRAFFIC_LIGHTS)` and
  *   `TRAFFIC_LIGHTS = LogicalPosition { x: 20.0, y: 31.0 }` (desktop/src-tauri/src/main.rs,
- *   `build_main_window`), with `titleBarStyle: "Transparent"` for setup and `Overlay` for OpenBot's
- *   own page (`match_title_bar`). Both styles draw the buttons over the page.
+ *   `build_main_window`), with `titleBarStyle: "Overlay"` for setup and for OpenBot's own page
+ *   (`tauri.conf.json`, `match_title_bar`): the buttons over the page, which runs to the window's top
+ *   edge, and no title text.
  * - tao 0.37.2 (the version in desktop/src-tauri/Cargo.lock), `inset_traffic_lights` in
  *   src/platform_impl/macos/view.rs, puts button `i`'s frame at `x + i * space_between`, where
  *   `space_between` is AppKit's own distance from the close button to the minimise button, and makes
