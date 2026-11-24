@@ -13,19 +13,17 @@ import { BotBuddy } from "@/components/agents/bot-buddy";
 import { ConversationBuddy } from "@/components/channels/conversation-buddy";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
-  automaticBuddy,
   buddyFor,
   type DrawnBuddy,
   ownBuddy,
   poseFor,
 } from "@/lib/buddies/buddy";
 import { ownBuddiesQueryOptions } from "@/lib/buddies/queries";
-import { STOCK_BUDDIES } from "@/lib/buddies/stock";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * A Bot's buddy, as its conversation's corner draws it: the one the person chose for it, or the stock
- * buddy its seed picks. Small and resting, it is the still picture.
+ * A Bot's buddy, as its conversation's corner draws it: the one the person chose for it. A buddy is
+ * opt in, so a Bot nobody chose one for draws nothing. Small and resting, it is the still picture.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -63,16 +61,9 @@ function renderBot(buddy: string | null) {
 }
 
 describe("a Bot drawn as its buddy", () => {
-  test("is the stock buddy its seed picks until somebody chooses", () => {
+  test("is nothing until the person chooses one", () => {
     const view = renderBot(null);
-    const drawn = view.container.querySelector("[data-buddy]");
-    expect(drawn?.getAttribute("data-buddy")).toBe(
-      automaticBuddy("knowledge").key,
-    );
-    expect(view.getByRole("img", { name: "Knowledge" })).toBeTruthy();
-    expect(view.container.querySelector("img")?.getAttribute("src")).toBe(
-      automaticBuddy("knowledge").avatarUrl,
-    );
+    expect(view.container.innerHTML).toBe("");
   });
 
   test("is the stock buddy the person chose", () => {
@@ -123,16 +114,19 @@ describe("a Bot drawn as its buddy", () => {
 });
 
 describe("the buddy in a conversation", () => {
-  const bot = {
+  const bot = (buddy: string | null) => ({
     id: "knowledge",
     name: "Knowledge",
     avatarSeed: "knowledge",
-    buddy: null,
-  };
-  const corner = (activity: "idle" | "working") =>
+    buddy,
+  });
+  const corner = (
+    activity: "idle" | "working",
+    buddy: string | null = "stock:meemers",
+  ) =>
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <ConversationBuddy activity={activity} bot={bot} />
+        <ConversationBuddy activity={activity} bot={bot(buddy)} />
       </QueryClientProvider>,
     );
 
@@ -147,35 +141,27 @@ describe("the buddy in a conversation", () => {
     ).toBeTruthy();
     expect(view.getByRole("img", { name: "Knowledge" })).toBeTruthy();
   });
+
+  test("is not drawn for a Bot the person chose no buddy for, even while it works", () => {
+    expect(corner("working", null).container.innerHTML).toBe("");
+  });
 });
 
 describe("which buddy and which pose", () => {
-  test("the same seed always picks the same stock buddy, and seeds spread across them", () => {
-    expect(automaticBuddy("knowledge").key).toBe(
-      automaticBuddy("knowledge").key,
-    );
-    const picked = new Set(
-      Array.from(
-        { length: 200 },
-        (_, index) => automaticBuddy(`bot-${index}`).key,
-      ),
-    );
-    expect(picked.size).toBe(STOCK_BUDDIES.length);
-  });
-
-  test("a choice that names nothing this app knows draws the automatic buddy", () => {
-    const automatic = automaticBuddy("knowledge").key;
-    expect(buddyFor("knowledge", "stock:nobody", []).key).toBe(automatic);
-    expect(buddyFor("knowledge", "own:gone", [made as never]).key).toBe(
-      automatic,
-    );
+  test("no choice, or a choice that names nothing this app knows, is no buddy", () => {
+    expect(buddyFor(null, [])).toBeNull();
+    expect(buddyFor("stock:nobody", [])).toBeNull();
+    expect(buddyFor("own:gone", [made as never])).toBeNull();
+    expect(buddyFor("stock:meemers", [])?.key).toBe("stock:meemers");
   });
 
   test("a buddy with no clip for what the Bot does plays the next best pose", () => {
     const own = ownBuddy(made as never) as DrawnBuddy;
     expect(poseFor(own, "working")).toBe("thinking");
     expect(poseFor(own, "waiting")).toBe("idle");
-    expect(poseFor(automaticBuddy("knowledge"), "waiting")).toBe("asking");
+    expect(
+      poseFor(buddyFor("stock:meemers", []) as DrawnBuddy, "waiting"),
+    ).toBe("asking");
   });
 
   test("a buddy whose picture isn't drawn yet can't be drawn", () => {

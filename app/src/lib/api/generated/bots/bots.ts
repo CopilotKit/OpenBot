@@ -1780,7 +1780,7 @@ export const getReplaceBotBuddyUrl = (
 };
 
 /**
- * Choose which buddy draws a Bot, for the caller only: a stock buddy the app ships (stock:<id>), or one of the caller's own buddies once it is ready (own:<buddy id>). Null goes back to the stock buddy picked from the Bot's avatarSeed. Any Bot the caller can see may be given one, a Bot that comes with OpenBot included, because nobody else sees the choice. The Bot's buddy field reads it back.
+ * Choose which buddy draws a Bot, for the caller only: a stock buddy the app ships (stock:<id>), or one of the caller's own buddies once it is ready (own:<buddy id>). Null takes the buddy away: a buddy is opt in, so a Bot nobody chose one for has none. Any Bot the caller can see may be given one, a Bot that comes with OpenBot included, because nobody else sees the choice. The Bot's buddy field reads it back.
  * @summary Choose the buddy the caller sees for a Bot
  */
 export const replaceBotBuddy = async (

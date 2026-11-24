@@ -1,5 +1,6 @@
 import {
   IconChevronRight,
+  IconMoodOff,
   IconPhotoPlus,
   IconTrash,
 } from "@tabler/icons-react";
@@ -28,12 +29,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { AgentProfile } from "@/lib/agents/queries";
-import {
-  automaticBuddy,
-  type DrawnBuddy,
-  ownBuddy,
-  stockBuddy,
-} from "@/lib/buddies/buddy";
+import { type DrawnBuddy, ownBuddy, stockBuddy } from "@/lib/buddies/buddy";
 import {
   chooseBotBuddyMutationOptions,
   createBuddyMutationOptions,
@@ -48,8 +44,8 @@ import { queryClient } from "@/query-client";
 const MAX_PICTURE_BYTES = 8 * 1024 * 1024;
 
 /**
- * The "For you" row for a Bot's buddy: the character it is drawn as, for this person only. Opens the
- * picker.
+ * The "For you" row for a Bot's buddy: the character that shows in this person's conversations with
+ * it while it works. Opt in, so a Bot starts with none. Opens the picker.
  */
 export function BotBuddyRow({
   agent,
@@ -65,19 +61,23 @@ export function BotBuddyRow({
         size="sm"
       >
         <ItemMedia>
-          <BotBuddy
-            buddy={buddy}
-            name={buddy.name}
-            seed={agent.avatarSeed}
-            size={32}
-          />
+          {buddy ? (
+            <BotBuddy
+              buddy={buddy}
+              name={buddy.name}
+              seed={agent.avatarSeed}
+              size={32}
+            />
+          ) : (
+            <NoBuddy size={32} />
+          )}
         </ItemMedia>
         <ItemContent>
           <ItemTitle>Buddy</ItemTitle>
           <ItemDescription>
-            {agent.buddy
-              ? `${buddy.name}. Only you see it.`
-              : `${buddy.name}, picked for this Bot. Choose another for yourself.`}
+            {buddy
+              ? `${buddy.name} shows in your conversations while this Bot works. Only you see it.`
+              : "None. Choose one to see it in your conversations while this Bot works."}
           </ItemDescription>
         </ItemContent>
         <ItemActions>
@@ -135,8 +135,7 @@ function BuddyPicker({
   const own = useQuery(ownBuddiesQueryOptions());
   const choose = useMutation(chooseBotBuddyMutationOptions(queryClient));
   const [picked, setPicked] = useState<string | null>(agent.buddy ?? null);
-  const automatic = automaticBuddy(agent.avatarSeed);
-  const preview = previewOf(picked, automatic, own.data);
+  const preview = previewOf(picked, own.data);
   const changed = picked !== (agent.buddy ?? null);
 
   const save = async () => {
@@ -157,24 +156,29 @@ function BuddyPicker({
         <DialogHeader>
           <DialogTitle>Buddy</DialogTitle>
           <DialogDescription>
-            Choose the character {agent.name} is drawn as. Only you see it.
+            Choose a character to show in your conversations with {agent.name}{" "}
+            while it works. Only you see it.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 grid gap-5">
           <div className="flex items-center gap-4">
-            <BotBuddy
-              buddy={preview}
-              key={preview.key}
-              name={preview.name}
-              seed={agent.avatarSeed}
-              size={96}
-            />
+            {preview ? (
+              <BotBuddy
+                buddy={preview}
+                key={preview.key}
+                name={preview.name}
+                seed={agent.avatarSeed}
+                size={96}
+              />
+            ) : (
+              <NoBuddy size={96} />
+            )}
             <div className="min-w-0">
-              <p className="font-medium">{preview.name}</p>
+              <p className="font-medium">{preview ? preview.name : "None"}</p>
               <p className="text-muted-foreground text-sm">
-                {picked === null
-                  ? "Picked for this Bot."
-                  : picked.startsWith("own:")
+                {!preview
+                  ? "Nothing shows in your conversations."
+                  : picked?.startsWith("own:")
                     ? "Made by you."
                     : "A stock buddy."}
               </p>
@@ -184,12 +188,9 @@ function BuddyPicker({
           <fieldset className="grid gap-2" disabled={choose.isPending}>
             <legend className="mb-2 font-medium text-sm">Stock buddies</legend>
             <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-              <BuddyOption
-                buddy={automatic}
-                label="Automatic"
+              <NoBuddyOption
                 onPick={() => setPicked(null)}
                 picked={picked === null}
-                seed={agent.avatarSeed}
               />
               {STOCK_BUDDIES.map((stock) => {
                 const buddy = stockBuddy(stock);
@@ -247,14 +248,50 @@ function BuddyPicker({
 
 function previewOf(
   picked: string | null,
-  automatic: DrawnBuddy,
   own: readonly OwnBuddy[] | undefined,
-): DrawnBuddy {
-  if (picked === null) return automatic;
+): DrawnBuddy | null {
+  if (picked === null) return null;
   const stock = STOCK_BUDDIES.find((buddy) => `stock:${buddy.id}` === picked);
   if (stock) return stockBuddy(stock);
   const made = own?.find((buddy) => `own:${buddy.id}` === picked);
-  return (made && ownBuddy(made)) ?? automatic;
+  return made ? ownBuddy(made) : null;
+}
+
+/** Where a buddy would be, for a Bot that has none. */
+function NoBuddy({ size }: { size: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="grid shrink-0 place-items-center rounded-full border border-border border-dashed text-muted-foreground"
+      style={{ height: size, width: size }}
+    >
+      <IconMoodOff style={{ height: size * 0.45, width: size * 0.45 }} />
+    </span>
+  );
+}
+
+/** The picker's first choice: no buddy. */
+function NoBuddyOption({
+  picked,
+  onPick,
+}: {
+  picked: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      aria-pressed={picked}
+      className={cn(
+        "grid justify-items-center gap-1 rounded-lg border border-transparent p-2 text-center outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring",
+        picked && "border-foreground/40 bg-muted/40",
+      )}
+      onClick={onPick}
+      type="button"
+    >
+      <NoBuddy size={48} />
+      <span className="line-clamp-2 text-xs leading-tight">None</span>
+    </button>
+  );
 }
 
 function BuddyOption({

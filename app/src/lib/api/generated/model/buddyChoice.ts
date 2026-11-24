@@ -3,7 +3,7 @@
  */
 
 /**
- * A buddy: stock:<id> for a stock buddy the app ships, own:<buddy id> for one of the caller's own. Null for the stock buddy picked from the Bot's avatarSeed.
+ * A buddy: stock:<id> for a stock buddy the app ships, own:<buddy id> for one of the caller's own. Null for none: a buddy is opt in.
  * @maxLength 80
  * @nullable
  * @pattern ^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$

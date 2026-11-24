@@ -16,19 +16,26 @@ import { orbPalette } from "@/lib/orb-palette";
 const STILL_MAX_SIZE = 32;
 
 /**
- * The buddy a Bot is drawn as, for the person looking: the one they chose for it, or the stock buddy
- * its seed picks. A Bot is found by its seed, which is how every place that draws one names it.
+ * The buddy a Bot is drawn as, for the person looking: the one they chose for it, or none. A Bot is
+ * found by its seed, which is how every place that draws one names it.
  */
-export function useBotBuddy(seed: string): DrawnBuddy {
+export function useBotBuddy(seed: string): DrawnBuddy | null {
   const { data: choice } = useQuery({
     ...agentListQueryOptions(),
     select: (bots) => bots.find((bot) => bot.avatarSeed === seed)?.buddy,
   });
+  return useChosenBuddy(choice);
+}
+
+/** The buddy a choice names (`stock:<id>` or `own:<id>`), or none. */
+export function useChosenBuddy(
+  choice: string | null | undefined,
+): DrawnBuddy | null {
   const { data: own } = useQuery({
     ...ownBuddiesQueryOptions(),
     enabled: choice?.startsWith("own:") ?? false,
   });
-  return useMemo(() => buddyFor(seed, choice, own), [seed, choice, own]);
+  return useMemo(() => buddyFor(choice, own), [choice, own]);
 }
 
 /**
@@ -58,7 +65,7 @@ function frameClass(bare: boolean): string {
 /**
  * A Bot drawn as its buddy. Small and resting, it is the buddy's still picture; larger, or while the
  * Bot works, waits on the person or has just finished, the pose for that plays on a loop. Under
- * reduced motion it is always the still picture.
+ * reduced motion it is always the still picture. A Bot with no buddy draws nothing.
  */
 export function BotBuddy({
   seed,
@@ -83,6 +90,7 @@ export function BotBuddy({
   const own = useBotBuddy(seed);
   const buddy = given ?? own;
   const reduceMotion = useReducedMotion();
+  if (!buddy) return null;
   // A buddy with no clips (one only drawn, where nothing could animate it) is always its picture.
   const still =
     keepStill ||

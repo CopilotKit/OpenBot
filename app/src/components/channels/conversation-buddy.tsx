@@ -1,6 +1,6 @@
 import type { Message } from "@ag-ui/core";
 import { useEffect, useRef, useState } from "react";
-import { BotBuddy } from "@/components/agents/bot-buddy";
+import { BotBuddy, useChosenBuddy } from "@/components/agents/bot-buddy";
 import { ChooseBuddyButton } from "@/components/bot-profile/buddy";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { conversationActivity } from "@/lib/buddies/activity";
@@ -42,7 +42,8 @@ export function useConversationBuddyActivity(input: {
 /**
  * The conversation's Bot as its buddy, over the conversation's bottom right corner while the Bot does
  * something: thinking, working, talking, waiting on the person, and a moment after it is done. At
- * rest it is not drawn, so it never sits over the conversation for long. Clicking it chooses another.
+ * rest it is not drawn, so it never sits over the conversation for long, and a Bot the person chose no
+ * buddy for has none: a buddy is opt in. Clicking it chooses another.
  */
 export function ConversationBuddy({
   bot,
@@ -51,13 +52,15 @@ export function ConversationBuddy({
   bot: Pick<AgentProfile, "id" | "name" | "avatarSeed" | "buddy">;
   activity: BuddyActivity;
 }) {
-  if (activity === "idle") return null;
+  const buddy = useChosenBuddy(bot.buddy);
+  if (!buddy || activity === "idle") return null;
   return (
     <div className="fade-in-0 slide-in-from-bottom-2 zoom-in-90 animate-in duration-300">
       <ChooseBuddyButton agent={bot}>
         <BotBuddy
           activity={activity}
           bare
+          buddy={buddy}
           name={bot.name}
           seed={bot.avatarSeed}
           size={SIZE}

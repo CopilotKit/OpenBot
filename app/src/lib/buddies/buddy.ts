@@ -74,38 +74,22 @@ export function ownBuddy(own: OwnBuddy): DrawnBuddy | null {
   };
 }
 
-/** A string's hash, the same in every browser, so a Bot gets the same stock buddy everywhere. */
-function hash(text: string): number {
-  let value = 2166136261;
-  for (let index = 0; index < text.length; index++) {
-    value ^= text.charCodeAt(index);
-    value = Math.imul(value, 16777619);
-  }
-  return value >>> 0;
-}
-
-/** The stock buddy a Bot gets until somebody chooses one, picked from its seed. */
-export function automaticBuddy(seed: string): DrawnBuddy {
-  return stockBuddy(STOCK_BUDDIES[hash(seed) % STOCK_BUDDIES.length]);
-}
-
 /**
- * The buddy a Bot is drawn as: the one the person chose, or its automatic one. A choice naming a
- * stock buddy this app doesn't ship, or one of the person's own that is gone, draws the automatic one.
+ * The buddy a Bot is drawn as, for the person looking: the one they chose for it. A buddy is opt in,
+ * so a Bot nobody chose one for has none, and neither has one whose choice names a stock buddy this
+ * app doesn't ship or one of the person's own that is gone or not drawn yet.
  */
 export function buddyFor(
-  seed: string,
   choice: string | null | undefined,
   own: readonly OwnBuddy[] | undefined,
-): DrawnBuddy {
+): DrawnBuddy | null {
   if (choice?.startsWith("stock:")) {
     const stock = STOCK_BUDDIES.find((buddy) => `stock:${buddy.id}` === choice);
-    if (stock) return stockBuddy(stock);
+    return stock ? stockBuddy(stock) : null;
   }
   if (choice?.startsWith("own:")) {
     const made = own?.find((buddy) => `own:${buddy.id}` === choice);
-    const drawn = made ? ownBuddy(made) : null;
-    if (drawn) return drawn;
+    return made ? ownBuddy(made) : null;
   }
-  return automaticBuddy(seed);
+  return null;
 }
