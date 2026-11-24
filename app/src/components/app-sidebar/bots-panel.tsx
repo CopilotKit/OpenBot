@@ -212,7 +212,7 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
       actions={
         <Button
           aria-label="New Bot"
-          className="hover:bg-foreground/5 dark:hover:bg-foreground/5"
+          className="hover:bg-foreground/5"
           render={(props) => (
             <Link {...props} search={{ new: true }} to="/bots" />
           )}

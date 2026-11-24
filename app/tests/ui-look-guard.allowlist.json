@@ -18,16 +18,6 @@
   "components/app-sidebar/account-label.tsx": {
     "text": 1
   },
-  "components/app-sidebar/bots-panel.tsx": {
-    "darkColor": 1
-  },
-  "components/app-sidebar/channel-item-content.tsx": {
-    "text": 3,
-    "darkColor": 1
-  },
-  "components/app-sidebar/conversations-panel.tsx": {
-    "darkColor": 1
-  },
   "components/approvals/question-notice.tsx": {
     "darkColor": 2
   },
@@ -156,9 +146,6 @@
   },
   "components/layout/page-parts.tsx": {
     "card": 2
-  },
-  "components/layout/section-panel.tsx": {
-    "text": 1
   },
   "components/manage/plugin-page.tsx": {
     "cornerStep": 1

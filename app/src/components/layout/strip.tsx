@@ -70,7 +70,7 @@ export function Strip({
  * stays filled with a short bar at the strip's left edge.
  */
 export const stripItemClassName = cn(
-  "relative flex size-9 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/75 outline-hidden ring-sidebar-ring transition-colors",
+  "relative flex size-9 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/75 outline-hidden ring-sidebar-ring transition-colors",
   "hover:bg-foreground/5 hover:text-sidebar-foreground focus-visible:ring-2 [&_svg]:size-5 [&_svg]:shrink-0",
   "data-active:bg-foreground/[0.07] data-active:text-sidebar-foreground",
   "data-active:before:absolute data-active:before:top-1/2 data-active:before:-left-[6px] data-active:before:h-5 data-active:before:w-[3px] data-active:before:-translate-y-1/2 data-active:before:rounded-full data-active:before:bg-sidebar-foreground",

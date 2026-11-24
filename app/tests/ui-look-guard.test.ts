@@ -190,3 +190,28 @@ describe("screens keep the look", () => {
     expect(stale).toEqual([]);
   });
 });
+
+/*
+ * Files the look has been applied to. Each keeps to every rule, with nothing on the allowlist; a
+ * screen joins this list when it is cleaned up.
+ */
+const CLEAN = [
+  // The shell: the sidebar's strip and panel, and the frame the page sits in.
+  "components/layout/strip.tsx",
+  "components/layout/section-panel.tsx",
+  "components/layout/sidebar-shell.tsx",
+  "components/layout/page-shell.tsx",
+  "components/app-sidebar/section-strip.tsx",
+  "components/app-sidebar/app-sidebar.tsx",
+  "components/app-sidebar/conversations-panel.tsx",
+  "components/app-sidebar/bots-panel.tsx",
+  "components/app-sidebar/channel.tsx",
+  "components/app-sidebar/channel-item-content.tsx",
+];
+
+test("the files the look has been applied to keep every rule", () => {
+  const broken = CLEAN.filter((file) => actual[file] !== undefined).map(
+    (file) => `${file}: ${JSON.stringify(actual[file])}`,
+  );
+  expect(broken).toEqual([]);
+});
