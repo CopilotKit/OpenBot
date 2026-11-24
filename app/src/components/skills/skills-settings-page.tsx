@@ -3,6 +3,8 @@ import {
   IconChalkboardTeacher,
   IconChevronRight,
   IconDots,
+  IconChevronDown,
+  IconPencil,
   IconPlus,
   IconPuzzle,
 } from "@tabler/icons-react";
@@ -216,6 +218,8 @@ export function SkillsSettingsPage({
           <EditSkill slug={editing} />
         ) : null
       }
+      // A plugin's review lists skills, servers and addresses side by side, so it gets more room.
+      detailWidth={showInstall ? 480 : undefined}
       onClose={() => navigate({ to: "/skills", search: {} })}
       open={showCreate || showInstall || showEdit}
     >
@@ -237,35 +241,59 @@ export function SkillsSettingsPage({
 
         <LearningSharing
           action={
-            <div className="flex gap-1">
-              <Button
-                render={(props) => (
-                  <Link {...props} search={{ install: true }} to="/skills" />
-                )}
-                size="sm"
-                variant="ghost"
-              >
-                <IconPuzzle />
-                Install a plugin
-              </Button>
-              <Button
-                render={(props) =>
-                  // The personal edition's skills each have a switch per Bot, so a new one is written
-                  // on the page that leads to those switches. Elsewhere a person's own skill is
-                  // written in the panel beside the list.
-                  personal ? (
-                    <Link {...props} {...paths.newSkill()} />
-                  ) : (
-                    <Link {...props} search={{ new: true }} to="/skills" />
-                  )
+            /*
+             * One verb, Add, with every way a skill arrives under it: written, installed from a
+             * plugin, or recorded where OpenBot can run a browser. Three buttons side by side
+             * would crowd the section's title on a phone and give three equal weights to what is
+             * one decision.
+             */
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button size="sm" variant="ghost">
+                    <IconPlus />
+                    Add
+                    <IconChevronDown className="text-muted-foreground" />
+                  </Button>
                 }
-                size="sm"
-                variant="ghost"
-              >
-                <IconPlus />
-                New skill
-              </Button>
-            </div>
+              />
+              <DropdownMenuContent align="end">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    nativeButton={false}
+                    render={
+                      // The personal edition's skills each have a switch per Bot, so a new one is
+                      // written on the page that leads to those switches. Elsewhere a person's own
+                      // skill is written in the panel beside the list.
+                      personal ? (
+                        <Link {...paths.newSkill()} />
+                      ) : (
+                        <Link search={{ new: true }} to="/skills" />
+                      )
+                    }
+                  >
+                    <IconPencil />
+                    New skill
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    nativeButton={false}
+                    render={<Link search={{ install: true }} to="/skills" />}
+                  >
+                    <IconPuzzle />
+                    Install a plugin
+                  </DropdownMenuItem>
+                  {browser.data?.available ? (
+                    <DropdownMenuItem
+                      nativeButton={false}
+                      render={<Link to="/browser" />}
+                    >
+                      <IconChalkboardTeacher />
+                      Record a task
+                    </DropdownMenuItem>
+                  ) : null}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           }
           written={written}
           writtenKnown={writtenKnown}

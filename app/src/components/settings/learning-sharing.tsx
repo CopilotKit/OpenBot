@@ -137,7 +137,7 @@ export function LearningSharing({
   written?: React.ReactNode[];
   /** False while the page is still reading the written skills, or failed to: an empty `written` then means "not known", not "none". */
   writtenKnown?: boolean;
-  /** The section's one verb: New skill. */
+  /** The section's one verb: Add, with New skill and the other ways a skill arrives under it. */
   action?: React.ReactNode;
 } = {}) {
   const sharing = useQuery(personalLearningQueryOptions());
@@ -208,7 +208,7 @@ export function LearningSharing({
             <PageEmpty>
               {data.skills === null
                 ? emptySentence(data, mode, true)
-                : "No skills yet. Write one with New skill, or teach a Bot a task."}
+                : "No skills yet. Write one or install a plugin from Add, or teach a Bot a task."}
             </PageEmpty>
           ) : null
         ) : (
@@ -323,7 +323,7 @@ export function LearningSharing({
             <PageEmpty>
               {data.skills === null || data.unavailable === "off"
                 ? emptySentence(data, mode, false)
-                : "No skills yet. Write one with New skill, or teach a Bot a task."}
+                : "No skills yet. Write one or install a plugin from Add, or teach a Bot a task."}
             </PageEmpty>
           ) : null
         ) : (

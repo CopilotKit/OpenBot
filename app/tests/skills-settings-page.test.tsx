@@ -9,6 +9,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { SkillsSettingsPage } from "@/components/skills/skills-settings-page";
 import { authKeys } from "@/lib/auth/queries";
 import { browserKeys } from "@/lib/browser/queries";
@@ -53,6 +54,16 @@ const skill = (
   tools: [],
   usableOnYourBots: ownerUserId !== null,
 });
+
+/** Open the section's Add menu and answer each item's address by its name. */
+async function addMenu(view: ReturnType<typeof render>) {
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: "Add" }));
+  const menu = await view.findByRole("menu");
+  return (name: string) =>
+    within(menu).queryByRole("menuitem", { name })?.getAttribute("href") ??
+    null;
+}
 
 const refundOrder = {
   name: "refund-order",
@@ -157,12 +168,13 @@ test("in the personal edition, the skills written for every Bot are yours too, a
   expect(view.queryByRole("heading", { name: "Workspace skills" })).toBeNull();
 });
 
-test("New skill opens the side panel, and Teach a Bot is a row where a browser can run", async () => {
+test("Add opens New skill and Install a plugin in the side panel, and Record a task where a browser can run", async () => {
   const view = draw("team", { browser: true });
   await view.findByRole("heading", { name: "Skills" });
-  expect(view.getByText("New skill").closest("a")?.getAttribute("href")).toBe(
-    "/skills?new=true",
-  );
+  const href = await addMenu(view);
+  expect(href("New skill")).toBe("/skills?new=true");
+  expect(href("Install a plugin")).toBe("/skills?install=true");
+  expect(href("Record a task")).toBe("/browser");
   const teach = section(view, "Teach a Bot");
   expect(
     within(teach).getByText("Record a task").closest("a")?.getAttribute("href"),
@@ -172,18 +184,20 @@ test("New skill opens the side panel, and Teach a Bot is a row where a browser c
 test("in the personal edition, New skill opens the form whose skill has a switch per Bot", async () => {
   const view = draw("personal");
   await view.findByRole("heading", { name: "Skills" });
-  expect(view.getByText("New skill").closest("a")?.getAttribute("href")).toBe(
-    "/skills/new",
-  );
+  const href = await addMenu(view);
+  expect(href("New skill")).toBe("/skills/new");
+  expect(href("Install a plugin")).toBe("/skills?install=true");
 });
 
-test("no Teach a Bot row where OpenBot can't run a browser for you", async () => {
+test("no Teach a Bot row, and no Record a task, where OpenBot can't run a browser for you", async () => {
   const view = draw("team");
   await view.findByRole("heading", { name: "Skills" });
   expect(view.queryByRole("heading", { name: "Teach a Bot" })).toBeNull();
+  const href = await addMenu(view);
+  expect(href("Record a task")).toBeNull();
 });
 
-test("the skills you wrote and New skill stay when Learning can't be read", async () => {
+test("the skills you wrote and Add stay when Learning can't be read", async () => {
   const view = draw("team", { learning: false });
   await view.findByRole("heading", { name: "Skills" });
   await view.findByText(
@@ -191,11 +205,11 @@ test("the skills you wrote and New skill stay when Learning can't be read", asyn
   );
   const yours = section(view, "Your skills");
   expect(within(yours).getByText("Weekly report")).toBeTruthy();
-  expect(view.getByText("New skill")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Add" })).toBeTruthy();
   expect(view.queryByText(/No skills yet/)).toBeNull();
 });
 
-test("in the personal edition too, the skills you wrote and New skill stay when Learning can't be read", async () => {
+test("in the personal edition too, the skills you wrote and Add stay when Learning can't be read", async () => {
   const view = draw("personal", { learning: false });
   await view.findByRole("heading", { name: "Skills" });
   await view.findByText(
@@ -204,7 +218,7 @@ test("in the personal edition too, the skills you wrote and New skill stay when 
   const yours = section(view, "Your skills");
   expect(within(yours).getByText("Weekly report")).toBeTruthy();
   expect(within(yours).getByText("Onboarding")).toBeTruthy();
-  expect(view.getByText("New skill")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Add" })).toBeTruthy();
   expect(view.queryByText(/No skills yet/)).toBeNull();
 });
 

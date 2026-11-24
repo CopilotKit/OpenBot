@@ -134,7 +134,7 @@ test("a person's skills page says the skills failed to load, not that they have 
   ).toBeTruthy();
   expect(
     view.queryByText(
-      "No skills yet. Write one with New skill, or teach a Bot a task.",
+      "No skills yet. Write one or install a plugin from Add, or teach a Bot a task.",
     ),
   ).toBeNull();
 });
@@ -146,7 +146,7 @@ test("a person with genuinely no skills is still told so", async () => {
 
   expect(
     await view.findByText(
-      "No skills yet. Write one with New skill, or teach a Bot a task.",
+      "No skills yet. Write one or install a plugin from Add, or teach a Bot a task.",
     ),
   ).toBeTruthy();
   expect(

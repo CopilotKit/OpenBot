@@ -45,10 +45,15 @@ export type InstallPlan = {
  * `taken` is the slugs of the skills the person can already see. Saving under a slug replaces the
  * skill there, so a plugin skill whose name is taken is left out rather than allowed to overwrite
  * one somebody wrote.
+ *
+ * `mayAddServers` is false for somebody who isn't an admin in the team edition. A server is added
+ * for the whole organization, so only an admin adds one; the plugin's servers are then shown as left
+ * out with that reason, rather than tried and refused one by one.
  */
 export function installPlan(
   reading: Extract<PluginReading, { ok: true }>,
   taken: ReadonlySet<string>,
+  { mayAddServers = true }: { mayAddServers?: boolean } = {},
 ): InstallPlan {
   const skills: PlannedSkill[] = [];
   const skippedSkills = [...reading.skippedSkills];
@@ -89,6 +94,21 @@ export function installPlan(
       otherFiles: skill.otherFiles,
     });
   }
+  if (!mayAddServers) {
+    return {
+      skills,
+      skippedSkills,
+      servers: [],
+      skippedServers: [
+        ...reading.servers.map((server) => ({
+          name: server.name,
+          reason:
+            "Only an admin adds a server here. Ask yours to add it from Connections.",
+        })),
+        ...reading.skippedServers,
+      ],
+    };
+  }
   return {
     skills,
     skippedSkills,
@@ -119,6 +139,12 @@ export type SkillResult = { slug: string; saved: boolean; message?: string };
 
 export type InstallResult = { servers: ServerResult[]; skills: SkillResult[] };
 
+/** Where an install is: the row being written (null once done), and what has come out so far. */
+export type InstallProgress = {
+  working: { kind: "server" | "skill"; key: string } | null;
+  result: InstallResult;
+};
+
 /** The two writes an install makes, so the order and the failure rules are testable on their own. */
 export type InstallSteps = {
   addServer: (input: {
@@ -136,14 +162,24 @@ export type InstallSteps = {
  * the plugin's skill matches. It grants nothing: what a Bot may call is still its grants.
  *
  * One failure stops nothing else (Agent Plugins §11.3): each server and skill reports on its own.
+ * `onProgress` hears which one is being written and everything that has come out so far, so a
+ * screen can mark each row as it finishes rather than wait for the whole install.
  */
 export async function installPlugin(
   plan: InstallPlan,
   steps: InstallSteps,
+  onProgress?: (progress: InstallProgress) => void,
 ): Promise<InstallResult> {
   const servers: ServerResult[] = [];
+  const skills: SkillResult[] = [];
+  const tell = (working: InstallProgress["working"]) =>
+    onProgress?.({
+      working,
+      result: { servers: [...servers], skills: [...skills] },
+    });
   const tools: string[] = [];
   for (const server of plan.servers) {
+    tell({ kind: "server", key: server.name });
     try {
       const outcome = await steps.addServer({
         title: server.title,
@@ -175,9 +211,9 @@ export async function installPlugin(
     }
   }
 
-  const skills: SkillResult[] = [];
   const declared = [...new Set(tools)];
   for (const skill of plan.skills) {
+    tell({ kind: "skill", key: skill.slug });
     try {
       await steps.saveSkill({
         slug: skill.slug,
@@ -195,6 +231,7 @@ export async function installPlugin(
       });
     }
   }
+  tell(null);
   return { servers, skills };
 }
 

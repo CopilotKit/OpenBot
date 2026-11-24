@@ -1,6 +1,6 @@
 # Installing Agent Plugins
 
-**Skills → Install a plugin** installs a plugin written in the
+**Skills → Add → Install a plugin** installs a plugin written in the
 [Agent Plugins](https://agent-plugins.org/specification) format, version 1.0.0. A plugin is a folder:
 
 ```text
@@ -13,8 +13,15 @@ release-notes/
 └── mcp.json                       # MCP servers
 ```
 
-Pick the folder and OpenBot lists everything in it before anything is written: what each skill and
-server becomes, and why anything is left out. Nothing is installed until you press Install.
+Drop the folder, or a `.zip` of it, on the panel, or choose either with its button. OpenBot lists
+everything in it before anything is written: what each skill and server becomes, and why anything
+won't be installed. Each skill's instructions can be opened and read first. Nothing is installed
+until you press Install, and the same rows then say how each part came out: a server that signs
+each person in offers **Finish setup**, and one that needs a key offers **Add a key**.
+
+A `.zip` is read in the browser. A zipped folder is read from inside that folder, and an archive
+that is over 50 MB, password-protected or ZIP64 is refused with the reason. Entries that would land
+outside the plugin, and the `__MACOSX/` copies Finder adds, are dropped.
 
 ## What each part becomes
 
@@ -41,7 +48,10 @@ The spec's failure rules are kept:
 - An `mcp.json` that is not valid for 1.0.0 drops the plugin's servers and keeps its skills.
 - A skill or server that is not valid drops only itself.
 - A skill whose name you already use is left out. Saving under a skill's command replaces it, and a
-  plugin never replaces a skill somebody wrote.
+  plugin never replaces a skill somebody wrote. Install stays off until your skills have been read.
+- In the team edition only an admin adds a server, as on Connections → Add server. For anybody
+  else the plugin's servers are listed as not installed, with that reason, and its skills still
+  install.
 
 ## Older layouts
 

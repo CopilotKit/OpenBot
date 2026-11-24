@@ -1,448 +1,693 @@
 import {
   IconAlertTriangle,
-  IconCheck,
+  IconBook,
+  IconChevronRight,
+  IconCircleCheck,
+  IconFileZip,
   IconFolderOpen,
-  IconMinus,
+  IconLoader2,
+  IconPackage,
+  IconPlug,
+  IconPuzzle,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
+import {
+  archiveFiles,
+  droppedFiles,
+  folderFiles,
+  PickError,
+} from "@/lib/agent-plugins/files";
+import {
   type InstallPlan,
+  type InstallProgress,
   type InstallResult,
   installPlan,
   installPlugin,
   type ServerResult,
 } from "@/lib/agent-plugins/install";
 import {
-  type LeftOut,
   type PluginFile,
   type PluginReading,
-  pathInPlugin,
   readPlugin,
-  wantsText,
 } from "@/lib/agent-plugins/read";
 import { addServerByUrlMutationOptions } from "@/lib/apps/mutations";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { saveSkillMutationOptions } from "@/lib/skills/mutations";
 import { skillListQueryOptions } from "@/lib/skills/queries";
+import { cn } from "@/lib/utils";
 
 /**
- * Install a plugin, in the detail panel beside Skills: pick the plugin's folder, read what it will
- * do, then install it.
+ * Install a plugin, in the detail panel beside Skills: drop or choose the plugin, read what it will
+ * add, then install it and finish setting up whatever needs a sign-in or a key.
  *
- * The plugin is read in the browser and installed through the same two writes a person makes by
- * hand, saving a skill and adding a server by its address (`installPlugin`), so there is nothing new
- * on the server side to trust. Every skill and server is listed before anything is written, with the
- * reason for each one left out.
+ * The plugin is read in the browser and installed through the two writes a person makes by hand,
+ * saving a skill and adding a server by its address (`installPlugin`), so there is nothing new on
+ * the server side to trust. Every skill and server is listed before anything is written, and the
+ * same rows then report how each one came out, so the screen a person pressed Install on is the
+ * screen that tells them what happened.
  */
 export function InstallPlugin({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
   const skills = useQuery(skillListQueryOptions());
+  const me = useQuery(currentUserQueryOptions());
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
   const addServer = useMutation(addServerByUrlMutationOptions(queryClient));
   const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
   const [reading, setReading] = useState<PluginReading | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [pickError, setPickError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<InstallProgress | null>(null);
   const install = useMutation({
     mutationFn: (plan: InstallPlan) =>
-      installPlugin(plan, {
-        addServer: (input) => addServer.mutateAsync(input),
-        saveSkill: (input) => saveSkill.mutateAsync(input),
-      }),
+      installPlugin(
+        plan,
+        {
+          addServer: (input) => addServer.mutateAsync(input),
+          saveSkill: (input) => saveSkill.mutateAsync(input),
+        },
+        setProgress,
+      ),
   });
 
-  const taken = new Set((skills.data ?? []).map((skill) => skill.slug));
-  const plan = reading?.ok ? installPlan(reading, taken) : null;
-  const nothingToInstall =
-    plan !== null && plan.skills.length === 0 && plan.servers.length === 0;
   /*
-   * Saving under a command replaces the skill there, and `taken` is what stops a plugin doing that
-   * to one of the person's own. Without the list it would be empty, so nothing is installed until
-   * the list has been read.
+   * A server is added for the whole organization, so in the team edition only an admin adds one, as
+   * on Connections → Add server. Saving under a command replaces the skill there, and `taken` is
+   * what stops a plugin doing that to one of the person's own. Without the list it would be empty,
+   * so nothing is installed until both reads have answered.
    */
-  const skillsUnknown = skills.data === undefined;
+  const personal = capabilities.data?.edition === "personal";
+  const mayAddServers = personal || isOrganizationAdmin(me.data?.role);
+  const taken = new Set((skills.data ?? []).map((skill) => skill.slug));
+  /*
+   * Held as it was when Install was pressed. The skill list refetches as each skill is saved, and a
+   * plan worked out again from it would show the plugin's own new skills as already taken.
+   */
+  const plan =
+    install.variables ??
+    (reading?.ok ? installPlan(reading, taken, { mayAddServers }) : null);
+  const ready = skills.data !== undefined && me.data !== undefined;
+
+  async function open(files: Promise<PluginFile[]>) {
+    setOpening(true);
+    setPickError(null);
+    install.reset();
+    setProgress(null);
+    try {
+      const read = readPlugin(await files);
+      setReading(read.ok ? read : null);
+      if (!read.ok) setPickError(read.error);
+    } catch (thrown) {
+      setReading(null);
+      setPickError(
+        thrown instanceof PickError
+          ? thrown.message
+          : "That couldn't be opened. Try choosing it again.",
+      );
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  const result = install.data ?? progress?.result;
+  const done = install.data !== undefined;
 
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
-      <header>
-        <h1 className="text-2xl font-semibold">Install a plugin</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Pick a plugin folder in the{" "}
-          <a
-            className="underline"
-            href="https://agent-plugins.org/specification"
-            rel="noreferrer"
-            target="_blank"
-          >
-            Agent Plugins
-          </a>{" "}
-          format. Its skills become yours and its servers are added to
-          Connections. No Bot gets either until you give it to one.
-        </p>
-      </header>
+    <div className="flex min-h-full flex-col">
+      <div className="flex flex-1 flex-col gap-6 p-6">
+        <header>
+          <h1 className="font-semibold text-xl tracking-tight">
+            Install a plugin
+          </h1>
+          <p className="mt-1 text-pretty text-muted-foreground text-sm leading-relaxed">
+            Adds a plugin's skills and servers to OpenBot. No Bot gets them
+            until you choose. Plugins use the open{" "}
+            <a
+              className="underline underline-offset-4 hover:text-foreground"
+              href="https://agent-plugins.org/specification"
+              rel="noreferrer"
+              target="_blank"
+            >
+              Agent Plugins
+            </a>{" "}
+            format.
+          </p>
+        </header>
 
-      {install.data ? (
-        <InstallOutcome onDone={onDone} result={install.data} />
-      ) : (
-        <>
-          <FolderPicker
-            disabled={install.isPending}
-            onPicked={(files) => {
-              install.reset();
-              setReading(readPlugin(files));
-            }}
-          />
-          {reading && !reading.ok ? (
+        {reading?.ok && plan ? (
+          <>
+            {done && result ? <Outcome result={result} /> : null}
+            <PluginReview
+              onReplace={
+                install.isPending || done
+                  ? undefined
+                  : () => {
+                      setReading(null);
+                      setPickError(null);
+                    }
+              }
+              plan={plan}
+              progress={install.isPending ? progress : null}
+              reading={reading}
+              result={result ?? null}
+            />
+          </>
+        ) : (
+          <PluginDrop busy={opening} error={pickError} onOpen={open} />
+        )}
+      </div>
+
+      {reading?.ok && plan ? (
+        <footer
+          className={cn(
+            "sticky bottom-0 flex flex-col gap-2 border-border border-t px-6 py-4",
+            // Opaque, so rows scrolling under it don't show through: the docked panel's own fill.
+            "bg-background in-data-[slot=detail-pane]:bg-sidebar",
+          )}
+        >
+          {install.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {reading.error}
+              {install.error.message}
             </p>
           ) : null}
-          {reading?.ok && plan ? (
-            <>
-              <PluginReview plan={plan} reading={reading} />
-              {install.error ? (
-                <p className="text-destructive text-sm" role="alert">
-                  {install.error.message}
-                </p>
-              ) : null}
-              <div>
+          {skills.error ? (
+            <p className="text-destructive text-sm" role="alert">
+              Couldn't read your skills, so nothing can be installed: a plugin's
+              skill could replace one of yours. Try again in a moment.
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            {done ? (
+              <>
+                <Button
+                  onClick={() => {
+                    setReading(null);
+                    install.reset();
+                    setProgress(null);
+                  }}
+                  variant="ghost"
+                >
+                  Install another
+                </Button>
+                <Button onClick={onDone}>Done</Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  disabled={install.isPending}
+                  onClick={onDone}
+                  variant="ghost"
+                >
+                  Cancel
+                </Button>
                 <Button
                   disabled={
-                    nothingToInstall || install.isPending || skillsUnknown
+                    !ready ||
+                    install.isPending ||
+                    (plan.skills.length === 0 && plan.servers.length === 0)
                   }
                   onClick={() => install.mutate(plan)}
                 >
-                  {install.isPending
-                    ? "Installing…"
-                    : `Install ${reading.name}`}
+                  {install.isPending ? (
+                    <>
+                      <IconLoader2 className="motion-safe:animate-spin" />
+                      Installing…
+                    </>
+                  ) : (
+                    "Install"
+                  )}
                 </Button>
-                {skills.error ? (
-                  <p className="mt-2 text-destructive text-sm" role="alert">
-                    Couldn't read your skills, so nothing can be installed: a
-                    plugin's skill could replace one of yours. Try again in a
-                    moment.
-                  </p>
-                ) : null}
-                {nothingToInstall ? (
-                  <p className="mt-2 text-muted-foreground text-sm">
-                    Nothing in this plugin can be installed here.
-                  </p>
-                ) : null}
-              </div>
-            </>
-          ) : null}
-        </>
-      )}
+              </>
+            )}
+          </div>
+        </footer>
+      ) : null}
     </div>
   );
 }
 
 /**
- * A folder picker. The browser hands over every file under the folder with its path; only the
- * manifest, the server configs and each SKILL.md are read, so a plugin with binaries or
- * `node_modules` in it costs a listing, not a read.
+ * Where a plugin arrives: dropped on the box, or chosen with either button. Folders and `.zip`
+ * files are both how plugins travel, and a browser's file picker can't offer both in one dialog.
  */
-function FolderPicker({
-  disabled,
-  onPicked,
+function PluginDrop({
+  busy,
+  error,
+  onOpen,
 }: {
-  disabled: boolean;
-  onPicked: (files: PluginFile[]) => void;
+  busy: boolean;
+  error: string | null;
+  onOpen: (files: Promise<PluginFile[]>) => void;
 }) {
-  const input = useRef<HTMLInputElement>(null);
+  const folder = useRef<HTMLInputElement>(null);
+  const archive = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
   // `webkitdirectory` is not in React's attribute types, though every current browser supports it.
   useEffect(() => {
-    input.current?.setAttribute("webkitdirectory", "");
+    folder.current?.setAttribute("webkitdirectory", "");
   }, []);
 
   return (
-    <div>
+    <div className="flex flex-col gap-3">
+      <Empty
+        className={cn(
+          "rounded-lg border border-border border-dashed py-10 transition-colors duration-150",
+          over && "border-primary bg-primary/5",
+        )}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+            setOver(false);
+          }
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setOver(true);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setOver(false);
+          onOpen(droppedFiles(event.dataTransfer));
+        }}
+      >
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            {busy ? (
+              <IconLoader2 className="motion-safe:animate-spin" />
+            ) : (
+              <IconPackage />
+            )}
+          </EmptyMedia>
+          <EmptyTitle>
+            {busy ? "Reading the plugin…" : "Drop a plugin here"}
+          </EmptyTitle>
+          <EmptyDescription>Its folder, or a .zip of it.</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button
+              disabled={busy}
+              onClick={() => folder.current?.click()}
+              size="sm"
+              variant="outline"
+            >
+              <IconFolderOpen />
+              Choose folder
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={() => archive.current?.click()}
+              size="sm"
+              variant="outline"
+            >
+              <IconFileZip />
+              Choose .zip
+            </Button>
+          </div>
+        </EmptyContent>
+      </Empty>
       <input
         aria-label="Plugin folder"
         className="sr-only"
-        disabled={disabled}
         multiple
-        onChange={async (event) => {
+        onChange={(event) => {
           const picked = Array.from(event.target.files ?? []);
           event.target.value = "";
-          onPicked(await pluginFiles(picked));
+          if (picked.length > 0) onOpen(folderFiles(picked));
         }}
-        ref={input}
+        ref={folder}
+        tabIndex={-1}
         type="file"
       />
-      <Button
-        disabled={disabled}
-        onClick={() => input.current?.click()}
-        variant="outline"
-      >
-        <IconFolderOpen />
-        Choose a plugin folder
-      </Button>
-    </div>
-  );
-}
-
-/** The picked files by their path inside the plugin, with the text of the ones that are read. */
-export async function pluginFiles(
-  files: readonly File[],
-): Promise<PluginFile[]> {
-  return Promise.all(
-    files.map(async (file) => {
-      const path = pathInPlugin(file.webkitRelativePath || file.name);
-      return { path, text: wantsText(path) ? await file.text() : null };
-    }),
-  );
-}
-
-/** What installing will do, all of it, before anything is written. */
-export function PluginReview({
-  reading,
-  plan,
-}: {
-  reading: Extract<PluginReading, { ok: true }>;
-  plan: InstallPlan;
-}) {
-  return (
-    <div className="flex flex-col gap-5">
-      <section>
-        <h2 className="font-medium">
-          {reading.name}
-          {reading.version ? (
-            <span className="ml-2 text-muted-foreground text-sm">
-              {reading.version}
-            </span>
-          ) : null}
-        </h2>
-        {reading.description ? (
-          <p className="text-muted-foreground text-sm">{reading.description}</p>
-        ) : null}
-        {reading.format !== "agent-plugins" ? (
-          <p className="mt-1 text-muted-foreground text-sm">
-            Read from its{" "}
-            {reading.format === "claude" ? "Claude Code" : "Codex"} manifest,
-            the layout before Agent Plugins.
-          </p>
-        ) : null}
-      </section>
-
-      <ReviewList
-        empty="No skills."
-        items={plan.skills.map((skill) => ({
-          key: skill.slug,
-          title: `/${skill.slug}`,
-          detail: [
-            skill.summary,
-            skill.otherFiles.length > 0
-              ? `Its other files aren't kept: ${skill.otherFiles.join(", ")}.`
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" "),
-          // What a Bot will be told, readable before it is saved: the plugin's author wrote it.
-          instructions: skill.instructions,
-        }))}
-        leftOut={plan.skippedSkills}
-        title="Skills"
+      <input
+        accept=".zip,application/zip"
+        aria-label="Plugin archive"
+        className="sr-only"
+        onChange={(event) => {
+          const picked = event.target.files?.[0];
+          event.target.value = "";
+          if (picked) onOpen(archiveFiles(picked));
+        }}
+        ref={archive}
+        tabIndex={-1}
+        type="file"
       />
-
-      <ReviewList
-        empty="No servers."
-        items={plan.servers.map((server) => ({
-          key: server.name,
-          title: server.title,
-          detail: server.url,
-        }))}
-        leftOut={plan.skippedServers}
-        title="Servers"
-      />
-
-      {reading.notes.length > 0 ? (
-        <section>
-          <h3 className="font-medium text-sm">Also in the folder</h3>
-          <ul className="mt-1 list-disc pl-5 text-muted-foreground text-sm">
-            {reading.notes.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        </section>
+      {error ? (
+        <p className="text-destructive text-sm" role="alert">
+          {error}
+        </p>
       ) : null}
     </div>
   );
 }
 
-function ReviewList({
+/** What a skill or server row says on its right: nothing before Install, then how it came out. */
+type RowState =
+  | { kind: "idle" }
+  | { kind: "working" }
+  | { kind: "done"; label: string }
+  | { kind: "setup"; label: string; serverId?: string }
+  | { kind: "failed"; label: string };
+
+/**
+ * The plugin, its skills and servers, and what won't be installed. Drawn before the install and
+ * kept through it, each row's right side turning into how that row came out.
+ */
+export function PluginReview({
+  reading,
+  plan,
+  progress = null,
+  result = null,
+  onReplace,
+}: {
+  reading: Extract<PluginReading, { ok: true }>;
+  plan: InstallPlan;
+  progress?: InstallProgress | null;
+  result?: InstallResult | null;
+  /** Pick another plugin. Absent while installing and after. */
+  onReplace?: () => void;
+}) {
+  const skillState = (slug: string): RowState => {
+    const done = result?.skills.find((skill) => skill.slug === slug);
+    if (done) {
+      return done.saved
+        ? { kind: "done", label: "Saved" }
+        : { kind: "failed", label: done.message ?? "Not saved." };
+    }
+    return progress?.working?.kind === "skill" && progress.working.key === slug
+      ? { kind: "working" }
+      : { kind: "idle" };
+  };
+  const serverState = (name: string): RowState => {
+    const done = result?.servers.find((server) => server.name === name);
+    if (done) return serverOutcome(done);
+    return progress?.working?.kind === "server" && progress.working.key === name
+      ? { kind: "working" }
+      : { kind: "idle" };
+  };
+  const leftOut = [
+    ...plan.skippedSkills.map((item) => ({ ...item, kind: "Skill" })),
+    ...plan.skippedServers.map((item) => ({ ...item, kind: "Server" })),
+  ];
+  const count = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+  const adds = [
+    plan.skills.length > 0 ? count(plan.skills.length, "skill") : "",
+    plan.servers.length > 0 ? count(plan.servers.length, "server") : "",
+  ].filter(Boolean);
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <PageRows className="mt-0">
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconPuzzle />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>
+                {reading.name}
+                {reading.version ? (
+                  <span className="font-normal text-muted-foreground text-xs">
+                    {reading.version}
+                  </span>
+                ) : null}
+              </ItemTitle>
+              {reading.description ? (
+                <ItemDescription>{reading.description}</ItemDescription>
+              ) : null}
+            </ItemContent>
+            {onReplace ? (
+              <ItemActions>
+                <Button onClick={onReplace} size="sm" variant="ghost">
+                  Choose another
+                </Button>
+              </ItemActions>
+            ) : null}
+          </Item>
+        </PageRows>
+        {/* Before the install: once it has run, the outcome above says what it came to. */}
+        {result && !progress ? null : (
+          <p className="mt-2 text-muted-foreground text-sm">
+            {adds.length > 0
+              ? `Adds ${adds.join(" and ")}.`
+              : "Nothing in this plugin can be installed here."}
+            {reading.format !== "agent-plugins"
+              ? ` Read from its ${reading.format === "claude" ? "Claude Code" : "Codex"} manifest.`
+              : ""}
+          </p>
+        )}
+      </div>
+
+      {plan.skills.length > 0 ? (
+        <ReviewSection count={plan.skills.length} title="Skills">
+          {plan.skills.map((skill, index) => (
+            <div key={skill.slug}>
+              {index > 0 ? <Separator /> : null}
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconBook />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>/{skill.slug}</ItemTitle>
+                  {skill.summary ? (
+                    <ItemDescription>{skill.summary}</ItemDescription>
+                  ) : null}
+                  <details className="group/details mt-1 text-xs">
+                    <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+                      <IconChevronRight className="size-3.5 transition-transform duration-150 group-open/details:rotate-90" />
+                      Instructions
+                    </summary>
+                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-sans text-foreground text-xs leading-relaxed">
+                      {skill.instructions}
+                    </pre>
+                    {skill.otherFiles.length > 0 ? (
+                      <p className="mt-2 text-muted-foreground">
+                        Not kept: {skill.otherFiles.join(", ")}
+                      </p>
+                    ) : null}
+                  </details>
+                </ItemContent>
+                <RowStatus state={skillState(skill.slug)} />
+              </Item>
+            </div>
+          ))}
+        </ReviewSection>
+      ) : null}
+
+      {plan.servers.length > 0 ? (
+        <ReviewSection count={plan.servers.length} title="Servers">
+          {plan.servers.map((server, index) => (
+            <div key={server.name}>
+              {index > 0 ? <Separator /> : null}
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconPlug />
+                </ItemMedia>
+                <ItemContent className="min-w-0">
+                  <ItemTitle>{server.title}</ItemTitle>
+                  <ItemDescription className="truncate">
+                    {server.url}
+                  </ItemDescription>
+                </ItemContent>
+                <RowStatus state={serverState(server.name)} />
+              </Item>
+            </div>
+          ))}
+        </ReviewSection>
+      ) : null}
+
+      {leftOut.length > 0 || reading.notes.length > 0 ? (
+        <details className="group/left-out">
+          <summary className="flex cursor-pointer select-none items-center gap-1.5 font-semibold text-sm [&::-webkit-details-marker]:hidden">
+            <IconChevronRight className="size-4 text-muted-foreground transition-transform duration-150 group-open/left-out:rotate-90" />
+            Won't be installed
+            <span className="font-normal text-muted-foreground">
+              {leftOut.length + reading.notes.length}
+            </span>
+          </summary>
+          <ul className="mt-3 flex flex-col gap-3 pl-5.5 text-sm">
+            {leftOut.map((item) => (
+              <li key={`${item.kind}:${item.name}`}>
+                <span className="font-medium">{item.name}</span>
+                <span className="ml-2 text-muted-foreground text-xs">
+                  {item.kind}
+                </span>
+                <p className="text-muted-foreground">{item.reason}</p>
+              </li>
+            ))}
+            {reading.notes.map((note) => (
+              <li className="text-muted-foreground" key={note}>
+                {note}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function ReviewSection({
   title,
-  items,
-  leftOut,
-  empty,
+  count,
+  children,
 }: {
   title: string;
-  items: {
-    key: string;
-    title: string;
-    detail: string;
-    instructions?: string;
-  }[];
-  leftOut: LeftOut[];
-  empty: string;
+  count: number;
+  children: React.ReactNode;
 }) {
   return (
     <section>
-      <h3 className="font-medium text-sm">
+      <h2 className="font-semibold text-sm">
         {title}
-        <span className="ml-2 text-muted-foreground">
-          {items.length} to install
-          {leftOut.length > 0 ? `, ${leftOut.length} left out` : ""}
+        <span className="ml-1.5 font-normal text-muted-foreground">
+          {count}
         </span>
-      </h3>
-      {items.length === 0 && leftOut.length === 0 ? (
-        <p className="mt-1 text-muted-foreground text-sm">{empty}</p>
-      ) : (
-        <ul className="mt-2 flex flex-col gap-2">
-          {items.map((item) => (
-            <Row
-              detail={item.detail}
-              icon={<IconCheck className="size-4 text-primary" />}
-              instructions={item.instructions}
-              key={item.key}
-              title={item.title}
-            />
-          ))}
-          {leftOut.map((item) => (
-            <Row
-              detail={item.reason}
-              icon={<IconMinus className="size-4 text-muted-foreground" />}
-              key={`left-out:${item.name}`}
-              muted
-              title={item.name}
-            />
-          ))}
-        </ul>
-      )}
+      </h2>
+      <PageRows className="mt-2">{children}</PageRows>
     </section>
   );
 }
 
-function Row({
-  icon,
-  title,
-  detail,
-  instructions,
-  muted = false,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  detail?: string;
-  /** A skill's instructions, behind a disclosure. */
-  instructions?: string;
-  muted?: boolean;
-}) {
+function RowStatus({ state }: { state: RowState }) {
+  if (state.kind === "idle") return null;
   return (
-    <li className="flex gap-2 text-sm">
-      <span className="mt-0.5 shrink-0">{icon}</span>
-      <div className="min-w-0 flex-1">
-        <span className={muted ? "text-muted-foreground" : "font-medium"}>
-          {title}
+    <ItemActions className="max-w-[45%] justify-end text-right text-xs">
+      {state.kind === "working" ? (
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <IconLoader2 className="size-4 motion-safe:animate-spin" />
+          Adding
         </span>
-        {detail ? (
-          <span className="block break-words text-muted-foreground">
-            {detail}
-          </span>
-        ) : null}
-        {instructions ? (
-          <details className="mt-1">
-            <summary className="cursor-pointer text-muted-foreground">
-              Read the instructions
-            </summary>
-            <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border p-2 font-mono text-xs">
-              {instructions}
-            </pre>
-          </details>
-        ) : null}
-      </div>
-    </li>
+      ) : state.kind === "done" ? (
+        <span className="flex items-center gap-1.5 text-success">
+          <IconCircleCheck className="size-4" />
+          {state.label}
+        </span>
+      ) : state.kind === "setup" ? (
+        <Button
+          render={
+            // A server that was added opens on its own page, where each person signs in. One
+            // refused for want of a key was never added, so it is added again with the key.
+            state.serverId ? (
+              <Link params={{ key: state.serverId }} to="/connections/$key" />
+            ) : (
+              <Link to="/connections/new" />
+            )
+          }
+          size="sm"
+          variant="outline"
+        >
+          {state.label}
+        </Button>
+      ) : (
+        <span className="flex items-start gap-1.5 text-destructive">
+          <IconAlertTriangle className="mt-px size-4 shrink-0" />
+          {state.label}
+        </span>
+      )}
+    </ItemActions>
   );
 }
 
-const SERVER_STATUS: Record<ServerResult["status"], string> = {
-  added: "Added. Give its tools to a Bot from Connections.",
-  "sign-in": "Added. Each person signs in to it from Connections.",
-  "already-added": "Already added here.",
-  "needs-key": "Needs a key, which an admin adds from Connections.",
-  "not-approved": "Not on your admin's list of approved servers.",
-  failed: "Not added.",
-};
+/** A server's outcome as its row says it: added, a step left to take, or why it wasn't added. */
+function serverOutcome(server: ServerResult): RowState {
+  switch (server.status) {
+    case "added":
+    case "already-added":
+      return {
+        kind: "done",
+        label: server.status === "added" ? "Added" : "Already added",
+      };
+    case "sign-in":
+      return {
+        kind: "setup",
+        label: "Finish setup",
+        ...(server.serverId ? { serverId: server.serverId } : {}),
+      };
+    case "needs-key":
+      return {
+        kind: "setup",
+        label: "Add a key",
+        ...(server.serverId ? { serverId: server.serverId } : {}),
+      };
+    case "not-approved":
+      return {
+        kind: "failed",
+        label: "Not on your admin's approved list.",
+      };
+    case "failed":
+      return { kind: "failed", label: server.message ?? "Not added." };
+  }
+}
 
-/** What the install came to, row by row: one failure stops nothing else, so each says its own. */
-export function InstallOutcome({
-  result,
-  onDone,
-}: {
-  result: InstallResult;
-  onDone: () => void;
-}) {
-  const ok = (status: ServerResult["status"]) =>
-    status === "added" || status === "sign-in" || status === "already-added";
+/** One line on what the install came to, read out when it lands. */
+export function Outcome({ result }: { result: InstallResult }) {
+  const saved = result.skills.filter((skill) => skill.saved).length;
+  const is = (...statuses: ServerResult["status"][]) =>
+    result.servers.filter((server) => statuses.includes(server.status)).length;
+  // A server refused for want of a key was never added: it is a step left, not an install.
+  const added = is("added", "already-added", "sign-in");
+  const signIn = is("sign-in");
+  const needsKey = is("needs-key");
+  const failed = result.skills.length - saved + is("not-approved", "failed");
+  const servers = (n: number) => `${n} server${n === 1 ? "" : "s"}`;
+  const parts = [
+    saved > 0 ? `${saved} skill${saved === 1 ? "" : "s"}` : "",
+    added > 0 ? `${added} server${added === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
   return (
-    <div className="flex flex-col gap-5">
-      {result.skills.length > 0 ? (
-        <section>
-          <h3 className="font-medium text-sm">Skills</h3>
-          <ul className="mt-2 flex flex-col gap-2">
-            {result.skills.map((skill) => (
-              <Row
-                detail={
-                  skill.saved
-                    ? "Saved. Put it on a Bot from the Bot's Skills."
-                    : skill.message
-                }
-                icon={
-                  skill.saved ? (
-                    <IconCheck className="size-4 text-primary" />
-                  ) : (
-                    <IconAlertTriangle className="size-4 text-destructive" />
-                  )
-                }
-                key={skill.slug}
-                title={`/${skill.slug}`}
-              />
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      {result.servers.length > 0 ? (
-        <section>
-          <h3 className="font-medium text-sm">Servers</h3>
-          <ul className="mt-2 flex flex-col gap-2">
-            {result.servers.map((server) => (
-              <Row
-                detail={[
-                  SERVER_STATUS[server.status],
-                  ok(server.status) ? "" : server.message,
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                icon={
-                  ok(server.status) ? (
-                    <IconCheck className="size-4 text-primary" />
-                  ) : (
-                    <IconAlertTriangle className="size-4 text-destructive" />
-                  )
-                }
-                key={server.name}
-                title={server.name}
-              />
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      <div className="flex gap-2">
-        <Button onClick={onDone}>Done</Button>
-        {result.servers.length > 0 ? (
-          <Button render={<Link to="/connections" />} variant="ghost">
-            Open Connections
-          </Button>
-        ) : null}
-      </div>
+    <div
+      className="rounded-lg border border-border bg-card p-4 text-sm dark:border-transparent"
+      role="status"
+    >
+      <p className="flex items-center gap-2 font-medium">
+        {failed > 0 || needsKey > 0 ? (
+          <IconAlertTriangle className="size-4 text-warning" />
+        ) : (
+          <IconCircleCheck className="size-4 text-success" />
+        )}
+        {parts.length > 0
+          ? `Installed ${parts.join(" and ")}.`
+          : "Nothing was installed."}
+      </p>
+      <p className="mt-1 text-muted-foreground">
+        {[
+          signIn > 0
+            ? `Finish setting up ${signIn === 1 ? "1 server" : servers(signIn)} by signing in before a Bot can use ${signIn === 1 ? "it" : "them"}.`
+            : "",
+          needsKey > 0
+            ? `${servers(needsKey)} need${needsKey === 1 ? "s" : ""} a key, which an admin adds from Connections.`
+            : "",
+          failed > 0
+            ? `${failed} couldn't be installed; each row says why.`
+            : "",
+          saved > 0 ? "Put a skill on a Bot from that Bot's Skills page." : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      </p>
     </div>
   );
 }
