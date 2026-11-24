@@ -208,6 +208,124 @@ async function pick(view: ReturnType<typeof render>, name: RegExp) {
   await userEvent.click(await view.findByRole("radio", { name }));
 }
 
+test("provider catalogue scrolls separately from the anchored selection and actions", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return allProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = render(
+    <ProviderPicker
+      chosen={null}
+      held={{}}
+      root="/tmp/openbot-provider-root"
+      onBack={() => {}}
+      onChoose={() => {}}
+      failure={<p>Start needs another attempt.</p>}
+      status={<p>Setting up OpenBot meanwhile.</p>}
+    />,
+  );
+  await view.findByRole("radio", { name: /^OpenAI-compatible/ });
+  const sheet = view
+    .getByRole("heading", { name: "Connect your AI" })
+    .closest(".sheet");
+  const body = sheet?.querySelector(":scope > .setup-body");
+  const footer = view
+    .getByRole("button", { name: "Continue" })
+    .closest(".setup-footer");
+  expect(sheet?.classList.contains("provider-layout")).toBe(true);
+  expect(
+    sheet?.querySelector(":scope > .setup-header-block h1"),
+  ).not.toBeNull();
+  expect(body).not.toBeNull();
+  expect(footer?.parentElement).toBe(sheet);
+  expect(
+    view.getByRole("button", { name: "Back" }).closest(".setup-footer"),
+  ).toBe(footer);
+  expect(view.getByText("Setting up OpenBot meanwhile.").parentElement).toBe(
+    footer,
+  );
+  expect(view.getByText("Start needs another attempt.").parentElement).toBe(
+    body,
+  );
+  expect(
+    view.getByRole("group", { name: "Model provider" }).parentElement,
+  ).toBe(body);
+  expect(body?.querySelector(".setup-panel")).toBeNull();
+
+  await pick(view, /^OpenAI-compatible/);
+  expect(
+    document.activeElement ===
+      view.getByRole("radio", { name: /^OpenAI-compatible/ }),
+  ).toBe(true);
+  expect(
+    view.getByRole("group", { name: "Model provider" }).parentElement,
+  ).toBe(sheet);
+  expect(
+    view
+      .getByLabelText("Base URL")
+      .closest(".setup-content.setup-panel.chosen-provider")?.parentElement,
+  ).toBe(body);
+  await userEvent.click(view.getByText("Advanced compatible endpoint options"));
+  expect(
+    view
+      .getByLabelText("Container Base URL, if different")
+      .closest(".setup-body"),
+  ).toBe(body);
+  await userEvent.click(
+    view.getByRole("button", { name: "Choose a different provider" }),
+  );
+  expect(
+    view.getByRole("group", { name: "Model provider" }).parentElement,
+  ).toBe(body);
+  expect(body?.querySelector(".setup-panel")).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Continue" }).closest(".setup-footer"),
+  ).toBe(footer);
+});
+
+test("plan wait, signed-in confirmation and API key share one body with stable footer actions", async () => {
+  const finished = deferred<string>();
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    if (command === "finish_chatgpt_sign_in") return finished.promise;
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  await pick(view, /^OpenAI/);
+  const identity = view.getByRole("group", { name: "Model provider" });
+  const footer = view
+    .getByRole("button", { name: "Continue" })
+    .closest(".setup-footer");
+  const panel = view.container.querySelector(
+    ".setup-body > .setup-content.setup-panel.chosen-provider",
+  );
+  expect(panel).not.toBeNull();
+  expect(footer).not.toBeNull();
+  expect(identity.parentElement).toBe(footer?.parentElement);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
+  );
+  expect(
+    (await view.findByText("Waiting for you to approve it…")).closest(
+      ".chosen-provider",
+    ),
+  ).toBe(panel);
+  await act(async () => finished.resolve("chatgpt-token"));
+  expect(
+    (await view.findByText(/Signed in to OpenAI/)).closest(".chosen-provider"),
+  ).toBe(panel);
+  await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+  expect(
+    view.getByLabelText("OpenAI API key").closest(".chosen-provider"),
+  ).toBe(panel);
+  expect(view.getByRole("group", { name: "Model provider" })).toBe(identity);
+  expect(
+    view.getByRole("button", { name: "Continue" }).closest(".setup-footer"),
+  ).toBe(footer);
+});
+
 /*
  * Every "Sign in with" button carries the mark of the provider it signs in to, as the web app's
  * sign-in buttons do. They carried none, and Google's and xAI's rows had no mark to carry.
