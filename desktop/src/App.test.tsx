@@ -343,7 +343,7 @@ async function steadied(payload: ProgressEvent) {
 test("approved install layout keeps focused progress in the body and recovery actions in the footer", async () => {
   const { view, preparation, retry } = await beginPendingInstallation();
   const heading = view.getByRole("heading", { name: "Installing OpenBot" });
-  const sheet = heading.closest(".sheet");
+  const sheet = heading.closest<HTMLElement>(".sheet");
   expect(sheet?.matches(".setup-layout.install-layout")).toBe(true);
   expect(heading.parentElement?.matches(".setup-header-block")).toBe(true);
   expect(heading.parentElement?.parentElement).toBe(sheet);

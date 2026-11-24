@@ -107,7 +107,7 @@ test("groups the waiting status, current comparison code and recovery actions as
       onCancel={onCancel}
     />,
   );
-  const group = screen.container.querySelector(".sign-in-wait");
+  const group = screen.container.querySelector<HTMLElement>(".sign-in-wait");
   expect(group).not.toBeNull();
   expect(
     screen.getByText("Checking your sign-in…").closest(".status-line")
