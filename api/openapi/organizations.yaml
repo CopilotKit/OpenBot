@@ -1528,6 +1528,9 @@ components:
         is taken (SEAT_REQUIRED). An owner or an admin adds a seat at
         addSeatUrl, and the invitation can be sent once it is added. Nothing
         was invited.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
