@@ -122,6 +122,18 @@ test("each section's name is written under its icon, and read out once", () => {
   expect(button.querySelector(".sr-only")).toBeNull();
 });
 
+test("each section's icon sits in a square, the account's size", () => {
+  const view = inSidebar(
+    <Strip>
+      <StripItem icon={IconMessages} label="Conversations" />
+    </Strip>,
+  );
+  const button = view.getByRole("button", { name: "Conversations" });
+  const square = button.querySelector('[data-slot="strip-icon"]');
+  expect(square?.className.split(" ")).toContain("size-9");
+  expect(square?.className).not.toMatch(/\b[hw]-\d/);
+});
+
 test("an item with nothing more to say than its name has no tooltip", () => {
   const view = inSidebar(
     <Strip>

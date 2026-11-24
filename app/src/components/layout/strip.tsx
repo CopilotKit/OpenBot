@@ -81,7 +81,7 @@ export const stripItemClassName = cn(
 const stripSectionClassName = cn(
   "group/strip-item relative flex w-full shrink-0 flex-col items-center gap-1 rounded-md px-0.5 py-1 text-sidebar-foreground/75 outline-hidden ring-sidebar-ring transition-colors",
   "hover:text-sidebar-foreground focus-visible:ring-2 data-active:text-sidebar-foreground",
-  "data-active:before:absolute data-active:before:top-5 data-active:before:left-0 data-active:before:h-5 data-active:before:w-[3px] data-active:before:-translate-y-1/2 data-active:before:rounded-full data-active:before:bg-sidebar-foreground",
+  "data-active:before:absolute data-active:before:top-5.5 data-active:before:left-0 data-active:before:h-5 data-active:before:w-[3px] data-active:before:-translate-y-1/2 data-active:before:rounded-full data-active:before:bg-sidebar-foreground",
 );
 
 /**
@@ -123,7 +123,10 @@ export function StripItem({
         type: isButton ? "button" : undefined,
         children: (
           <>
-            <span className="relative flex h-8 w-11 items-center justify-center rounded-lg transition-colors group-hover/strip-item:bg-foreground/5 group-data-active/strip-item:bg-foreground/[0.07] [&_svg]:size-5 [&_svg]:shrink-0">
+            <span
+              className="relative flex size-9 items-center justify-center rounded-lg transition-colors group-hover/strip-item:bg-foreground/5 group-data-active/strip-item:bg-foreground/[0.07] [&_svg]:size-5 [&_svg]:shrink-0"
+              data-slot="strip-icon"
+            >
               <ItemIcon aria-hidden="true" stroke={1.75} />
             </span>
             <span
@@ -134,7 +137,7 @@ export function StripItem({
             </span>
             {/* After the name, so it is read after it, and drawn on the icon square's top-right corner. */}
             {end ? (
-              <span className="absolute top-0.5 right-[calc(50%-1.5rem)] flex">
+              <span className="absolute top-0.5 right-[calc(50%-1.25rem)] flex">
                 {end}
               </span>
             ) : null}
