@@ -8705,6 +8705,46 @@ for (const provider of [
   }
 }
 
+test("a finishing Start failure offers its real problem and troubleshooting actions once", async () => {
+  useCompatibleEndpointSetup({});
+  const problem = {
+    said: "OpenBot could not start its apps.",
+    detail: "Synthetic start failure with diagnostic detail.",
+    cause: "The computer has no room for the apps.",
+  };
+  const previous = invokeHandler;
+  let starts = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack" && starts++ === 0) throw problem;
+    if (command === "save_troubleshooting_logs") return null;
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint(
+    "https://models.example/v1",
+    "synthetic-model-key",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByText(problem.said);
+  await view.findByRole("button", { name: "Retry" });
+  expect(view.getAllByRole("alert")).toHaveLength(1);
+  expect(view.getAllByRole("button", { name: "Copy logs" })).toHaveLength(1);
+  expect(view.getAllByRole("button", { name: "Save to a file" })).toHaveLength(
+    1,
+  );
+  expect(view.getByText(problem.detail)).toBeTruthy();
+  expect(view.getByText(problem.cause)).toBeTruthy();
+  await userEvent.click(view.getByRole("button", { name: "Save to a file" }));
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({
+      command: "save_troubleshooting_logs",
+      args: { failure: `${problem.said}\n${problem.detail}` },
+    }),
+  );
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await expectHandover();
+  expect(starts).toBe(2);
+});
+
 test("Start credential failures do not expose a restore action", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;

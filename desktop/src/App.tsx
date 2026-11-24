@@ -1935,6 +1935,18 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * nothing runs.
    */
   if (starting) {
+    // Start keeps the native problem here; the sequence otherwise only knows that Start failed.
+    // Present it beside its Retry once, preserving separate notices and earlier sequence failures.
+    const startFailure =
+      !freshInstall &&
+      displayedFailure === recoveryFailure &&
+      local.at === "start" &&
+      local.stopped &&
+      !local.problem &&
+      local.blocked?.said === "OpenBot did not start." &&
+      leftoverVolumes.length === 0
+        ? recoveryFailure
+        : null;
     return (
       <main>
         <SetupRail>{!returning && <Sections at="Start" />}</SetupRail>
@@ -1952,7 +1964,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
             <div className="setup-content">
               {freshInstall || (
                 <LocalIntelligence
-                  sequence={local}
+                  sequence={
+                    startFailure ? { ...local, problem: startFailure } : local
+                  }
                   offerStart
                   handOff={handOff}
                   open={steps}
@@ -1981,9 +1995,11 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
               {pauseCard}
               {updatingLine}
               {/* Leftover data is a choice, offered above, not a failure to report here. */}
-              {displayedFailure && leftoverVolumes.length === 0 && (
-                <Failure problem={displayedFailure} />
-              )}
+              {displayedFailure &&
+                !startFailure &&
+                leftoverVolumes.length === 0 && (
+                  <Failure problem={displayedFailure} />
+                )}
               {!local.running && !busy && (
                 <div className="row">
                   <button
