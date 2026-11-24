@@ -321,24 +321,40 @@ test("the journey is the sole current operation above completed milestones and C
   expectJourneyOnly(screen, CONNECT);
 });
 
-test("the journey keeps the release's data reassurance and last-step cancellation restriction", async () => {
+test("release reassurance stays below completed milestones when the update begins", async () => {
   invokeHandler = answers({ run_local_eval: [ready] });
   const opening = deferred<StartOutcome>();
-  const screen = view({
+  const props: Props = {
     stack: "local-abc123",
     connected: true,
     onStart: () => opening.promise,
-    open: [
-      { step: "release", ok: true, running: true, detail: "Updating OpenBot." },
-    ],
-  });
-  await waitFor(() =>
-    expect(
-      screen.getByText(
-        "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
-      ),
-    ).toBeTruthy(),
+  };
+  const screen = view(props);
+  await screen.findByText(
+    "You can't cancel this last step. Stopping it partway could leave OpenBot half started.",
   );
+  expectJourneyOnly(screen, START);
+  const milestones = row(screen, SETUP).parentElement;
+  const above = milestones?.previousElementSibling;
+  screen.rerender(
+    <Holder
+      {...props}
+      open={[
+        {
+          step: "release",
+          ok: true,
+          running: true,
+          detail: "Updating OpenBot.",
+        },
+      ]}
+    />,
+  );
+  const reassurance = screen.getByText(
+    "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+  );
+  expect(row(screen, SETUP).parentElement).toBe(milestones);
+  expect(milestones?.previousElementSibling === above).toBe(true);
+  expect(milestones?.nextElementSibling === reassurance).toBe(true);
   expectJourneyOnly(screen, START);
   expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   expect(

@@ -1286,7 +1286,8 @@ export function LocalIntelligence({
   // update notes and recovery directions stay visible separately, without claiming completion.
   const journeying = offerStart && running && !stopped && !sequence.held;
   const releasing = open.some((row) => row.step === "release" && row.running);
-  const detail = at === "start" && releasing ? RELEASE_SAID : sequence.detail;
+  const releaseDetail = at === "start" && releasing;
+  const detail = releaseDetail ? RELEASE_SAID : sequence.detail;
   const completed = (row: Progress) =>
     row.ok &&
     !row.running &&
@@ -1326,7 +1327,7 @@ export function LocalIntelligence({
           releaseDue={releaseDue}
         />
       )}
-      {journeying && detail && <p>{detail}</p>}
+      {journeying && !releaseDetail && detail && <p>{detail}</p>}
       {notices.length > 0 && (
         <SetupProgress steps={notices} presentation="focus" />
       )}
@@ -1337,6 +1338,9 @@ export function LocalIntelligence({
           offerStart ? (journeying ? "milestones" : "focus") : "list"
         }
       />
+      {/* The release reassurance arrives after Start begins. Keep it below completed work so
+          those milestones stay anchored when the update starts or its download changes. */}
+      {journeying && releaseDetail && <p>{detail}</p>}
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && !waitingOn && !room && (
