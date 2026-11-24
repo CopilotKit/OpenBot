@@ -471,7 +471,8 @@ describe("one press of an app found by searching Connections", () => {
       () => {
         const tile = again.view.getByTestId("directory-slack");
         expect(tile.textContent).toContain("Requested");
-        expect((tile as HTMLButtonElement).disabled).toBe(true);
+        // A plain tile with nothing to press, never a faded, disabled button.
+        expect(tile.tagName).not.toBe("BUTTON");
       },
       { timeout: 3_000 },
     );

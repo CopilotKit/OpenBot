@@ -619,7 +619,15 @@ function RouteComponent() {
           {press.error}
         </p>
       ) : null}
-      <SignInNote press={press} />
+      <SignInNote
+        name={
+          directoryEntries.find((entry) => entry.id === press.signingIn)
+            ?.title ??
+          signingInApp?.title ??
+          "the app"
+        }
+        press={press}
+      />
       {/* What a move to OpenBot Cloud left to connect again, and the way to the list of it. */}
       <MovedAppsNotice />
       {/*
@@ -859,7 +867,14 @@ function ConnectionGrid({
  * Under the notices, while a sign-in this page opened is out: where to finish it, or the link when
  * the browser blocked the tab. The tile itself has left the directory's matches by then.
  */
-function SignInNote({ press }: { press: DirectoryPress }) {
+function SignInNote({
+  press,
+  name,
+}: {
+  press: DirectoryPress;
+  /** The app the sign-in is for. */
+  name: string;
+}) {
   const { tab, signingIn } = press;
   if (!signingIn) return null;
   if (tab.blockedUrl)
@@ -872,7 +887,7 @@ function SignInNote({ press }: { press: DirectoryPress }) {
           rel="noreferrer"
           target="_blank"
         >
-          Open the sign-in
+          Open {name}'s sign-in
         </a>
         .
       </p>
@@ -880,7 +895,7 @@ function SignInNote({ press }: { press: DirectoryPress }) {
   if (tab.waiting)
     return (
       <p className="mt-4 text-muted-foreground text-sm" role="status">
-        Finish signing in in the tab that opened.
+        Finish signing in to {name} in the tab that opened.
       </p>
     );
   return null;
@@ -960,14 +975,14 @@ function ConnectionItem({
       data-testid={
         row.directoryEntryId ? `directory-${row.key}` : `account-${row.key}`
       }
+      /*
+       * A tile asked for and waiting draws as a plain tile, like Shared account: nothing to press,
+       * and never a disabled button, which faded the whole tile and its mark.
+       */
       render={
-        onPress || row.requested ? (
-          <button
-            disabled={pending || row.requested === true}
-            onClick={onPress}
-            type="button"
-          />
-        ) : (
+        onPress ? (
+          <button disabled={pending} onClick={onPress} type="button" />
+        ) : row.requested ? undefined : (
           <Link params={{ key: row.key }} to="/connections/$key" />
         )
       }

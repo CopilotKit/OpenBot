@@ -237,7 +237,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   your account (a sign-in, a key form, or nothing for an app with no account) when you're an owner
   or admin of the organization, which on OpenBot Cloud is usually you. A member's press asks an admin
   to add it, and the request reads "Add Slack for everyone" in the admin's requests. Browse apps
-  opened from Connections does the same; Admin's own Browse apps still only adds.
+  opened from Connections does the same; Admin's own Browse apps still only adds. An owner or admin
+  also removes an app from its own page under Connections, with Admin's "Enable for this
+  organization" switch, so adding and removing never need Admin. A member isn't shown it.
 
 ### API
 
