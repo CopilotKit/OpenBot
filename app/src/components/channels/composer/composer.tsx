@@ -40,6 +40,7 @@ import {
 } from "@/lib/channels/attachments";
 import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
 import { newId } from "@/lib/new-id";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { cn } from "@/lib/utils";
 import { Button } from "../../ui/button";
 import { AttachmentStrip } from "./attachment-strip";
@@ -1330,6 +1331,10 @@ export function Composer({
       ) {
         return;
       }
+
+      // Bots can't run until a card is added: the dialog says why, and every word stays where it
+      // was typed, so the message goes with one press once the card is there.
+      if (stopIfNeedsCard()) return;
 
       // Before anything is cleared or parked: a held send keeps every word where it was typed.
       if (onSendHeld) {

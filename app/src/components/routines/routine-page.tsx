@@ -49,6 +49,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { deleteQuestion } from "@/lib/delete-question";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { routineDoes } from "@/lib/routines/merged";
 import {
@@ -388,7 +389,11 @@ export function RoutinePage({
               <button
                 aria-label={`Run the routine scheduled ${routine.schedule} now`}
                 disabled={!routine.enabled || runNow.isPending}
-                onClick={() => runNow.mutate(routine.id)}
+                onClick={() => {
+                  // Bots can't run until a card is added: the dialog says why, in place of a run.
+                  if (stopIfNeedsCard()) return;
+                  runNow.mutate(routine.id);
+                }}
                 type="button"
               />
             }

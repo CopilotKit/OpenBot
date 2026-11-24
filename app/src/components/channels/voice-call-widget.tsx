@@ -21,6 +21,7 @@ import {
 import { LiveWaveform } from "@/components/ui/live-waveform";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { cn } from "@/lib/utils";
 import type { useVoiceCall } from "@/lib/voice/use-voice-call";
 import { queryClient } from "@/query-client";
@@ -278,7 +279,11 @@ export function VoiceCallWidget({
                 variant="ghost"
                 size="sm"
                 className="mt-2"
-                onClick={() => void session.start()}
+                onClick={() => {
+                  // Bots can't run until a card is added: the dialog says why, in place of a call.
+                  if (stopIfNeedsCard()) return;
+                  void session.start();
+                }}
               >
                 Try again
               </Button>
