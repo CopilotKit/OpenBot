@@ -40594,7 +40594,7 @@ components:
                 type: https://open.bot/errors/plan-required
                 title: This organization needs a plan.
                 status: 402
-                detail: This organization's free trial is used up. Ask an admin to add a card.
+                detail: You've used your free trial. Ask an admin to add a card to keep your Bots running.
                 code: PLAN_REQUIRED
                 category: permission
                 retryable: false
