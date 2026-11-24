@@ -1,4 +1,4 @@
-import { IconSettings, type TablerIcon } from "@tabler/icons-react";
+import { IconSettings, type Icon } from "@/components/icons";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { SettingsToolCallState } from "./registry";
@@ -24,7 +24,7 @@ export function SettingsReadCard({
   title: string;
   /** One line under the title. */
   caption?: string;
-  icon?: TablerIcon;
+  icon?: Icon;
   state: SettingsToolCallState;
   /** Why it was refused or didn't work, in the person's words. */
   reason?: string;

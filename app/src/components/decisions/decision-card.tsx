@@ -1,4 +1,4 @@
-import { IconCheck } from "@tabler/icons-react";
+import { IconCheck } from "@/components/icons";
 import { type RegisterableHotkey, useHotkeys } from "@tanstack/react-hotkeys";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useId, useRef, useState } from "react";
@@ -293,7 +293,10 @@ export function DecisionCard({
             transition={{ ...fold, delay: reduceMotion ? 0 : 0.06 }}
           >
             <p className="flex min-w-0 items-center gap-2 border-border border-t px-4 py-2.5 text-sm">
-              <IconCheck aria-hidden className="size-4 shrink-0 text-success" />
+              <IconCheck
+                aria-hidden
+                className="size-4 shrink-0 text-success-ink"
+              />
               <span className="font-medium">
                 {answer.choice ?? answer.label}
               </span>

@@ -8,7 +8,7 @@ import {
   IconTag,
   IconUsers,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
@@ -325,7 +325,7 @@ function ComponentDetail({
             <>
               <Item size="sm">
                 <ItemMedia variant="icon">
-                  <IconAlertTriangle className="text-warning" />
+                  <IconAlertTriangle className="text-warning-ink" />
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>Not in this build</ItemTitle>

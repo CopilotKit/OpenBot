@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
+import { Notice } from "@/components/ui/notice";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { computerModeQueryOptions } from "@/lib/enterprise/queries";
-import { cn } from "@/lib/utils";
 
 /**
  * Said to an admin wherever Admin talks about computers: this OpenBot runs every person's Bots on
@@ -27,18 +27,16 @@ export function SharedComputersNotice({ className }: { className?: string }) {
   });
   if (!admin || !team || mode.data !== "shared") return null;
   return (
-    <p
-      className={cn(
-        "rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm",
-        className,
-      )}
+    <Notice
+      className={className}
       data-shared-computers-notice=""
+      variant="warning"
     >
       <span className="font-medium">Everyone's Bots share one computer.</span> A
       command one Bot runs can read another person's files there, so use this
       only for a proof of concept. To give each person a computer of their own,
       set <code>computers.mode: sandbox</code> in the Helm chart, or{" "}
       <code>COMPUTER_SUPERVISOR_URL</code> with Docker Compose.
-    </p>
+    </Notice>
   );
 }

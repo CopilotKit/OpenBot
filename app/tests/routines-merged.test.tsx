@@ -22,10 +22,12 @@ import {
   scheduleWords,
 } from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
+import { orbName } from "@/lib/orb-palette";
 import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { Route as BotGoalsRoute } from "@/routes/_authed/_app/bots.$agentId.responsibilities";
 import { Route as ResponsibilitiesRoute } from "@/routes/_authed/_app/responsibilities";
+import { clearSkin, setSkin } from "@/skins/store";
 import { answerBotsList } from "./bots-api";
 import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
 import {
@@ -167,8 +169,8 @@ function serving({
     }
     const bots = answerBotsList(input, init, {
       visible: [
-        { id: "expenses", name: "Expenses" },
-        { id: "knowledge", name: "Knowledge" },
+        { id: "expenses", name: "Expenses", avatarSeed: "expenses" },
+        { id: "knowledge", name: "Knowledge", avatarSeed: "knowledge" },
       ],
     });
     if (bots) return bots;
@@ -536,10 +538,52 @@ test("every kind of row is one link or button with a chevron, with no control in
     const row = view.getByText(text).closest("a, button") as HTMLElement;
     expect(row).not.toBeNull();
     expect(row.querySelector("button, a, input, [role=switch]")).toBeNull();
-    expect(row.querySelector(".tabler-icon-chevron-right")).not.toBeNull();
+    expect(row.querySelector(".icon-chevron-right")).not.toBeNull();
   }
   expect(view.queryByRole("switch")).toBeNull();
   expect(view.queryByRole("button", { name: /^Delete/ })).toBeNull();
+});
+
+test("in the current kit every kind of row leads with its Bot's tile, the designers' gradient for its colour", async () => {
+  serving({
+    routines: [routine("r1", "expenses")],
+    checkIns: [checkIn("c1", "expenses", "The launch brief")],
+  });
+  const view = draw();
+  await view.findByText("Post the standup summary.");
+  const gradient = `var(--gradient-bot-${orbName("expenses")})`;
+  for (const text of [
+    "Post the standup summary.",
+    "Reconcile receipts",
+    "The launch brief",
+  ]) {
+    const row = view.getByText(text).closest("a, button") as HTMLElement;
+    const tile = row.querySelector("[data-routine-tile] > span");
+    expect(tile?.getAttribute("style")).toContain(gradient);
+    expect(row.querySelector("[data-variant=icon]")).toBeNull();
+  }
+});
+
+test("the legacy kit keeps the plain icon tile on every kind of row", async () => {
+  setSkin("openduet");
+  serving({
+    routines: [routine("r1", "expenses")],
+    checkIns: [checkIn("c1", "expenses", "The launch brief")],
+  });
+  const view = draw();
+  await view.findByText("Post the standup summary.");
+  for (const text of [
+    "Post the standup summary.",
+    "Reconcile receipts",
+    "The launch brief",
+  ]) {
+    const row = view.getByText(text).closest("a, button") as HTMLElement;
+    expect(row.querySelector("[data-routine-tile]")).toBeNull();
+    expect(
+      row.querySelector("[data-slot=item-media][data-variant=icon]"),
+    ).not.toBeNull();
+  }
+  clearSkin();
 });
 
 test("a schedule's page pauses it, runs it, shows its runs and deletes it", async () => {
@@ -663,7 +707,10 @@ test("a skipped last run is on the row, and a quiet success is not", async () =>
 test("on the every-Bot list a schedule's row names its Bot, and its page leads to that Bot", async () => {
   serving({ goals: [], routines: [routine("r1", "expenses")] });
   const view = draw(null);
-  expect(await view.findByText(/^Expenses · Weekdays at 09:00/)).toBeTruthy();
+  // On its line, or as the current kit's card's first chip beside the schedule on its own.
+  expect(
+    await view.findByText(/^(Expenses · Weekdays at 09:00|Expenses$)/),
+  ).toBeTruthy();
   const details = within(await openSchedule(view));
   expect(
     details.getByRole("link", { name: /Expenses/ }).getAttribute("href"),

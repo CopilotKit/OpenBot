@@ -1,4 +1,4 @@
-import { IconUser } from "@tabler/icons-react";
+import { IconUser } from "@/components/icons";
 import { initialsOf } from "@/lib/organizations/words";
 import { cn } from "@/lib/utils";
 

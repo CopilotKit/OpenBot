@@ -162,7 +162,7 @@ function SubtaskStatus({
   if (handedBack)
     return <span className="shrink-0 text-muted-foreground">Handed back</span>;
   if (step.failed)
-    return <span className="shrink-0 text-warning">Didn't finish</span>;
+    return <span className="shrink-0 text-warning-ink">Didn't finish</span>;
   const said = steps || (answered ? ANSWERED_DIRECTLY : "");
   return said ? (
     <span className="shrink-0 text-muted-foreground">{said}</span>

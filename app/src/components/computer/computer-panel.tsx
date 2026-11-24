@@ -2,7 +2,7 @@ import {
   IconDeviceDesktop,
   IconDeviceDesktopOff,
   IconTerminal2,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { PageEmpty } from "@/components/layout/page-parts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -126,7 +126,7 @@ function LiveComputerPanel({
           </TabsList>
           {youHaveIt ? (
             <span
-              className="rounded-full bg-warning/15 px-2.5 py-1 font-medium text-warning text-xs"
+              className="rounded-full bg-warning-subtle px-2.5 py-1 font-medium text-warning-ink text-xs"
               role="status"
             >
               You have control

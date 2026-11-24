@@ -9,7 +9,7 @@ import {
   IconHandStop,
   IconPlayerStop,
   IconProgress,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   QueryClientContext,
   useMutation,
@@ -83,13 +83,13 @@ const STATE: Record<
     label: "Needs you",
     icon: IconHandStop,
     dot: "bg-warning",
-    text: "text-warning",
+    text: "text-warning-ink",
   },
   done: {
     label: TASK_DONE_LABEL,
     icon: IconCircleCheck,
     dot: "bg-success",
-    text: "text-success",
+    text: "text-success-ink",
   },
   failed: {
     label: TASK_FAILED_LABEL,
@@ -536,7 +536,7 @@ export function TaskReport({
                     ? STATE.failed.text
                     : stoppedSince
                       ? STATE.stopped.text
-                      : "text-success",
+                      : "text-success-ink",
               )}
             />
             <span className="truncate">{title ?? "Task"}</span>
@@ -583,7 +583,7 @@ export function TaskReport({
       className={cn(
         "w-full max-w-md rounded-xl border p-3",
         kind === "needs"
-          ? "border-warning/30 bg-warning/5"
+          ? "border-warning/30 bg-warning-subtle/50"
           : stopped
             ? "border-border bg-card dark:border-transparent"
             : "border-destructive/30 bg-destructive/5",

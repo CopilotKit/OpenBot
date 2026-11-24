@@ -116,7 +116,8 @@ test("in the personal edition, a Bot with no apps points to Connections, not You
   const view = draw();
 
   const title = await view.findByText("No apps yet");
-  const empty = title.closest("[data-slot='empty']");
+  // The legacy kit's empty state, or the current kit's outlined row (PageEmpty).
+  const empty = title.closest("[data-slot='empty'], [data-page-empty]");
   expect(empty).not.toBeNull();
   const text = empty?.textContent ?? "";
   expect(text).toContain("Connect one on Connections.");

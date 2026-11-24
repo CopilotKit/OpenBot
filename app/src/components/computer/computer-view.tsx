@@ -1,7 +1,7 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import { COMPUTER_START_WAIT_MS } from "@openbot/shared/computer-start";
-import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
+import { IconLock, IconWorld, IconX } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useFittedWidth } from "@/components/browser/fitted-window";
@@ -963,7 +963,7 @@ export function ComputerView({
 
         {/* The request reason appears above the always-available ownership controls. */}
         {!driving && !settled && control?.requested ? (
-          <div className="flex items-start justify-between gap-3 border-t bg-warning/10 px-3 py-2 text-sm">
+          <div className="flex items-start justify-between gap-3 border-t bg-warning-subtle px-3 py-2 text-sm">
             <span>
               <strong className="font-medium">The Bot needs you.</strong>{" "}
               {reason}
@@ -1080,7 +1080,7 @@ export function ComputerView({
           quietly waiting on them.
         */}
         {!settled && driving && !control?.transitioning ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-warning/10 px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-warning-subtle px-3 py-2">
             <span className="text-sm">
               <strong className="font-medium">You have control.</strong> The Bot
               waits until you hand it back. Open the screen to click and type.

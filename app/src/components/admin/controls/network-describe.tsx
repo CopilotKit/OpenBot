@@ -1,4 +1,4 @@
-import { IconWorld, IconWorldOff } from "@tabler/icons-react";
+import { IconWorld, IconWorldOff } from "@/components/icons";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { DescribeField } from "@/components/boundaries/describe-rule";
@@ -257,7 +257,7 @@ function HostRows({ hosts }: { hosts: NetworkReplayHost[] }) {
                   className={
                     block
                       ? "font-medium text-destructive text-sm"
-                      : "font-medium text-success text-sm"
+                      : "font-medium text-success-ink text-sm"
                   }
                 >
                   {block ? "Would block" : "Would allow"}

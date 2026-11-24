@@ -5,13 +5,11 @@ import { shownSubtitle } from "@/lib/agents/subtitle";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
- * Room for the orb's halo inside the transcript's scroller, which cuts whatever reaches past its
- * edge. The halo (the pattern and the orb's glow) reaches 40px past the orb, and the column gives it
- * only its 16px gutter until the pane is wide enough to centre the 768px column with 24px either
- * side (52rem, with room for a scrollbar). Below that the intro steps in by the 24px it lacks.
- * Reported on 1.0.1 at the desktop's default window: the halo was cut flat at the pane's edge.
+ * Figma's "Bot Card" at the top of a conversation: white, 20px corners, the 72px orb beside the
+ * name in 32px and two lines of what the Bot does. Shared with the placeholder, which has to take
+ * exactly its room.
  */
-const HALO_ROOM = "@max-[52rem]:ps-6";
+const CARD = "flex items-center gap-4 rounded-card bg-card p-5";
 
 /**
  * The top of a conversation with one Bot: its orb, its name, what it does, and who can see it.
@@ -19,8 +17,8 @@ const HALO_ROOM = "@max-[52rem]:ps-6";
  * Drawn from the Bot's profile, with visibility shown only in the team edition.
  * It is the first thing in the transcript's scroll content and scrolls away with it.
  *
- * The empty-state pattern sits behind the orb as a halo (`.orb-pattern` in styles.css), so it follows
- * the `--empty-pattern*` tokens and a skin that turns the pattern off turns this off too.
+ * A card, as Figma draws it, rather than words on the page: it is the Bot's card, the one Home
+ * shows, at the size of a heading.
  */
 export function ConversationIntro({
   agent,
@@ -43,22 +41,23 @@ export function ConversationIntro({
     .filter((part): part is string => Boolean(part?.trim()))
     .join(" · ");
   return (
-    <div className={`flex items-center gap-5 pt-4 pb-2 ${HALO_ROOM}`}>
-      <div className="relative isolate grid shrink-0 place-items-center">
-        <div aria-hidden className="orb-pattern" />
+    <div className={CARD}>
+      <div className="grid shrink-0 place-items-center">
         <BotOrb
           name={agent.name}
           seed={agent.avatarSeed || agent.id}
-          size={96}
+          size={72}
         />
       </div>
       <div className="min-w-0">
-        <h1 className="font-bold text-3xl tracking-tight">{agent.name}</h1>
+        <h1 className="truncate font-semibold text-3xl tracking-heading">
+          {agent.name}
+        </h1>
         {/* Two lines at most: a role can run to a paragraph, and the intro introduces, it doesn't brief.
             The whole role is on the Bot's page and in the detail pane. */}
         {about ? (
           <p
-            className="mt-1 line-clamp-2 max-w-[60ch] text-muted-foreground"
+            className="mt-2 line-clamp-2 text-muted-foreground text-sm"
             title={about}
           >
             {about}
@@ -90,20 +89,16 @@ export function ConversationIntroPlaceholder() {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   return (
-    <div
-      aria-hidden
-      className={`flex items-center gap-5 pt-4 pb-2 ${HALO_ROOM}`}
-    >
-      <div className="relative isolate grid shrink-0 place-items-center">
-        <div className="orb-pattern" />
-        <Skeleton className="size-24 rounded-full" />
+    <div aria-hidden className={CARD}>
+      <div className="grid shrink-0 place-items-center">
+        <Skeleton className="size-18 rounded-full" />
       </div>
       <div className="min-w-0 flex-1">
         {/* The heading's line, then two lines of role, as `line-clamp-2` allows. */}
         <div className="flex h-9 items-center">
           <Skeleton className="h-7 w-48" />
         </div>
-        <div className="mt-1 flex h-12 max-w-[60ch] flex-col justify-around">
+        <div className="mt-2 flex h-[2lh] flex-col justify-around text-sm">
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-2/3" />
         </div>

@@ -1,7 +1,4 @@
-import {
-  IconAdjustmentsHorizontal,
-  IconToggleRight,
-} from "@tabler/icons-react";
+import { IconAdjustmentsHorizontal, IconToggleRight } from "@/components/icons";
 import {
   type AdminCardState,
   AdminChangeCard,

@@ -2,10 +2,11 @@ import {
   IconCheck,
   IconChevronDown,
   IconChevronLeft,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { createContext, type ReactNode, useContext, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BrandName } from "@/components/edition/brand-name";
+import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Popover,
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/popover";
 import { appConfig } from "@/lib/generated/application-config";
 import { cn } from "@/lib/utils";
+import { useKit } from "@/skins/store";
 
 /**
  * The frame every onboarding step sits in: one DOM, laid out two ways by CSS.
@@ -60,6 +62,7 @@ export function OnboardingFrame({
   intro,
   demo,
   demoFirst = false,
+  wideDemo = false,
 }: {
   /** Every step's name, in order. */
   titles: string[];
@@ -95,22 +98,45 @@ export function OnboardingFrame({
   demo?: ReactNode;
   /** Below `lg`, the picture above the heading. */
   demoFirst?: boolean;
+  /** The picture needs the room, such as the booking calendar: the words' pane narrows. */
+  wideDemo?: boolean;
 }) {
+  const currentKit = useKit() === "current";
   const total = titles.length;
   const shape =
-    "h-[52px] w-full rounded-full px-5 text-sm font-semibold lg:h-10 lg:w-auto lg:min-w-32 lg:rounded-lg";
+    "h-[52px] w-full rounded-full px-5 text-sm font-semibold lg:h-10 lg:w-auto lg:min-w-32 lg:rounded-lg kit:lg:min-w-0 kit:lg:rounded-full";
   return (
     <div
-      className="grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:h-svh lg:grid-cols-[minmax(28rem,40rem)_minmax(0,1fr)] lg:grid-rows-[auto_auto_1fr_auto]"
+      className={cn(
+        "grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:h-svh lg:grid-cols-[minmax(28rem,40rem)_minmax(0,1fr)] lg:grid-rows-[auto_auto_1fr_auto]",
+        // The UI Kit's frame (styles.css): the words' pane 560px at most, narrower for a calendar.
+        wideDemo
+          ? "kit:lg:grid-cols-[26rem_minmax(0,1fr)]"
+          : "kit:lg:grid-cols-[minmax(26rem,35rem)_minmax(0,1fr)]",
+      )}
       data-onboarding-frame=""
+      data-wide-demo={wideDemo ? "" : undefined}
     >
+      {/*
+       * The words' pane, drawn behind the header, the words and the buttons, which are three rows of
+       * this grid: the current kit only (styles.css), with the notches where it meets the page.
+       * Those three are positioned too, so they paint over it in the order they come.
+       */}
+      <div
+        aria-hidden
+        className="hidden kit:lg:col-start-1 kit:lg:row-span-4 kit:lg:row-start-1 kit:lg:block"
+        data-onboarding-pane=""
+      >
+        <span data-onboarding-notch="top" />
+        <span data-onboarding-notch="bottom" />
+      </div>
       {/*
        * In OpenBot Desktop on macOS the window's buttons sit over the page's top-left corner, where
        * the one-column layout puts Back (a 1000px window is one column). The desktop marks the page
        * (`data-desktop-titlebar`, macOS only), and draws them about 21–37px down, so the header then
        * starts 48px down, below them, in one column and in two.
        */}
-      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background lg:col-start-1 pt-[env(safe-area-inset-top)] max-lg:in-data-[desktop-titlebar=overlay]:pt-12 lg:in-data-[desktop-titlebar=overlay]:pt-12 lg:static lg:bg-transparent lg:px-10 lg:pt-10">
+      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background lg:col-start-1 pt-[env(safe-area-inset-top)] max-lg:in-data-[desktop-titlebar=overlay]:pt-12 lg:in-data-[desktop-titlebar=overlay]:pt-12 lg:static lg:bg-transparent lg:px-10 lg:pt-10 kit:lg:relative kit:lg:px-8 kit:lg:pt-8 kit:lg:in-data-[desktop-titlebar=overlay]:pt-12">
         {/*
          * The phone's chrome. Back is not drawn on the first step, rather than drawn disabled: there
          * is nowhere behind it, and a control that does nothing is one more thing a screen reader
@@ -130,9 +156,10 @@ export function OnboardingFrame({
           ) : null}
           {total > 1 ? <StepDashes index={index} total={total} /> : null}
         </div>
-        <div className="hidden lg:flex lg:items-center lg:justify-between lg:gap-4">
+        <div className="hidden lg:flex lg:items-center lg:justify-between lg:gap-4 kit:lg:h-9">
           <div className="text-sm flex items-center gap-2 font-semibold">
-            <AgentOrb size="24px" />
+            {/* Figma's "Brand / Logo" in the current kit, the sidebar's mark; the legacy kit keeps its live orb. */}
+            {currentKit ? <OpenBotLogo /> : <AgentOrb size="24px" />}
             <BrandName>{appConfig.brand.productName}</BrandName>
           </div>
           {titles.length > 1 ? (
@@ -148,7 +175,7 @@ export function OnboardingFrame({
 
       <div
         className={cn(
-          "col-start-1 min-w-0 px-4 lg:col-start-1 lg:row-start-2 lg:px-10 lg:pt-24",
+          "col-start-1 min-w-0 px-4 lg:col-start-1 lg:row-start-2 lg:px-10 lg:pt-24 kit:lg:relative kit:lg:px-8 kit:lg:pt-12",
           demoFirst ? "row-start-3" : "row-start-2 pt-1.5",
         )}
         data-onboarding-intro=""
@@ -165,12 +192,14 @@ export function OnboardingFrame({
       {demo ? (
         <div
           className={cn(
-            "col-start-1 flex min-w-0 flex-col px-4 lg:sticky lg:top-0 lg:col-start-2 lg:row-span-4 lg:row-start-1 lg:my-0 lg:max-h-svh lg:overflow-y-auto lg:border-l lg:border-border lg:bg-muted/40 lg:px-10 lg:py-10",
+            "col-start-1 flex min-w-0 flex-col px-4 lg:sticky lg:top-0 lg:col-start-2 lg:row-span-4 lg:row-start-1 lg:my-0 lg:max-h-svh lg:overflow-y-auto lg:border-l lg:border-border lg:bg-muted/40 lg:px-10 lg:py-10 kit:lg:max-h-none kit:lg:min-h-0",
             demoFirst ? "row-start-2 mb-6" : "row-start-3 mt-8",
           )}
           data-onboarding-demo=""
         >
-          <div className="mx-auto w-full max-w-xl lg:my-auto">{demo}</div>
+          <div className="mx-auto w-full max-w-xl lg:my-auto kit:lg:max-w-[50rem]">
+            {demo}
+          </div>
         </div>
       ) : null}
 
@@ -183,7 +212,7 @@ export function OnboardingFrame({
        * is nothing more, so the step's last line (Welcome's carousel dots) stops above the fade
        * rather than half hidden in it.
        */}
-      <footer className="sticky bottom-0 col-start-1 row-start-5 mt-8 bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-linear-to-t before:from-background before:to-transparent lg:static lg:col-start-1 lg:row-start-4 lg:mt-0 lg:bg-transparent lg:px-10 lg:pt-8 lg:pb-10 lg:before:hidden">
+      <footer className="sticky bottom-0 col-start-1 row-start-5 mt-8 bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-linear-to-t before:from-background before:to-transparent lg:static lg:col-start-1 lg:row-start-4 lg:mt-0 lg:bg-transparent lg:px-10 lg:pt-8 lg:pb-10 lg:before:hidden kit:lg:relative kit:lg:px-8 kit:lg:pb-8">
         <div className="mx-auto flex w-full max-w-md flex-col gap-3 lg:mx-0 lg:max-w-none">
           {notice}
           {footnote ? (
@@ -199,7 +228,7 @@ export function OnboardingFrame({
               <button
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "lg" }),
-                  "text-sm hidden font-semibold lg:order-first lg:inline-flex",
+                  "text-sm hidden font-semibold lg:order-first lg:inline-flex kit:lg:rounded-full kit:lg:px-4 kit:lg:hover:bg-secondary",
                 )}
                 data-onboarding-back="desktop"
                 onClick={onBack}
@@ -218,7 +247,7 @@ export function OnboardingFrame({
                   // Last on a desktop, so the way forward is the rightmost button; first on a phone.
                   "motion-reduce:transition-none lg:order-last",
                   primary.done &&
-                    "bg-success/10 text-success hover:bg-success/10",
+                    "bg-success-subtle text-success-ink hover:bg-success-subtle",
                 )}
                 data-done={primary.done ? "" : undefined}
                 data-onboarding-primary=""
@@ -246,6 +275,8 @@ export function OnboardingFrame({
                   // Quiet beside a primary; outlined like a button where it is the only one.
                   primary &&
                     "lg:min-w-0 lg:border-transparent lg:bg-transparent lg:shadow-none lg:dark:border-transparent lg:dark:bg-transparent",
+                  // The kit's Secondary on the gray pane: its own fill, white under the pointer.
+                  "kit:lg:bg-secondary kit:lg:hover:bg-card",
                 )}
                 data-onboarding-secondary=""
                 onClick={secondary.onClick}
@@ -295,13 +326,18 @@ function StepMenu({
         className={cn(
           buttonVariants({ variant: "ghost", size: "sm" }),
           "text-xs -me-2 gap-1 font-medium text-muted-foreground",
+          // The kit's: 14px regular gray, a pale pill under the pointer and while open.
+          "kit:lg:me-0 kit:lg:rounded-full kit:lg:px-3 kit:lg:text-sm kit:lg:font-normal kit:lg:hover:bg-secondary kit:lg:data-popup-open:bg-secondary",
         )}
         data-onboarding-steps=""
       >
         Step {index + 1} of {titles.length}
         <IconChevronDown aria-hidden className="size-3.5" />
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-88 gap-1 p-1.5">
+      <PopoverContent
+        align="end"
+        className="w-88 gap-1 p-1.5 kit:w-74 kit:rounded-menu kit:p-1 kit:shadow-(--menu-shadow) kit:ring-0"
+      >
         <PopoverTitle className="text-xs px-2 pt-1 text-muted-foreground">
           Steps
         </PopoverTitle>
@@ -320,8 +356,9 @@ function StepMenu({
                       current
                         ? "bg-primary text-primary-foreground"
                         : done
-                          ? "bg-foreground/8 text-foreground"
+                          ? "bg-foreground/8 text-foreground kit:bg-success-subtle kit:text-success"
                           : "text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]",
+                      "kit:size-5 kit:text-[11px]",
                     )}
                   >
                     {done ? (
@@ -330,9 +367,15 @@ function StepMenu({
                       at + 1
                     )}
                   </span>
-                  <span className="min-w-0 truncate">
+                  <span className="min-w-0 flex-1 truncate">
                     <BrandName>{title}</BrandName>
                   </span>
+                  {current ? (
+                    <IconCheck
+                      aria-hidden
+                      className="hidden size-4.5 shrink-0 kit:block"
+                    />
+                  ) : null}
                   {done ? (
                     <span className="sr-only">, done</span>
                   ) : !current && !pickable ? (
@@ -341,14 +384,14 @@ function StepMenu({
                 </>
               );
               const row =
-                "text-sm flex min-h-8 w-full items-center gap-3 rounded-lg px-2 py-1 text-left";
+                "text-sm flex min-h-8 w-full items-center gap-3 rounded-lg px-2 py-1 text-left kit:min-h-9 kit:gap-2 kit:rounded-menu-item kit:pr-3";
               return (
                 <li key={title}>
                   {pickable ? (
                     <button
                       className={cn(
                         row,
-                        "text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring",
+                        "text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring kit:hover:bg-row-hover",
                       )}
                       data-onboarding-pick={at}
                       onClick={() => {
@@ -365,7 +408,7 @@ function StepMenu({
                       className={cn(
                         row,
                         current
-                          ? "bg-muted font-medium text-foreground"
+                          ? "bg-muted font-medium text-foreground kit:bg-transparent kit:font-normal"
                           : "text-muted-foreground",
                       )}
                     >
@@ -438,16 +481,16 @@ export function StepIntro({
   const named = useContext(StepTitle);
   const title = given ?? named;
   return (
-    <div className="mx-auto flex w-full max-w-md flex-col items-center text-center lg:mx-0 lg:items-start lg:text-left">
-      <h1 className="text-3xl font-semibold tracking-tight text-pretty [overflow-wrap:anywhere] focus:outline-none">
+    <div className="mx-auto flex w-full max-w-md flex-col items-center text-center lg:mx-0 lg:items-start lg:text-left kit:lg:max-w-none">
+      <h1 className="text-3xl font-semibold tracking-tight text-pretty [overflow-wrap:anywhere] focus:outline-none kit:lg:tracking-heading">
         {typeof title === "string" ? <BrandName>{title}</BrandName> : title}
       </h1>
       {children ? (
-        <div className="text-base mt-3 flex max-w-md flex-col gap-2 text-pretty text-muted-foreground">
+        <div className="text-base mt-3 flex max-w-md flex-col gap-2 text-pretty text-muted-foreground kit:lg:mt-2 kit:lg:max-w-none kit:lg:text-sm kit:lg:font-light">
           {children}
         </div>
       ) : null}
-      {after ? <div className="mt-6 w-full">{after}</div> : null}
+      {after ? <div className="mt-6 w-full kit:lg:mt-8">{after}</div> : null}
     </div>
   );
 }

@@ -2,7 +2,7 @@ import {
   IconCircleMinus,
   IconCirclePlus,
   IconHistory,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as React from "react";
 import { useState } from "react";
@@ -184,7 +184,7 @@ function ActionRows<T extends ChangedAction>({
   );
 }
 
-const TURNS_OFF = "text-warning";
+const TURNS_OFF = "text-warning-ink";
 const TURNS_ON = "text-foreground";
 
 /**

@@ -1,4 +1,4 @@
-import { IconChevronLeft } from "@tabler/icons-react";
+import { IconChevronLeft } from "@/components/icons";
 import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
@@ -92,13 +92,23 @@ export function PageShell({
       /*
        * Exactly the panel's height, never scrolls. `min-w-0` lets a table wider than the pane scroll
        * inside its own container instead of pushing the page sideways.
+       *
+       * The current kit holds the page 44px inside the pane on every side, as Figma's Activity does,
+       * so the table is a card standing in the pane rather than a band across it, and the title block
+       * sits 36px over the first control, the column pages' rhythm. The legacy kit keeps the page
+       * against the pane's edges, 16px in for the title.
        */
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {barRow}
-        <div className={cn("shrink-0 px-4", bar ? "pt-8" : "pt-12")}>
+        <div className={cn("shrink-0 px-4 kit:px-11", bar ? "pt-8" : "pt-12")}>
           {header}
         </div>
-        <div className={cn("mt-6 flex min-h-0 flex-1 flex-col", className)}>
+        <div
+          className={cn(
+            "mt-6 flex min-h-0 flex-1 flex-col kit:mt-9 kit:px-11 kit:pb-11",
+            className,
+          )}
+        >
           {children}
         </div>
       </div>
@@ -108,7 +118,13 @@ export function PageShell({
   return (
     <>
       {barRow}
-      <PageColumn bar={bar} className={className}>
+      <PageColumn
+        bar={bar}
+        className={cn(
+          width === "wide" && "kit:max-w-none kit:px-11",
+          className,
+        )}
+      >
         {header}
         {children}
       </PageColumn>

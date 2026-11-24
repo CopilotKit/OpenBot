@@ -39,6 +39,27 @@ So: no hand-drawn containers, no new widths, no new spacing scale, no second way
 the screen genuinely does not fit — a table, a canvas, an editor beside a live preview — that is a
 deviation worth stating out loud and worth a comment saying why.
 
+The same holds for colours, corners and shadows. They come from the UI Kit (Figma "OpenBot
+(MASTER)", page UI Kit): the primitives in `components/ui` and the tokens in `theme.css`. A screen
+does not write Tailwind's palette (`text-emerald-600`), a colour of its own (`bg-[#f1f2f7]`), a
+corner of its own (`rounded-[20px]`) or a shadow of its own (`shadow-[…]`), and its icons come from
+`components/icons`. `app/tests/ui-kit-guard.test.ts` fails on a new one. Screens drawn before the
+kit are counted in `app/tests/ui-kit-guard.baseline.json`; cleaning one up lowers its count, and
+the test says how to write the new counts.
+
+A status is drawn with the kit's status tokens, in three uses: `bg-success` / `bg-warning` for a
+dot, `bg-success-subtle` / `bg-warning-subtle` / `bg-destructive-subtle` for a tint (`/50` for a
+fainter one), and `text-success-ink` / `text-warning-ink` / `text-destructive` for words and an icon
+on the page. The bare `text-success` is the kit's light green for a glyph on its own tint, as `Badge`
+draws it, and too light to read as words. Each has its dark value built in, so a status class needs
+no `dark:` partner, and the legacy kit maps them back to the Tailwind shades its screens used.
+
+A sentence about how things stand, set apart from the page (couldn't save, the desktop app is
+offline, restoring this computer), is a `Notice` from `components/ui/notice.tsx`, never a box drawn
+by hand: `variant` is the badge's (`destructive`, `warning`, `success`, `additional`, `neutral`),
+`icon` leads in the status colour and `action` holds a button at the end. Give it `role="alert"` or
+`role="status"` as the moment needs. A screen sets only its margin on it.
+
 ## The Shape
 
 Four components make the frame. They compose in this order and nest no other way.
@@ -46,16 +67,30 @@ Four components make the frame. They compose in this order and nest no other way
 ```
 PageShell        the page: header (title, description, action, backButton) then children
   PageSection    a titled group of unrelated decisions, with a deliberately large gap above it
-    PageRows     the grouped card: rounded-lg border bg-card
-      Item       one row, size="sm", divided from its neighbours by <Separator />
+    PageRows     the column of rows: each row its own white card (rounded-card), 2px apart
+      Item       one row, size="sm"
     PageEmpty    what a section says when it has nothing to list
 ```
 
-`PageShell` takes a `width`: `prose` (`max-w-3xl`, 768px) is the default, and every
+This is the November 2026 redesign (Figma "Master screens"): Sora on Tailwind's 16px type scale,
+cool neutral grays, ink-black pill buttons, and rows as separate 20px-cornered cards. The tokens
+are in `theme.css`. Tailwind's own corner steps sit on the kit's scale there too (`rounded-lg` is
+the 12px tile, `rounded-2xl` the 20px card), so a screen's existing corners follow the kit.
+
+Which UI Kit a skin is drawn with is one switch, `skins/kit.ts`: OpenBot's own skin is on the
+current kit, the alternate skins on the legacy one, whose sizes, corners and type
+`skins/legacy-base.css` puts back under `<html data-kit="legacy">`. A screen never asks which skin
+it is. Where the two kits differ, it asks the kit: a class with the `kit:` variant (current kit
+only) or `legacy:` (inside a primitive only), and `useKit()` from `skins/store.ts` where the
+structure differs (Bot Cards on Bots, the onboarding). `app/tests/skins-kit.test.ts` holds the app
+to it, so moving a skin to the current kit stays a change to `skins/kit.ts` and its own skin.css.
+
+`PageShell` takes a `width`: `prose` (`max-w-page`, Figma's 700px column plus the 16px gutter) is the default, and every
 configuration screen uses it so no screen is wider than another. Sentences inside it are held to
 `max-w-prose`, so the column has room for a label beside its control without stretching the text.
-`wide` (`max-w-5xl`) exists for one screen — `admin/audit.tsx`, because an audit log is a table to be
-scanned and prose width would wrap every row. It is not a licence for anything else to be wide.
+`full` exists for one screen — the audit log (`components/manage/audit-page.tsx`, Settings → Activity and Admin's), because it is a table to be scanned and prose width would wrap every row. The page is the window's height and only the rows scroll. In the current kit it stands 44px inside the pane on every side, as Figma's Activity does, so the table is a card; the legacy kit keeps it against the pane's edges. It is not a licence for anything else to be wide.
+
+`wide` exists for one screen too, the components gallery, which the designers asked for in three columns: in the current kit it reaches across the pane 44px in on each side as `full` does, but scrolls as a column does, and its grid goes from two columns to three once the page is 768px wide (a container query, `@container` on the page). The legacy kit draws it as `prose`.
 
 ## The Rhythm
 
@@ -65,22 +100,22 @@ components above; a screen that sets its own is drifting.
 | Between | Gap | Where it lives |
 |---------|-----|----------------|
 | Page edge (top / sides / bottom) | 48 / 16 / 64px | `PageShell` column (`pt-12` or `pt-8` under the bar, `px-4`, `pb-16`) |
-| Title → description | 8px | `PageShell` header |
-| Title block → first content | 32px | `PageShell`: `[&>header+*]:mt-8` |
+| Title → description | 4px | `PageShell` header (20px semibold title, light 14px description) |
+| Title block → first content | 36px | `PageShell`: `[&>header+*]:mt-9` |
 | Title → tabs, tabs → content | 24px, then 32px | `PageShell`: `[&>header+nav]`, `[&>header+nav+*]` |
-| Section → section | 48px | `PageSection` (`mt-12`) |
-| Section heading → description | 4px | `PageSection` |
-| Heading block → section content | 16px | `PageRows` / `PageEmpty` (`mt-4`) |
+| Section → section | 36px | `PageSection` (`mt-9`) |
+| Section heading → description | 4px | `PageSection` (16px semibold heading, light 14px description) |
+| Heading block → section content | 12px | `PageRows` / `PageEmpty` (`mt-3`) |
 | Controls stacked inside a section | 12px | the screen, with `gap-3` |
-| A row in `PageRows` | 65px with a description, never under 56px | `Item` (`px-4 py-3.5 gap-3`), `PageRows` (`min-h-14`) |
-| Divider between rows | inset 16px from both edges | `PageRows`, on every horizontal `Separator` inside it |
+| A row in `PageRows` | 84px with a 44px tile, never under 56px | `Item` (`p-5 gap-3`), `PageRows` (`min-h-14`) |
+| Row → row | 2px | `PageRows` (`gap-0.5`); each row is its own card |
 
-The 32px under the title is deliberately tighter than the 48px between sections: the title belongs
-to the page it introduces. Those `PageShell` selectors outrank the first child's own `mt-*`, so a
-section or notice keeps its usual margin everywhere else and loses it only at the top.
+The title sits as far above the first section as the sections sit from each other, Figma's 36px.
+Those `PageShell` selectors outrank the first child's own `mt-*`, so a section or notice keeps its
+usual margin everywhere else and loses it only at the top.
 
 A page with one section gives that section no `title`: the page title already names it, and a second
-heading 32px below the first says the same thing twice. Put the description on `PageShell` instead
+heading 36px below the first says the same thing twice. Put the description on `PageShell` instead
 (`connections.index.tsx`). A count or filter that belongs to a search sits on the search's row, not
 on a line of its own.
 
@@ -100,17 +135,19 @@ the action is right there. A search with no results uses `IconSearch` and "No ma
    page's one primary verb, on the title's baseline.
 3. Group the page's decisions into `PageSection`s, each with a `title` and, where the grouping is not
    self-evident, a `description`.
-4. Give each section one `PageRows` card. Rows go inside it as `Item size="sm"`, with `<Separator />`
-   between them and none after the last. `PageRows` is a card with dividers, not a stack of cards —
-   gaps between rows are the wrong shape.
+4. Give each section one `PageRows`. Rows go inside it as `Item size="sm"`; `PageRows` makes each
+   one a white card and spaces them 2px apart, so a screen sets no gap and draws no card of its own.
+   A new screen puts no `<Separator />` between rows. Older screens still have them, from when this
+   was one card divided by lines; `PageRows` hides them, so they can be removed as screens are
+   touched. A row drawn `variant="outline"` stays an outline (Figma's row for something not set up).
 5. Read `admin/plugins/index.tsx` for the whole pattern end to end, and
    `admin/plugins/$key.tsx` or `admin/components/$name.tsx` for a screen with several sections and
    mixed row kinds.
 
 ### Procedure 2: Compose a row
 
-1. `ItemMedia variant="icon"` holds a leading icon from `@tabler/icons-react`, drawn as a 16px glyph
-   on a 32px muted tile. It is what makes a card of rows scannable; a row without one reads as a
+1. `ItemMedia variant="icon"` holds a leading icon from `@/components/icons` (Hugeicons, never an icon
+   package directly), drawn as a 20px glyph on a 44px tile (`bg-sidebar`, `rounded-tile`). It is what makes a column of rows scannable; a row without one reads as a
    paragraph. Pass the bare icon — the variant sizes and colours it — and use plain `ItemMedia` only
    for something that is its own picture, such as a Bot's avatar.
 2. `ItemContent` holds `ItemTitle` and, where the row needs a second line, `ItemDescription`.
@@ -151,8 +188,10 @@ itself when the dialog changes something.
 ### Procedure 4: Sizes and variants
 
 1. `Item size="sm"` for rows inside a card. `default` only for a row standing on its own.
-2. `Button size="sm"` for a control inside a row or a dialog footer; `lg` for a page's own actions;
-   `icon-sm` for a control floating over artwork.
+2. Buttons are pills in 14px semibold. `Button size="sm"` (32px, Figma's secondary) for a control
+   inside a row or a dialog footer; `default` (36px, Figma's primary) for a page's own action;
+   `lg` (40px) where a page has one large call to action; `icon-sm` for a control floating over
+   artwork.
 3. `Item variant` — pick **one for the whole screen**. `muted` is a fill with no border; `outline` is
    a border with no fill; `default` is neither. Mixing two of them on one screen reads as two
    different kinds of list, and the reader looks for a distinction that is not there.
@@ -189,10 +228,12 @@ itself when the dialog changes something.
 ## Units
 
 The root is the browser's 16px, so Tailwind's spacing, sizes and widths are their documented values
-(`p-4` is 16px, `max-w-3xl` is 768px) and land on its 4px grid. Text is the exception: `styles.css`
-sets every `--text-*` to Tailwind's default times 15/16, so `text-sm` is 13.125px and body text is
-15px. That is the scale this app has always read at; do not size text in px or rem by hand to match
-the docs.
+(`p-4` is 16px, `max-w-3xl` is 768px) and land on its 4px grid. Text is on Tailwind's own scale too,
+which is Figma's: `text-xs` 12px, `text-sm` 14px, `text-base` 16px, `text-xl` 20px, and `text-3xl`
+32px (Figma's H1, not Tailwind's 30). `text-xs` carries Figma's -4% tracking and 1.35 line height
+itself; a heading takes `tracking-heading`. Do not size text in px or rem by hand. The alternate
+skins still read the old 15px scale (`skins/legacy-base.css`), so a size written by hand would be
+wrong in one of them.
 
 Even so, never hardcode a pixel constant derived from a Tailwind token, and never compute a ratio
 from one. Measure the element — `offsetWidth`, `clientWidth`, a `ResizeObserver` — and scale from what
@@ -211,7 +252,7 @@ is actually on screen. The root was once 15px, and every constant taken from the
 - A width, ratio or scale needs a number in pixels → the Units section. Measure, do not assume.
 - Choosing a margin or gap between blocks → the Rhythm table. If the frame already gives it, set none.
 - The screen genuinely does not fit this shape → say so in the response and comment the reason in the
-  code. There are two accepted precedents: a table (`admin/audit.tsx`, `width="wide"`), and the
+  code. There are two accepted precedents: a table (the audit log, `width="full"`), and the
   Connections tiles (`connections.index.tsx`), a grid of separate `variant="outline"` cards, 56px
   tall and 12px apart, because apps are picked out by their mark rather than read down as a list.
 - The question is which states the screen renders while loading or failing → not this skill;
@@ -221,9 +262,9 @@ is actually on screen. The root was once 15px, and every constant taken from the
 
 | Signal | What it means | Do instead |
 |--------|---------------|------------|
-| A hand-written `rounded-lg border border-border bg-card` div wrapping rows | `PageRows` re-implemented, and it will drift from the other seven screens | Use `PageRows` |
-| Rows separated by `gap-*` instead of `<Separator />` | A stack of cards rather than one card of rows | `<Separator />` between rows, none after the last |
-| `width="wide"` on anything that is not a table | Prose width is the default for a reason; wide was for the audit log | Leave `width` alone |
+| A hand-written `rounded-card bg-card` div wrapping rows, or a `gap-*` between them | `PageRows` re-implemented, and it will drift from every other screen | Use `PageRows`, which draws the cards and the 2px between them |
+| A `<Separator />` added between rows on a new screen | The old one-card-with-dividers shape; `PageRows` hides it anyway | Leave it out |
+| `width="full"` on anything that is not a table | Prose width is the default for a reason; full is for the audit log | Leave `width` alone |
 | A `max-w-*`, `p-*` or text size invented for one screen | A fifth container width, which is what this layout exists to stop | Reach for the existing component |
 | Children on an element passed to `Item`'s `render` | They replace the row's own children; the row draws empty | Pass a childless element |
 | `bg-card` on a row inside a dialog | `--card` equals `--popover`; the row is invisible | `variant="muted"` |
@@ -235,6 +276,8 @@ is actually on screen. The root was once 15px, and every constant taken from the
 | A chevron on a row that opens nothing | Announces a destination that does not exist | Value in `ItemActions`, no chevron |
 | A set of chips or toggles crammed into `ItemActions` | It competes with the label for width and wraps badly | `ItemFooter`, which is `basis-full` |
 | A back link in `PageShell`'s `action` | `action` is the page's primary verb, on the title's baseline | `backButton={{ label, linkProps }}` |
+| `text-emerald-600`, `bg-[#…]`, `rounded-[20px]` or `shadow-[…]` in a screen | A look the UI Kit does not have, which no token change reaches; `ui-kit-guard.test.ts` fails | A token (`text-success-ink`, `bg-warning-subtle`, `bg-secondary`, `rounded-card`, `shadow-composer`) or a `components/ui` primitive such as `Badge` |
+| A `rounded-md border bg-destructive/10 px-3 py-2` box around a sentence | A notice drawn by hand, a sixth shade of it | `Notice` with its `variant` |
 
 ## Error Handling
 
@@ -255,6 +298,9 @@ is actually on screen. The root was once 15px, and every constant taken from the
   state instead of computed from the query. Derive it on every render.
 - **Two screens that should match do not**: one of them drew its own container. Diff the two against
   `admin/plugins/index.tsx` and delete whichever hand-drawn wrapper is not `PageRows`.
+- **A block inside `PageRows` turned into a card of its own**: `PageRows` makes every direct child a
+  card. Something that belongs to a row (a preview under a setting, a row's expanded detail) goes
+  inside that row's wrapper, not beside it.
 - **The layout genuinely cannot express the screen**: stop and say so rather than bending it
   silently. A deviation with a stated reason and a comment is fine; an undocumented fifth way to draw
   a card is what this skill exists to prevent.

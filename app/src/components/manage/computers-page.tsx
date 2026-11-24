@@ -4,7 +4,7 @@ import {
   IconBolt,
   IconDeviceDesktop,
   IconDeviceDesktopOff,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
@@ -36,6 +36,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import { Notice } from "@/components/ui/notice";
 import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { useBotListScope } from "@/lib/agents/list-scope";
@@ -301,25 +302,22 @@ export function ComputersPage({
   const body = (
     <>
       {problem ? (
-        <p
-          className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-          role="alert"
-        >
+        <Notice className="mt-4" role="alert" variant="destructive">
           {problem}
-        </p>
+        </Notice>
       ) : null}
 
       {personal || agentId ? null : isolation === "shared" ? (
         // The server's own word on whether this is a shared install (one person's isn't).
         <SharedComputersNotice className="mt-4" />
       ) : isolation === "per-person" ? (
-        <p className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
+        <Notice className="mt-4">
           Each person has their own computer, and every Bot they use runs on it,
           public Bots made by other people included. Each Bot keeps its own
           browser profile and folder there, but a command one Bot runs can reach
           anything else on that person's computer. An isolated Bot has a
           computer of its own.
-        </p>
+        </Notice>
       ) : null}
 
       {/*
@@ -370,12 +368,9 @@ export function ComputersPage({
           }
         >
           {setState.error ? (
-            <p
-              className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-              role="alert"
-            >
+            <Notice className="mb-3" role="alert" variant="destructive">
               {setState.error.message}
-            </p>
+            </Notice>
           ) : null}
           {noComputers ? (
             <PageEmpty
@@ -713,19 +708,16 @@ function HostFoldersSection({
       title="Folders on this computer"
     >
       {problem ? (
-        <p
-          className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-          role="alert"
-        >
+        <Notice className="mb-3" role="alert" variant="destructive">
           {problem}
-        </p>
+        </Notice>
       ) : null}
 
       {desktop && !connected && !loading ? (
-        <p className="mb-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+        <Notice className="mb-3" variant="warning">
           The desktop app is offline. Open it to approve folders or run
           commands.
-        </p>
+        </Notice>
       ) : null}
 
       {loading ? null : !desktop ? (
@@ -846,12 +838,9 @@ function FolderGrantList({
         </div>
       ))}
       {botPending.map((request) => (
-        <div
-          className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm"
-          key={request.operationId}
-        >
+        <Notice key={request.operationId} variant="warning">
           {pendingSentence(request, personal)}
-        </div>
+        </Notice>
       ))}
     </div>
   );

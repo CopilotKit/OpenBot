@@ -29,6 +29,8 @@ export type OnboardingStep = {
   demo?: () => ReactNode;
   /** Below `lg`, the demo above the intro rather than after it. */
   demoFirst?: boolean;
+  /** The demo needs the room, such as the booking calendar: the words' pane narrows. */
+  wideDemo?: boolean;
   /** The primary's words here. "Continue" when absent. */
   primaryLabel?: string;
   /** What the primary does, given the move to the next step. Moving on when absent. */
@@ -227,6 +229,7 @@ export function OnboardingWizard({
             ) : null
           }
           demoFirst={step?.demoFirst === true}
+          wideDemo={step?.wideDemo === true}
           footnote={step?.footnote}
           index={index}
           intro={

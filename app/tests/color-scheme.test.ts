@@ -41,11 +41,9 @@ for (const file of sourceFiles()) {
 const NOT_YET_ON_THE_SCHEME = new Set([
   "components/app-sidebar/channel-item-content.tsx",
   "components/browser/recording.tsx",
-  "components/channels/coding-tool-cards.tsx",
   "components/channels/voice-call-widget.tsx",
   "components/component-preview.tsx",
   "components/computer/computer-view.tsx",
-  "components/gallery/frame.tsx",
   "components/onboarding/demos/team-demo.tsx",
   "components/onboarding/demos/welcome-demo.tsx",
   "components/onboarding/laptop-illustration.tsx",

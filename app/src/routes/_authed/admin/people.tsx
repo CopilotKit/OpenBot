@@ -4,7 +4,7 @@ import {
   IconShieldCheck,
   IconUser,
   IconUsers,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";

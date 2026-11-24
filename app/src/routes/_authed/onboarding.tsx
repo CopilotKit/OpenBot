@@ -17,6 +17,10 @@ import { SelfHostDemo } from "@/components/onboarding/demos/self-host-demo";
 import { FINISH_MS, useNameStep } from "@/components/onboarding/name-step";
 import { StepIntro } from "@/components/onboarding/onboarding-frame";
 import {
+  type OnboardingScene,
+  OnboardingSlides,
+} from "@/components/onboarding/onboarding-slides";
+import {
   type OnboardingStep,
   OnboardingWizard,
 } from "@/components/onboarding/onboarding-wizard";
@@ -40,6 +44,13 @@ import {
 import { BUSINESS_URL } from "@/lib/openbot-for-business";
 import { setupChecklistQueryOptions } from "@/lib/setup/queries";
 import { queryClient } from "@/query-client";
+import { useKit } from "@/skins/store";
+import businessVideo from "@/assets/onboarding/business.mp4";
+import businessPoster from "@/assets/onboarding/business-poster.png";
+import nameVideo from "@/assets/onboarding/name.mp4";
+import namePoster from "@/assets/onboarding/name-poster.png";
+import welcomeVideo from "@/assets/onboarding/welcome.mp4";
+import welcomePoster from "@/assets/onboarding/welcome-poster.png";
 
 const PRODUCT = appConfig.brand.productName;
 
@@ -120,6 +131,60 @@ export const Route = createFileRoute("/_authed/onboarding")({
  * first task has started (`NotifyPrompt`), when what they are for is plain.
  */
 
+/*
+ * The pictures in the current kit (Figma "Onboarding"): one video a step, filling the pane, which
+ * the legacy kit's skins draw as their animated demos instead. Each video plays its scenes one after
+ * another and ends on the start of its first, so it loops without a jump; `from` is where each scene
+ * starts, in seconds, read off the designers' cut.
+ */
+const ASK = {
+  id: "welcome",
+  caption:
+    "Ask in plain words. A Bot does the work and tells you when it's done.",
+  label: "A message box under the OpenBot orb, where you ask a Bot for work",
+};
+const WELCOME_SCENES: OnboardingScene[] = [
+  { ...ASK, from: 0 },
+  {
+    id: "computer",
+    caption: "Bots use a browser and files of their own, apart from yours.",
+    label: "A Bot reading a page in its own browser, beside its own files",
+    from: 7.25,
+  },
+  {
+    id: "team",
+    caption: "Pick a Bot for the job, or make your own.",
+    label: "Your Bots at work, each with what it is doing, and New Bot",
+    from: 12.25,
+  },
+  { ...ASK, from: 18.25 },
+];
+const DEPLOY = {
+  id: "deploy",
+  caption: `Deploy self-hosted or in the cloud. That's ${PRODUCT} for Business.`,
+  label: `${PRODUCT} on Kubernetes in your own infrastructure, on AWS, GCP or Azure, or in ${PRODUCT} Cloud`,
+};
+// The designers' second cut (Figma "Onboarding_it2"): where it runs, then the teams it serves.
+const BUSINESS_SCENES: OnboardingScene[] = [
+  { ...DEPLOY, from: 0 },
+  {
+    id: "teams",
+    caption: "Built for teams. With full governance, admin and audit.",
+    label:
+      "Four teams around one OpenBot, with policies, an audit trail and access",
+    from: 6,
+  },
+  { ...DEPLOY, from: 12.75 },
+];
+const NAME_SCENES: OnboardingScene[] = [
+  {
+    id: "name",
+    caption: "",
+    label: "The OpenBot orb over the question Home opens on",
+    from: 0,
+  },
+];
+
 /**
  * The welcome step: one animation of what OpenBot does, and beside it the one choice worth making
  * before the first task, whether a Bot asks before it changes anything.
@@ -134,7 +199,7 @@ export const Route = createFileRoute("/_authed/onboarding")({
  * The animation is a picture and the switch is real, so they never share a pane: the switch sits
  * with the words, and the picture stays a picture.
  */
-function welcomeStep(computer: boolean): OnboardingStep {
+function welcomeStep(computer: boolean, currentKit: boolean): OnboardingStep {
   return {
     id: "welcome",
     title: `Welcome to ${PRODUCT}`,
@@ -145,19 +210,19 @@ function welcomeStep(computer: boolean): OnboardingStep {
             aria-labelledby="onboarding-permissions"
             className="flex flex-col gap-3 text-left"
           >
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1 kit:lg:gap-1.5">
               <h2
-                className="text-lg font-semibold text-pretty"
+                className="text-lg font-semibold text-pretty kit:lg:text-base kit:lg:leading-heading kit:lg:tracking-heading"
                 id="onboarding-permissions"
               >
                 Choose when Bots ask
               </h2>
-              <p className="text-pretty text-muted-foreground">
+              <p className="text-pretty text-muted-foreground kit:lg:text-sm kit:lg:font-light">
                 {ALWAYS_ASKS_SHORT}
               </p>
             </div>
             <AskFirstSwitch />
-            <p className="text-sm text-pretty text-muted-foreground">
+            <p className="text-sm text-pretty text-muted-foreground kit:lg:text-xs">
               You can change this anytime in Settings.
             </p>
           </section>
@@ -166,7 +231,19 @@ function welcomeStep(computer: boolean): OnboardingStep {
         <p>Give work to Bots in plain words. They tell you when it's done.</p>
       </StepIntro>
     ),
-    demo: () => <IntroReel computer={computer} />,
+    demo: () =>
+      currentKit ? (
+        <OnboardingSlides
+          kind="intro"
+          poster={welcomePoster}
+          scenes={WELCOME_SCENES}
+          // An OpenBot without a Bot computer is never shown one.
+          skip={computer ? [] : ["computer"]}
+          video={welcomeVideo}
+        />
+      ) : (
+        <IntroReel computer={computer} />
+      ),
   };
 }
 
@@ -188,7 +265,7 @@ function welcomeStep(computer: boolean): OnboardingStep {
  * A calendar that can't load (offline, blocked, silent) puts the picture back, with Book a call, which
  * opens the OpenBot for Business page in a new tab (on the Desktop, in the person's browser).
  */
-function useBookDemoStep(): OnboardingStep {
+function useBookDemoStep(currentKit: boolean): OnboardingStep {
   const [calendar, setCalendar] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
   const [booked, setBooked] = React.useState(false);
@@ -207,7 +284,17 @@ function useBookDemoStep(): OnboardingStep {
         </p>
       </StepIntro>
     ),
-    demo: () => <SelfHostDemo />,
+    demo: () =>
+      currentKit ? (
+        <OnboardingSlides
+          kind="self-host"
+          poster={businessPoster}
+          scenes={BUSINESS_SCENES}
+          video={businessVideo}
+        />
+      ) : (
+        <SelfHostDemo />
+      ),
     primaryLabel: "Book a demo",
     onPrimary: () => setCalendar(true),
     secondary: { label: "Not now" },
@@ -240,6 +327,7 @@ function useBookDemoStep(): OnboardingStep {
       </StepIntro>
     ),
     demo: () => <BookingCalendar onBooked={book} onFailed={fail} />,
+    wideDemo: true,
     primaryLabel: undefined,
     onPrimary: undefined,
     primaryHidden: !booked,
@@ -474,8 +562,23 @@ function OnboardingSteps() {
     return () => clearTimeout(timer);
   }, [leaving, navigate, reduced, next]);
 
-  const name = useNameStep({ finish, finished });
-  const selfhost = useBookDemoStep();
+  // The current kit draws the November 2026 onboarding; the legacy kit keeps its own (skins/kit.ts).
+  const currentKit = useKit() === "current";
+  const nameStep = useNameStep({ finish, finished });
+  const name: OnboardingStep = currentKit
+    ? {
+        ...nameStep,
+        demo: () => (
+          <OnboardingSlides
+            kind="name"
+            poster={namePoster}
+            scenes={NAME_SCENES}
+            video={nameVideo}
+          />
+        ),
+      }
+    : nameStep;
+  const selfhost = useBookDemoStep(currentKit);
   const ai = useAiStep();
   /*
    * The checklist says whether there is a Bot computer, and the intro shows one only where there
@@ -516,7 +619,7 @@ function OnboardingSteps() {
 
   const byId: Record<StepId, OnboardingStep> = {
     welcome: {
-      ...welcomeStep(!computerMissing),
+      ...welcomeStep(!computerMissing, currentKit),
       primaryDisabled: !capabilities,
       notice: capabilitiesFailed,
     },

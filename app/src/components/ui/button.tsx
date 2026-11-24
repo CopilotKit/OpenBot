@@ -4,33 +4,54 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,translate,opacity] duration-150 ease-out outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  /*
+   * The UI Kit's "Button" and "Icon Button": pills labelled in 14px semibold, with the label and
+   * its icon 4px apart. A state is a colour of its own (theme.css: `--color-primary-hover` and the
+   * rest), not the button faded or nudged.
+   *
+   * The alternate skins keep the buttons they were drawn with: every colour and measure here that
+   * differs between the two is a token (theme.css), which the skins set back to theirs
+   * (skins/legacy-base.css): the fade when disabled, the 1px press, the smaller icons, the tighter
+   * end beside an icon and the link's underline. A call site's own class still replaces any of
+   * them, under a skin too.
+   *
+   * The kit's variants by name: Primary is `default`, Secondary is `secondary` and also `outline`,
+   * which the kit does not have, Tertiary is `ghost`, Link is `link`. `destructive` is the app's own.
+   * Its sizes: M is `default` (36px, 16px in from each end, 20px icons), S is `sm` (32px, 12px in,
+   * 18px icons), and the round Icon Button M is `icon-lg` (36px, an 18px glyph). Each size sets its
+   * own icon, none is set here: `buttonVariants()` is used without `cn` in places, where a size
+   * written here as well would leave two in the class list and the stylesheet's order to choose.
+   */
+  "group/button inline-flex shrink-0 items-center justify-center rounded-full border border-transparent bg-clip-padding text-sm leading-tight font-semibold whitespace-nowrap transition-[color,background-color,border-color,box-shadow,translate,opacity] duration-150 ease-out outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-(--button-press-shift) disabled:pointer-events-none disabled:opacity-(--button-disabled-opacity) aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
+        default:
+          "bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active disabled:text-primary-disabled",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "border-outline-border bg-outline hover:bg-outline-hover hover:text-foreground active:bg-outline-active aria-expanded:bg-outline-expanded aria-expanded:text-foreground disabled:text-outline-disabled",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "bg-secondary text-secondary-foreground hover:bg-secondary-hover active:bg-secondary-active aria-expanded:bg-secondary-expanded aria-expanded:text-secondary-foreground disabled:text-secondary-disabled",
         ghost:
-          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+          "hover:bg-ghost-hover hover:text-foreground active:bg-ghost-active aria-expanded:bg-ghost-expanded aria-expanded:text-foreground disabled:text-ghost-disabled",
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
-        link: "text-primary underline-offset-4 hover:underline",
+          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 disabled:opacity-50 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
+        // The kit's Link: the ink label, darker as it is pressed, with no underline.
+        link: "text-primary underline-offset-4 hover:text-link-hover hover:[text-decoration-line:var(--link-hover-decoration)] active:text-link-active disabled:text-link-disabled",
       },
       size: {
         default:
-          "h-9 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-7 gap-1 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "h-10 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        icon: "size-8",
+          "h-9 gap-1 px-4 in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-button-edge has-data-[icon=inline-start]:pl-button-edge [&_svg:not([class*='size-'])]:size-button-icon",
+        xs: "h-6 gap-1 px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-8 gap-1 px-3 in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-button-edge-sm has-data-[icon=inline-start]:pl-button-edge-sm [&_svg:not([class*='size-'])]:size-button-icon-sm",
+        lg: "h-10 gap-1 px-5 in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-4 has-data-[icon=inline-start]:pl-4 [&_svg:not([class*='size-'])]:size-5",
+        icon: "size-8 in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-[18px]",
         "icon-xs":
-          "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
+          "size-6 in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
         "icon-sm":
-          "size-7 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg",
-        "icon-lg": "size-9",
+          "size-7 in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-4",
+        "icon-lg":
+          "size-9 in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-[18px]",
       },
     },
     defaultVariants: {

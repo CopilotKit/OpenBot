@@ -49,7 +49,7 @@ function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
   if (lastRun.status === "skipped") {
     return {
       text: `Skipped ${when}`,
-      className: "text-warning",
+      className: "text-warning-ink",
       dot: "bg-warning",
     };
   }
@@ -126,7 +126,7 @@ const RUN_STATUS: Record<
   skipped: {
     text: "Skipped",
     dot: "bg-warning",
-    className: "text-warning",
+    className: "text-warning-ink",
   },
   waiting: { text: "Waiting for you", dot: "bg-sky-500", className: "" },
 };

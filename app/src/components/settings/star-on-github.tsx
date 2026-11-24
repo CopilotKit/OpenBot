@@ -1,5 +1,5 @@
 import { STAR_ON_GITHUB } from "@openbot/shared/notices";
-import { IconStar } from "@tabler/icons-react";
+import { IconStar } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { OPENBOT_REPO_URL } from "@/components/star-prompt/star-prompt";

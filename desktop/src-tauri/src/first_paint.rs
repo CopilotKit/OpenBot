@@ -65,11 +65,11 @@ pub struct Palette {
 /// Light: the scheme's sidebar, card, border, foreground and muted-foreground, in sRGB.
 pub const LIGHT: Palette = Palette {
     // tokens/src/scheme.ts, light: ground=sidebar card=card border=border ink=foreground soft=muted-foreground (bun run tokens:generate)
-    ground: (0xed, 0xed, 0xf5),
+    ground: (0xe7, 0xea, 0xf0),
     card: (0xff, 0xff, 0xff),
-    border: (0xdb, 0xdb, 0xe5),
-    ink: (0x01, 0x05, 0x07),
-    soft: (0x64, 0x64, 0x6c),
+    border: (0xec, 0xec, 0xec),
+    ink: (0x0e, 0x10, 0x13),
+    soft: (0x6e, 0x70, 0x71),
     // end of tokens/src/scheme.ts
 };
 
@@ -845,10 +845,10 @@ mod tests {
             assert!(styles.contains(token), "styles.css no longer has {token}");
         }
         // The ground the window is built on is the one the title bar already takes.
-        assert_eq!(palette(false).ground, (0xed, 0xed, 0xf5));
+        assert_eq!(palette(false).ground, (0xe7, 0xea, 0xf0));
         assert_eq!(palette(true).ground, (0x0d, 0x0b, 0x13));
         let main = include_str!("main.rs");
-        assert!(main.contains("Color(0xed, 0xed, 0xf5, 0xff)"));
+        assert!(main.contains("Color(0xe7, 0xea, 0xf0, 0xff)"));
         assert!(main.contains("Color(0x0d, 0x0b, 0x13, 0xff)"));
         // The words the setup page uses while OpenBot gets ready.
         assert!(include_str!("../../src/App.tsx").contains(&format!("<h1>{HEADING}</h1>")));

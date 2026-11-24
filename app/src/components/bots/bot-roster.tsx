@@ -1,8 +1,9 @@
-import { IconBolt, IconChevronRight, IconPlus } from "@tabler/icons-react";
+import { IconBolt, IconChevronRight, IconPlus } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AgentCard } from "@/components/agents/agent-card";
 import {
   attentionSummary,
   useStoppedTasks,
@@ -16,6 +17,7 @@ import {
 } from "@/components/layout/page-shell";
 import { NeedsYouBoard } from "@/components/needs-you/board";
 import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -34,6 +36,8 @@ import {
   botAttentionQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { cn } from "@/lib/utils";
+import { useKit } from "@/skins/store";
 
 /**
  * Every Bot the person can reach, in the one place they are listed: what needs the person first,
@@ -99,19 +103,19 @@ export function BotRoster() {
        */}
       {pinned.length ? (
         <PageSection title="Pinned">
-          <RosterRows agents={pinned} byId={byId} />
+          <RosterList agents={pinned} byId={byId} />
         </PageSection>
       ) : null}
       {yours.length ? (
         <PageSection title="Yours">
-          <RosterRows agents={yours} byId={byId} />
+          <RosterList agents={yours} byId={byId} />
         </PageSection>
       ) : null}
       {shared.length ? (
         <PageSection
           title={personal ? "Included with OpenBot" : "Shared with you"}
         >
-          <RosterRows agents={shared} byId={byId} />
+          <RosterList agents={shared} byId={byId} />
         </PageSection>
       ) : null}
       {available === 0 ? (
@@ -181,8 +185,103 @@ function HiddenSection({
       description={`${agents.length} ${agents.length === 1 ? "Bot" : "Bots"} you hid.${personal ? "" : " Only your list changes."}`}
       title="Hidden"
     >
-      {open ? <RosterRows agents={agents} byId={byId} /> : null}
+      {open ? <RosterList agents={agents} byId={byId} /> : null}
     </PageSection>
+  );
+}
+
+/**
+ * A section's Bots: Figma's Bot Cards in the current kit ("bots" on Master screens), the rows the
+ * legacy kit's skins were drawn with in that kit (skins/kit.ts).
+ */
+function RosterList({
+  agents,
+  byId,
+}: {
+  agents: AgentProfile[];
+  byId: Map<string, BotAttention>;
+}) {
+  const currentKit = useKit() === "current";
+  return currentKit ? (
+    <BotCards agents={agents} byId={byId} />
+  ) : (
+    <RosterRows agents={agents} byId={byId} />
+  );
+}
+
+/**
+ * What a Bot's row or card says under its name, and how many things from it wait on the person.
+ * The count is everything from it that waits on them, its check-in items and tasks included, so a
+ * Bot whose items are listed under Needs you still says so wherever it sits.
+ */
+function useRosterState(
+  agent: AgentProfile,
+  state: BotAttention | undefined,
+): { summary: string; waiting: number } {
+  const stopped = useStoppedTasks();
+  if (!state) return { summary: "", waiting: 0 };
+  return {
+    summary: [
+      state.paused ? "Paused" : "",
+      attentionSummary(state, stopped(agent.id)),
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    waiting: waitingOnYou(state),
+  };
+}
+
+/**
+ * Each Bot a white card with its orb, its name and two lines, two to a row 2px apart, opening its
+ * page. A section of one Bot is one card across the column, as Figma draws Included with OpenBot.
+ * What a Bot waits on replaces what it is for, with the count at the card's end.
+ */
+function BotCards({
+  agents,
+  byId,
+}: {
+  agents: AgentProfile[];
+  byId: Map<string, BotAttention>;
+}) {
+  return (
+    <ul
+      className={cn(
+        "mt-3 grid grid-cols-1 gap-0.5",
+        agents.length > 1 && "sm:grid-cols-2",
+      )}
+    >
+      {agents.map((agent) => (
+        <li className="min-w-0" key={agent.id}>
+          <BotCard agent={agent} state={byId.get(agent.id)} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function BotCard({
+  agent,
+  state,
+}: {
+  agent: AgentProfile;
+  state: BotAttention | undefined;
+}) {
+  const { summary, waiting } = useRosterState(agent, state);
+  return (
+    <Link
+      className="block rounded-card"
+      params={{ agentId: agent.id }}
+      to="/bots/$agentId"
+    >
+      <AgentCard
+        agent={agent}
+        appearance="row"
+        description={summary}
+        trailing={
+          waiting > 0 ? <Badge variant="count">{waiting}</Badge> : undefined
+        }
+      />
+    </Link>
   );
 }
 
@@ -205,11 +304,7 @@ function RosterRows({
   );
 }
 
-/**
- * One Bot, opening its page. The count is everything from it that waits on the person, its
- * check-in items and tasks included, so a Bot whose items are listed under Needs you still says so
- * wherever it sits.
- */
+/** One Bot, opening its page, with what `useRosterState` says of it. */
 function RosterRow({
   agent,
   state,
@@ -217,13 +312,7 @@ function RosterRow({
   agent: AgentProfile;
   state: BotAttention | undefined;
 }) {
-  const stopped = useStoppedTasks();
-  const summary = state
-    ? [state.paused ? "Paused" : "", attentionSummary(state, stopped(agent.id))]
-        .filter(Boolean)
-        .join(" · ")
-    : "";
-  const waiting = state ? waitingOnYou(state) : 0;
+  const { summary, waiting } = useRosterState(agent, state);
   return (
     <Item
       render={<Link params={{ agentId: agent.id }} to="/bots/$agentId" />}
@@ -239,11 +328,7 @@ function RosterRow({
         </ItemDescription>
       </ItemContent>
       <ItemActions>
-        {waiting > 0 ? (
-          <span className="rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums">
-            {waiting}
-          </span>
-        ) : null}
+        {waiting > 0 ? <Badge variant="count">{waiting}</Badge> : null}
         <IconChevronRight className="size-4 text-muted-foreground" />
       </ItemActions>
     </Item>

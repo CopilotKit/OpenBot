@@ -138,7 +138,7 @@ test("Activity leaves out choosing tools for a run, in every view", async () => 
   expect(view.container.textContent).not.toContain("Choose tools for a run");
   await userEvent
     .setup({ document })
-    .click(view.getByRole("button", { name: "Nobody watching" }));
+    .click(view.getByRole("tab", { name: "Nobody watching" }));
   await waitFor(() => expect(view.getByText("No matches")).toBeTruthy());
 });
 

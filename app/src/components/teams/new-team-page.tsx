@@ -1,4 +1,4 @@
-import { IconUsersGroup } from "@tabler/icons-react";
+import { IconUsersGroup } from "@/components/icons";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";

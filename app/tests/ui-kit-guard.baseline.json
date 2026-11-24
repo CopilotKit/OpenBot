@@ -1,0 +1,64 @@
+{
+  "components/app-sidebar/channel-item-content.tsx": {
+    "palette": 2
+  },
+  "components/app-sidebar/channel.tsx": {
+    "radius": 1
+  },
+  "components/audit/audit-table.tsx": {
+    "radius": 1
+  },
+  "components/browser/browser-bar.tsx": {
+    "radius": 1
+  },
+  "components/browser/browser-screen.tsx": {
+    "radius": 1
+  },
+  "components/browser/recording.tsx": {
+    "palette": 1
+  },
+  "components/channels/coding-tool-cards.tsx": {
+    "radius": 1
+  },
+  "components/channels/voice-call-widget.tsx": {
+    "palette": 4
+  },
+  "components/component-preview.tsx": {
+    "palette": 1
+  },
+  "components/computer/computer-view.tsx": {
+    "palette": 1
+  },
+  "components/computer/desktop-illustration.tsx": {
+    "radius": 3
+  },
+  "components/gallery/cards.tsx": {
+    "radius": 1
+  },
+  "components/gallery/charts.tsx": {
+    "radius": 3
+  },
+  "components/onboarding/demos/team-demo.tsx": {
+    "palette": 3
+  },
+  "components/onboarding/demos/welcome-demo.tsx": {
+    "palette": 3,
+    "shadow": 1
+  },
+  "components/onboarding/laptop-illustration.tsx": {
+    "palette": 9,
+    "shadow": 4
+  },
+  "components/onboarding/onboarding-frame.tsx": {
+    "shadow": 1
+  },
+  "components/onboarding/organization-flow.tsx": {
+    "palette": 12
+  },
+  "components/routines/routine-runs.tsx": {
+    "palette": 1
+  },
+  "lib/copilot/a2ui-breakdown.tsx": {
+    "radius": 2
+  }
+}

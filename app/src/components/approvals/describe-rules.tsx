@@ -6,7 +6,7 @@ import {
   IconPlus,
   IconTrash,
   IconUsers,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import {
@@ -316,7 +316,7 @@ function replayRowOf(change: BacktestChange): ReplayRow {
       : change.change === "removes_ask"
         ? change.person === "deny"
           ? "text-destructive"
-          : "text-warning"
+          : "text-warning-ink"
         : "text-foreground",
     note: [fixed ? change.reason : null, answer].filter(Boolean).join(" "),
   };

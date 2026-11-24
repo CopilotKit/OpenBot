@@ -12,7 +12,7 @@ import {
   IconSparkles,
   IconUsers,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import {

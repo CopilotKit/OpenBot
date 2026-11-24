@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { ORB_PALETTES, orbPalette } from "../src/lib/orb-palette";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  ORB_NAMES,
+  ORB_PALETTES,
+  orbName,
+  orbPalette,
+} from "../src/lib/orb-palette";
 
 /*
  * A Bot's orb color comes from its seed (`avatarSeed`, the Bot's id by default), never its name,
@@ -57,5 +64,25 @@ describe("orbPalette", () => {
 
   test("an empty seed gives the first palette", () => {
     expect(orbPalette("")).toBe(ORB_PALETTES[0]);
+  });
+});
+
+describe("a Bot's tile gradient", () => {
+  const styles = readFileSync(
+    join(import.meta.dir, "../src/styles.css"),
+    "utf8",
+  );
+
+  test("every palette has a name and the designers' tile gradient", () => {
+    expect(ORB_PALETTES.length).toBe(ORB_NAMES.length);
+    for (const name of ORB_NAMES)
+      expect(styles).toContain(`--gradient-bot-${name}:`);
+  });
+
+  test("a Bot's tile is named as its colours are picked, from its seed", () => {
+    for (const seed of SEEDS)
+      expect(ORB_PALETTES[ORB_NAMES.indexOf(orbName(seed))]).toBe(
+        orbPalette(seed),
+      );
   });
 });

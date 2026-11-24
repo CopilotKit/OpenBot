@@ -2,7 +2,7 @@ import {
   IconAlertTriangle,
   IconLoader2,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -403,8 +403,8 @@ export function LearningNextRow({
       <ItemMedia
         variant="icon"
         className={cn(
-          tone === "ok" && "text-success",
-          tone === "warn" && "text-warning",
+          tone === "ok" && "text-success-ink",
+          tone === "warn" && "text-warning-ink",
           tone === "busy" && "[&_svg]:animate-spin",
         )}
       >

@@ -4,7 +4,7 @@ import {
   IconChevronRight,
   IconPlus,
   IconRadar,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
@@ -13,6 +13,7 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
+import { RoutineMedia } from "@/components/routines/routine-tile";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,7 +31,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import {
@@ -484,6 +484,7 @@ export function SettingRow({
   showBot = true,
   label,
   agentId,
+  seed,
 }: {
   setting: ProactiveSetting;
   botName: string;
@@ -494,6 +495,8 @@ export function SettingRow({
   label?: string;
   /** The Bot whose own list this is, so the page's back link returns to it. */
   agentId?: string;
+  /** Its Bot's `avatarSeed` on Routines, where the tile takes the Bot's colours (`RoutineMedia`). */
+  seed?: string;
 }) {
   // When it starts, what it does, and where it stands: the Routines list's sentence for a check-in.
   const summary = `${intervalLabel(setting.intervalMinutes)} · Tells you · ${checkInStatus(setting, blocked)}`;
@@ -510,9 +513,9 @@ export function SettingRow({
       }
       size="sm"
     >
-      <ItemMedia variant="icon">
+      <RoutineMedia seed={seed}>
         <IconRadar />
-      </ItemMedia>
+      </RoutineMedia>
       <ItemContent>
         {/* What it watches leads, where it watches one thing; the Bot is who watches it. */}
         <ItemTitle>

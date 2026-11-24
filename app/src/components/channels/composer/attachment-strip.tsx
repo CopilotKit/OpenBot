@@ -1,4 +1,4 @@
-import { IconPhoto, IconX } from "@tabler/icons-react";
+import { IconPhoto, IconX } from "@/components/icons";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 

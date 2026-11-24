@@ -33,7 +33,7 @@ import { queryClient } from "@/query-client";
  * on an OpenBot that lists them, as the account row reads it under their name.
  */
 const params = new URLSearchParams(location.search);
-const width = Number(params.get("width") ?? 340);
+const width = Number(params.get("width") ?? 280);
 const organization = params.get("organization");
 
 if (organization) {

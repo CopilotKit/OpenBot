@@ -3,7 +3,7 @@ import {
   IconAlertTriangle,
   IconCircleCheck,
   IconHandStop,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -146,9 +146,9 @@ export function HelpRequestCard({
     >
       <ItemMedia variant="icon">
         {ended.done ? (
-          <IconCircleCheck className="text-success" />
+          <IconCircleCheck className="text-success-ink" />
         ) : (
-          <IconAlertTriangle className="text-warning" />
+          <IconAlertTriangle className="text-warning-ink" />
         )}
       </ItemMedia>
       <ItemContent>

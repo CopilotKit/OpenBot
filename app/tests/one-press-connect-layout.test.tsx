@@ -144,7 +144,13 @@ async function style(page: Page) {
   // The transcript fades in once it is styled: wait for it, but not for a shimmer that never ends.
   await page.evaluate(() =>
     Promise.race([
-      Promise.all(document.getAnimations().map((motion) => motion.finished)),
+      // A motion cancelled by the styles added above (a button's colour, restarted) has nothing
+      // left to wait for: its `finished` rejects, which is not a failure of the page.
+      Promise.all(
+        document
+          .getAnimations()
+          .map((motion) => motion.finished.catch(() => undefined)),
+      ),
       new Promise((done) => setTimeout(done, 1_500)),
     ]),
   );

@@ -1,10 +1,10 @@
 import {
   IconChevronRight,
-  IconCircleCheckFilled,
+  IconCircleCheck,
   IconCloud,
   IconExternalLink,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   createContext,
@@ -1232,7 +1232,7 @@ function SignInFields({
   if (kept)
     return (
       <p className="flex items-center gap-2 text-sm">
-        <IconCircleCheckFilled className="size-4 shrink-0 text-success" />
+        <IconCircleCheck className="size-4 shrink-0 text-success-ink" />
         You're signed in with your {signInWords(provider.id, login)}.
       </p>
     );
@@ -1270,7 +1270,7 @@ function SignInFields({
       )}
       {signedIn ? (
         <p className="flex items-center gap-2 text-sm">
-          <IconCircleCheckFilled className="size-4 text-success" />
+          <IconCircleCheck className="size-4 text-success-ink" />
           Signed in to {provider.name}.
         </p>
       ) : waiting ? (
@@ -1509,9 +1509,9 @@ export function ConnectedRow({
         <ItemDescription>{described?.summary}</ItemDescription>
       </ItemContent>
       <ItemActions>
-        <IconCircleCheckFilled
+        <IconCircleCheck
           aria-label="Connected"
-          className="size-5 text-success"
+          className="size-5 text-success-ink"
         />
       </ItemActions>
     </Item>

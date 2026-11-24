@@ -1,5 +1,5 @@
 import { whatIfExplainable } from "@openbot/shared/what-if";
-import { IconHelpCircle } from "@tabler/icons-react";
+import { IconHelpCircle } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { AuditEvent } from "@/components/audit/audit-cells";
@@ -112,7 +112,7 @@ export function WhyButton({ event }: { event: AuditEvent }) {
                   </span>
                 </div>
                 {differs ? (
-                  <p className="text-warning text-sm">
+                  <p className="text-warning-ink text-sm">
                     Today's settings decide this differently. Something has
                     changed since it happened.
                   </p>

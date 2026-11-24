@@ -81,7 +81,7 @@ export function ToolLine({
   const tone = refused
     ? "text-destructive"
     : failed
-      ? "text-warning"
+      ? "text-warning-ink"
       : "text-muted-foreground";
 
   /*

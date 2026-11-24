@@ -3,7 +3,7 @@ import {
   IconInfoCircle,
   IconMicrophone,
   IconMicrophoneOff,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useId } from "react";
 import {
   Item,
@@ -170,7 +170,7 @@ export function NarrationSwitch({
     >
       {listening ? (
         <span
-          className="inline-flex items-center gap-1.5 text-success"
+          className="inline-flex items-center gap-1.5 text-success-ink"
           role="status"
         >
           {/* Decorative: the word beside it says it is live. */}

@@ -1,16 +1,5 @@
 import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import {
-  IconAlertTriangle,
-  IconBan,
-  IconDeviceDesktop,
-  IconDownload,
-  IconEyeOff,
-  IconList,
-  IconRefresh,
-  IconSearch,
-  IconX,
-} from "@tabler/icons-react";
-import {
   keepPreviousData,
   useInfiniteQuery,
   useQuery,
@@ -25,9 +14,22 @@ import {
   withFilters,
 } from "@/components/audit/audit-filters";
 import { AuditTable } from "@/components/audit/audit-table";
+import {
+  IconAlertTriangle,
+  IconBan,
+  IconDeviceDesktop,
+  IconDownload,
+  IconEyeOff,
+  IconList,
+  IconRefresh,
+  IconSearch,
+  IconX,
+} from "@/components/icons";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchField } from "@/components/ui/search-field";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { explainable, WhyButton } from "@/components/what-if/why-button";
 import { useBotNames } from "@/lib/agents/bot-names";
 import type { AuditAnswer, AuditFilterLabels } from "@/lib/audit/ask";
@@ -52,6 +54,7 @@ import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { organizationMembersQueryOptions } from "@/lib/organizations/queries";
 import { skillListQueryOptions } from "@/lib/skills/queries";
 import { cn } from "@/lib/utils";
+import { useKit } from "@/skins/store";
 
 /**
  * Read surface for policy, computer, component, MCP, and credential audit events.
@@ -88,6 +91,115 @@ const FILTERS = [
     search: "?initiatorKind=routine,handoff,responsibility,memory",
   },
 ] as const;
+
+/**
+ * The saved views: one control with one answer. The current kit draws the UI Kit's Tabs, as Figma's
+ * Activity does, the chosen view a white pill on the pale track. The legacy kit keeps its segmented
+ * group: the pressed one filled, the rest flat inside the same outline, after the word "View". On a
+ * phone they wrap inside it: in one line the last two ran off the window's edge.
+ */
+function ViewPicker({
+  view,
+  onChange,
+}: {
+  view: string;
+  onChange: (search: string) => void;
+}) {
+  const currentKit = useKit() === "current";
+  if (currentKit)
+    return (
+      <Tabs
+        onValueChange={(label) =>
+          onChange(
+            FILTERS.find((filter) => filter.label === label)?.search ??
+              FILTERS[0].search,
+          )
+        }
+        value={
+          FILTERS.find((filter) => filter.search === view)?.label ??
+          FILTERS[0].label
+        }
+      >
+        <TabsList aria-label="View">
+          {FILTERS.map((filter) => (
+            <TabsTrigger key={filter.label} value={filter.label}>
+              <filter.icon />
+              {filter.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+    );
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-muted-foreground text-xs">View</span>
+      <fieldset
+        aria-label="View"
+        className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg border border-border p-0.5"
+      >
+        {FILTERS.map((filter) => {
+          const active = view === filter.search;
+          return (
+            <Button
+              aria-pressed={active}
+              className={cn(
+                "h-6 px-2 font-normal",
+                active ? "bg-muted text-foreground" : "text-muted-foreground",
+              )}
+              key={filter.label}
+              onClick={() => onChange(filter.search)}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              <filter.icon />
+              {filter.label}
+            </Button>
+          );
+        })}
+      </fieldset>
+    </div>
+  );
+}
+
+/**
+ * Search across every word a row shows. The current kit draws the UI Kit's Search, S, 200px as in
+ * Figma, with its clear button; the legacy kit keeps its field with the glyph laid over it.
+ */
+function EventSearch({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const currentKit = useKit() === "current";
+  if (currentKit)
+    return (
+      <SearchField
+        aria-label="Search events"
+        className="w-50"
+        onChange={(event) => onChange(event.target.value)}
+        onClear={() => onChange("")}
+        placeholder="Search events…"
+        type="search"
+        value={value}
+      />
+    );
+  return (
+    <div className="relative w-64">
+      <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        aria-label="Search events"
+        className="h-8 pl-8"
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Search events…"
+        type="search"
+        value={value}
+      />
+    </div>
+  );
+}
 
 /** A saved view's query with one Bot's rows asked for too, for the table and the export alike. */
 export function withBot(search: string, bot: string | undefined): string {
@@ -214,6 +326,7 @@ export function AuditPage({
 } = {}) {
   const paths = useManagePaths();
   const [view, setView] = useState<string>(FILTERS[0].search);
+  const currentKit = useKit() === "current";
   /*
    * Admin's filters, as chips: asked of the server beside the view, from an answer or added by hand.
    * A Bot's own Activity page links here with `bot`, which arrives as that Bot's chip, so the one Bot
@@ -343,7 +456,7 @@ export function AuditPage({
            * anything the table draws again. The answer's chips are the toolbar's, beside the search.
            */}
           {ask ? (
-            <div className="flex shrink-0 flex-col gap-2 px-4 pb-3">
+            <div className="flex shrink-0 flex-col gap-2 px-4 pb-3 kit:px-0">
               <AskTheTrail
                 onAnswer={(next) => {
                   setAnswer(next);
@@ -366,7 +479,7 @@ export function AuditPage({
           ) : null}
           {events.isPending ? null : events.isError &&
             !events.isFetchNextPageError ? (
-            <p className="px-4 text-destructive text-sm" role="alert">
+            <p className="px-4 text-destructive text-sm kit:px-0" role="alert">
               Couldn't load these events. Try again in a moment.
             </p>
           ) : (
@@ -400,54 +513,14 @@ export function AuditPage({
               storedNames={edition !== "personal"}
               {...(ask ? { rowAction: whyFor } : {})}
               toolbar={({ count, filters }) => (
-                <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
-                  {/*
-                   * The saved views are one control with one answer, so they are drawn as a segmented
-                   * group: the pressed one is filled, the rest sit flat inside the same outline. On a
-                   * phone they wrap inside it: in one line the last two ran off the window's edge.
-                   */}
+                /*
+                 * The current kit draws Figma's toolbar (Activity, Master screens): the views 24px over
+                 * the search, and the table 16px under it with no rule between, being a card of its own.
+                 */
+                <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3 kit:gap-6 kit:border-b-0 kit:px-0 kit:pb-4">
+                  <ViewPicker onChange={setView} view={view} />
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-muted-foreground text-xs">View</span>
-                    <fieldset
-                      aria-label="View"
-                      className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg border border-border p-0.5"
-                    >
-                      {FILTERS.map((filter) => {
-                        const active = view === filter.search;
-                        return (
-                          <Button
-                            aria-pressed={active}
-                            className={cn(
-                              "h-6 px-2 font-normal",
-                              active
-                                ? "bg-muted text-foreground"
-                                : "text-muted-foreground",
-                            )}
-                            key={filter.label}
-                            onClick={() => setView(filter.search)}
-                            size="xs"
-                            type="button"
-                            variant="ghost"
-                          >
-                            <filter.icon />
-                            {filter.label}
-                          </Button>
-                        );
-                      })}
-                    </fieldset>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="relative w-64">
-                      <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        aria-label="Search events"
-                        className="h-8 pl-8"
-                        onChange={(event) => setQuery(event.target.value)}
-                        placeholder="Search events…"
-                        type="search"
-                        value={query}
-                      />
-                    </div>
+                    <EventSearch onChange={setQuery} value={query} />
                     {/* Beside the other filters, on the row that wraps: it narrows what is asked for. */}
                     {bot && !ask ? (
                       <Button
@@ -486,16 +559,17 @@ export function AuditPage({
                       <Button
                         onClick={() => events.refetch()}
                         size="sm"
-                        variant="outline"
+                        variant={currentKit ? "secondary" : "outline"}
                       >
                         <IconRefresh />
                         Refresh
                       </Button>
+                      {/* The page's one primary action in the current kit, as Figma draws it. */}
                       <Button
                         disabled={exporting}
                         onClick={exportCsv}
                         size="sm"
-                        variant="outline"
+                        variant={currentKit ? "default" : "outline"}
                       >
                         <IconDownload />
                         {exporting ? "Exporting…" : "Export CSV"}
@@ -524,7 +598,9 @@ export function AuditPage({
             />
           )}
         </div>
-        {children ? <div className="px-4 pb-16">{children}</div> : null}
+        {children ? (
+          <div className="px-4 pb-16 kit:px-0">{children}</div>
+        ) : null}
       </div>
     </PageShell>
   );

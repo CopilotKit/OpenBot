@@ -8,7 +8,7 @@ import {
   IconPlug,
   IconPlus,
   IconSearch,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
@@ -36,7 +36,8 @@ import {
   linkedNotice,
   visibleLinkedNotice,
 } from "@/components/settings/linked-notice";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
@@ -50,6 +51,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { SearchField } from "@/components/ui/search-field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { myAppRequestsQueryOptions } from "@/lib/app-access/queries";
 import {
@@ -92,6 +94,8 @@ import {
   personalConnections,
 } from "@/lib/plugins/queries";
 import { searchTextEntry } from "@/lib/search-text";
+import { cn } from "@/lib/utils";
+import { useKit } from "@/skins/store";
 
 /**
  * The services a Bot reads as you.
@@ -266,6 +270,7 @@ const markFor = (key: string) => keyedLookup(MARKS, key);
 
 function RouteComponent() {
   const { connected: outcome, authorized, linked } = Route.useSearch();
+  const currentKit = useKit() === "current";
   /*
    * ALL THREE READ ONCE HERE, AND ALL THREE DROPPED FROM THE URL BELOW — not just `?linked=`.
    *
@@ -557,13 +562,14 @@ function RouteComponent() {
       /*
        * The page's one verb: an MCP server OpenBot doesn't list, added by its address. Its own screen,
        * because it takes a name, an address and sometimes a key (the layout skill's Procedure 5).
+       * The current kit's 40px primary, as New routine is drawn on its page (the designers' answer).
        */
       action={
         mayAddServer ? (
           <Button
             render={(props) => <Link {...props} to="/connections/new" />}
-            size="sm"
-            variant="outline"
+            size={currentKit ? "lg" : "sm"}
+            variant={currentKit ? "default" : "outline"}
           >
             <IconPlus />
             Add custom MCP
@@ -706,17 +712,28 @@ function RouteComponent() {
           </PageEmpty>
         ) : (
           <>
-            <InputGroup className="h-9 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
-              <InputGroupAddon>
-                <IconSearch aria-hidden="true" className="size-4" />
-              </InputGroupAddon>
-              <InputGroupInput
+            {currentKit ? (
+              // The kit's search (Figma "connections"); the legacy kit keeps its filled bar.
+              <SearchField
                 aria-label="Search connections"
+                onChange={(event) => setSearch(event.target.value)}
+                onClear={() => setSearch("")}
                 placeholder="Search connections"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
               />
-            </InputGroup>
+            ) : (
+              <InputGroup className="h-9 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
+                <InputGroupAddon>
+                  <IconSearch aria-hidden="true" className="size-4" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  aria-label="Search connections"
+                  placeholder="Search connections"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </InputGroup>
+            )}
             {nothingMatches ? (
               <PageEmpty icon={IconSearch} title="No matches">
                 Nothing matches “{search.trim()}”.
@@ -804,6 +821,10 @@ function RouteComponent() {
  * exception: connections are apps you pick out by their mark, so they are laid out as tiles rather
  * than read down as a list. In the personal edition, pressing a tile that is not in use connects or
  * adds it. `children` go after the tiles.
+ *
+ * The current kit draws them as Figma's app cards ("connections"): white, 2px apart, a 44px tile,
+ * the name in 16px and up to three lines of what it does, with no edge. The legacy kit keeps its
+ * outlined 56px tiles 12px apart. `TILE`, `TILE_MARK` and `TILE_SUMMARY` hold the difference.
  */
 function ConnectionGrid({
   rows,
@@ -821,7 +842,7 @@ function ConnectionGrid({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
+    <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2 kit:gap-0.5">
       {rows.map((row) => {
         const entry = row.directoryEntryId
           ? directory.find((candidate) => candidate.id === row.directoryEntryId)
@@ -911,13 +932,13 @@ function ConnectionsLoading() {
     <div aria-label="Loading your connections" role="status">
       <div aria-hidden="true">
         <Skeleton className="h-9 w-full rounded-md bg-muted/60 motion-reduce:animate-none" />
-        <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
+        <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2 kit:gap-0.5">
           {["a", "b", "c", "d"].map((key) => (
             <div
-              className="flex min-h-14 items-center gap-3 rounded-lg border border-border bg-card px-3"
+              className="flex min-h-14 items-center gap-3 rounded-lg border border-border bg-card px-3 kit:min-h-21 kit:rounded-card kit:border-transparent kit:p-row"
               key={key}
             >
-              <Skeleton className="size-8 rounded-md motion-reduce:animate-none" />
+              <Skeleton className="size-8 rounded-md motion-reduce:animate-none kit:size-11 kit:rounded-tile" />
               <Skeleton className="h-3.5 w-28 motion-reduce:animate-none" />
             </div>
           ))}
@@ -926,6 +947,14 @@ function ConnectionsLoading() {
     </div>
   );
 }
+
+/** A tile, its mark and its line: the legacy kit's outlined tile, the current kit's app card. */
+const TILE =
+  "min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5 kit:border-transparent kit:p-row";
+const TILE_MARK =
+  "size-9 kit:size-11 kit:rounded-tile kit:bg-sidebar kit:text-foreground";
+// Three lines, broken between words: `break-all` in the legacy tile's one line splits them anywhere.
+const TILE_SUMMARY = "kit:line-clamp-3 kit:[word-break:normal] kit:break-words";
 
 /** The broker's directory of more apps, as the last tile of Add an app. */
 function BrowseTile({
@@ -937,18 +966,18 @@ function BrowseTile({
 }) {
   return (
     <Item
-      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5"
+      className={TILE}
       data-testid="account-browse"
       render={<Link {...link} />}
       size="sm"
       variant="outline"
     >
-      <RowMark className="size-9">
+      <RowMark className={TILE_MARK}>
         <IconApps className="size-4" />
       </RowMark>
-      <ItemContent className="min-w-0 gap-0.5">
+      <ItemContent className="min-w-0 gap-0.5 kit:gap-1">
         <ItemTitle className="block w-auto truncate">{browse.title}</ItemTitle>
-        <ItemDescription className="line-clamp-1 text-xs">
+        <ItemDescription className={cn("line-clamp-1 text-xs", TILE_SUMMARY)}>
           {browse.description}
         </ItemDescription>
       </ItemContent>
@@ -971,7 +1000,7 @@ function ConnectionItem({
 }) {
   return (
     <Item
-      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5 text-left"
+      className={cn(TILE, "text-left")}
       data-testid={
         row.directoryEntryId ? `directory-${row.key}` : `account-${row.key}`
       }
@@ -989,14 +1018,14 @@ function ConnectionItem({
       size="sm"
       variant="outline"
     >
-      <RowMark className="size-9">
+      <RowMark className={TILE_MARK}>
         <ConnectionMark mark={row.mark} name={row.title} />
       </RowMark>
-      <ItemContent className="min-w-0 gap-0.5">
+      <ItemContent className="min-w-0 gap-0.5 kit:gap-1">
         <ItemTitle className="block w-auto truncate">{row.title}</ItemTitle>
         {row.summary ? (
           <ItemDescription
-            className="line-clamp-1 break-all text-xs"
+            className={cn("line-clamp-1 break-all text-xs", TILE_SUMMARY)}
             title={row.summary}
           >
             {row.summary}
@@ -1045,11 +1074,21 @@ function ConnectionStateLabel({
   row: ConnectionRow;
   pending: boolean;
 }) {
+  const currentKit = useKit() === "current";
   const { state } = row;
+  if (state === "connected" && currentKit) {
+    // The kit's success badge (Figma "connections"): a tick in the status colour on its tint.
+    return (
+      <Badge variant="success">
+        <IconCheck data-icon="inline-start" />
+        {row.noAccount ? "On" : "Connected"}
+      </Badge>
+    );
+  }
   if (state === "connected") {
     return (
       <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <IconCheck aria-hidden="true" className="size-3.5 text-success" />
+        <IconCheck aria-hidden="true" className="size-3.5 text-success-ink" />
         {row.noAccount ? "On" : "Connected"}
       </span>
     );
@@ -1063,8 +1102,18 @@ function ConnectionStateLabel({
   if (row.requested) {
     return <span className="text-xs text-muted-foreground">Requested</span>;
   }
+  /*
+   * What pressing the tile does, drawn as a button though the tile itself is the press: the current
+   * kit's secondary button, the legacy kit's muted pill.
+   */
   const pill = (
-    <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
+    <span
+      className={
+        currentKit
+          ? buttonVariants({ size: "sm", variant: "secondary" })
+          : "rounded-full bg-muted px-3 py-1 text-xs font-medium"
+      }
+    >
       {pending
         ? PENDING_LABEL[row.action ?? "connect"]
         : state === "needs_reconnect"

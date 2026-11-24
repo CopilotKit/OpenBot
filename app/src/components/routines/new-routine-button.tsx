@@ -1,4 +1,4 @@
-import { IconClock, IconPlus } from "@tabler/icons-react";
+import { IconClock, IconPlus } from "@/components/icons";
 import { Link, useRouter } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import {
@@ -6,20 +6,24 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useKit } from "@/skins/store";
 
 /**
  * New routine, opening the create screen. `agentId` starts it out for one Bot.
  *
- * `outline` where it stands alone in an empty state, `ghost` on a page's title row, as Add
- * credential and New skill are drawn.
+ * `outline` where it stands alone in an empty state. On a page's title row, the current kit's
+ * primary button, as Figma draws New Bot and New routine; the legacy kit's `ghost`, as Add
+ * credential and New skill are drawn there.
  */
 export function NewRoutineButton({
   agentId,
-  variant = "ghost",
+  variant,
 }: {
   agentId?: string;
+  /** Absent, it is a page's own action: the current kit's 40px primary (Figma "routines"). */
   variant?: "ghost" | "outline";
 }) {
+  const currentKit = useKit() === "current";
   // A list drawn with no router around it, as a skin's own tests draw it, has nowhere to link to.
   if (!useRouter({ warn: false })) return null;
   return (
@@ -31,8 +35,8 @@ export function NewRoutineButton({
           to="/routines/new"
         />
       )}
-      size="sm"
-      variant={variant}
+      size={variant === undefined && currentKit ? "lg" : "sm"}
+      variant={variant ?? (currentKit ? "default" : "ghost")}
     >
       <IconPlus />
       New routine

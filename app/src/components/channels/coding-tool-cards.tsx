@@ -8,7 +8,7 @@ import {
   IconPencil,
   IconSearch,
   IconTerminal2,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { structuredPatch } from "diff";
 import { type ReactNode, useState } from "react";
 import { byPosition } from "@/components/gallery/positions";
@@ -148,7 +148,7 @@ function OutcomeStatus({
     );
   if (outcome.state === "failed")
     return (
-      <span className="shrink-0 text-xs text-warning">
+      <span className="shrink-0 text-xs text-warning-ink">
         {outcome.exitCode === undefined
           ? "Didn't work"
           : `Exit code ${outcome.exitCode}`}
@@ -252,15 +252,15 @@ function diffRows(before: string, after: string): DiffRow[] {
 }
 
 const ROW_TONES = {
-  add: "bg-success/10",
-  del: "bg-red-500/10 dark:bg-red-500/15",
+  add: "bg-success-subtle",
+  del: "bg-destructive-subtle",
   same: "text-muted-foreground",
   gap: "text-muted-foreground",
 } as const;
 
 const MARK_TONES = {
-  add: "text-success",
-  del: "text-red-700 dark:text-red-400",
+  add: "text-success-ink",
+  del: "text-destructive",
 } as const;
 
 const DIFF_ROWS = 12;

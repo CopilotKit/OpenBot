@@ -68,9 +68,11 @@ describe("sidebar width", () => {
   const storage = (entries: Record<string, string>) => (key: string) =>
     entries[key] ?? null;
 
-  test("every shell starts at the app's width until somebody drags one", () => {
-    expect(SIDEBAR_WIDTH).toBe("340px");
-    expect(storedSidebarWidth(storage({}))).toBe("340px");
+  test("every shell starts at its UI Kit's width until somebody drags one", () => {
+    // OpenBot's own look, as Figma draws it; the legacy kit keeps the width its skins had.
+    expect(SIDEBAR_WIDTH).toEqual({ current: "280px", legacy: "340px" });
+    expect(storedSidebarWidth(storage({}), "current")).toBe("280px");
+    expect(storedSidebarWidth(storage({}), "legacy")).toBe("340px");
   });
 
   test("a dragged width is shared, ahead of the app's old one", () => {
@@ -80,13 +82,17 @@ describe("sidebar width", () => {
           [SIDEBAR_WIDTH_STORAGE_KEY]: "280",
           [LEGACY_APP_SIDEBAR_WIDTH_KEY]: "400",
         }),
+        "current",
       ),
     ).toBe("280px");
   });
 
   test("the app's old width carries over, and admin's and settings' do not", () => {
     expect(
-      storedSidebarWidth(storage({ [LEGACY_APP_SIDEBAR_WIDTH_KEY]: "400" })),
+      storedSidebarWidth(
+        storage({ [LEGACY_APP_SIDEBAR_WIDTH_KEY]: "400" }),
+        "current",
+      ),
     ).toBe("400px");
     expect(
       storedSidebarWidth(
@@ -94,14 +100,15 @@ describe("sidebar width", () => {
           "openbot-sidebar-width:settings": "250",
           "openbot-sidebar-width:admin": "260",
         }),
+        "current",
       ),
-    ).toBe("340px");
+    ).toBe("280px");
   });
 
-  test("a width out of bounds falls back to the default", () => {
-    expect(
-      storedSidebarWidth(storage({ [SIDEBAR_WIDTH_STORAGE_KEY]: "9000" })),
-    ).toBe("340px");
+  test("a width out of bounds falls back to the kit's default", () => {
+    const outOfBounds = storage({ [SIDEBAR_WIDTH_STORAGE_KEY]: "9000" });
+    expect(storedSidebarWidth(outOfBounds, "current")).toBe("280px");
+    expect(storedSidebarWidth(outOfBounds, "legacy")).toBe("340px");
   });
 });
 

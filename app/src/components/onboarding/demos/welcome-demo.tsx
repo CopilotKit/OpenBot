@@ -1,4 +1,4 @@
-import { IconArrowUp, IconMicrophone, IconPlus } from "@tabler/icons-react";
+import { IconArrowUp, IconMicrophone, IconPlus } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { DemoOrb } from "@/components/onboarding/demo-orb";
 import { cn } from "@/lib/utils";
@@ -138,7 +138,9 @@ function WelcomeScene({
           />
           <span
             className={
-              beat === 2 ? "text-success" : "text-blue-600 dark:text-blue-400"
+              beat === 2
+                ? "text-success-ink"
+                : "text-blue-600 dark:text-blue-400"
             }
           >
             {beat === 2 ? "Found three places" : "Working on it"}

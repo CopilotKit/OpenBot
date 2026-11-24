@@ -1,5 +1,5 @@
 import { RESEARCH_ROLES } from "@openbot/shared/research";
-import { IconChevronRight, IconPlugOff, IconWorld } from "@tabler/icons-react";
+import { IconChevronRight, IconPlugOff, IconWorld } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";
@@ -255,7 +255,7 @@ export function SkillTools({
                        * worth seeing before ticking it.
                        */}
                       {tool.writes ? (
-                        <span className="text-warning text-xs">
+                        <span className="text-warning-ink text-xs">
                           changes things
                         </span>
                       ) : null}

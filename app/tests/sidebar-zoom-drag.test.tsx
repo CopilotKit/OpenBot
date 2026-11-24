@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { SIDEBAR_WIDTH } from "../src/lib/sidebar";
 import { personBody } from "./accounts-api";
 
 /**
@@ -45,6 +46,8 @@ const WIDE = { width: 1440, height: 900 };
 const ZOOMED = { width: 820, height: 540 };
 /** Two-fifths of the zoomed window: `SIDEBAR_MAX_SHARE` in app/src/lib/sidebar.ts. */
 const ZOOMED_MOST = Math.floor(ZOOMED.width * 0.4);
+/** The width before any drag: OpenBot's own look, which the fixture draws (no skin chosen). */
+const DEFAULT_WIDTH = Number.parseInt(SIDEBAR_WIDTH.current, 10);
 
 /**
  * The narrowest each shape may be dragged: the panel's floor, plus the 3rem strip beside one; and
@@ -395,9 +398,9 @@ describe.skipIf(!asked)("the sidebar's edge at any zoom", () => {
       for (const [engine, browser] of engines) {
         const page = await open(browser, shape, ZOOMED);
         try {
-          // 340px by default, which is more than two-fifths of the zoomed window.
+          // The Figma width remains the starting width when it fits under the window's ceiling.
           expect(await measured(page)).toMatchObject({
-            width: ZOOMED_MOST,
+            width: Math.min(DEFAULT_WIDTH, ZOOMED_MOST),
             window: ZOOMED.width,
           });
           await shot(page, `${engine}-${shape.name}-zoomed`);
@@ -525,7 +528,10 @@ describe.skipIf(!asked)("the sidebar's edge at any zoom", () => {
       for (const [, browser] of engines) {
         const page = await open(browser, shape, { width: 768, height: 540 });
         try {
-          expect(await measured(page)).toMatchObject({ width: 307 });
+          // Its own width, or two-fifths of the window (307px) where that is less.
+          expect(await measured(page)).toMatchObject({
+            width: Math.min(DEFAULT_WIDTH, Math.floor(768 * 0.4)),
+          });
           await drag(page, -400);
           expect(await measured(page)).toMatchObject({ width: shape.floor });
         } finally {

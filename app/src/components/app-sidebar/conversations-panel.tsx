@@ -1,14 +1,10 @@
-import { IconMessagePlus, IconSearch } from "@tabler/icons-react";
+import { IconMessagePlus, IconPlus } from "@/components/icons";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SectionPanel } from "@/components/layout/section-panel";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
+import { SearchField } from "@/components/ui/search-field";
 import {
   SidebarContent,
   SidebarGroup,
@@ -33,6 +29,7 @@ import {
   type MessageListEmphasis,
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
+import { useKit } from "@/skins/store";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -306,6 +303,7 @@ function SearchResults({
  */
 export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
   const emphasis = useMessageListEmphasis();
+  const currentKit = useKit() === "current";
   const [view] = useConversationView();
   const channels = useInfiniteQuery(channelListQueryOptions());
   const [search, setSearch] = useState("");
@@ -360,28 +358,29 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
             />
           )}
         >
-          <IconMessagePlus />
+          {/* Figma's plus in OpenBot's own look; the legacy kit keeps the bubble with a plus. */}
+          {currentKit ? <IconPlus /> : <IconMessagePlus />}
         </Button>
       }
     >
-      <SidebarContent ref={scrollRoot} className="scroll-fade-b">
+      <SidebarContent ref={scrollRoot} className="scroll-fade-b kit:pt-2">
         <SidebarMenu>
-          <SidebarGroup className="gap-px pt-0">
+          {/* Figma's rows: 4px apart, the first 12px under the search. */}
+          <SidebarGroup className="gap-px pt-0 kit:gap-1 kit:p-0">
             <SidebarMenuItem>
-              <InputGroup className="bg-background text-sm rounded-lg h-9">
-                <InputGroupInput
-                  aria-label="Search conversations"
-                  aria-describedby={
-                    searching ? "conversation-search-scope" : undefined
-                  }
-                  onChange={(event) => changeSearch(event.target.value)}
-                  placeholder="Search…"
-                  value={search}
-                />
-                <InputGroupAddon>
-                  <IconSearch />
-                </InputGroupAddon>
-              </InputGroup>
+              {/* The UI Kit's small search, with its round clear button. */}
+              <SearchField
+                aria-label="Search conversations"
+                aria-describedby={
+                  searching ? "conversation-search-scope" : undefined
+                }
+                clearLabel="Clear the search"
+                onChange={(event) => changeSearch(event.target.value)}
+                onClear={() => changeSearch("")}
+                placeholder="Search…"
+                size="sm"
+                value={search}
+              />
             </SidebarMenuItem>
             {/*
              * What is searched, said while somebody types: names and the recent lines the rows
@@ -396,7 +395,7 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
                 {searchable ? SEARCH_SCOPE : SEARCH_HINT}
               </p>
             ) : null}
-            <div className="w-full h-2" />
+            <div className="w-full h-2 kit:h-1" />
             {searching ? (
               searchable ? (
                 <SearchResults

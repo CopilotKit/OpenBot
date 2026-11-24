@@ -1,13 +1,16 @@
 import {
   IconApps,
   IconBrain,
+  IconCheck,
   IconDeviceDesktop,
   IconMessages,
+  IconRefresh,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 import { PageRows } from "@/components/layout/page-shell";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -29,6 +32,7 @@ import {
   setupChecklistQueryOptions,
 } from "@/lib/setup/queries";
 import { cn } from "@/lib/utils";
+import { useKit } from "@/skins/store";
 import { queryClient } from "@/query-client";
 
 const ICONS: Record<SetupRowId, typeof IconBrain> = {
@@ -82,6 +86,7 @@ export function SetupChecklist({
    * that could not be read at all is read again first.
    */
   const checking = checklist.isFetching || recheck.isPending;
+  const currentKit = useKit() === "current";
   const checkAgain = (
     <Button
       className="self-center lg:self-start"
@@ -94,6 +99,13 @@ export function SetupChecklist({
       variant="ghost"
     >
       {checking ? "Checking…" : "Check again"}
+      {/* Figma's "setup/check-again-button": the refresh glyph after the words, turning while it checks. */}
+      {currentKit ? (
+        <IconRefresh
+          className={cn(checking && "animate-spin motion-reduce:animate-none")}
+          data-icon="inline-end"
+        />
+      ) : null}
     </Button>
   );
 
@@ -120,9 +132,17 @@ export function SetupChecklist({
               : summaryOf(checklist.data.rows, hosted)}
           </p>
           <PageRows className="mt-0">
-            <ul aria-label="Setup">
+            {/*
+             * One card divided by lines in the legacy kit; in the current kit each check is a card
+             * of its own, 2px apart, as Figma's Setup draws them.
+             */}
+            <ul
+              aria-label="Setup"
+              className="kit:flex kit:flex-col kit:gap-0.5 kit:overflow-visible kit:rounded-none kit:bg-transparent"
+            >
               {checklist.data.rows.map((row, at) => (
                 <li
+                  className="kit:overflow-hidden kit:rounded-card kit:bg-card kit:[&>[data-slot=separator]]:hidden"
                   data-ready={row.ready ? "" : undefined}
                   data-setup-row={row.id}
                   data-status={row.status}
@@ -193,18 +213,21 @@ function pillFor(row: SetupRow) {
   if (row.status === "ready")
     return {
       label: "Ready",
-      tone: "bg-success/10 text-success",
+      tone: "bg-success-subtle text-success-ink",
+      badge: "success" as const,
     };
   if (row.status === "not_checked")
     return {
       label: "Not checked",
-      tone: "bg-warning/10 text-warning",
+      tone: "bg-warning-subtle text-warning-ink",
+      badge: "warning" as const,
     };
   return {
     label: "Needs setup",
     tone: row.required
       ? "bg-destructive/10 text-destructive"
-      : "bg-warning/10 text-warning",
+      : "bg-warning-subtle text-warning-ink",
+    badge: row.required ? ("destructive" as const) : ("warning" as const),
   };
 }
 
@@ -220,6 +243,7 @@ function SetupItem({
 }) {
   const Icon = ICONS[row.id];
   const pill = member && !row.ready ? null : pillFor(row);
+  const currentKit = useKit() === "current";
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -239,7 +263,17 @@ function SetupItem({
           {row.detail}
         </ItemDescription>
       </ItemContent>
-      {pill ? (
+      {pill && currentKit ? (
+        // The kit's status badge (Figma's Setup): Ready with its tick, a gap in its status's tint.
+        <ItemActions className="shrink-0 self-start">
+          <Badge variant={pill.badge}>
+            {row.status === "ready" ? (
+              <IconCheck data-icon="inline-start" />
+            ) : null}
+            {pill.label}
+          </Badge>
+        </ItemActions>
+      ) : pill ? (
         <ItemActions className="shrink-0 self-start">
           <span
             className={cn(

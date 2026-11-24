@@ -1,4 +1,4 @@
-import { IconTrash } from "@tabler/icons-react";
+import { IconTrash } from "@/components/icons";
 import {
   Item,
   ItemContent,

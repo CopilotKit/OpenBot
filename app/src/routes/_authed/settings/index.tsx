@@ -22,6 +22,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import { Kbd } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
 import { personalAiConnectionQueryOptions } from "@/lib/ai-connection/queries";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
@@ -93,12 +94,7 @@ function RouteComponent() {
                 <ItemActions>
                   <span className="flex gap-1">
                     {formatHotkey(hotkey.combo).map((part) => (
-                      <kbd
-                        className="rounded-md border bg-muted px-1.5 py-0.5 font-sans text-xs text-muted-foreground"
-                        key={part}
-                      >
-                        {part}
-                      </kbd>
+                      <Kbd key={part}>{part}</Kbd>
                     ))}
                   </span>
                 </ItemActions>

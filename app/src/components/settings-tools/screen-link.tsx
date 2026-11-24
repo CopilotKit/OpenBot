@@ -1,4 +1,4 @@
-import { IconChevronRight } from "@tabler/icons-react";
+import { IconChevronRight } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 
 /** A screen to open, as a link at the foot of a card. */

@@ -1,0 +1,266 @@
+/*
+ * THE LEGACY UI KIT: what every alternate skin was drawn on, before the November 2026 redesign moved
+ * OpenBot to Sora on a 16px scale and the UI Kit's primitives. A skin is drawn with it while
+ * skins/kit.ts says so, which puts `data-kit="legacy"` on `<html>`; moving a skin to the current
+ * kit is a change there, and nothing here or in a screen.
+ *
+ * The colours need nothing here: each skin sets its own palette in its skin.css. Type does, because
+ * Tailwind reads it from one set of variables for every skin. So a skin starts from Inter at the
+ * sizes it had, each Tailwind's default times 15/16 (`text-sm` 13.125px), with Tailwind's own line
+ * heights and no tightening. A skin that sets its own face (OpenFuse's `--font-sans`) still wins:
+ * its selector is as specific as this one and comes later.
+ *
+ * And Tailwind's corner steps, as multiples of the skin's `--radius` again, where the current kit
+ * puts them on its own scale (theme.css).
+ */
+:root[data-kit="legacy"] {
+  /*
+   * The status colours as the legacy screens drew them, in Tailwind's palette, so a screen drawn
+   * with the kit's status tokens (theme.css) looks as it did: emerald-500 dots, emerald-600 words,
+   * 10% tints of emerald-500 and amber-500, amber-600 words. Error's tint stays the skin's own red
+   * at 10%, as its notices drew it. Values rather than Tailwind's variables, which Tailwind leaves
+   * out once no class asks for them.
+   */
+  --color-success: oklch(69.6% 0.17 162.48); /* emerald-500 */
+  --color-success-ink: oklch(59.6% 0.145 163.225); /* emerald-600 */
+  --color-success-subtle: color-mix(
+    in oklab,
+    oklch(69.6% 0.17 162.48) 10%,
+    transparent
+  );
+  --color-warning: oklch(76.9% 0.188 70.08); /* amber-500 */
+  --color-warning-ink: oklch(66.6% 0.179 58.318); /* amber-600 */
+  --color-warning-subtle: color-mix(
+    in oklab,
+    oklch(76.9% 0.188 70.08) 10%,
+    transparent
+  );
+  /*
+   * A notice as the legacy screens drew one by hand: a box with smaller corners, 12px by 8px in,
+   * edged in its status colour at 40% (neutral: the hairline) over its 10% fill, neutral a 40% muted.
+   */
+  --radius-notice: var(--radius-md);
+  --spacing-notice-x: 0.75rem;
+  --spacing-notice-y: 0.5rem;
+  --color-notice-neutral: color-mix(in oklab, var(--muted) 40%, transparent);
+  --color-notice-edge-success: color-mix(
+    in oklab,
+    var(--color-success) 40%,
+    transparent
+  );
+  --color-notice-edge-warning: color-mix(
+    in oklab,
+    var(--color-warning) 40%,
+    transparent
+  );
+  --color-notice-edge-destructive: color-mix(
+    in oklab,
+    var(--destructive) 40%,
+    transparent
+  );
+  --color-notice-edge-additional: color-mix(
+    in oklab,
+    var(--color-additional) 40%,
+    transparent
+  );
+  --color-notice-edge-neutral: var(--border);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-brand: var(--font-sans);
+  --text-xs: 0.703125rem; /* 11.25px */
+  --text-xs--line-height: calc(1 / 0.75);
+  --text-xs--letter-spacing: normal;
+  --text-sm: 0.8203125rem; /* 13.125px */
+  --text-sm--line-height: calc(1.25 / 0.875);
+  --text-base: 0.9375rem; /* 15px */
+  --text-lg: 1.0546875rem; /* 16.875px */
+  --text-xl: 1.171875rem; /* 18.75px */
+  --text-2xl: 1.40625rem; /* 22.5px */
+  --text-3xl: 1.7578125rem; /* 28.125px */
+  --text-3xl--line-height: calc(2.25 / 1.875);
+  --text-4xl: 2.109375rem; /* 33.75px */
+  --tracking-heading: normal;
+}
+
+/*
+ * And the buttons, fields and menus the skins were drawn with, before the UI Kit's: the tokens
+ * theme.css gives OpenBot's own look, set back to what the primitives drew (components/ui). A
+ * button is tinted on hover, nudged a pixel when pressed and faded when disabled, with smaller
+ * icons and a tighter end beside one, and its link is underlined under the pointer; an outlined
+ * button keeps its border. A field is shorter, with a `--input` border that stays put under the
+ * pointer, the periwinkle focus ring outside it and a muted placeholder. A menu has the smaller
+ * corners, a hairline and a short shadow, and tighter rows. A tickbox shows what is under it and
+ * fades when disabled; tabs are shorter, squarer and medium weight; a table names its columns in
+ * 14px medium; a count is a small 11px pill. The message box keeps one look in every state but
+ * listening.
+ */
+:root[data-kit="legacy"] {
+  --color-primary-hover: color-mix(in oklab, var(--primary) 85%, transparent);
+  --color-primary-active: var(--color-primary-hover);
+  --color-primary-disabled: var(--primary-foreground);
+  --color-secondary-hover: color-mix(
+    in oklch,
+    var(--secondary),
+    var(--foreground) 5%
+  );
+  --color-secondary-active: var(--color-secondary-hover);
+  --color-secondary-disabled: var(--secondary-foreground);
+  --color-secondary-expanded: var(--secondary);
+  --color-ghost-hover: var(--muted);
+  --color-ghost-active: var(--muted);
+  --color-ghost-expanded: var(--muted);
+  --color-ghost-disabled: currentColor;
+  --color-outline: var(--card);
+  --color-outline-border: var(--input);
+  --color-outline-hover: var(--muted);
+  --color-outline-active: var(--muted);
+  --color-outline-expanded: var(--muted);
+  --color-outline-disabled: currentColor;
+  --color-link-hover: var(--primary);
+  --color-link-active: var(--primary);
+  --color-link-disabled: var(--primary);
+  --spacing-button-icon: 1.125rem;
+  --spacing-button-icon-sm: 1rem;
+  --spacing-button-edge: 0.75rem;
+  --spacing-button-edge-sm: 0.625rem;
+  --button-press-shift: 1px;
+  --button-disabled-opacity: 0.5;
+  --link-hover-decoration: underline;
+
+  --color-field-border: var(--input);
+  --color-field-border-hover: var(--input);
+  --color-field-placeholder: var(--muted-foreground);
+  --color-field-disabled: var(--foreground);
+  --color-field-focus-border: var(--ring);
+  --color-field-disabled-bg: color-mix(in oklab, var(--input) 50%, transparent);
+  --spacing-field: 2.25rem;
+  --spacing-field-sm: 1.75rem;
+  --spacing-field-x: 0.625rem;
+  --spacing-field-x-sm: 0.625rem;
+  --spacing-field-y: 0.5rem;
+  --spacing-field-icon: 1rem;
+  --spacing-field-addon: 0.5rem;
+  --spacing-field-addon-gap: 0.375rem;
+  --radius-field: var(--radius);
+  --radius-field-sm: min(calc(var(--radius) * 0.8), 10px);
+  --field-focus-band: 0px;
+  --field-focus-ring: 3px;
+  --field-invalid-ring: 3px;
+  --field-disabled-opacity: 0.5;
+
+  --spacing-menu-item-x: 0.375rem;
+  --spacing-menu-item-end: 0.375rem;
+  --spacing-menu-item-y: 0.25rem;
+  --spacing-menu-gap: 0.375rem;
+  --spacing-menu-icon: 1rem;
+  --spacing-menu-inset: 1.75rem;
+  --spacing-menu-label-y: 0.25rem;
+  --spacing-menu-indicator: 0.5rem;
+  --spacing-menu-check: 1rem;
+  --spacing-select-pad: 0px;
+  --radius-menu: var(--radius);
+  --radius-menu-item: calc(var(--radius) * 0.8);
+  --menu-shadow:
+    0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent),
+    0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --menu-shadow-sub:
+    0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent),
+    0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+  --leading-heading: 1.25;
+  --color-row-hover: var(--muted);
+  --color-sidebar-item-hover: color-mix(
+    in oklab,
+    var(--foreground) 5%,
+    transparent
+  );
+  --color-bot-card-hover: color-mix(in oklab, var(--card) 70%, transparent);
+  --spacing-row-actions: 0.5rem;
+  --spacing-row: 1.25rem;
+
+  --color-check-bg: transparent;
+  --color-check-border: var(--muted-foreground);
+  --color-check-border-hover: var(--muted-foreground);
+  --color-check-checked-hover: var(--primary);
+  --color-check-focus-border: var(--ring);
+  --color-check-focus-ring: color-mix(in oklab, var(--ring) 50%, transparent);
+  --check-focus-ring: 3px;
+  --color-check-invalid-bg: transparent;
+  --check-invalid-ring: 3px;
+  --color-check-checked-invalid: var(--primary);
+  --color-check-disabled-bg: transparent;
+  --color-check-disabled-border: var(--muted-foreground);
+  --color-check-checked-disabled: var(--primary);
+  --color-check-disabled: var(--primary-foreground);
+  --check-disabled-opacity: 0.5;
+  --check-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --color-radio-hover: var(--primary);
+  --color-radio-disabled: var(--primary);
+
+  --color-tabs: var(--muted);
+  --color-tab-active: var(--background);
+  --spacing-tabs: 2rem;
+  --spacing-tabs-pad: 3px;
+  --spacing-tab-x: 0.375rem;
+  --spacing-tab-gap: 0.375rem;
+  --spacing-tab-edge: 0.25rem;
+  --radius-tabs: var(--radius);
+  --radius-tab: calc(var(--radius) * 0.8);
+  --tab-weight: 500;
+  --tab-trim: 1px;
+  --tab-active-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+
+  --color-table-head: var(--muted-foreground);
+  --text-table-head-size: 0.875rem;
+  --table-head-weight: 500;
+  --color-table: transparent;
+  --radius-table: 0px;
+  --color-table-head-bg: var(--background);
+  --spacing-table-head: 2.5rem;
+  --spacing-table-cell-x: 0.75rem;
+  --spacing-table-cell-y: 0.5rem;
+
+  --color-composer-placeholder-hover: var(--color-composer-placeholder);
+  --composer-focus-ring: 0px;
+  --color-composer-listening: var(--muted);
+  --color-composer-disabled: var(--card);
+  --color-composer-disabled-ink: currentColor;
+  --composer-disabled-shadow: var(--shadow-composer);
+
+  --spacing-search-lg: 2.75rem;
+  --spacing-search-lg-gap: 0.375rem;
+  --color-search-lg: color-mix(in oklab, var(--muted) 50%, transparent);
+  --search-lg-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --color-search-icon: var(--muted-foreground);
+  --search-focus-ring: 3px;
+  --color-search-focus-ring: color-mix(in oklab, var(--ring) 50%, transparent);
+  --color-search-focus-border: var(--ring);
+
+  --spacing-badge-count: auto;
+  --spacing-badge-count-x: 0.375rem;
+  --text-badge-count: 11px;
+  --badge-count-weight: 500;
+}
+:root[data-kit="legacy"].dark {
+  /* The legacy screens' status words in dark: emerald-400 and amber-500. */
+  --color-success-ink: oklch(76.5% 0.177 163.223); /* emerald-400 */
+  --color-warning-ink: oklch(76.9% 0.188 70.08); /* amber-500 */
+  --color-search-lg: color-mix(in oklab, var(--input) 40%, transparent);
+  --color-ghost-hover: color-mix(in oklab, var(--muted) 50%, transparent);
+  --color-ghost-active: var(--color-ghost-hover);
+  --color-outline: color-mix(in oklab, var(--input) 30%, transparent);
+  --color-outline-hover: color-mix(in oklab, var(--input) 50%, transparent);
+  --color-outline-active: var(--color-outline-hover);
+  --color-field-disabled-bg-dark: color-mix(
+    in oklab,
+    var(--input) 80%,
+    transparent
+  );
+}

@@ -729,12 +729,12 @@ fetches none.
 const END_PAGE_STYLE: &str = r#"
 :root {
   /* tokens/src/scheme.ts, light: background foreground card muted-foreground border sidebar (bun run tokens:generate) */
-  --background: oklch(0.983 0.003 286.4);
-  --foreground: oklch(0.108 0.015 220.9);
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.172 0.007 258.4);
   --card: oklch(1 0 0);
-  --muted-foreground: oklch(0.506 0.013 285.9);
-  --border: oklch(0.894 0.014 286.1);
-  --sidebar: oklch(0.948 0.011 286.2);
+  --muted-foreground: oklch(0.172 0.007 258.4 / 60%);
+  --border: oklch(0.172 0.007 258.4 / 8%);
+  --sidebar: oklch(0.936 0.009 264.5);
   /* end of tokens/src/scheme.ts */
   --radius: 0.625rem;
   --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);

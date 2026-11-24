@@ -1,5 +1,6 @@
-import { IconArrowRight } from "@tabler/icons-react";
+import { IconArrowRight } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Button } from "@/components/ui/button";
 import type { AgentProfile } from "@/lib/agents/queries";
@@ -7,28 +8,45 @@ import type { AgentProfile } from "@/lib/agents/queries";
 export function AgentCard({
   agent,
   appearance = "compact",
+  description,
+  trailing,
 }: {
   agent: AgentProfile;
   appearance?: "compact" | "row";
+  /** In place of what the Bot is for, on a row: what it is doing or waiting on (the Bots page). */
+  description?: string;
+  /** At the row's end, such as how many things wait on the person. */
+  trailing?: ReactNode;
 }) {
   if (appearance === "row") {
     return (
       /*
        * The avatar beside the name rather than above it: a tall card left most of its height empty
        * between the two, and a row reads the name and what the Bot is for in one glance.
+       *
+       * Figma's "Bot Card": a white card with a 44px avatar, the name in 16px and two lines of what
+       * the Bot is for, turning the page's colour under the pointer. Every card is two lines tall
+       * whatever its description, so a grid of them keeps its rows even.
        */
-      <div className="flex h-16 min-w-0 items-center gap-3 rounded-xl border border-border bg-card px-3 transition-colors hover:border-ring dark:border-transparent">
+      <div
+        className="flex min-w-0 items-center gap-3 rounded-card bg-card p-5 transition-colors hover:bg-bot-card-hover"
+        data-slot="bot-card"
+      >
         <div aria-hidden="true" className="flex shrink-0">
-          <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={32} />
+          <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={44} />
         </div>
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate text-sm font-medium" title={agent.name}>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <span
+            className="truncate font-semibold text-base leading-heading tracking-heading"
+            title={agent.name}
+          >
             {agent.name}
           </span>
-          <span className="truncate text-xs text-muted-foreground">
-            {agent.roleDescription}
+          <span className="line-clamp-2 min-h-[2lh] break-words text-muted-foreground text-sm">
+            {description || agent.roleDescription}
           </span>
         </div>
+        {trailing ? <div className="flex shrink-0">{trailing}</div> : null}
       </div>
     );
   }

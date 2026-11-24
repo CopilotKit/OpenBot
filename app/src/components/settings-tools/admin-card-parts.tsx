@@ -1,4 +1,4 @@
-import { IconArrowRight, IconUsers } from "@tabler/icons-react";
+import { IconArrowRight, IconUsers } from "@/components/icons";
 import type { ComponentType, ReactNode } from "react";
 import { Badge, type Tone } from "@/components/gallery/frame";
 import { PersonAvatar } from "@/components/organizations/person-avatar";

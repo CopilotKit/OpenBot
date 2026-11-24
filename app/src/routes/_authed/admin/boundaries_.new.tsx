@@ -3,7 +3,7 @@ import {
   IconCode,
   IconShieldX,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   keepPreviousData,
   useMutation,
@@ -361,7 +361,7 @@ function NewRulePage() {
                     </p>
                   ) : null}
                   {chosen !== "custom" && chosen !== "describe" ? (
-                    <p className="text-warning text-sm">{chosen.cost}</p>
+                    <p className="text-warning-ink text-sm">{chosen.cost}</p>
                   ) : null}
                   {written ? (
                     <RuleReading rule={rule} written={written} />

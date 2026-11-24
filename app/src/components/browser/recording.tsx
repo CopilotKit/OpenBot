@@ -8,7 +8,7 @@ import {
   IconLoader2,
   IconPlayerRecordFilled,
   IconTrash,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { type UseMutationOptions, useMutation } from "@tanstack/react-query";
 import { type ReactNode, useRef, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -299,12 +299,12 @@ export function StoppedIcon({
   return stopped.empty || stopped.kept || stopped.retrying ? (
     <IconAlertTriangle
       aria-hidden="true"
-      className={cn("text-warning", className)}
+      className={cn("text-warning-ink", className)}
     />
   ) : (
     <IconCircleCheck
       aria-hidden="true"
-      className={cn("text-success", className)}
+      className={cn("text-success-ink", className)}
     />
   );
 }

@@ -10,7 +10,7 @@ import {
   IconShieldLock,
   IconSparkles,
   IconUsers,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";

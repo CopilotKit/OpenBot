@@ -1,4 +1,4 @@
-import { IconCheck, IconX } from "@tabler/icons-react";
+import { IconCheck, IconX } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
@@ -207,7 +207,10 @@ function MovedAppRow({
       <ItemActions className="shrink-0">
         {app.reconnected ? (
           <span className="flex items-center gap-1 text-muted-foreground text-xs">
-            <IconCheck aria-hidden="true" className="size-3.5 text-success" />
+            <IconCheck
+              aria-hidden="true"
+              className="size-3.5 text-success-ink"
+            />
             Reconnected
           </span>
         ) : (

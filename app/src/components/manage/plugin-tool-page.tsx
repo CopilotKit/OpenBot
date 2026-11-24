@@ -1,4 +1,4 @@
-import { IconBolt, IconPlugOff, IconTool } from "@tabler/icons-react";
+import { IconBolt, IconPlugOff, IconTool } from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
@@ -180,7 +180,7 @@ export function PluginToolPage({
               <span
                 className={
                   tool.effect === "write"
-                    ? "text-warning text-xs"
+                    ? "text-warning-ink text-xs"
                     : "text-muted-foreground text-xs"
                 }
               >

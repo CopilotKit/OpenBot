@@ -9,7 +9,7 @@ import {
   IconSitemap,
   IconUser,
   IconUsers,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   keepPreviousData,
   useInfiniteQuery,

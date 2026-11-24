@@ -28,7 +28,8 @@ function UserAvatar() {
   return (
     <div
       aria-hidden="true"
-      className="size-[28px] shrink-0 bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden"
+      // Figma's "Account / Avatar" in OpenBot's own look: 32px, surface/50, the secondary ink.
+      className="size-[28px] shrink-0 bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden kit:size-8 kit:bg-avatar kit:text-muted-foreground"
     >
       {initials}
     </div>

@@ -4,7 +4,7 @@ import {
   IconExternalLink,
   IconPuzzle,
   IconTool,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
@@ -1201,7 +1201,8 @@ export function PluginPage({
                   <ConnectionStateUnreadable />
                 ) : (
                   <Item size="sm">
-                    <ItemContent>
+                    {/* Room to read the words on a phone: the status and Connect go under them there. */}
+                    <ItemContent className="min-w-40">
                       <ItemTitle>Your account</ItemTitle>
                       <ItemDescription>
                         {personal
@@ -1482,7 +1483,7 @@ export function PluginPage({
                       <span
                         className={
                           tool.effect === "write"
-                            ? "text-warning text-xs"
+                            ? "text-warning-ink text-xs"
                             : "text-muted-foreground text-xs"
                         }
                       >
@@ -1811,7 +1812,7 @@ export function PluginPage({
                   >
                     <div className="mb-1 flex items-center justify-between">
                       <p
-                        className="font-medium text-warning text-sm"
+                        className="font-medium text-warning-ink text-sm"
                         id="grant-writes-heading"
                       >
                         Changes things

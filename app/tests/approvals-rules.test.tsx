@@ -32,6 +32,7 @@ import {
 } from "@/components/channels/tool-activity";
 import { TeamBotConsents } from "@/components/settings/team-bot-consents";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { clearSkin, setSkin } from "@/skins/store";
 import { ME_PATH, meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import {
@@ -329,6 +330,29 @@ test("with personal rules switched off by the team, they are shown as not applyi
     ),
   ).toBeTruthy();
   expect(view.queryByText("Add a rule")).toBeNull();
+});
+
+test("with no rules, the current kit says so in a muted line atop the Add a rule card, as Figma does", async () => {
+  inboxOverride = { rules: [], teamRules: [] };
+  const view = draw(<ApprovalSettings />);
+  const none = await view.findByText("No rules yet");
+  // One card: the line, then the row that adds the first rule.
+  const card = none.parentElement as HTMLElement;
+  expect(card.parentElement?.getAttribute("data-slot")).toBe("page-rows");
+  expect(within(card).getByText("Add a rule")).toBeTruthy();
+  expect(view.container.querySelector("[data-page-empty]")).toBeNull();
+});
+
+test("with no rules, the legacy kit keeps its empty state above the Add a rule row", async () => {
+  inboxOverride = { rules: [], teamRules: [] };
+  setSkin("openduet");
+  const view = draw(<ApprovalSettings />);
+  const none = await view.findByText("No rules yet");
+  const empty = none.closest("[data-slot=empty]");
+  const add = view.getByText("Add a rule");
+  clearSkin();
+  expect(empty).not.toBeNull();
+  expect(empty?.contains(add)).toBe(false);
 });
 
 test("an administrator is told where team settings are", async () => {

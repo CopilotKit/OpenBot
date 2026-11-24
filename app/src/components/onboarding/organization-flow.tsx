@@ -5,7 +5,7 @@ import {
   IconListCheck,
   IconRobot,
   IconShieldCheck,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useReducedMotion } from "motion/react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 
@@ -51,12 +51,12 @@ const OUTCOMES: Node[] = [
   {
     label: "Your rules",
     icon: IconShieldCheck,
-    tone: "bg-success/15 text-success",
+    tone: "bg-success-subtle text-success-ink",
   },
   {
     label: "Team Bots",
     icon: IconRobot,
-    tone: "bg-warning/15 text-warning",
+    tone: "bg-warning-subtle text-warning-ink",
   },
   {
     label: "Audit trail",

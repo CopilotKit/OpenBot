@@ -28,7 +28,7 @@ import {
   IconClock,
   IconDownload,
   IconPhoto,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { QueryClientContext, useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -329,7 +329,7 @@ export function RestoringTranscript() {
     // One announcement, with every bar hidden from it: nine empty shapes read aloud is worse.
     <div aria-label="Loading this conversation" role="status">
       <div aria-hidden="true" className="flex justify-end pb-7">
-        <Skeleton className="h-10 w-64 rounded-xl bg-muted/40 motion-reduce:animate-none" />
+        <Skeleton className="h-[43px] w-64 rounded-tile bg-muted/40 motion-reduce:animate-none" />
       </div>
       <div aria-hidden="true" className="flex flex-col gap-3">
         {RESTORING_ANSWER_LINES.map((line) => (
@@ -1086,7 +1086,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
           */}
           <Bubble
             align={align}
-            variant={isUser ? "muted" : "ghost"}
+            variant={isUser ? "sent" : "ghost"}
             className={isUser ? undefined : "w-full"}
           >
             <BubbleContent
@@ -2185,10 +2185,10 @@ export function ChatTranscript({
   // Which calls draw a component, so one asked for too early is left out. See `shared/tool-steps.ts`.
   const isComponent = useComponentTest();
   /**
-   * The transcript's column, shared by the restoring state and the scroller. 768px, wider than the
-   * composer's 672px, which is the reading width ChatGPT and Claude.ai give an answer.
+   * The transcript's column, shared by the restoring state and the scroller: Figma's 700px, the
+   * width of the box below it, so a message and the box it was typed in share their edges.
    */
-  const column = "mx-auto w-full max-w-3xl px-4";
+  const column = "mx-auto w-full max-w-page px-4";
   /*
    * NOT MEMOISED, AND THAT IS DELIBERATE. `useMemo` keyed on `messages` looks obviously right and
    * silently broke the transcript: the agent hands back the SAME array and mutates it, so the

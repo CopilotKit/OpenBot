@@ -655,14 +655,14 @@ test("a task the person stopped reads Stopped on the board, in its card's words,
       surface.getByText(title).closest("[data-slot=item]") as HTMLElement;
     expect(row("Chase the supplier").dataset.taskState).toBe("stopped");
     expect(
-      row("Chase the supplier").querySelector(".tabler-icon-player-stop"),
+      row("Chase the supplier").querySelector(".icon-player-stop"),
     ).not.toBeNull();
     expect(
-      row("Chase the supplier").querySelector(".bg-warning\\/10"),
+      row("Chase the supplier").querySelector(".bg-warning-subtle"),
     ).toBeNull();
     expect(row("File the expense report").dataset.taskState).toBe("failed");
     expect(
-      row("File the expense report").querySelector(".bg-warning\\/10"),
+      row("File the expense report").querySelector(".bg-warning-subtle"),
     ).not.toBeNull();
 
     // One that couldn't finish on its own still says so, in its card's words, and why.
@@ -815,18 +815,18 @@ test("one wait inside a task is one row and one count, and rows that wait on nob
       }),
     ).toBeTruthy();
     expect(
-      row("Order Fernhill seeds").querySelector(".bg-warning\\/10"),
+      row("Order Fernhill seeds").querySelector(".bg-warning-subtle"),
     ).not.toBeNull();
     // Listed, and not waiting on the person: no tint. A finished delegated one is not listed.
     expect(
-      row("Draft the board update").querySelector(".bg-warning\\/10"),
+      row("Draft the board update").querySelector(".bg-warning-subtle"),
     ).toBeNull();
     expect(surface.queryByText("Check the venue's doors time")).toBeNull();
   }
-  // The Bot's own badge on the Bots page says the same number.
+  // The Bot's own badge on the Bots page says the same number, on its card in OpenBot's own look.
   const bots = region("Bots page");
   const botRow = (await bots.findByText("1 task waiting on you")).closest(
-    "[data-slot=item]",
+    "[data-slot=item], [data-slot=bot-card]",
   ) as HTMLElement;
   expect(within(botRow).getByText("1")).toBeTruthy();
   // Answered from the board, without opening the thread: the whole question, and a box to answer in.

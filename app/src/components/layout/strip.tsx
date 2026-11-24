@@ -1,9 +1,10 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
-import type { Icon } from "@tabler/icons-react";
+import { type Icon, solidIcon } from "@/components/icons";
 import type * as React from "react";
 import type { ReactNode } from "react";
 import { Sidebar } from "@/components/ui/sidebar";
+import { useKit } from "@/skins/store";
 import {
   Tooltip,
   TooltipContent,
@@ -23,6 +24,14 @@ import { cn } from "@/lib/utils";
  * top, about 21 to 37px down (`data-desktop-titlebar`, macOS only), so the strip then starts 32px lower,
  * below them, level with the panel beside it (`SectionPanel`), and the room it leaves above the orb
  * moves the window (`data-desktop-drag`). Windows has its own title bar, and a browser none.
+ *
+ * In OpenBot's own look (Figma "Sidebar", Option 2) the app's sidebar has a title bar of its own
+ * above the strip and the panel, which holds the window's buttons (`SidebarTitleBar`), so from `md`
+ * the strip starts right under it on every platform: its sections 12px down and 8px apart, the
+ * account 4px off the bottom. Folded to the strip, the header (the orb) is 12px down and the sections
+ * 20px under it, the account 20px off the bottom. The sections' list keeps room above and below for
+ * the open section's mark, which reaches past the item (styles.css), since the list scrolls and so
+ * clips what is outside it.
  */
 export function Strip({
   header,
@@ -42,22 +51,23 @@ export function Strip({
       data-desktop-drag=""
       className={cn(
         "w-(--sidebar-width-icon) shrink-0 items-center bg-transparent py-1 in-data-[desktop-titlebar=overlay]:pt-9",
+        "kit:pb-1 kit:group-data-[collapsible=icon]:pb-5 kit:md:pt-0",
         className,
       )}
     >
       {header ? (
-        <div className="flex h-12 shrink-0 items-center justify-center">
+        <div className="flex h-12 shrink-0 items-center justify-center kit:h-auto kit:pt-3">
           {header}
         </div>
       ) : null}
       <nav
         aria-label="Sections"
-        className="no-scrollbar flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-1"
+        className="no-scrollbar flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-1 kit:gap-2 kit:pt-3 kit:pb-6 kit:group-data-[collapsible=icon]:pt-5"
       >
         {children}
       </nav>
       {footer ? (
-        <div className="flex shrink-0 flex-col items-center gap-1 py-1">
+        <div className="flex shrink-0 flex-col items-center gap-1 py-1 kit:py-0">
           {footer}
         </div>
       ) : null}
@@ -68,13 +78,23 @@ export function Strip({
 /**
  * The look of one icon on the strip: a square that fills on hover, and while its section is open
  * stays filled with a short bar at the strip's left edge.
+ *
+ * OpenBot's own look (Figma "Sidebar", Option 2): a 40px circle with an 18px glyph in the ink, the
+ * sidebar's white fill under the pointer. The open section has no fill: its glyph turns solid
+ * (`StripItem`) and the window's edge bites into the sidebar beside it, with a pale bar in the bite
+ * (styles.css, the frame's rules).
  */
 export const stripItemClassName = cn(
   "relative flex size-9 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/75 outline-hidden ring-sidebar-ring transition-colors",
   "hover:bg-foreground/5 hover:text-sidebar-foreground focus-visible:ring-2 [&_svg]:size-5 [&_svg]:shrink-0",
   "data-active:bg-foreground/[0.07] data-active:text-sidebar-foreground",
   "data-active:before:absolute data-active:before:top-1/2 data-active:before:-left-[6px] data-active:before:h-5 data-active:before:w-[3px] data-active:before:-translate-y-1/2 data-active:before:rounded-full data-active:before:bg-sidebar-foreground",
+  "kit:size-10 kit:rounded-full kit:text-sidebar-foreground kit:[&_svg]:size-[18px]",
+  "kit:hover:bg-sidebar-item-hover kit:data-active:bg-transparent kit:data-active:hover:bg-transparent",
 );
+
+/** The strip's line in OpenBot's own look: Figma's 1px at 18px, on the set's 24-unit grid. */
+const KIT_STROKE = 4 / 3;
 
 /**
  * One section's icon on the strip. A link when its section is a page (`render={<Link … />}`), a
@@ -103,6 +123,9 @@ export function StripItem({
     tooltip?: ReactNode;
   }) {
   const isButton = render === undefined;
+  const currentKit = useKit() === "current";
+  // OpenBot's own look draws the open section's glyph solid, where the glyph has a solid face.
+  const Glyph = currentKit && active ? solidIcon(ItemIcon) : ItemIcon;
   const item = useRender({
     defaultTagName: "button",
     render: <TooltipTrigger render={render} />,
@@ -114,7 +137,7 @@ export function StripItem({
         type: isButton ? "button" : undefined,
         children: (
           <>
-            <ItemIcon aria-hidden="true" stroke={1.75} />
+            <Glyph aria-hidden="true" stroke={currentKit ? KIT_STROKE : 1.75} />
             <span className="sr-only">{label}</span>
             {end ? (
               <span className="absolute -top-0.5 -right-0.5 flex">{end}</span>

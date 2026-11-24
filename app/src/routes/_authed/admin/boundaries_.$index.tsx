@@ -115,7 +115,7 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
       title={label.name}
     >
       {policy.mode === "dry-run" ? (
-        <p className="text-warning text-sm">
+        <p className="text-warning-ink text-sm">
           Trial mode is on, so this rule records matching actions without
           stopping them.
         </p>

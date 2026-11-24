@@ -9,7 +9,7 @@ import {
   IconPlayerPlay,
   IconRobot,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, type LinkProps, useNavigate } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
@@ -111,7 +111,7 @@ export function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
   if (lastRun.status === "skipped")
     return {
       text: `Skipped ${when}`,
-      className: "text-warning",
+      className: "text-warning-ink",
     };
   if (lastRun.status === "succeeded")
     return { text: `Ran ${when}`, className: "text-muted-foreground" };
@@ -126,13 +126,13 @@ export function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
  * re-enable, so a paused routine's stamp is frozen in the past. A stamp in the past is a firing the
  * sweep has not picked up, and "Next 5 hours ago" is nonsense, so it is said as Due.
  */
-function nextRunWords(routine: RoutineRecord): {
+export function nextRunWords(routine: RoutineRecord): {
   text: string;
   className?: string;
 } {
   if (!routine.enabled) return { text: "Paused" };
   if (new Date(routine.nextRunAt).getTime() <= Date.now())
-    return { text: "Due", className: "text-warning" };
+    return { text: "Due", className: "text-warning-ink" };
   return { text: relativeTime(routine.nextRunAt) };
 }
 
@@ -143,10 +143,10 @@ const RUN_STATUS: Record<
   running: { text: "Running", className: "" },
   succeeded: {
     text: "Succeeded",
-    className: "text-success",
+    className: "text-success-ink",
   },
   failed: { text: "Failed", className: "text-destructive" },
-  skipped: { text: "Skipped", className: "text-warning" },
+  skipped: { text: "Skipped", className: "text-warning-ink" },
   waiting: { text: "Waiting for you", className: "" },
 };
 

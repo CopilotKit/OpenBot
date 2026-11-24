@@ -10,7 +10,7 @@ import {
   IconInfoCircle,
   IconLock,
   IconUsers,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   type UseQueryResult,
   useMutation,

@@ -1,4 +1,4 @@
-import { IconChevronRight, IconSparkles } from "@tabler/icons-react";
+import { IconChevronRight, IconSparkles } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";

@@ -12,7 +12,7 @@ import {
   IconUser,
   IconUserShield,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { Fragment } from "react";
 import type { AuditEvent } from "@/components/audit/audit-cells";
@@ -84,7 +84,7 @@ function settingWords(change: CapabilityChange): {
       change.scopeKind === "team" || change.scopeKind === "group"
         ? "Grant"
         : "On",
-    className: "text-success",
+    className: "text-success-ink",
   };
 }
 
@@ -195,7 +195,7 @@ function verdictOf(person: PreviewPerson): { text: string; className: string } {
   if (person.capabilities.some(gains))
     return {
       text: "Gains access",
-      className: "text-success",
+      className: "text-success-ink",
     };
   return { text: "Keeps access", className: "text-muted-foreground" };
 }
@@ -325,7 +325,7 @@ export function PermissionsPreview({
           </FieldDescription>
         </div>
         {data.warning ? (
-          <p className="text-warning text-sm">{data.warning}</p>
+          <p className="text-warning-ink text-sm">{data.warning}</p>
         ) : null}
         {data.people.length > 0 ? (
           <PageRows>

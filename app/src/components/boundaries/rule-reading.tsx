@@ -1,4 +1,4 @@
-import { IconAlertTriangle, IconCircleCheck } from "@tabler/icons-react";
+import { IconAlertTriangle, IconCircleCheck } from "@/components/icons";
 import type { WrittenRule } from "@/components/boundaries/describe-rule";
 import { cn } from "@/lib/utils";
 
@@ -45,7 +45,7 @@ export function ReadingStatus({
       <div className={cn("flex flex-col gap-2", edited && "opacity-60")}>
         {check.ok ? (
           <p className="flex items-center gap-1.5">
-            <IconCircleCheck className="size-4 shrink-0 text-success" />
+            <IconCircleCheck className="size-4 shrink-0 text-success-ink" />
             {passed}
           </p>
         ) : (
@@ -67,9 +67,9 @@ export function ReadingStatus({
             <p className="mt-0.5 text-muted-foreground">{explanation}</p>
           </div>
         ) : null}
-        {warning ? <p className="text-warning">{warning}</p> : null}
+        {warning ? <p className="text-warning-ink">{warning}</p> : null}
       </div>
-      {edited ? <p className="text-warning">{edited}</p> : null}
+      {edited ? <p className="text-warning-ink">{edited}</p> : null}
     </div>
   );
 }

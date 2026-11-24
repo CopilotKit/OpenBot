@@ -17,8 +17,8 @@ import { REGIONS, WHOLE_FILES } from "./targets";
  *   / * end of tokens/src/scheme.ts * /
  *
  * `all` names every token. An entry written `field=token` writes a Rust struct field holding the
- * token as an RGB tuple, for the desktop app's native first paint; otherwise a line is a CSS custom
- * property. The region keeps the start marker's indent.
+ * token as an RGB tuple, for the desktop app's native first paint (a translucent token laid over the
+ * card); otherwise a line is a CSS custom property. The region keeps the start marker's indent.
  */
 
 const START =
@@ -39,9 +39,17 @@ function regionLines(mode: Mode, entries: string, indent: string) {
       : [undefined, entry];
     const value = scheme[mode][token(name as string)];
     if (!field) return `${indent}--${name}: ${value};`;
-    const { r, g, b } = oklchToRgb(value);
+    /*
+     * A native field has no alpha, so a translucent color (a border or quiet text drawn as the ink
+     * at a strength) is laid over the card, where the first paint draws its edge and its lines, as
+     * a browser would lay it: in sRGB.
+     */
+    const { r, g, b, alpha } = oklchToRgb(value);
+    const under = oklchToRgb(scheme[mode].card);
+    const over = (top: number, bottom: number) =>
+      Math.round(top * alpha + bottom * (1 - alpha));
     const hex = (n: number) => `0x${n.toString(16).padStart(2, "0")}`;
-    return `${indent}${field}: (${hex(r)}, ${hex(g)}, ${hex(b)}),`;
+    return `${indent}${field}: (${hex(over(r, under.r))}, ${hex(over(g, under.g))}, ${hex(over(b, under.b))}),`;
   });
 }
 

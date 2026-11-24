@@ -1071,7 +1071,7 @@ export function StartedByCell({
   return (
     <span
       className={
-        unattended ? "font-medium text-warning" : "text-muted-foreground"
+        unattended ? "font-medium text-warning-ink" : "text-muted-foreground"
       }
     >
       {startedByLine(startedByText(event, nameFor, deployment, viewer))}
@@ -1107,7 +1107,7 @@ export function DecisionCell({
           outcome === "refused"
             ? "font-medium text-destructive"
             : outcome === "did-not-happen"
-              ? "font-medium text-warning"
+              ? "font-medium text-warning-ink"
               : "text-muted-foreground"
         }
       >
@@ -1295,7 +1295,7 @@ export const OUTCOME_MARK: Record<AuditOutcome, string> = {
 /** The faint tint on rows worth stopping at. Allowed rows stay plain. */
 export const OUTCOME_ROW: Record<AuditOutcome, string> = {
   refused: "bg-destructive/5 hover:bg-destructive/10",
-  "did-not-happen": "bg-warning/5 hover:bg-warning/10",
+  "did-not-happen": "bg-warning-subtle/50 hover:bg-warning-subtle",
   allowed: "",
 };
 

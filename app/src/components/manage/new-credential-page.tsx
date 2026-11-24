@@ -347,7 +347,7 @@ function CredentialForm({ modelKey }: { modelKey: ModelKeyName | null }) {
               provider,
               kind === "model" ? modelKey?.keyId : keyId,
             ) ? (
-              <p className="mt-5 text-warning text-sm">
+              <p className="mt-5 text-warning-ink text-sm">
                 This key already has an active credential. Saving replaces it
                 and revokes the old one.
               </p>

@@ -1,4 +1,4 @@
-import { IconPlugConnected, IconPlus } from "@tabler/icons-react";
+import { IconPlugConnected, IconPlus } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
 import {

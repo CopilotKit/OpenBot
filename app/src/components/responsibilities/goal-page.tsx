@@ -9,7 +9,7 @@ import {
   IconProgress,
   IconTarget,
   IconWebhook,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, type LinkProps, useNavigate } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
@@ -607,7 +607,7 @@ function runStatusClass(status: string) {
   return status === "failed"
     ? "text-destructive"
     : status === "succeeded"
-      ? "text-success"
+      ? "text-success-ink"
       : "text-muted-foreground";
 }
 

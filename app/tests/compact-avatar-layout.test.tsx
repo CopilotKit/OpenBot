@@ -150,8 +150,9 @@ async function offsets(browser: Browser): Promise<Record<Row, number[]>> {
     return await tab.evaluate((rows) => {
       const out: Record<string, number[]> = {};
       for (const row of rows) {
+        // OpenBot's own look draws each orb as the designers' picture (`BotOrb`, Figma's "Orbs").
         const orbs = document.querySelectorAll<HTMLElement>(
-          `[data-row="${row}"] .bot-orb-still`,
+          `[data-row="${row}"] .bot-orb-image`,
         );
         out[row] = [...orbs].map((orb) => {
           const holder = orb.closest<HTMLElement>(

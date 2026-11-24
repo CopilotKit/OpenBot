@@ -1,7 +1,8 @@
-import { IconPinFilled } from "@tabler/icons-react";
+import { IconPinFilled } from "@/components/icons";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import type { ConversationView } from "@/lib/settings/conversation-view";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
+import { useKit } from "@/skins/store";
 
 /**
  * Shared by live conversations and the appearance preference previews.
@@ -39,6 +40,7 @@ export function ChannelItemContent({
   /** False where the row sits under its Bot already (the Bots panel), so the orb is not said twice. */
   avatar?: boolean;
 }) {
+  const currentKit = useKit() === "current";
   const unreadDot = unread ? (
     <span
       className="size-2 shrink-0 rounded-full bg-primary"
@@ -74,9 +76,10 @@ export function ChannelItemContent({
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {avatar ? (
           <div className="shrink-0">
+            {/* Figma's 24px avatar in the current kit ("Recent Conversation item"); the legacy kit keeps 20. */}
             <ChannelAvatar
               participantIds={participantIds}
-              size={20}
+              size={currentKit ? 24 : 20}
               typing={busy}
             />
           </div>
@@ -102,15 +105,17 @@ export function ChannelItemContent({
     );
   }
 
-  const primaryText = `text-sm leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-medium"}`;
-  const secondaryText = "text-[12px] leading-4 text-muted-foreground";
+  // Figma's conversation row: a regular 14px line under a 12px one in the secondary ink, 4px apart.
+  const primaryText = `text-sm ${unread ? "font-semibold" : "font-normal"}`;
+  const secondaryText = "text-xs text-muted-foreground";
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
       <div className="shrink-0">
+        {/* Figma's 28px avatar in the current kit; the legacy kit keeps 32. */}
         <ChannelAvatar
           participantIds={participantIds}
-          size={32}
+          size={currentKit ? 28 : 32}
           typing={busy}
         />
       </div>
@@ -127,7 +132,7 @@ export function ChannelItemContent({
           {pin}
         </div>
         <div
-          className={`mt-px truncate ${emphasis === "thread" ? primaryText : secondaryText}`}
+          className={`mt-1 truncate ${emphasis === "thread" ? primaryText : secondaryText}`}
           title={title}
         >
           {displayedTitle}

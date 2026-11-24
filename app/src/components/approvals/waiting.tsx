@@ -9,7 +9,7 @@ import {
   IconHandStop,
   IconMessageQuestion,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useState } from "react";
@@ -491,7 +491,7 @@ function AnswerDialog({
                 {/* Keys drawn as the Settings shortcuts are, so the glyphs sit centred on the row. */}
                 {[MAC ? "⌘" : "Ctrl", "↵"].map((key) => (
                   <kbd
-                    className="inline-flex h-5 min-w-5 items-center justify-center rounded-md border bg-muted px-1 font-sans text-[11px] text-muted-foreground leading-none"
+                    className="inline-flex h-5 min-w-5 items-center justify-center rounded-md border bg-muted px-1 font-sans text-xs text-muted-foreground leading-none"
                     key={key}
                   >
                     {key}

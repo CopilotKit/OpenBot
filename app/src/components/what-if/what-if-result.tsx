@@ -18,7 +18,7 @@ import {
   IconPuzzle,
   IconShieldCheck,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { PageRows } from "@/components/layout/page-shell";
@@ -79,20 +79,20 @@ const PAGE_WORDS: Record<NonNullable<WhatIfLayer["page"]>, string> = {
 const VERDICTS: Record<WhatIfVerdict, { label: string; tone: string }> = {
   allows: {
     label: "Allows",
-    tone: "bg-success/10 text-success",
+    tone: "bg-success-subtle text-success-ink",
   },
   refuses: { label: "Refuses", tone: "bg-destructive/10 text-destructive" },
   asks: {
     label: "Asks first",
-    tone: "bg-warning/10 text-warning",
+    tone: "bg-warning-subtle text-warning-ink",
   },
   hands_off: {
     label: "Hands off",
-    tone: "bg-warning/10 text-warning",
+    tone: "bg-warning-subtle text-warning-ink",
   },
   trial: {
     label: "Would refuse",
-    tone: "bg-warning/10 text-warning",
+    tone: "bg-warning-subtle text-warning-ink",
   },
 };
 
@@ -100,8 +100,8 @@ const VERDICTS: Record<WhatIfVerdict, { label: string; tone: string }> = {
 const DECIDES_ROW: Record<WhatIfVerdict, string> = {
   allows: "",
   refuses: "bg-destructive/5",
-  asks: "bg-warning/5",
-  hands_off: "bg-warning/5",
+  asks: "bg-warning-subtle/50",
+  hands_off: "bg-warning-subtle/50",
   trial: "",
 };
 
@@ -116,7 +116,7 @@ export const OUTCOMES: Record<
   allowed: {
     label: "Allowed",
     icon: IconCircleCheck,
-    tone: "bg-success/10 text-success",
+    tone: "bg-success-subtle text-success-ink",
   },
   refused: {
     label: "Refused",
@@ -126,12 +126,12 @@ export const OUTCOMES: Record<
   asks: {
     label: "Asks first",
     icon: IconMessageQuestion,
-    tone: "bg-warning/10 text-warning",
+    tone: "bg-warning-subtle text-warning-ink",
   },
   hands_off: {
     label: "Person does it",
     icon: IconHandStop,
-    tone: "bg-warning/10 text-warning",
+    tone: "bg-warning-subtle text-warning-ink",
   },
 };
 

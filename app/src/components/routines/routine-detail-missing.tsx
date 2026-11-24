@@ -1,4 +1,4 @@
-import type { Icon } from "@tabler/icons-react";
+import type { Icon } from "@/components/icons";
 import { type MutationKey, useMutationState } from "@tanstack/react-query";
 import { type LinkProps, Navigate } from "@tanstack/react-router";
 import { LoadingRows } from "@/components/layout/loading-rows";

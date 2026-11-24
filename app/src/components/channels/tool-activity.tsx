@@ -24,7 +24,7 @@ import {
   IconSubtask,
   IconTool,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   useCallback,
   useContext,
@@ -764,7 +764,7 @@ export function StepStatus({
   if (step.refused)
     return <span className="shrink-0 text-destructive">Blocked</span>;
   if (step.failed)
-    return <span className="shrink-0 text-warning">Didn't work</span>;
+    return <span className="shrink-0 text-warning-ink">Didn't work</span>;
   return null;
 }
 

@@ -58,31 +58,39 @@ export type Token = keyof typeof MEANING;
 export type Palette = Record<Token, string>;
 
 /*
- * Three surfaces, darkest to lightest, the way Linear draws them: the frame (the sidebar's tint,
- * which the window edge shares), the panel the page sits in, and the white cards on it. The frame
- * is CopilotKit's pale lavender, the grays lean towards its lilac, the ring is its periwinkle, and
- * the selected sidebar row is a lilac tint.
+ * OpenBot's own look, the November 2026 redesign (Figma "Master screens"). Three surfaces, darkest
+ * to lightest: the frame (the sidebar's cool gray, Figma's `--sidebar/bg`, which also backs a row's
+ * icon tile), the pale page (`--bg-secondary`), and the white cards on it. Text and the primary
+ * button are Figma's near-black ink (`--text-primary`); secondary text and borders are that ink at
+ * 60% and 8%, so they read the same on the page, a card and a tile. The pale fills are the
+ * secondary button (`#f1f2f7`) and the chips (`#eff2f6`); `input` is the pale blue-gray Figma gives
+ * a switch that is off. The ring stays CopilotKit's periwinkle.
+ *
+ * The status colors are Figma's (variable collection "OpenBot", group "colors"): success #12c89c,
+ * warning #f26900 and error #e21f32. Success and warning are drawn for dots, badges and tints, and
+ * are too light to read as words on white; the web app draws its words in their ink, the same color
+ * pulled toward `foreground` (app/src/theme.css, `--color-*-ink`).
  */
 const light: Palette = {
-  background: "oklch(0.983 0.003 286.4)",
-  foreground: "oklch(0.108 0.015 220.9)",
+  background: "oklch(0.985 0 0)",
+  foreground: "oklch(0.172 0.007 258.4)",
   card: "oklch(1 0 0)",
-  "card-foreground": "oklch(0.108 0.015 220.9)",
+  "card-foreground": "oklch(0.172 0.007 258.4)",
   popover: "oklch(1 0 0)",
-  "popover-foreground": "oklch(0.108 0.015 220.9)",
-  primary: "oklch(0.108 0.015 220.9)",
+  "popover-foreground": "oklch(0.172 0.007 258.4)",
+  primary: "oklch(0.172 0.007 258.4)",
   "primary-foreground": "oklch(1 0 0)",
-  secondary: "oklch(0.956 0.005 286.3)",
-  "secondary-foreground": "oklch(0.108 0.015 220.9)",
-  muted: "oklch(0.956 0.005 286.3)",
-  "muted-foreground": "oklch(0.506 0.013 285.9)",
-  accent: "oklch(0.956 0.005 286.3)",
-  "accent-foreground": "oklch(0.108 0.015 220.9)",
-  destructive: "oklch(0.504 0.178 22.9)",
-  success: "oklch(0.514 0.1 167.2)",
-  warning: "oklch(0.555 0.163 49)",
-  border: "oklch(0.894 0.014 286.1)",
-  input: "oklch(0.894 0.014 286.1)",
+  secondary: "oklch(0.962 0.007 277.2)",
+  "secondary-foreground": "oklch(0.172 0.007 258.4)",
+  muted: "oklch(0.96 0.006 255.5)",
+  "muted-foreground": "oklch(0.172 0.007 258.4 / 60%)",
+  accent: "oklch(0.962 0.007 277.2)",
+  "accent-foreground": "oklch(0.172 0.007 258.4)",
+  destructive: "oklch(0.585 0.223 24)",
+  success: "oklch(0.741 0.145 169.4)",
+  warning: "oklch(0.68 0.19 46.5)",
+  border: "oklch(0.172 0.007 258.4 / 8%)",
+  input: "oklch(0.878 0.022 263.2)",
   ring: "oklch(0.644 0.167 276.1)",
   "chart-1": "oklch(0.869 0.022 252.894)",
   "chart-2": "oklch(0.554 0.046 257.417)",
@@ -90,20 +98,20 @@ const light: Palette = {
   "chart-4": "oklch(0.372 0.044 257.287)",
   "chart-5": "oklch(0.279 0.041 260.031)",
   "empty-pattern-color": "oklch(0.746 0.117 279.9)",
-  sidebar: "oklch(0.948 0.011 286.2)",
-  "sidebar-foreground": "oklch(0.108 0.015 220.9)",
-  "sidebar-primary": "oklch(0.108 0.015 220.9)",
+  sidebar: "oklch(0.936 0.009 264.5)",
+  "sidebar-foreground": "oklch(0.172 0.007 258.4)",
+  "sidebar-primary": "oklch(0.172 0.007 258.4)",
   "sidebar-primary-foreground": "oklch(1 0 0)",
-  "sidebar-accent": "oklch(0.832 0.085 281.4 / 30%)",
-  "sidebar-accent-foreground": "oklch(0.108 0.015 220.9)",
-  "sidebar-border": "oklch(0.894 0.014 286.1)",
+  "sidebar-accent": "oklch(1 0 0 / 60%)",
+  "sidebar-accent-foreground": "oklch(0.172 0.007 258.4)",
+  "sidebar-border": "oklch(0.172 0.007 258.4 / 8%)",
   "sidebar-ring": "oklch(0.644 0.167 276.1)",
 };
 
 /*
  * The same three surfaces on a near-black plum ground: the frame darkest, the cards lightest.
  * Secondary and muted fills are lighter than the cards, as shadcn's dark fills are, so a button or
- * badge never reads as a hole.
+ * badge never reads as a hole. Not yet redrawn for the redesign, whose dark theme is still to come.
  */
 const dark: Palette = {
   background: "oklch(0.182 0.023 296.6)",

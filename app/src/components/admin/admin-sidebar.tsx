@@ -1,4 +1,4 @@
-import { IconArrowLeft } from "@tabler/icons-react";
+import { IconArrowLeft, IconChevronLeft } from "@/components/icons";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
 import { useAdminSections } from "@/components/admin/admin-sections";
@@ -40,10 +40,16 @@ export function AdminSidebar({
       <SidebarHeader className="h-12 p-2">
         <SidebarMenu>
           <SidebarMenuItem>
+            {/*
+             * Figma's "Navigation / Back" in OpenBot's own look: a chevron, the words in semibold,
+             * and the sidebar's white pill under the pointer. The skins keep their arrow and fill.
+             */}
             <SidebarMenuButton
+              className="kit:h-9 kit:rounded-full kit:px-2 kit:font-semibold kit:hover:bg-sidebar-item-hover"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
-                  <IconArrowLeft className="mr-2 h-4 w-4" />
+                  <IconArrowLeft className="mr-2 h-4 w-4 kit:hidden" />
+                  <IconChevronLeft className="hidden kit:mr-1 kit:block kit:size-5" />
                   Back to app
                 </Link>
               )}

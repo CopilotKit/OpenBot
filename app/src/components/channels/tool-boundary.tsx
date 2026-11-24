@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
+import { Notice } from "@/components/ui/notice";
 
 /**
  * A component that throws must not take the conversation with it.
@@ -68,10 +69,10 @@ export class ToolRenderBoundary extends Component<
     }
     if (this.state.failed) {
       return (
-        <p className="my-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <Notice className="my-2" variant="destructive">
           Couldn't show <span className="font-medium">{this.props.name}</span>.
           The rest of the conversation is fine.
-        </p>
+        </Notice>
       );
     }
     return this.props.children;

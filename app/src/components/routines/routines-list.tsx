@@ -2,10 +2,11 @@ import {
   IconChevronRight,
   IconClock,
   IconPlayerPause,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
+import { BotOrb } from "@/components/agents/bot-orb";
 import { LoadingRows } from "@/components/layout/loading-rows";
 import {
   PageEmpty,
@@ -19,6 +20,7 @@ import {
   SettingRow,
   useCheckInsBlocked,
 } from "@/components/suggestions/proactive-panel";
+import { Chip, ChipMedia } from "@/components/ui/chip";
 import {
   Item,
   ItemActions,
@@ -45,8 +47,11 @@ import {
   type RoutineRecord,
   routinesQueryOptions,
 } from "@/lib/routines/queries";
+import { cn } from "@/lib/utils";
+import { useKit } from "@/skins/store";
 import { NewRoutineButton } from "./new-routine-button";
-import { lastRunLabel, scheduleWords } from "./routine-page";
+import { RoutineMedia } from "./routine-tile";
+import { lastRunLabel, nextRunWords, scheduleWords } from "./routine-page";
 
 type BotDirectory = Map<string, AgentProfile>;
 
@@ -124,6 +129,104 @@ function RoutineItem({
 }
 
 /**
+ * A scheduled routine in the current kit: Figma's routine card ("routines" on Master screens). A
+ * tile in its Bot's colours, what it is called, when it starts and what it does, and its facts as
+ * chips: its Bot, how its last run went and when it runs next. The whole card still opens its page,
+ * where it is switched, run, read back and deleted: Figma's switch and Run now, History and Delete
+ * on the card wait for the designers to settle against that (`.pr/ui-kit-audit.md`).
+ */
+function RoutineCard({
+  routine,
+  bot,
+  showBot,
+  agentId,
+}: {
+  routine: RoutineRecord;
+  /** Its Bot, for the tile's colours and the first chip. */
+  bot: Pick<AgentProfile, "name" | "avatarSeed"> | undefined;
+  /** Off on one Bot's own list, where every card is that Bot's. */
+  showBot: boolean;
+  agentId?: string;
+}) {
+  const lastRun = lastRunLabel(routine.lastRun);
+  const outcome = routine.lastRun?.status;
+  const next = nextRunWords(routine);
+  const does = routineDoes(routine);
+  const line = [
+    routine.enabled
+      ? scheduleWords(routine)
+      : "Paused. Nothing starts it until you turn it on",
+    routine.enabled ? "Acts" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <Item
+      className="items-start"
+      render={
+        <Link
+          params={{ routineId: routine.id }}
+          search={agentId ? { agentId } : {}}
+          to="/routines/schedules/$routineId"
+        />
+      }
+      size="sm"
+    >
+      <RoutineMedia seed={bot?.avatarSeed ?? ""}>
+        {routine.enabled ? <IconClock /> : <IconPlayerPause />}
+      </RoutineMedia>
+      <ItemContent className={cn("gap-1", routine.enabled ? "" : "opacity-60")}>
+        <ItemTitle>
+          <span className="line-clamp-2">{routine.title ?? does}</span>
+          <span className="font-normal text-muted-foreground text-xs">
+            Schedule
+          </span>
+        </ItemTitle>
+        <ItemDescription>{line}</ItemDescription>
+        {routine.title && routine.title !== does ? (
+          <ItemDescription className="line-clamp-1">{does}</ItemDescription>
+        ) : null}
+        {routine.conversation.gone ? (
+          <ItemDescription className="text-destructive">
+            Its conversation was deleted
+          </ItemDescription>
+        ) : null}
+        <div className="mt-2 flex flex-wrap gap-0.5">
+          {showBot && bot ? (
+            <Chip>
+              <ChipMedia>
+                <BotOrb name={bot.name} seed={bot.avatarSeed} size={16} />
+              </ChipMedia>
+              {bot.name}
+            </Chip>
+          ) : null}
+          {/* Every last run but a quiet success, which is in the details, as on the row. */}
+          {outcome === "succeeded" ? null : (
+            <Chip
+              className={
+                outcome === "failed" || outcome === "skipped"
+                  ? lastRun.className
+                  : undefined
+              }
+            >
+              {lastRun.text}
+            </Chip>
+          )}
+          {routine.enabled ? (
+            <Chip className={next.className}>
+              {next.text === "Due" ? next.text : `Next ${next.text}`}
+            </Chip>
+          ) : null}
+        </div>
+      </ItemContent>
+      <ItemActions>
+        <IconChevronRight className="size-4 text-muted-foreground" />
+      </ItemActions>
+    </Item>
+  );
+}
+
+/**
  * A goal's row: what it is (its title), when it starts (its schedules, events and triggers, or
  * when you ask), that it acts, and until when (its outcome). Its status and progress are on the
  * row. It opens the goal's own page, where its schedules are switched and deleted too: a link, so
@@ -137,6 +240,7 @@ function GoalItem({
   routines,
   botName,
   agentId,
+  seed,
 }: {
   goal: ResponsibilityRecord;
   /** Undefined when the routines read failed: its starts are then not known. */
@@ -145,6 +249,8 @@ function GoalItem({
   botName?: string;
   /** The Bot whose own list this is, so the goal's back link returns to it. */
   agentId?: string;
+  /** Its Bot's `avatarSeed`, for the tile's colours. */
+  seed: string;
 }) {
   /*
    * Its triggers, read only where the row uses them: an active goal's starts, and whether a goal
@@ -193,9 +299,9 @@ function GoalItem({
       }
       size="sm"
     >
-      <ItemMedia variant="icon">
+      <RoutineMedia seed={seed}>
         <Icon />
-      </ItemMedia>
+      </RoutineMedia>
       <ItemContent className={goal.status === "active" ? "" : "opacity-60"}>
         <ItemTitle>
           {goal.title}
@@ -243,6 +349,7 @@ export function RoutinesList({
   /** Where the page section's own top margin is somebody else's spacing. */
   embedded?: boolean;
 } = {}) {
+  const currentKit = useKit() === "current";
   const routines = useQuery(routinesQueryOptions());
   const goals = useQuery(responsibilitiesQueryOptions());
   const checkIns = useQuery(proactiveSettingsQueryOptions());
@@ -304,7 +411,14 @@ export function RoutinesList({
           {rows.map((row, index) => (
             <Fragment key={`${row.kind}:${row.id}`}>
               {index > 0 ? <Separator /> : null}
-              {row.kind === "routine" ? (
+              {row.kind === "routine" && currentKit ? (
+                <RoutineCard
+                  agentId={agentId}
+                  bot={bots.get(row.agentId)}
+                  routine={row.routine}
+                  showBot={showBot}
+                />
+              ) : row.kind === "routine" ? (
                 <RoutineItem
                   botName={
                     showBot
@@ -324,6 +438,7 @@ export function RoutinesList({
                   agentId={agentId}
                   goal={row.goal}
                   routines={routines.error ? undefined : row.routines}
+                  seed={bots.get(row.agentId)?.avatarSeed ?? ""}
                 />
               ) : (
                 <SettingRow
@@ -331,6 +446,7 @@ export function RoutinesList({
                   blocked={blocked}
                   botName={bots.get(row.agentId)?.name ?? "A Bot"}
                   label="Check-in"
+                  seed={bots.get(row.agentId)?.avatarSeed ?? ""}
                   setting={row.checkIn}
                   showBot={showBot}
                 />

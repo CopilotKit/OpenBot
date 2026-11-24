@@ -1,4 +1,4 @@
-import { IconChevronRight, IconClock } from "@tabler/icons-react";
+import { IconChevronRight, IconClock } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {

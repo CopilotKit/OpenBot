@@ -1,4 +1,4 @@
-import { IconX } from "@tabler/icons-react";
+import { IconX } from "@/components/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
 import { Button } from "@/components/ui/button";
