@@ -62,7 +62,7 @@ import {
   enterpriseOverviewQueryOptions,
   modelUsageQueryOptions,
 } from "@/lib/enterprise/queries";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { markFor } from "@/lib/marks";
 import { effortLabel } from "@/lib/models/effort";
 import { modelLabel, modelNamer } from "@/lib/models/names";
@@ -768,8 +768,9 @@ export function AllowedModelsDialog({
             </p>
           ) : null}
           {rows.length === 0 ? (
-            // With nothing listed and nothing searched for, the note above says why.
-            listsModels || needle ? (
+            // With nothing listed and nothing searched for, the note above says why. A listing that
+            // is still on its way, or couldn't be read, is no answer to a search either.
+            (listsModels ? available.data !== undefined : needle) ? (
               <PageEmpty icon={IconSearch} title="No matches" />
             ) : null
           ) : (

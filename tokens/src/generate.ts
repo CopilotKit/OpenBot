@@ -31,6 +31,24 @@ function token(name: string): Token {
   return name as Token;
 }
 
+/**
+ * A color as an RGB copy can hold it, which has no opacity: a translucent one (a line drawn as the
+ * text color at 12%) is blended over the mode's `card`, the surface it is drawn on there, rather
+ * than written at full strength.
+ */
+function opaque(mode: Mode, value: string) {
+  const color = oklchToRgb(value);
+  if (color.alpha === 1) return color;
+  const under = oklchToRgb(scheme[mode].card);
+  const blend = (top: number, below: number) =>
+    Math.round(top * color.alpha + below * (1 - color.alpha));
+  return {
+    r: blend(color.r, under.r),
+    g: blend(color.g, under.g),
+    b: blend(color.b, under.b),
+  };
+}
+
 function regionLines(mode: Mode, entries: string, indent: string) {
   const names = entries.trim() === "all" ? TOKENS : entries.trim().split(/\s+/);
   return names.map((entry) => {
@@ -39,7 +57,7 @@ function regionLines(mode: Mode, entries: string, indent: string) {
       : [undefined, entry];
     const value = scheme[mode][token(name as string)];
     if (!field) return `${indent}--${name}: ${value};`;
-    const { r, g, b } = oklchToRgb(value);
+    const { r, g, b } = opaque(mode, value);
     const hex = (n: number) => `0x${n.toString(16).padStart(2, "0")}`;
     return `${indent}${field}: (${hex(r)}, ${hex(g)}, ${hex(b)}),`;
   });

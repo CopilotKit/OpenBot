@@ -252,6 +252,9 @@ is actually on screen. The root was once 15px, and every constant taken from the
 | A chevron on a row that opens nothing | Announces a destination that does not exist | Value in `ItemActions`, no chevron |
 | A set of chips or toggles crammed into `ItemActions` | It competes with the label for width and wraps badly | `ItemFooter`, which is `basis-full` |
 | A back link in `PageShell`'s `action` | `action` is the page's primary verb, on the title's baseline | `backButton={{ label, linkProps }}` |
+| A bordered `bg-card` box drawn by hand that is not a list of rows | A card of its own, which drifts from every other card | `Card` from `components/ui/card.tsx` |
+| A corner, shadow or text size in brackets (`rounded-[20px]`, `shadow-[…]`, `text-[13px]`) | A look of its own that no token reaches | The rules in `docs/app-guidelines.md`, "The look" |
+| A `dark:` color class | A color that only one theme gets right | A token: it carries both values |
 
 ## Error Handling
 

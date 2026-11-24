@@ -22,14 +22,79 @@
  */
 import type { ReactNode } from "react";
 import { ClientError } from "@/lib/client";
+import { cn } from "@/lib/utils";
 
-/** The server's own sentence when `error` is a 503 that carries one and a `Retry-After`. */
+/**
+ * The server's own sentence when `error` is a 503 that carries one and a `Retry-After`.
+ *
+ * Or, when `error` was thrown because of one (its `cause`), the error's own longer sentence that
+ * folds it in: "It's saved on the Routines page, but it didn't start. OpenBot is moving this
+ * organization. Try again in a moment." is still OpenBot holding off, so it is drawn calmly too.
+ */
 export function unavailableSaid(error: unknown): string | undefined {
-  return error instanceof ClientError &&
+  if (
+    error instanceof ClientError &&
     error.status === 503 &&
     error.retryAfterMs !== undefined
-    ? error.said
+  )
+    return error.said;
+  return error instanceof Error &&
+    !(error instanceof ClientError) &&
+    error.message &&
+    error.cause instanceof ClientError &&
+    unavailableSaid(error.cause) !== undefined
+    ? error.message
     : undefined;
+}
+
+/** Whether `failed` (or one of several reads) is OpenBot holding off for now, not a failure. */
+export function isHeld(failed: unknown | readonly unknown[]): boolean {
+  return heldSaid(failed) !== undefined;
+}
+
+/**
+ * A failure said in a box of its own, above or beside what it is about: the box the app draws in
+ * red for what failed, and in the muted colours of a notice for OpenBot holding off (a move, or a
+ * database briefly out of reach). A box drawn by hand around {@link failureSaid} kept its red border
+ * and fill around calm words (Admin, Computers). Nothing when there is no error.
+ *
+ * `own` is the screen's own sentence for a real failure; without it the error's own words are said.
+ */
+export function FailureNotice({
+  error,
+  own,
+  className,
+}: {
+  error: unknown;
+  own?: string;
+  className?: string;
+}): ReactNode {
+  if (!error) return null;
+  const held = isHeld(error);
+  const words =
+    own ??
+    (error instanceof Error && error.message
+      ? error.message
+      : typeof error === "object" &&
+          "message" in error &&
+          typeof error.message === "string"
+        ? error.message
+        : "Something went wrong. Try again in a moment.");
+  return (
+    <p
+      className={cn(
+        "rounded-md border px-3 py-2 text-sm",
+        held
+          ? "border-border bg-muted/40 text-muted-foreground"
+          : "border-destructive/40 bg-destructive/10",
+        className,
+      )}
+      data-held={held ? "" : undefined}
+      role="alert"
+    >
+      {loadFailure(error, words)}
+    </p>
+  );
 }
 
 /** The server's own sentence for the first of `failed` that is such a 503, if any is. */

@@ -67,6 +67,7 @@ import {
   enforceSingleAgent,
   toDraft,
 } from "./draft";
+import { MESSAGE_BOX_FRAME } from "./frame";
 import { screenPickedFiles } from "./picked-files";
 import { type RejectedFile, RejectedFiles } from "./rejected-files";
 import { type AgentOption, buildTriggers } from "./triggers";
@@ -1727,6 +1728,7 @@ export function Composer({
         <form
           aria-busy={isBusy}
           data-slot="composer"
+          data-typing={draft.isEmpty ? undefined : ""}
           className={cn(
             /*
              * The padding goes on the form rather than on the editor because the editor scrolls
@@ -1736,7 +1738,8 @@ export function Composer({
              * A column: the attachment strip across the top, the message box under it, and the
              * controls row at the bottom.
              */
-            "flex flex-col rounded-2xl border border-border bg-card px-3 py-3",
+            "flex flex-col px-3 py-3",
+            MESSAGE_BOX_FRAME,
             className,
           )}
           onSubmit={handleFormSubmit}
@@ -1830,8 +1833,9 @@ export function Composer({
       <LiveDictationNotice dictation={dictation} />
       <form
         aria-busy={isBusy}
-        className="overflow-hidden rounded-2xl border border-border bg-card"
+        className={cn("overflow-hidden", MESSAGE_BOX_FRAME)}
         data-slot="composer"
+        data-typing={draft.isEmpty ? undefined : ""}
         onSubmit={handleFormSubmit}
       >
         <DictationSurface

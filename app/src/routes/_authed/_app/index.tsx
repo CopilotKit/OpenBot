@@ -19,6 +19,7 @@ import { heldFileOf } from "@/components/channels/composer/attachments";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { WorkingNow } from "@/components/channels/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
+import { HomeField, useHomeIntro } from "@/components/home/home-field";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -52,6 +53,7 @@ import {
   type Failure,
   failureOf,
   failureSaid,
+  isHeld,
   loadFailure,
   unavailableSaid,
 } from "@/lib/load-failure";
@@ -63,6 +65,7 @@ import { useDraftModel } from "@/lib/models/run-model";
 import { newId } from "@/lib/new-id";
 import { takeInvitationLink } from "@/lib/organizations/invitation-link";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
@@ -141,6 +144,9 @@ function RouteComponent() {
    * are writing something else does not overwrite it: it stays stashed, for the next home page.
    */
   const typed = useRef(false);
+  /* The message box's area, which the orb's field behind the page follows. */
+  const area = useRef<HTMLDivElement>(null);
+  const intro = useHomeIntro();
   useEffect(
     () =>
       onFailedStart(() => {
@@ -253,10 +259,18 @@ function RouteComponent() {
       <SidebarToggleBar>
         <BusinessLink />
       </SidebarToggleBar>
-      <div className="flex-1 flex flex-col items-center justify-center w-full p-4 mt-8">
+      <div
+        className={cn(
+          "relative isolate flex-1 flex flex-col items-center justify-center w-full p-4 mt-8",
+          intro && "home-intro",
+        )}
+      >
+        {/* OpenBot's orb, spread out behind the message box. On the first Home of a visit it
+            draws itself in while the heading, the box and Explore Bots rise in (styles.css). */}
+        <HomeField area={area} intro={intro} />
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
-        <div className="flex flex-col items-center">
+        <div className="flex flex-col items-center" data-intro="heading">
           <h1 className="text-2xl font-semibold tracking-tight text-center">
             {firstConversationGreeting(
               user,
@@ -266,6 +280,8 @@ function RouteComponent() {
         </div>
         <div
           className="mt-8 w-full flex flex-col items-center"
+          data-intro="box"
+          ref={area}
           onKeyDownCapture={() => {
             typed.current = true;
           }}
@@ -366,11 +382,11 @@ function RouteComponent() {
          * somebody shared another Bot, so the rest are one "All Bots" away. Every state below
          * reserves the same two rows, so the composer above it does not move when the list settles.
          */}
-        <div className="mt-10 w-full max-w-2xl">
+        <div className="mt-10 w-full max-w-2xl" data-intro="explore">
           {loading || capabilities.isPending ? (
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Skeleton className="mt-4 h-[140px]" />
+              <Skeleton className="mt-4 h-36" />
             </>
           ) : explore?.length ? (
             // Wins over `failed`: a failed background refetch does not clear TanStack Query's
@@ -393,7 +409,7 @@ function RouteComponent() {
                   </Link>
                 ) : null}
               </div>
-              <ul className="mt-4 grid min-h-[140px] grid-cols-1 content-start gap-3 sm:grid-cols-2">
+              <ul className="mt-4 grid min-h-36 grid-cols-1 content-start gap-3 sm:grid-cols-2">
                 {explore.slice(0, EXPLORE_SHOWN).map((agent) => (
                   <li className="min-w-0" key={agent.id}>
                     <Link search={{ agent: agent.id }} to="/channel/new">
@@ -403,7 +419,18 @@ function RouteComponent() {
                 ))}
               </ul>
             </section>
-          ) : personal ? null : failed && agents === undefined ? (
+          ) : personal ? null : failed &&
+            agents === undefined &&
+            isHeld(agentsError) &&
+            !error ? (
+            // OpenBot holding off (a move, a brief outage) is said once, under the composer, and
+            // the list fills in by itself when it is back (lib/load-failure.tsx). Saying the same
+            // sentence here again read as two things wrong.
+            <>
+              <h2 className="font-semibold text-base">Explore Bots</h2>
+              <Skeleton className="mt-4 h-[140px]" />
+            </>
+          ) : failed && agents === undefined ? (
             // `agents === undefined` narrows this to "the query has never once returned
             // successfully" — not merely "the last request errored". `?.length` alone can't
             // tell that apart from a slice that loaded and is genuinely empty: TanStack Query
@@ -418,8 +445,8 @@ function RouteComponent() {
                 className={
                   // OpenBot holding off for now is not a failure (lib/load-failure.tsx).
                   unavailableSaid(agentsError)
-                    ? "mt-4 h-[140px] border border-dashed"
-                    : "mt-4 h-[140px] border border-dashed border-destructive"
+                    ? "mt-4 h-36 border border-dashed"
+                    : "mt-4 h-36 border border-dashed border-destructive"
                 }
               >
                 <EmptyHeader>
@@ -438,7 +465,7 @@ function RouteComponent() {
             // plain copy for both: an empty roster is a fact, not an error.
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-[140px] border border-dashed">
+              <Empty className="mt-4 h-36 border border-dashed">
                 <EmptyHeader>
                   <EmptyTitle className="text-muted-foreground">
                     Nobody has shared a Bot with you yet.

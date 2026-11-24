@@ -622,7 +622,7 @@ export function ConversationView({
          */}
         {attached ? (
           <div
-            className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
+            className="mx-5 -mb-4 rounded-t-xl border border-border border-b-0 bg-muted pb-4"
             data-slot="composer-drawer"
           >
             {attached}

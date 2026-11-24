@@ -39,7 +39,6 @@ for (const file of sourceFiles()) {
  * lacks is a change to theme.css first.
  */
 const NOT_YET_ON_THE_SCHEME = new Set([
-  "components/app-sidebar/channel-item-content.tsx",
   "components/browser/recording.tsx",
   "components/channels/coding-tool-cards.tsx",
   "components/channels/voice-call-widget.tsx",

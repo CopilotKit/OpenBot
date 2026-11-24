@@ -10,7 +10,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
-import { type Failure, failureSaid } from "@/lib/load-failure";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { consentCopy } from "@/lib/plugins/enablement-notes";
 import { finishOnReturn } from "@/lib/plugins/finish-on-return";
 import {
@@ -87,7 +87,10 @@ export function GrantList({
     return (
       <PageSection title="Actions">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't read what this account allows right now.{" "}
+          {loadFailure(
+            grants.error,
+            "Couldn't read what this account allows right now.",
+          )}{" "}
           <Button
             onClick={() => grants.refetch()}
             size="sm"

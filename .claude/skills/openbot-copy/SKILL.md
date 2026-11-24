@@ -62,6 +62,11 @@ than showing an empty row. `app/src/lib/primitives.ts` holds the names, the orde
 | **Setup** | A Bot's name and instructions. | |
 | **Vault** | Your saved logins and keys. No Bot sees what is in it. | Saved logins, Passwords, Keys, Credentials (as pages) |
 
+**The sidebar strip's short names.** The strip writes each section's name under its icon, in a
+column too narrow for the long ones, so there alone Conversations is **Chats** and Connections is
+**Apps**. The panel or page each opens keeps its full name, and sentences still say "conversation".
+Nowhere else uses these short names.
+
 The scopes are **this Bot** (the Bot's page), **every Bot** (Settings, and Connections for Apps)
 and, in the team edition, **everyone** (Admin). The words in the "Not" column may still appear in a
 sentence ("a goal", "a check-in", "your saved logins") and as a label inside a page. They are not

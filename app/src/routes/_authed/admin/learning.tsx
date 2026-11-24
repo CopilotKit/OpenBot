@@ -249,7 +249,7 @@ function ContainerSetup({
         </div>
       )}
       {(create.error || automatic.createError) && (
-        <p role="alert" className="text-destructive">
+        <p role="alert" className="text-destructive text-sm">
           {create.error ? failureSaid(create.error) : automatic.createError}
         </p>
       )}
@@ -342,7 +342,7 @@ export function LearningPage() {
           </p>
         )}
         {settingsError && (
-          <p role="alert" className="mt-4 text-destructive">
+          <p role="alert" className="mt-4 text-destructive text-sm">
             {failureSaid(settingsError)}
           </p>
         )}
@@ -394,7 +394,7 @@ export function LearningPage() {
                 Per-Bot participation
               </legend>
               {(agents.error || hiddenAgents.error) && (
-                <p role="alert" className="text-destructive">
+                <p role="alert" className="text-destructive text-sm">
                   {loadFailure(
                     [agents.error, hiddenAgents.error],
                     "Couldn't load the Bot list. Saved settings for each Bot are below.",
@@ -479,7 +479,7 @@ export function LearningPage() {
               </Button>
             </div>
             {save.error && (
-              <p role="alert" className="text-destructive">
+              <p role="alert" className="text-destructive text-sm">
                 {failureSaid(save.error)}
               </p>
             )}
@@ -524,7 +524,7 @@ export function LearningPage() {
           </label>
           {overview.isPending && <p role="status">Checking the backend…</p>}
           {overview.error && (
-            <p role="alert" className="text-destructive">
+            <p role="alert" className="text-destructive text-sm">
               {failureSaid(overview.error)}
             </p>
           )}
