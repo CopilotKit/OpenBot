@@ -190,10 +190,12 @@ export function SetupProgress({
   label = "Setup progress",
   showElapsed = true,
   quiet = false,
+  presentation = "list",
 }: {
   steps: Progress[];
   label?: string;
   showElapsed?: boolean;
+  presentation?: "list" | "focus" | "milestones";
   /**
    * A running row is marked without a spinner: something else on the screen is already the one
    * thing that spins (the step's own wait, or the Start's journey), and two read as two waits.
@@ -201,14 +203,39 @@ export function SetupProgress({
   quiet?: boolean;
 }) {
   if (steps.length === 0) return null;
+  const current =
+    presentation === "focus"
+      ? steps.findIndex(
+          (step) =>
+            !step.pending &&
+            (step.running ||
+              step.waiting ||
+              step.paused ||
+              (!step.ok && !step.note)),
+        )
+      : -1;
+  const rows =
+    current > 0
+      ? [
+          steps[current],
+          ...steps.slice(0, current),
+          ...steps.slice(current + 1),
+        ]
+      : steps;
+  const className =
+    presentation === "focus"
+      ? "steps setup-progress-focus"
+      : presentation === "milestones"
+        ? "steps setup-milestones"
+        : "steps";
   return (
-    <ol className="steps" aria-label={label} aria-live="polite">
-      {steps.map((step) => (
+    <ol className={className} aria-label={label} aria-live="polite">
+      {rows.map((step, index) => (
         <SetupProgressRow
           key={step.step}
           step={step}
           showElapsed={showElapsed}
-          quiet={quiet}
+          quiet={quiet || (presentation === "focus" && index > 0)}
         />
       ))}
     </ol>
