@@ -258,6 +258,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   own release still shows the uninstall command.
 - People, Remove says the person keeps their account and any other organization they're in. It no
   longer promises an organization of their own (Before upgrading).
+- **An admin gives a Bot an app from its card in one press.** Asked for Notion, a Bot drew a card
+  that told its admin "Only an admin can give it", and Give it answered "Notion has no tools to give
+  yet". An app that has listed none of its tools yet is asked again once you've signed in, and the
+  press stopped before your sign-in. It now turns the app on, opens your sign-in, and gives the app
+  to the Bot once you're in. On OpenBot Cloud that is the admin of their own organization. A card or
+  a Bot's Apps row shown to an admin says what is missing, never to ask an admin. Where the press
+  still can't go on, the card says "Couldn't get Notion ready for this Bot. Try again in a moment."
 - When an admin asks a Bot for an app it can't use yet, the Bot names the step the admin's own app
   card offers (Give it to, Turn on and give it to, Set it up, or Connect the shared account). It
   used to tell them to ask an administrator, even when they were the organization's only one.
