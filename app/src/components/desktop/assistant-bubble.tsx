@@ -214,7 +214,7 @@ export function AssistantBubble({
           <motion.span
             animate={moving ? { opacity: [1, 0.4, 1] } : undefined}
             aria-hidden
-            className="pointer-events-none absolute -inset-1.5 rounded-full border-2 border-amber-400"
+            className="pointer-events-none absolute -inset-1.5 rounded-full border-2 border-warning"
             transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
           />
         ) : null}
@@ -236,7 +236,7 @@ export function AssistantBubble({
             <motion.span
               animate={{ opacity: 1 }}
               aria-hidden
-              className="pointer-events-none absolute -inset-1.5 rounded-full border-2 border-emerald-400"
+              className="pointer-events-none absolute -inset-1.5 rounded-full border-2 border-success"
               exit={{ opacity: 0 }}
               initial={{ opacity: 0 }}
               transition={{ duration: 0.3 }}
@@ -281,7 +281,7 @@ export function AssistantBubble({
             className={cn(
               "absolute -top-1 -right-1 grid h-5 min-w-5 place-items-center rounded-full border-2 border-background px-1 font-semibold text-[11px] leading-none tabular-nums",
               now.waiting > 0
-                ? "bg-amber-400 text-amber-950"
+                ? "bg-warning text-background"
                 : "bg-primary text-primary-foreground",
             )}
             initial={reduceMotion ? false : { scale: 0.4 }}
