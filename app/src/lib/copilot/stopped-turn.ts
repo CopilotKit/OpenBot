@@ -2,6 +2,7 @@ import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
 import { botNoLongerUsable } from "@/lib/agents/queries";
 import { problemRequestId, recordProblem } from "@/lib/desktop/problems";
+import { useClearWhenHoldEnds } from "@/lib/held-ends";
 import { type Failure, isHeld } from "@/lib/load-failure";
 import { isPlanRequired, showCardNeeded } from "@/lib/plan/card-needed";
 
@@ -403,6 +404,10 @@ export function useStoppedTurn(agentId: string): Failure | null {
   useEffect(
     () => watchStoppedTurn(agent, agentId, setStopped),
     [agent, agentId],
+  );
+  // A hold is about now: said until the organization answers again, then gone (lib/held-ends.ts).
+  useClearWhenHoldEnds(stopped, () =>
+    setStopped((shown) => (shown === stopped ? null : shown)),
   );
 
   return stopped;

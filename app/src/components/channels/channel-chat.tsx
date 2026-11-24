@@ -117,6 +117,7 @@ import {
   useConnectionLost,
   useReconnected,
 } from "@/lib/desktop/connection-lost";
+import { useClearWhenHoldEnds } from "@/lib/held-ends";
 import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
@@ -743,6 +744,10 @@ export function ChannelChat({
    */
   // Its sentence, or the server's refusal kept whole when it is OpenBot holding off (drawn calmly).
   const [runError, setRunError] = useState<Failure | null>(null);
+  // A hold is about now: said until the organization answers again, then gone (lib/held-ends.ts).
+  useClearWhenHoldEnds(runError, () =>
+    setRunError((shown) => (shown === runError ? null : shown)),
+  );
   /**
    * The turns of this mount the server refused for the person, by the id of the person's message:
    * the sentence it said (`refusedForPerson`). Unlike `runError`, the next turn doesn't clear one:

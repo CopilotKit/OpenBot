@@ -501,3 +501,220 @@ describe.skipIf(!asked)(
       }, 120_000);
   },
 );
+
+/**
+ * The sentence is about now. Found by the end-to-end test of database sharding: from home it stayed
+ * under the message box 30 seconds after the move had ended, and in a conversation the turn's card
+ * stayed too. It goes once the organization answers again (lib/held-ends.ts), and the words sent stay
+ * in the box to send again. The Bots panel said it under every Bot; it says it once.
+ */
+describe.skipIf(!asked)(
+  "once the organization answers again after a move",
+  () => {
+    /** Northwind held until `release()`, telling a client to ask again in 2 seconds. */
+    function holdBriefly(server: FakeServer) {
+      hold(server, MOVING);
+      server.retryAfterSeconds = 2;
+      return () => {
+        server.movingUntil = 0;
+      };
+    }
+
+    /** How many places on the page say `words`, each the innermost element that does. */
+    async function times(page: Page, words: string): Promise<number> {
+      return page.evaluate((said) => {
+        const holders = [...document.querySelectorAll("body *")].filter(
+          (element) =>
+            element.checkVisibility() && element.textContent?.trim() === said,
+        );
+        return holders.filter(
+          (element) =>
+            !holders.some(
+              (other) => other !== element && element.contains(other),
+            ),
+        ).length;
+      }, words);
+    }
+
+    for (const engine of engines)
+      for (const look of LOOKS)
+        test(`a conversation, a Bot's page and home say it while it lasts, keep the message and clear after it, and the Bots panel says it once, in ${engine}, ${look.width}, ${look.theme}`, async () => {
+          const seen: Record<string, unknown> = {};
+          const message = "Name a planet with rings.";
+
+          // A conversation.
+          {
+            const server = new ChatServer();
+            const page = await open(engine, look, server, "/conversation");
+            try {
+              await page.getByText("1223").waitFor({ timeout: 15_000 });
+              const release = holdBriefly(server);
+              await send(page, "conversation", message);
+              const stopped = page.getByTestId("transcript-stopped");
+              await stopped.waitFor({ timeout: 15_000 });
+              const during = {
+                says: (await stopped.innerText()).trim(),
+                drawn: await drawn(page, MOVING),
+                kept: (
+                  await page
+                    .getByRole("textbox", { name: "Message" })
+                    .innerText()
+                ).trim(),
+              };
+              await shoot(
+                page,
+                "organization-unavailable-chat",
+                "conversation-held",
+                engine,
+                look,
+              );
+              release();
+              const cleared = await stopped
+                .waitFor({ state: "detached", timeout: 12_000 })
+                .then(
+                  () => true,
+                  () => false,
+                );
+              await shoot(
+                page,
+                "organization-unavailable-chat",
+                "conversation-back",
+                engine,
+                look,
+              );
+              seen.conversation = { ...during, cleared };
+            } finally {
+              await page.close();
+            }
+          }
+
+          // The Bot's own chat page.
+          {
+            const server = new ChatServer();
+            const page = await open(
+              engine,
+              look,
+              server,
+              "/bot?agent=general-assistant",
+            );
+            try {
+              await page
+                .getByRole("heading", { name: "General Assistant" })
+                .waitFor({ timeout: 15_000 });
+              await page.waitForTimeout(500);
+              const release = holdBriefly(server);
+              await send(page, "bot", message);
+              const band = page.getByTestId("bot-chat-stopped");
+              await band.waitFor({ timeout: 15_000 });
+              const says = (await band.innerText()).trim();
+              release();
+              const cleared = await band
+                .waitFor({ state: "detached", timeout: 12_000 })
+                .then(
+                  () => true,
+                  () => false,
+                );
+              seen.botPage = { says, cleared };
+            } finally {
+              await page.close();
+            }
+          }
+
+          // Home: the message is sent as the move begins, and home takes it back.
+          {
+            const server = new ChatServer();
+            const page = await open(engine, look, server, "/");
+            try {
+              const box = page.getByRole("textbox", { name: "Message" });
+              await box.waitFor({ timeout: 15_000 });
+              await page.waitForTimeout(500);
+              const release = holdBriefly(server);
+              await box.click();
+              await page.keyboard.type(message);
+              await page.keyboard.press("Enter");
+              const said = page.getByText(MOVING, { exact: true });
+              await said.waitFor({ timeout: 15_000 });
+              const during = {
+                says: await times(page, MOVING),
+                drawn: await drawn(page, MOVING),
+                kept: (await box.innerText()).trim(),
+              };
+              await shoot(
+                page,
+                "organization-unavailable-chat",
+                "home-held",
+                engine,
+                look,
+              );
+              release();
+              const cleared = await said
+                .waitFor({ state: "detached", timeout: 12_000 })
+                .then(
+                  () => true,
+                  () => false,
+                );
+              await shoot(
+                page,
+                "organization-unavailable-chat",
+                "home-back",
+                engine,
+                look,
+              );
+              seen.home = {
+                ...during,
+                cleared,
+                keptAfter: (await box.innerText()).trim(),
+              };
+            } finally {
+              await page.close();
+            }
+          }
+
+          // The Bots panel, opened while the move goes on: three Bots, each with its conversations.
+          {
+            const server = new ChatServer();
+            hold(server, MOVING);
+            const page = await open(engine, look, server, "/bots-panel");
+            try {
+              await page.getByText("Risk Analyst").waitFor({ timeout: 15_000 });
+              await page
+                .getByText(MOVING, { exact: true })
+                .first()
+                .waitFor({ timeout: 15_000 });
+              await page.waitForTimeout(500);
+              await shoot(
+                page,
+                "organization-unavailable-chat",
+                "bots-panel",
+                engine,
+                look,
+              );
+              seen.botsPanel = {
+                says: await times(page, MOVING),
+                drawn: await drawn(page, MOVING),
+              };
+            } finally {
+              await page.close();
+            }
+          }
+
+          expect(seen).toEqual({
+            conversation: {
+              says: MOVING,
+              drawn: CALM,
+              kept: message,
+              cleared: true,
+            },
+            botPage: { says: MOVING, cleared: true },
+            home: {
+              says: 1,
+              drawn: CALM,
+              kept: message,
+              cleared: true,
+              keptAfter: message,
+            },
+            botsPanel: { says: 1, drawn: CALM },
+          });
+        }, 240_000);
+  },
+);

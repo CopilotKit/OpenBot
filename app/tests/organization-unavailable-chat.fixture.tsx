@@ -10,9 +10,12 @@ import {
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { BotsPanel } from "@/components/app-sidebar/bots-panel";
 import { ChannelChat } from "@/components/channels/channel-chat";
+import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -25,12 +28,14 @@ import {
 } from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import { Route as BotRoute } from "@/routes/_authed/_app/bot";
+import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 import { Route as AuditRoute } from "@/routes/_authed/admin/audit";
 
 /**
  * The app as organization-unavailable-chat.test.tsx loads it in a browser: a conversation with a
- * Bot (the real conversation, with CopilotKit's runtime client set up as the app sets it up), the Bot's own
- * chat page, and Admin's audit log with its filters. Everything is read from the test's server, in
+ * Bot (the real conversation, with CopilotKit's runtime client set up as the app sets it up), the
+ * Bot's own chat page, home and its message box (a message sent opens a placeholder that says so),
+ * the sidebar's Bots panel, and Admin's audit log with its filters. Everything is read from the test's server, in
  * Northwind (organization-notices-browser.ts), which the test can move or take out of reach.
  *
  * The conversation's row is put in the roster here and kept, so the page asks the server only for
@@ -67,6 +72,39 @@ queryClient.setQueryData<InfiniteData<ChannelPage>>(channelKeys.list(), {
   ],
   pageParams: [""],
 });
+
+/** Northwind's three Bots, as the list the app reads gives them: read before the move, and kept. */
+function bot(id: string, name: string): AgentProfile {
+  return {
+    assignedToMe: false,
+    keyFromOpenBot: false,
+    avatarSeed: name,
+    builtIn: true,
+    canManage: true,
+    endpoint: null,
+    hasAuth: false,
+    hasCallbackToken: false,
+    isolated: false,
+    isolationActive: false,
+    isolationOffReason: null,
+    hidden: false,
+    pinned: false,
+    mine: true,
+    name,
+    roleDescription: "Helps with everyday work.",
+    systemOwned: false,
+    title: "Assistant",
+    visibility: "public",
+    id,
+    runsOnOpenBotModel: true,
+  };
+}
+queryClient.setQueryDefaults(agentKeys.list(false), { staleTime: Infinity });
+queryClient.setQueryData(agentKeys.list(false), [
+  bot("general-assistant", "General Assistant"),
+  bot("knowledge", "Knowledge"),
+  bot("risk-analyst", "Risk Analyst"),
+]);
 
 /*
  * The runtime client as `CopilotProvider` (lib/copilot/provider.tsx) sets it up, without the
@@ -105,6 +143,28 @@ const Audit = AuditRoute.options.component as () => ReactNode;
 const router = createRouter({
   history: createBrowserHistory(),
   routeTree: rootRoute.addChildren([
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      validateSearch: HomeRoute.options.validateSearch,
+      component: HomeRoute.options.component,
+    }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/start/$startId",
+      component: () => <p data-app-starting="">Starting</p>,
+    }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/bots-panel",
+      component: () => (
+        <SidebarShell className="h-svh overflow-hidden">
+          <div className="w-80 border-r">
+            <BotsPanel />
+          </div>
+        </SidebarShell>
+      ),
+    }),
     createRoute({
       getParentRoute: () => rootRoute,
       path: "/conversation",

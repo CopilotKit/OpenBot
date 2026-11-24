@@ -49,6 +49,7 @@ import {
   useAttachmentLimits,
 } from "@/lib/deployment/queries";
 import { editionOf } from "@/lib/edition-guard";
+import { useClearWhenHoldEnds } from "@/lib/held-ends";
 import {
   type Failure,
   failureOf,
@@ -139,6 +140,11 @@ function RouteComponent() {
   const [asked] = useState(ask);
   const [restores, setRestores] = useState(0);
   const [error, setError] = useState<Failure | null>(restored?.error ?? null);
+  // A hold is about now: said until the organization answers again, then gone (lib/held-ends.ts).
+  // The words stay in the box to send again.
+  useClearWhenHoldEnds(error, () =>
+    setError((shown) => (shown === error ? null : shown)),
+  );
   /*
    * Whether the person has typed in the box since it was last filled. A start that fails while they
    * are writing something else does not overwrite it: it stays stashed, for the next home page.
