@@ -538,10 +538,10 @@ paths:
         ignoring case, and then by id. appId names the app an entry was added
         as, or is null. search narrows the list to entries whose name or
         description holds it, ignoring case.
-        source narrows it to one kind. Anybody signed in may read the
-        catalogue. Only an administrator sees the wider directory, so anybody
-        else's list holds catalogue entries only, and asking for
-        source=directory is refused. Where no directory is set up, the list
+        source narrows it to one kind. Anybody signed in may read it, the
+        wider directory included, so a person can find an app and ask an
+        administrator to add it (createAppAccessRequest). Only an
+        administrator adds one. Where no directory is set up, the list
         holds the catalogue only and source=directory is unavailable. In the
         personal edition the catalogue leaves out entries meant for a team,
         unless they're already added. A missing cursor starts at the first

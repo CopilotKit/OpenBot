@@ -4,13 +4,14 @@
 
 export interface AppAccessRequestInput {
   /**
+   * The Bot the app is for. Left out, the request is for an app nobody has added yet, to turn it on for everyone.
    * @minLength 1
    * @maxLength 200
    * @pattern \S
    */
-  botId: string;
+  botId?: string;
   /**
-   * The app's id, or its name.
+   * The app's id, or its name. For an app from the directory that nobody has added yet, the slug of its directory entry (the part of its entry id after directory:).
    * @minLength 1
    * @maxLength 200
    * @pattern \S
