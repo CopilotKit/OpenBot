@@ -109,9 +109,9 @@ the action is right there. A search with no results uses `IconSearch` and "No ma
 
 ### Procedure 2: Compose a row
 
-1. `ItemMedia variant="icon"` holds a leading icon from `@tabler/icons-react`, drawn as a 16px glyph
-   on a 32px muted tile. It is what makes a card of rows scannable; a row without one reads as a
-   paragraph. Pass the bare icon — the variant sizes and colours it — and use plain `ItemMedia` only
+1. `ItemMedia variant="icon"` holds a leading icon from `@tabler/icons-react`, drawn as a bare 16px
+   glyph in `muted-foreground`, in a 32px space with no tile behind it. It is what makes a card of
+   rows scannable; a row without one reads as a paragraph. Pass the bare icon — the variant sizes and colours it — and use plain `ItemMedia` only
    for something that is its own picture, such as a Bot's avatar.
 2. `ItemContent` holds `ItemTitle` and, where the row needs a second line, `ItemDescription`.
 3. `ItemActions` holds the control, or the value when the row is read-only.
@@ -235,6 +235,9 @@ is actually on screen. The root was once 15px, and every constant taken from the
 | A chevron on a row that opens nothing | Announces a destination that does not exist | Value in `ItemActions`, no chevron |
 | A set of chips or toggles crammed into `ItemActions` | It competes with the label for width and wraps badly | `ItemFooter`, which is `basis-full` |
 | A back link in `PageShell`'s `action` | `action` is the page's primary verb, on the title's baseline | `backButton={{ label, linkProps }}` |
+| A bordered `bg-card` box drawn by hand that is not a list of rows | A card of its own, which drifts from every other card | `Card` from `components/ui/card.tsx` |
+| A corner, shadow or text size in brackets (`rounded-[20px]`, `shadow-[…]`, `text-[13px]`) | A look of its own that no token reaches | The rules in `docs/app-guidelines.md`, "The look" |
+| A `dark:` color class | A color that only one theme gets right | A token: it carries both values |
 
 ## Error Handling
 

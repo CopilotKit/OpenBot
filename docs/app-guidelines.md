@@ -201,3 +201,45 @@ reads and writes its data is already written down, in the skills under `.claude/
 - `openbot-screen-layout`: the default layout of a screen.
 - `openbot-copy`: the words and the voice of anything a person reads.
 - `openbot-data-access`: how the browser app reads and writes server data.
+
+### The look
+
+The web app keeps one look, drawn by the primitives in `app/src/components/ui` and the scheme's
+tokens. A screen draws with them and adds no look of its own. Sizes stay: this look changes how
+things are drawn, not how big they are.
+
+1. **Colors.** Only the scheme's tokens, as above.
+2. **Type.** Inter and the type scale in `theme.css`. Controls, rows and navigation are `text-sm`;
+   labels, times and counts are `text-xs`. No text size written by hand (`text-[13px]`).
+3. **Corners.** All from `--radius`. Controls are `rounded-md`, cards and the page's panel
+   `rounded-lg`, menus, dialogs and the message box `rounded-xl`, round things `rounded-full`.
+   `rounded-none` squares a part off. No other step and no corner of its own (`rounded-[20px]`).
+4. **Surfaces.** The frame (`sidebar`), the panel the page sits in (`background`), cards on it
+   (`card`). A card has a hairline border in light and in dark.
+5. **Shadows.** A shadow says how far something floats, as Linear draws it, and Tailwind's own
+   steps only:
+   - none for everything in the page: the panel, cards, rows, fields, the sidebar;
+   - `shadow-xs` for a control pressed on a surface: an outlined button, a switch's knob, the
+     chosen tab, a checkbox;
+   - `shadow-lg` and a border for what opens beside the thing that opened it: menus, selects,
+     popovers, tooltips, toasts;
+   - `shadow-2xl` and a border for what sits over the app: dialogs, the command menu, sheets.
+
+   Nothing else has a shadow, and none is written by hand.
+6. **Sizes.** Heights, padding and spacing come from the primitives and `PageShell`. A screen
+   writes no size by hand (`h-[43px]`); it uses the nearest Tailwind step, never a smaller one.
+7. **Rows.** One card of rows with hairline dividers (`PageRows`). The leading icon is bare, in
+   `muted-foreground`, in the space a 32px tile would take.
+8. **The message box** is a flat card at rest. While someone types in it, it glows in `ring`. It
+   is the only thing that glows.
+9. **Icons.** Tabler, at their usual sizes. The default line is 1.75, set once in `theme.css`. An
+   icon that needs another line says why in a comment.
+10. **Widths** come from `PageShell`. A screen sets no `max-w-*` of its own without a comment.
+11. **Cards.** A card is `PageRows`, `PageCard` or `Card` (`components/ui/card.tsx`). No screen
+    draws a bordered `bg-card` box by hand.
+12. **One class, both themes.** No `dark:` override of a color: the token carries both values.
+
+[`app/tests/ui-look-guard.test.ts`](../app/tests/ui-look-guard.test.ts) fails when a screen breaks
+rules 2, 3, 5, 11 or 12. Screens drawn before these rules are counted in its allowlist, which only
+gets shorter. After cleaning a screen up, rewrite the counts with
+`OPENBOT_UPDATE_UI_LOOK_ALLOWLIST=1 bun test app/tests/ui-look-guard.test.ts`.
