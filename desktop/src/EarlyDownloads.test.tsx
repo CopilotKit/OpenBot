@@ -158,7 +158,7 @@ test("the big downloads start with Install, before anyone signs in, and never be
   await steadied(account);
   const row = within(
     view.getByRole("listitem", {
-      name: "Installing OpenBot in the background",
+      name: "Preparing OpenBot",
     }),
   );
   expect(
@@ -338,7 +338,7 @@ test("a download paused for space says so, with no bar and no time running on", 
   );
   const item = within(
     view.getByRole("listitem", {
-      name: "Installing OpenBot in the background",
+      name: "Preparing OpenBot",
     }),
   );
   expect(item.getByText("Step 2 of 4 · Paused")).toBeTruthy();
