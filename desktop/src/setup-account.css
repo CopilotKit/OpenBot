@@ -70,3 +70,15 @@
 .account-layout .setup-panel.agreement-panel > .row {
   margin-top: 8px;
 }
+
+.account-layout .agreement-panel > .agreement-icon {
+  flex: none;
+  margin-bottom: 10px;
+  color: var(--text-secondary);
+}
+
+.account-layout .agreement-panel > .agreement-explanation {
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  line-height: 1.5;
+}

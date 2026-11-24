@@ -1,3 +1,4 @@
+import { IconFileText } from "@tabler/icons-react";
 import {
   type ReactNode,
   useCallback,
@@ -466,10 +467,18 @@ export function CopilotKitAccount({
     <>
       {agreement && (
         // The organization and agreement version belong in the log, not the explanation or link.
-        <p>
-          To run OpenBot on this computer, accept the OpenBot by CopilotKit
-          license agreement.
-        </p>
+        <>
+          <IconFileText
+            className="agreement-icon"
+            size={28}
+            stroke={1.5}
+            aria-hidden="true"
+          />
+          <p className="agreement-explanation">
+            To run OpenBot on this computer, accept the OpenBot by CopilotKit
+            license agreement.
+          </p>
+        </>
       )}
       {refused?.switchEngine && (
         <ol className="blocker-steps">

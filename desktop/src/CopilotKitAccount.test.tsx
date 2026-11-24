@@ -551,6 +551,13 @@ test("the agreement groups its explanation, legal link and explicit Accept in th
   expect(heading.closest(".setup-header-block")?.parentElement).toBe(sheet);
   const panel = accept.closest<HTMLElement>(".setup-panel");
   expect(panel).not.toBeNull();
+  const documentIcon = panel?.querySelector("svg.agreement-icon");
+  expect(documentIcon).not.toBeNull();
+  expect(documentIcon?.getAttribute("aria-hidden")).toBe("true");
+  expect(documentIcon?.getAttribute("width")).toBe("28");
+  expect(documentIcon?.getAttribute("height")).toBe("28");
+  expect(documentIcon?.getAttribute("stroke-width")).toBe("1.5");
+  expect(screen.queryByRole("img")).toBeNull();
   expect(panel?.closest(".setup-body")?.parentElement).toBe(sheet);
   expect(panel?.parentElement?.classList.contains("setup-content")).toBe(true);
   const explanation = screen.getByText(
