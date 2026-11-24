@@ -106,6 +106,7 @@ main
 
   main > .rail + .sheet.setup-layout > .setup-body,
   .booking-step.setup-layout > .setup-body {
+    justify-content: flex-start;
     padding-block: 18px;
   }
 
