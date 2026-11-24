@@ -175,6 +175,16 @@ export function trayPlace(userAgent = navigator.userAgent): string {
     : "the system tray";
 }
 
+/**
+ * The row shows a spinner (unless its list is `quiet`): it runs, and is not paused or waiting on
+ * the person. A screen that shows such a row keeps every other wait on it still.
+ */
+export function spins(step: Progress): boolean {
+  return (
+    !step.pending && !step.waiting && !step.paused && (step.running ?? false)
+  );
+}
+
 export function SetupProgress({
   steps,
   label = "Setup progress",

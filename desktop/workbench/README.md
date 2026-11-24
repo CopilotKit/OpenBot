@@ -113,7 +113,7 @@ Click a group name to fold the group or open it again. The number after the name
 
 The desktop scenes come from three files in `scenes/`:
 
-- `install.ts` has the seven install runs.
+- `install.ts` has the eight install runs.
 - `windows.ts` has six runs for the Status, Update, Move to Cloud and Shutting down windows.
 - `states.ts` has one still scene for each state in `src/fakeNative/states.ts`. Each state names the setup step it shows (`step`, a `SetupStep` from `src/telemetry.ts`), or `null` when the window shows no setup step. When App's flow changes, `stateSteps.browser.test.ts` names each state that no longer shows its step.
 

@@ -567,3 +567,20 @@ test("after a move, the same summary offers no second move", async () => {
   expect(view.queryByRole("button", { name: MOVE_TO_F })).toBeNull();
   expect(called("move_engine_here")).toHaveLength(1);
 });
+
+/*
+ * Install's own row spins beside the line when it runs with no download of its own (checking the
+ * release, before the images): the line keeps its words and its bar, and does not spin as well.
+ */
+test("a quiet line says how far the downloads are, with no spinner of its own", async () => {
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(<EarlyDownloadsLine quiet />);
+  });
+  await said({ state: "downloading", bytes: 1.2 * GB, size: 2.9 * GB });
+  expect(view.getByRole("status").textContent).toBe("Downloading OpenBot.");
+  expect(
+    view.getByRole("progressbar", { name: "Download progress" }),
+  ).toBeTruthy();
+  expect(view.container.querySelector(".step-spinner")).toBeNull();
+});
