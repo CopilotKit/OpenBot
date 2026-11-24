@@ -1,5 +1,5 @@
 import { NOTICE_ID_PATTERN } from "@openbot/shared/notices";
-import type { Import, ReconnectApp } from "@/lib/api/generated/model";
+import type { App, Import, ReconnectApp } from "@/lib/api/generated/model";
 
 /**
  * THE APPS A MOVE TO OPENBOT CLOUD LEFT FOR THE PERSON TO CONNECT AGAIN, AND THE RULES FOR WHEN ONE
@@ -96,6 +96,31 @@ export function cloudAppFor<
 }
 
 /**
+ * Whether an app here needs no account of the person's, as listApps says of it, so it is done for
+ * them once the organization has it: a server added by its address that doesn't sign each person in
+ * (it is reached with the organization's key, or needs none), a directory app on the organization's
+ * one shared account once that account is connected, and a directory app that connects with
+ * nothing. Every other app waits for the person's own connection.
+ */
+export function needsNoAccountOfYours(
+  app: Pick<
+    App,
+    | "source"
+    | "signIn"
+    | "accountMode"
+    | "sharedAccountConnected"
+    | "connectsWith"
+  >,
+): boolean {
+  if (app.source === "address") return !app.signIn;
+  if (app.source === "directory")
+    return app.accountMode === "shared"
+      ? app.sharedAccountConnected
+      : app.connectsWith === "nothing";
+  return false;
+}
+
+/**
  * One moved app as the screens draw it: its notice id, the id of the app it is here (null where the
  * organization hasn't added it), and whether the person has connected it again.
  */
@@ -107,14 +132,16 @@ export type MovedApp = ReconnectApp & {
 
 /**
  * The moved apps still in view: every one the person has not dismissed, each marked reconnected
- * when their own connections have the app it is here. `cloudIdOf` names that app (`cloudAppFor`),
- * and `connected` is the app ids of the person's own live connections.
+ * when their own connections have the app it is here, or when that app needs no account of theirs
+ * (`doneHere`, read as `needsNoAccountOfYours`). `cloudIdOf` names that app (`cloudAppFor`), and
+ * `connected` is the app ids of the person's own live connections.
  */
 export function movedAppsInView(
   apps: readonly ReconnectApp[],
   cloudIdOf: (appId: string) => string | undefined,
   connected: ReadonlySet<string>,
   dismissed: readonly string[],
+  doneHere: (cloudId: string) => boolean = () => false,
 ): MovedApp[] {
   const answered = new Set(dismissed);
   return apps
@@ -124,7 +151,8 @@ export function movedAppsInView(
         ...app,
         noticeId: movedAppNoticeId(app.appId),
         cloudId,
-        reconnected: cloudId !== null && connected.has(cloudId),
+        reconnected:
+          cloudId !== null && (connected.has(cloudId) || doneHere(cloudId)),
       };
     })
     .filter((app) => !answered.has(app.noticeId));

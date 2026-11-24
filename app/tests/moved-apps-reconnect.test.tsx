@@ -231,6 +231,14 @@ const APPS: AppsFixture = {
     },
     directoryApp("notion", "Notion", "Read and write pages."),
   ],
+  /*
+   * The directory's apps not added here yet, as listAppDirectory lists them: Slack, and Linear,
+   * which the directory lists and then refuses to add. An app added by its address is never in it.
+   */
+  directory: [
+    { slug: "slack", name: "Slack", connection: { kind: "consent" } },
+    { slug: "linear", name: "Linear", connection: { kind: "consent" } },
+  ],
 };
 
 /** OpenBot Cloud's sentence for a carried app its organization doesn't allow. */
@@ -243,6 +251,28 @@ const TEAM_WIKI: ReconnectApp = {
   botNames: ["Research"],
   reason: NOT_ALLOWED,
 };
+
+/** A server added by its address on the person's computer: not in the directory. */
+const S4_ORDERS: ReconnectApp = {
+  appId: "s4-orders",
+  appName: "S4 Orders",
+  botNames: ["Order Desk"],
+};
+/** That server once an admin has added it here, with the organization's key. */
+const S4_ORDERS_HERE = {
+  id: "s4-orders",
+  title: "S4 Orders",
+  provenance: "custom",
+  url: "https://orders.s4.test/mcp",
+  signIn: false,
+};
+/** A directory app on the organization's one shared account, connected. */
+const NOTION_SHARED = {
+  ...directoryApp("notion", "Notion", "Read and write pages."),
+  accountMode: "shared" as const,
+  sharedVendorConnected: true,
+};
+const NOTION: ReconnectApp = { appId: "notion", appName: "Notion" };
 
 /** A finished move, as listImports answers it, listing `reconnect` and `carried`. */
 function finishedMove(
@@ -480,6 +510,20 @@ class FakeServer {
       expect(this.role).toBe("admin");
       const sent = request.postDataJSON() as Record<string, unknown>;
       CreateAppBody.parse(sent);
+      // A server added by its address: reached with the organization's key, nobody signs in.
+      if (sent.from === "address") {
+        const title = String(sent.title);
+        this.added.push(`address:${title}`);
+        const server = {
+          id: title.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+          title,
+          provenance: "custom",
+          url: String(sent.url),
+          signIn: false,
+        };
+        this.apps.servers = [...(this.apps.servers ?? []), server];
+        return { status: 201, json: CreateAppResponse.parse(appBody(server)) };
+      }
       expect(sent.from).toBe("directory");
       const entry = String(sent.directoryEntryId);
       this.added.push(entry);
@@ -1113,6 +1157,109 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         await page.close();
       }
     }, 90_000);
+
+  /*
+   * Found by the move's end-to-end run: Reconnect on a server added by its address asked the
+   * directory to add it, which it isn't in, and the row then said "Couldn't turn S4 Orders on here.
+   * Try again in a moment." Now an admin's one press opens Add custom MCP with its name filled in
+   * (the move doesn't bring the address or key), and adding it comes back to the list, done.
+   */
+  for (const engine of engines)
+    test(`an admin's Reconnect on a server added by its address opens Add custom MCP, and adding it comes back done, in ${engine}`, async () => {
+      const server = new FakeServer(
+        [finishedMove([S4_ORDERS, GMAIL])],
+        "admin",
+      );
+      const page = await open("/reconnect", server, engine);
+      try {
+        await row(page, "s4-orders")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL((url) => url.pathname === "/connections/new");
+        const name = page.getByLabel("Name");
+        await name.waitFor();
+        expect(await name.inputValue()).toBe("S4 Orders");
+        await page
+          .getByText(
+            "S4 Orders was added by its address in OpenBot on your computer. Add it here with the same address, and its key if it needs one.",
+          )
+          .waitFor();
+        // Never asked of the directory, which doesn't have it.
+        expect(server.added).toEqual([]);
+        await shoot(page, "add-by-address", engine, "light", WIDE);
+        await page.getByLabel("Server address").fill(S4_ORDERS_HERE.url);
+        await page.getByLabel(/^Key/).fill("s4-orders-key");
+        await page.getByLabel("Server address").press("Enter");
+        // Back on the list, and done: it needs no account of the person's.
+        await page.waitForURL(`${ORIGIN}/reconnect`);
+        await row(page, "s4-orders").getByText("Reconnected").waitFor();
+        expect(server.added).toEqual(["address:S4 Orders"]);
+        await row(page, "gmail")
+          .getByRole("button", { name: "Reconnect" })
+          .waitFor();
+      } finally {
+        await page.close();
+      }
+
+      // Anybody else: the row says only an admin can, and who they are, with nothing to press.
+      const member = new FakeServer([finishedMove([S4_ORDERS])]);
+      const asMember = await open("/reconnect", member, engine);
+      try {
+        await row(asMember, "s4-orders")
+          .getByText(
+            "An admin has to turn S4 Orders on before you can connect it: Priya Raman (priya@example.com) or Ines Duarte (ines@example.com).",
+          )
+          .waitFor();
+        expect(
+          await row(asMember, "s4-orders")
+            .getByRole("button", { name: "Reconnect" })
+            .count(),
+        ).toBe(0);
+      } finally {
+        await asMember.close();
+      }
+    }, 90_000);
+
+  /*
+   * Found by the same run: once an admin added that server with the organization's key, the list
+   * still offered Reconnect on it and home still counted it, because only the person's own
+   * connections marked an app done. An app that needs no account of the person's (a server reached
+   * with the organization's key, or a shared account that is connected) is done once it is here.
+   */
+  for (const engine of engines)
+    test(`an app here that needs no account of the person's is done, on the list and at home, in ${engine}`, async () => {
+      const server = new FakeServer([
+        finishedMove([S4_ORDERS, NOTION, DOCS, GMAIL]),
+      ]);
+      server.apps.servers = [
+        ...(server.apps.servers ?? []).filter(
+          (app) => app.id !== "composio-notion",
+        ),
+        S4_ORDERS_HERE,
+        NOTION_SHARED,
+        ...SIGN_IN_APPS,
+      ];
+      const page = await open("/reconnect", server, engine);
+      try {
+        await row(page, "s4-orders").getByText("Reconnected").waitFor();
+        await row(page, "notion").getByText("Reconnected").waitFor();
+        // A server that signs each person in, and a person's own sign-in, still wait for them.
+        for (const app of ["docs-search", "gmail"])
+          await row(page, app)
+            .getByRole("button", { name: "Reconnect" })
+            .waitFor();
+        await page.goto(`${ORIGIN}/`);
+        const bar = page.getByRole("complementary", {
+          name: "Apps to reconnect",
+        });
+        await bar.waitFor();
+        expect(await bar.textContent()).toContain(
+          "2 apps from your move still need reconnecting.",
+        );
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
 
   for (const engine of engines)
     test(`an admin's Reconnect adds an app the organization hasn't yet, and says so when it can't, in ${engine}`, async () => {
