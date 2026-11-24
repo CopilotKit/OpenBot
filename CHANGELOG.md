@@ -427,8 +427,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   connected.
 - On OpenBot Cloud, Connections leads to every app in the directory, searching it finds apps you
   haven't added yet, and an admin can turn an app off from its Connections page.
-- Connecting an app whose maker offers a sign-in, like PostHog or Fireflies, now takes you to that
-  sign-in instead of asking for a key.
+- Connecting an app that asked for a key now takes you to a sign-in where there is one: the maker's
+  own, for PostHog, Fireflies and over a hundred others, or else the directory's version of the app
+  that signs in through its maker. An app already added with its key keeps working as it is.
 - The built-in Notion, Google Drive, Parallel Search, Exa Search and Firecrawl are no longer offered,
   in any edition. Asking a Bot for Notion reaches the directory's Notion, and one already added keeps
   working. OpenBot Personal's keyless web search stays on in the background.
