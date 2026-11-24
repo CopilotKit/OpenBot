@@ -33,10 +33,11 @@ export function Lockup({ byCopilotKit = false }: { byCopilotKit?: boolean }) {
 /**
  * Where you are in setup, and what is left: every section by name, down the setup window's
  * sidebar, the current one marked as the app marks a selected row and the ones done ticked.
+ * Without `at`, none is marked: setup is still finding out where it is (Getting OpenBot ready).
  */
-export function Sections({ at }: { at: Section }) {
+export function Sections({ at }: { at?: Section }) {
   const names = SECTIONS;
-  const current = names.indexOf(at);
+  const current = at === undefined ? -1 : names.indexOf(at);
   return (
     <ol className="sections" aria-label="Setup">
       {names.map((name, index) => (
@@ -53,6 +54,16 @@ export function Sections({ at }: { at: Section }) {
       ))}
     </ol>
   );
+}
+
+/**
+ * Whether the window's buttons sit over the page, as macOS draws them (`TRAFFIC_LIGHTS`). Windows
+ * and Linux draw a title bar above the page instead, so the sidebar needs no room for them.
+ */
+function underLights(
+  userAgent = globalThis.navigator?.userAgent ?? "",
+): boolean {
+  return /Macintosh|Mac OS X/.test(userAgent);
 }
 
 /**
@@ -84,7 +95,10 @@ export function SetupRail({
   foot?: ReactNode;
 }) {
   return (
-    <aside className="rail" aria-label={label}>
+    <aside
+      className={underLights() ? "rail" : "rail under-title-bar"}
+      aria-label={label}
+    >
       <Lockup byCopilotKit={byCopilotKit} />
       {heading ? (
         <h1 className="rail-title">Set up OpenBot</h1>

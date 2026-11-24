@@ -1473,7 +1473,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   if (checkingResume || checkingWindows) {
     return (
       <main>
-        <SetupRail />
+        <SetupRail>
+          <Sections />
+        </SetupRail>
         <div className="sheet connection-sheet">
           <h1>Getting OpenBot ready</h1>
           <p className="lede" role="status">

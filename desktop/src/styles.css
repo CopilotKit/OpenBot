@@ -2899,10 +2899,23 @@ p.move-key-none {
  */
 main:has(> .rail) {
   --rail-width: 320px;
+  /*
+   * The sidebar's title and the page's heading share one line: the title's top is the sidebar's
+   * top, the lockup (32 px) and the gap under it, and the page's padding puts its heading there.
+   * On a Mac the sidebar starts under the window's buttons (`TRAFFIC_LIGHTS`, 26 to 39 px down);
+   * Windows and Linux draw a title bar above the page, so it starts near the top.
+   */
+  --rail-top: 56px;
+  --lockup-gap: 20px;
+  --head-top: calc(var(--rail-top) + 32px + var(--lockup-gap));
   display: grid;
   grid-template-columns: var(--rail-width) minmax(0, 1fr);
   align-items: stretch;
   padding: 0;
+}
+
+main:has(> .rail.under-title-bar) {
+  --rail-top: 24px;
 }
 
 .rail {
@@ -2910,12 +2923,21 @@ main:has(> .rail) {
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
-  /* Under the window's buttons (`TRAFFIC_LIGHTS`, 26 to 39 px down), with room to spare. */
-  padding: 64px 14px 20px;
+  padding: var(--rail-top) 14px 20px;
 }
 
+/* One line at any sidebar width, so the title under it never moves from step to step. */
 .rail > .lockup {
-  margin: 0 12px 24px;
+  height: 32px;
+  margin: 0 12px var(--lockup-gap);
+  white-space: nowrap;
+}
+
+/* "by CopilotKit" beside the name: quieter, so OpenBot still leads. */
+.rail > .lockup span.lockup-by {
+  margin-left: -4px;
+  font-weight: 400;
+  color: var(--text-secondary);
 }
 
 .rail-title {
@@ -2934,24 +2956,54 @@ main:has(> .rail) {
   border-top: 1px solid var(--border);
 }
 
+/* A foot with nothing to say this moment (the first screen's address page): no rule over nothing. */
+.rail-foot:empty {
+  display: none;
+}
+
 .rail-foot > :first-child {
   margin-top: 0;
 }
 
+/*
+ * The page: its heading on the sidebar title's line (`--head-top`, less the page's 10 px inset and
+ * its 1 px edge),
+ * and its column the card's old measure. On a wide window the column is centred in the page, as
+ * OpenBot centres a page's column after setup, instead of leaving the page's right half empty.
+ */
 main > .rail + .sheet {
   --sheet-pad: 48px;
   --sheet-ground: var(--background);
+  --measure: 36rem;
+  /* Half of what the page has beyond the column and its 1 px edges, or the page's own padding. */
+  --page-inline: max(
+    var(--sheet-pad),
+    calc((100% - 12px - var(--measure)) / 2)
+  );
+  /* The grid's width less its inset, so the page sits 10 px in on the right as on top and bottom
+     (with `.sheet`'s 100% it ran on to the window's edge). */
+  width: auto;
   max-width: none;
   max-height: none;
   min-height: 0;
   margin: 10px 10px 10px 0;
-  padding-top: 56px;
+  padding: calc(var(--head-top) - 11px) var(--page-inline) var(--sheet-pad);
   border-radius: calc(var(--radius) * 1.4);
   box-shadow: none;
 }
 
+main > .rail + .sheet:has(> .step-footer) {
+  padding-right: calc(var(--page-inline) - var(--gutter, 0px));
+}
+
+/* The first screen's heading is larger (28 px on a 36 px line): its baseline is 5.4 px lower in
+   its line than the title's, so it starts that much higher. */
+main > .rail + .sheet.welcome {
+  padding-top: calc(var(--head-top) - 11px - 5.4px);
+}
+
 main > .rail + .sheet > * {
-  max-width: 36rem;
+  max-width: var(--measure);
 }
 
 /*
@@ -3045,6 +3097,10 @@ main > .rail + .sheet > * {
   line-height: 20px;
 }
 
+.rail .tile-summary {
+  text-wrap: pretty;
+}
+
 .rail .tile-group {
   margin-top: 6px;
 }
@@ -3054,8 +3110,9 @@ main > .rail + .sheet > * {
   margin: 6px 0 0 -28px;
 }
 
+/* Each as tall as the one with the cloud marks, so the two ways are one rhythm. */
 .rail .tile-option {
-  min-height: 34px;
+  min-height: 36px;
   padding: 7px 12px 7px 28px;
   border: 0;
   border-radius: var(--radius-md);
@@ -3097,14 +3154,24 @@ main > .rail + .sheet > * {
 
 .choice-head p {
   margin: 0;
+  font-size: var(--text-base);
+  line-height: 22px;
   color: var(--text-secondary);
   text-wrap: pretty;
+}
+
+/* "What this computer needs": the page's section heading, as `h2` is set, not the browser's h3. */
+.rail + .sheet .needs h3 {
+  margin: 0 0 4px;
+  font-size: var(--text-base);
+  line-height: 22px;
+  font-weight: 600;
 }
 
 /* What this computer needs, as four facts in a grid, each under a hairline. */
 .rail + .sheet .needs-list {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 28px;
+  gap: 10px 28px;
   margin: 16px 0 24px;
   padding: 0;
   list-style: none;
@@ -3121,6 +3188,15 @@ main > .rail + .sheet > * {
   margin-top: 0;
 }
 
+/*
+ * The first screen's downloads line holds its tallest height so what is under it never moves. With
+ * nothing to say, in the page, only a failure is under it, and that belongs under Install, not
+ * 72 px further down and off the page's foot.
+ */
+.rail + .sheet .early-downloads.first-screen:empty {
+  min-height: 0;
+}
+
 /* Narrower windows (the window's least is 720 px): a narrower sidebar, its rows' lines left out. */
 @media (max-width: 860px) {
   main:has(> .rail) {
@@ -3129,11 +3205,61 @@ main > .rail + .sheet > * {
 
   main > .rail + .sheet {
     --sheet-pad: 32px;
-    padding-top: 40px;
+  }
+
+  /*
+   * The needs in the narrow page: one under the other, a size smaller. Two across, "A Mac or a
+   * 64-bit Windows PC" broke at its hyphen and its row stood taller than the other.
+   */
+  .rail + .sheet .needs-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    margin: 12px 0 16px;
+    font-size: var(--text-sm);
+    line-height: 20px;
+  }
+
+  .rail + .sheet .needs-list li {
+    padding-top: 6px;
+  }
+
+  .choice-head {
+    margin-bottom: 20px;
+  }
+
+  /* The lockup in the narrow sidebar: "by CopilotKit" smaller, so it stays on the name's line. */
+  .rail > .lockup {
+    gap: 10px;
+  }
+
+  .rail > .lockup .orb {
+    width: 28px;
+    height: 28px;
+  }
+
+  .rail > .lockup span.lockup-by {
+    margin-left: -2px;
+    font-size: var(--text-sm);
   }
 
   .rail .tile-summary,
   .rail .cloud-marks {
     display: none;
+  }
+}
+
+/* A short window (the least is 560 px): the sidebar's top and the shared line a little higher. */
+@media (max-height: 640px) {
+  main:has(> .rail) {
+    --rail-top: 52px;
+    --lockup-gap: 12px;
+  }
+
+  .choice-head {
+    margin-bottom: 16px;
+  }
+
+  main:has(> .rail.under-title-bar) {
+    --rail-top: 20px;
   }
 }
