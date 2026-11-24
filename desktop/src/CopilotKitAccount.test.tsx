@@ -83,7 +83,7 @@ test("checking keeps the heading outside the scrollable account interaction", as
   invokeHandler = async () => new Promise(() => {});
   const screen = await startSigningIn();
   const heading = screen.getByRole("heading", { name: "Your OpenBot account" });
-  const sheet = heading.closest(".sheet");
+  const sheet = heading.closest<HTMLElement>(".sheet");
   expect(sheet?.classList.contains("account-layout")).toBe(true);
   expect(sheet?.classList.contains("setup-layout")).toBe(true);
   expect(heading.closest(".setup-header-block")?.parentElement).toBe(sheet);

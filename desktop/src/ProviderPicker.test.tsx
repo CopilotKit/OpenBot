@@ -227,12 +227,15 @@ test("provider catalogue scrolls separately from the anchored selection and acti
   await view.findByRole("radio", { name: /^OpenAI-compatible/ });
   const sheet = view
     .getByRole("heading", { name: "Connect your AI" })
-    .closest(".sheet");
-  const body = sheet?.querySelector(":scope > .setup-body");
+    .closest<HTMLElement>(".sheet");
+  const body = sheet?.querySelector<HTMLElement>(":scope > .setup-body");
   const footer = view
     .getByRole("button", { name: "Continue" })
-    .closest(".setup-footer");
-  expect(sheet?.classList.contains("provider-layout")).toBe(true);
+    .closest<HTMLElement>(".setup-footer");
+  if (!sheet || !body || !footer) {
+    throw new Error("Provider layout must have a sheet, body and footer.");
+  }
+  expect(sheet.classList.contains("provider-layout")).toBe(true);
   expect(
     sheet?.querySelector(":scope > .setup-header-block h1"),
   ).not.toBeNull();
@@ -297,13 +300,14 @@ test("plan wait, signed-in confirmation and API key share one body with stable f
   const identity = view.getByRole("group", { name: "Model provider" });
   const footer = view
     .getByRole("button", { name: "Continue" })
-    .closest(".setup-footer");
+    .closest<HTMLElement>(".setup-footer");
   const panel = view.container.querySelector(
     ".setup-body > .setup-content.setup-panel.chosen-provider",
   );
   expect(panel).not.toBeNull();
   expect(footer).not.toBeNull();
-  expect(identity.parentElement).toBe(footer?.parentElement);
+  if (!footer) throw new Error("Provider actions must have a footer.");
+  expect(identity.parentElement).toBe(footer.parentElement);
   await userEvent.click(
     view.getByRole("button", { name: "Sign in with OpenAI" }),
   );
