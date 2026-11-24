@@ -428,7 +428,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Connecting an app whose maker offers a sign-in, like PostHog or Fireflies, now takes you to that
   sign-in instead of asking for a key.
 - Signing in to an app's own server works with servers that identify OpenBot by its published
-  client document, not only by registration.
+  client document, not only by registration. Where a server offers both, OpenBot Cloud uses its
+  document and every other OpenBot registers.
 - With thousands of app tools, a Bot finds the right one: Claude uses Anthropic's own tool loading,
   and OpenBot's search finds tools by exact name, by a required word, or within one app.
 - **A Bot asked for an app it doesn't hold puts up that app's card first.** Asked to find a
