@@ -21,6 +21,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import {
@@ -204,6 +205,14 @@ export type BrokeredAccount = {
   kind: BrokeredAccountKind;
   /** Leave for the vendor's consent screen. */
   connect: () => void;
+  /**
+   * The same, started by the page rather than by a press of Connect (`startConnect`). Where the app
+   * turns out to take a key after all, `keyInstead` is set rather than a refusal said, so the row
+   * opens the key form: nobody is asked to press Connect a second time.
+   */
+  connectOnArrival: () => void;
+  /** A connect started on arrival answered with a key form, not a sign-in. */
+  keyInstead: boolean;
   /** End the account at Composio, not only here. */
   disconnect: () => void;
   connecting: boolean;
@@ -463,6 +472,10 @@ export function useBrokeredAccount(input: {
    */
   const forgetRecheck = recheck.reset;
 
+  /* Whether the connect in flight was started on arrival: see `connectOnArrival`. */
+  const onArrival = useRef(false);
+  const [keyInstead, setKeyInstead] = useState(false);
+
   const connect = useMutation({
     ...connectAccountMutationOptions(returnTo, shared),
     onError: (thrown: Error) => report(thrown.message),
@@ -499,8 +512,16 @@ export function useBrokeredAccount(input: {
        * open the form, but a screen that quietly repaired a disagreement between the two lists
        * would leave nobody any reason to correct it — and the sentence names the one act that ends
        * the state, which is a reload against a deployment whose app has caught up.
+       *
+       * EXCEPT A CONNECT THE PAGE STARTED ITSELF: nobody pressed a sign-in button there, so the
+       * row opens the key form the app asked for (`keyInstead`) and there is nothing to report.
        */
       if (start === null) {
+        if (onArrival.current) {
+          onArrival.current = false;
+          setKeyInstead(true);
+          return;
+        }
         report(
           "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
         );
@@ -762,8 +783,15 @@ export function useBrokeredAccount(input: {
     configured,
     connect: () => {
       report(null);
+      onArrival.current = false;
       connect.mutate(serverId);
     },
+    connectOnArrival: () => {
+      report(null);
+      onArrival.current = true;
+      connect.mutate(serverId);
+    },
+    keyInstead,
     connecting: connect.isPending,
     disconnect: () => {
       report(null);
@@ -922,7 +950,7 @@ function accountSentence(input: {
        * is worth a second press rather than a second connection.
        */
       if (account.probe && !account.verified) {
-        return `Your key didn't pass a check with ${title}. That may be the key, or ${title} itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
+        return `Your key didn't pass a check with ${vendorNameOf(title)}. That may be the key, or ${vendorNameOf(title)} itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
       }
       /*
        * NOTHING WAS SPENT ON IT, WHICH IS A FACT ABOUT THE CHECK AND ABOUT THE APP AT THE TIME. The
@@ -943,7 +971,7 @@ function accountSentence(input: {
        * today.
        */
       if (account.probe === null) {
-        return `Connected with your key. It hasn't been checked with ${title}. At the time, ${title} had no safe way to check a key. That's about the app, not your key.`;
+        return `Connected with your key. It hasn't been checked with ${vendorNameOf(title)}. At the time, ${vendorNameOf(title)} had no safe way to check a key. That's about the app, not your key.`;
       }
       /*
        * AND NOTHING HAS SAID WHICH, which is no longer the page load: the connections read carries
@@ -953,7 +981,7 @@ function accountSentence(input: {
        * two things a record can say; this is what stands where there is no record, and it must not
        * borrow either.
        */
-      return `Connected with your key. It hasn't been checked with ${title}.`;
+      return `Connected with your key. It hasn't been checked with ${vendorNameOf(title)}.`;
     }
     /*
      * WHAT DISCONNECTING DID NOT DO. The account ends at Composio and the key does not end
@@ -962,7 +990,7 @@ function accountSentence(input: {
      * have live, so the row names the step this deployment cannot take for them.
      */
     if (account.disconnected) {
-      return `Disconnected. Your key still works at ${title}. Change it there to stop all access.`;
+      return `Disconnected. Your key still works at ${vendorNameOf(title)}. Change it there to stop all access.`;
     }
     /*
      * NOT THE SCREEN'S OWN SENTENCE, which is written for the kind that leaves: one of the two says
@@ -975,7 +1003,7 @@ function accountSentence(input: {
      * way this app is connected, and a row that replaced the whole line took it away with the trip
      * it was right to drop.
      */
-    const asked = `Needs a key from ${title}. Connect shows where to get one.`;
+    const asked = `Needs a key from ${vendorNameOf(title)}. Connect shows where to get one.`;
     return disconnectedReassurance
       ? `${asked} ${disconnectedReassurance}`
       : asked;
@@ -1011,11 +1039,12 @@ function KeyGuideNote({
   guide: KeyGuide | null;
   title: string;
 }) {
+  const vendor = vendorNameOf(title);
   return (
     <div className="mb-3 flex flex-col gap-1.5 text-sm" data-testid="key-guide">
       <p>
-        OpenBot connects to {title} with a key from your {title} account, not a
-        sign-in.
+        OpenBot connects to {vendor} with a key from your {vendor} account, not
+        a sign-in.
       </p>
       {guide ? <p className="text-muted-foreground">{guide.steps}</p> : null}
       {guide?.url ? (
@@ -1025,7 +1054,7 @@ function KeyGuideNote({
           rel="noopener noreferrer"
           target="_blank"
         >
-          Get a key from {title}
+          Get a key from {vendor}
           <IconArrowUpRight aria-hidden="true" className="size-3.5" />
         </a>
       ) : null}
@@ -1071,8 +1100,9 @@ export function BrokeredAccountRow({
   title,
 }: {
   /**
-   * Open the key form on arrival, once, for an app that takes a key and isn't connected: Browse
-   * apps sends somebody here straight after adding one. A sign-in app is started where it was added.
+   * Start connecting on arrival, once, for an app that isn't connected: the key form for an app that
+   * takes a key (Browse apps sends somebody here straight after adding one), the sign-in for one
+   * that signs in (the reconnect list's Reconnect).
    */
   startConnect?: boolean;
   /**
@@ -1160,14 +1190,21 @@ export function BrokeredAccountRow({
     if (account.fieldsSubmitted) setAsking(false);
   }, [account.fieldsSubmitted]);
 
-  /* The key form on arrival, when asked for: see `startConnect`. Once per visit. */
+  /*
+   * The connect on arrival, when asked for: see `startConnect`. Once per visit. The key form for an
+   * app that takes a key, the sign-in for one that signs in, nothing for one that needs no account.
+   */
   const started = useRef(false);
-  const { requestFields } = account;
+  const { requestFields, connectOnArrival } = account;
   useEffect(() => {
     if (!startConnect || started.current) return;
-    if (!account.configured || account.connected || account.kind !== "fields")
+    if (!account.configured || account.connected || account.kind === "no-auth")
       return;
     started.current = true;
+    if (account.kind === "consent") {
+      connectOnArrival();
+      return;
+    }
     setAsking(true);
     requestFields();
   }, [
@@ -1176,7 +1213,17 @@ export function BrokeredAccountRow({
     account.connected,
     account.kind,
     requestFields,
+    connectOnArrival,
   ]);
+  /* A sign-in started on arrival that turned out to want a key: the form, as for a key app. */
+  const { keyInstead } = account;
+  const keyOpened = useRef(false);
+  useEffect(() => {
+    if (!keyInstead || keyOpened.current) return;
+    keyOpened.current = true;
+    setAsking(true);
+    requestFields();
+  }, [keyInstead, requestFields]);
 
   /*
    * THE PERSON'S ACCOUNTS AT THE APP, BY NAME, once the row is connected. While the list is loading
@@ -1237,7 +1284,7 @@ export function BrokeredAccountRow({
               ends, which was cut off mid-word beside the buttons. */}
           <ItemDescription className="line-clamp-none">
             {several
-              ? `You connected ${accounts.length} ${title} accounts. Bots use your default account unless you ask for another.`
+              ? `You connected ${accounts.length} ${vendorNameOf(title)} accounts. Bots use your default account unless you ask for another.`
               : accountSentence({
                   account,
                   connectedDescription,
@@ -1282,7 +1329,7 @@ export function BrokeredAccountRow({
                 {/* Decorative: the word beside it already says which. */}
                 <span
                   aria-hidden="true"
-                  className="size-1.5 rounded-full bg-emerald-500"
+                  className="size-1.5 rounded-full bg-success"
                 />
                 {/* The same word for both kinds. The line beneath says what it rests on. */}
                 <span className="text-muted-foreground text-xs">Connected</span>

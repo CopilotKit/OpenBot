@@ -358,7 +358,8 @@ function createStates(where: Where): States {
       { kind: "settings", count: 1 },
     ],
     apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
-    footprintBytes: 20_200_000_000,
+    // The update adds files before the move measures this installation again.
+    footprintBytes: moveFirst ? 26_600_000_000 : 20_200_000_000,
     modelKeysAvailable: true,
   };
   function moveAnswer(command: string): unknown {
@@ -366,7 +367,7 @@ function createStates(where: Where): States {
       return {
         due: true,
         fromSettings: move !== "choice" && !moveFirst,
-        footprintBytes: 20_200_000_000,
+        footprintBytes: moveFirst ? 23_100_000_000 : 20_200_000_000,
       };
     if (command === "move_preview")
       return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
@@ -423,6 +424,10 @@ function createStates(where: Where): States {
               "Some of OpenBot's software is still on this computer. Restart your computer to finish removing it.",
             ]
           : [],
+      account: {
+        email: "sam.longname-for-wrapping@example.com",
+        organization: "Sam's organization",
+      },
     };
   }
   const signingIn = where.hash === "#signin";

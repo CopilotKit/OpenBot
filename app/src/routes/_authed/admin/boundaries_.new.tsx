@@ -361,9 +361,7 @@ function NewRulePage() {
                     </p>
                   ) : null}
                   {chosen !== "custom" && chosen !== "describe" ? (
-                    <p className="text-amber-600 text-sm dark:text-amber-500">
-                      {chosen.cost}
-                    </p>
+                    <p className="text-warning text-sm">{chosen.cost}</p>
                   ) : null}
                   {written ? (
                     <RuleReading rule={rule} written={written} />

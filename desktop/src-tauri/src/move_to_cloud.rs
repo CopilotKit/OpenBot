@@ -470,6 +470,20 @@ pub struct Moved {
     /// Whether OpenBot Cloud still needs the person's AI before their Bots can run
     /// (`Api::needs_ai_connection`), asked once the move is done. None when it couldn't be asked.
     pub connect_ai: Option<bool>,
+    /// The OpenBot Cloud account the move went into (`Api::account`), asked once the move is done,
+    /// so the result can say where everything is and as whom to sign in there. None when it
+    /// couldn't be asked.
+    pub account: Option<CloudAccount>,
+}
+
+/// The OpenBot Cloud account and organization a move went into, as the result says them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudAccount {
+    /// The email address the person signed in with, which is how they sign in there again.
+    pub email: String,
+    /// The organization the move went into, by its name, when Cloud names it.
+    pub organization: Option<String>,
 }
 
 /// How long the move waits on each side, and how often it asks.
@@ -590,6 +604,7 @@ pub fn run(
             .collect(),
         left_behind,
         connect_ai: None,
+        account: None,
     })
 }
 
@@ -771,6 +786,8 @@ pub trait Credentials: Send + Sync {
 pub struct Api {
     base: String,
     organization: String,
+    /// The organization's name, from the caller's list, when the API was opened by it (`open`).
+    organization_name: Option<String>,
     credentials: Box<dyn Credentials>,
     client: reqwest::blocking::Client,
 }
@@ -804,6 +821,7 @@ impl Api {
         Ok(Api {
             base: base.trim_end_matches('/').to_owned(),
             organization: organization.to_owned(),
+            organization_name: None,
             credentials,
             client,
         })
@@ -823,11 +841,47 @@ impl Api {
         )?;
         api.organization = pick(&page.organizations)
             .ok_or_else(|| "the caller belongs to no organization there".to_owned())?;
+        api.organization_name = page
+            .organizations
+            .iter()
+            .find(|organization| organization.id == api.organization)
+            .and_then(|organization| organization.name.clone())
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty());
         Ok(api)
     }
 
     pub fn organization(&self) -> &str {
         &self.organization
+    }
+
+    /**
+    The account the person signed in with, in the organization this API works in: their email
+    (`getPerson`, `me`) and the organization's name from their list. The move's
+    result says it, so the person knows where everything went and as whom to sign in there.
+    */
+    pub fn account(&self) -> Result<CloudAccount, String> {
+        #[derive(Deserialize)]
+        struct Answer {
+            person: Person,
+        }
+        #[derive(Deserialize)]
+        struct Person {
+            email: String,
+        }
+        let answer: Answer = self.json(
+            reqwest::Method::GET,
+            &self.in_organization("/people/me"),
+            None,
+        )?;
+        let email = answer.person.email.trim().to_owned();
+        if email.is_empty() {
+            return Err("OpenBot Cloud named no email address for the person".to_owned());
+        }
+        Ok(CloudAccount {
+            email,
+            organization: self.organization_name.clone(),
+        })
     }
 
     fn in_organization(&self, path: &str) -> String {
@@ -983,6 +1037,8 @@ impl PersonalAi {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Organization {
     pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(default)]
     pub active: bool,
     #[serde(default)]

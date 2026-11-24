@@ -128,3 +128,23 @@ test("STATE_NAMES holds every state once", () => {
   const keys = STATE_NAMES.map((state) => `${state.search}${state.hash}`);
   expect(new Set(keys).size).toBe(keys.length);
 });
+
+test("move-first measures the installation again after its update", () => {
+  const answer = stateAnswer({ hash: "#move-first", search: "" });
+  expect(answer("move_offer", undefined)).toMatchObject({
+    footprintBytes: 23_100_000_000,
+  });
+  expect(answer("move_preview", undefined)).toMatchObject({
+    footprintBytes: 26_600_000_000,
+  });
+});
+
+test("a completed move includes the signed-in Cloud account", () => {
+  const answer = stateAnswer({ hash: "#move-done", search: "" });
+  expect(answer("move_to_cloud", undefined)).toMatchObject({
+    account: {
+      email: "sam.longname-for-wrapping@example.com",
+      organization: "Sam's organization",
+    },
+  });
+});

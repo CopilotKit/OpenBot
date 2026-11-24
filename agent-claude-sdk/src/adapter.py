@@ -831,9 +831,16 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             input_data = input_data.model_copy(
                 update={"state": None, "forwarded_props": {}}
             )
-        options = super().build_options(input_data, thread_id)
+        # Nor does a full Bot take any. The server passes a run's forwarded props on as the browser
+        # sent them, less its own `openbot*` keys (read above), and upstream applies a list of them
+        # to Claude Code: `resume` and `fork_session` load another saved conversation, `model` and
+        # `fallback_model` pick a model the organization never allowed, and `betas`, `max_turns`,
+        # `max_budget_usd` and `output_format` change how it runs. None is the server's to send.
+        options = super().build_options(
+            input_data.model_copy(update={"forwarded_props": {}}) if input_data else None,
+            thread_id,
+        )
         if chosen:
-            # After the upstream merge, so the server's choice wins over a forwarded `model`.
             options.model, options.effort = chosen
         # On the gateway, the query's calls come back through this harness with the newest run
         # token of its thread. See run_model_proxy.py.

@@ -84,7 +84,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
       {
         title: team.pluginsLabel,
         description:
-          "Connect services, choose which Bots can use them, and approve MCP servers.",
+          "Connect services, choose which Bots can use them, and approve connectors.",
         icon: primitive("apps").icon,
         linkOptions: team.plugins(),
       },

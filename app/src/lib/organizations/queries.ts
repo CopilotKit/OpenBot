@@ -1,4 +1,5 @@
 import {
+  infiniteQueryOptions,
   type QueryClient,
   queryOptions,
   useQuery,
@@ -59,8 +60,14 @@ export const organizationKeys = {
   mine: () => ["organizations", "mine"] as const,
   members: (organizationId: string) =>
     ["organizations", "members", organizationId] as const,
+  /** One search of the members, a page at a time: under `members`, so what refreshes them refreshes it. */
+  memberPages: (organizationId: string, search = "") =>
+    ["organizations", "members", organizationId, { search }] as const,
   sentInvitations: (organizationId: string) =>
     ["organizations", "sent-invitations", organizationId] as const,
+  /** One search of the sent invitations, a page at a time, under `sentInvitations`. */
+  sentInvitationPages: (organizationId: string, search = "") =>
+    ["organizations", "sent-invitations", organizationId, { search }] as const,
   invitations: () => ["organizations", "invitations"] as const,
   invitation: (invitationId: string) =>
     ["organizations", "invitations", invitationId] as const,
@@ -342,6 +349,74 @@ export function organizationMembersQueryOptions(organizationId: string) {
         );
         return { items: page.members, nextCursor: page.nextCursor };
       }),
+  });
+}
+
+/** One page of an organization's members, and where the next one starts. */
+export type OrganizationMemberPage = {
+  members: OrganizationMemberSummary[];
+  nextCursor: string | null;
+};
+
+/**
+ * An organization's members, a page at a time, for Organization settings' Members list. With a
+ * search, only those whose name or address holds it, best matches first: the server's search, so
+ * somebody past the first page is found. A cursor belongs to the search that made it, which is why
+ * each search is its own entry.
+ */
+export function organizationMemberPagesQueryOptions(
+  organizationId: string,
+  search = "",
+) {
+  return infiniteQueryOptions({
+    queryKey: organizationKeys.memberPages(organizationId, search),
+    initialPageParam: "",
+    queryFn: async ({ pageParam, signal }): Promise<OrganizationMemberPage> => {
+      const page = await listOrganizationMembers(
+        organizationId,
+        {
+          ...(search ? { search } : {}),
+          ...(pageParam ? { cursor: pageParam as string } : {}),
+        },
+        { signal, fallback: MEMBERS_FALLBACK },
+      );
+      return { members: page.members, nextCursor: page.nextCursor };
+    },
+    getNextPageParam: (page: OrganizationMemberPage) =>
+      page.nextCursor ?? undefined,
+  });
+}
+
+/** One page of the invitations an organization sent, and where the next one starts. */
+export type SentInvitationPage = {
+  invitations: SentInvitation[];
+  nextCursor: string | null;
+};
+
+/**
+ * The invitations an organization sent, a page at a time, the newest first. With a search, only
+ * those whose address holds it. Only its owner and admins can read them.
+ */
+export function sentInvitationPagesQueryOptions(
+  organizationId: string,
+  search = "",
+) {
+  return infiniteQueryOptions({
+    queryKey: organizationKeys.sentInvitationPages(organizationId, search),
+    initialPageParam: "",
+    queryFn: async ({ pageParam, signal }): Promise<SentInvitationPage> => {
+      const page = await listOrganizationInvitations(
+        organizationId,
+        {
+          ...(search ? { search } : {}),
+          ...(pageParam ? { cursor: pageParam as string } : {}),
+        },
+        { signal, fallback: SENT_INVITATIONS_FALLBACK },
+      );
+      return { invitations: page.invitations, nextCursor: page.nextCursor };
+    },
+    getNextPageParam: (page: SentInvitationPage) =>
+      page.nextCursor ?? undefined,
   });
 }
 

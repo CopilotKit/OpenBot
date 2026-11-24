@@ -28,6 +28,13 @@ export const CLOUD_SIGN_IN_TITLE = "Sign in to OpenBot Cloud";
 export const CLOUD_SIGN_IN_LINE =
   "We run OpenBot for you. New here? Signing in creates your account.";
 
+/**
+ * Under the button that creates the account: how a new one starts, on a free trial measured by use.
+ * Never the number of runs.
+ */
+export const CLOUD_TRIAL_LINE =
+  "New accounts start on a free usage-based trial.";
+
 /** OpenBot for Business, in the words OpenBot Desktop's first screen gives it. */
 export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a demo.";
 
@@ -35,6 +42,18 @@ export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a demo.";
 export const COMPANY_ADDRESS_LABEL = "Your company's OpenBot address";
 export const COMPANY_ADDRESS_HELP =
   "Ask your IT team or whoever set up OpenBot at your company for this address.";
+
+/** The trial line, with "usage-based" held on one line so it never breaks at the hyphen. */
+function trialLineWords() {
+  const [before, after] = CLOUD_TRIAL_LINE.split("usage-based");
+  return (
+    <>
+      {before}
+      <span className="whitespace-nowrap">usage-based</span>
+      {after}
+    </>
+  );
+}
 
 /** How the page leaves for another OpenBot's address. A test replaces it to see where it was sent. */
 export const cloudSignInDeps = {
@@ -98,6 +117,16 @@ export function CloudSignIn({ flowId }: { flowId?: string }) {
       >
         {opening ? "Opening sign-in…" : "Sign in or create an account"}
       </a>
+      {/*
+       * Its own short line, so the line under the heading keeps its two lines; and "usage-based"
+       * is never split at its hyphen, at any width.
+       */}
+      <p
+        className="mt-3 text-balance text-center text-muted-foreground text-xs"
+        data-testid="cloud-trial-line"
+      >
+        {trialLineWords()}
+      </p>
       <div className="my-6 flex items-center gap-3">
         <Separator className="flex-1" />
         <span className="text-muted-foreground text-xs">or</span>

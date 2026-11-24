@@ -1220,6 +1220,136 @@ export const SendConversationMessageResponse = zod.object({
 });
 
 /**
+ * Return one page of the caller's own turns in the conversation that were refused before they ran, newest first: a model they may not run (MODEL_NOT_ALLOWED), a permission they don't have (CAPABILITY_REQUIRED), no OpenBot plan (PLAN_REQUIRED). Each says what the turn was for (the person's message, or what a routine or a task asked) and why it was refused, in the words the refusal said. Nothing of a refused turn reaches the conversation's thread, so a client draws these into the transcript itself: each after the message named by afterMessageId, or after the thread's messages where that is null. botId narrows the list to one Bot's. A missing cursor starts at the newest page and nextCursor null ends the list.
+ * @summary List the caller's turns in a conversation that were refused
+ */
+
+export const listRefusedTurnsPathConversationIdRegExp = new RegExp("\\S");
+
+export const ListRefusedTurnsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  conversationId: zod
+    .string()
+    .min(1)
+    .regex(listRefusedTurnsPathConversationIdRegExp)
+    .describe("The conversation's id."),
+});
+
+export const listRefusedTurnsQueryBotIdMax = 200;
+
+export const listRefusedTurnsQueryLimitDefault = 50;
+export const listRefusedTurnsQueryLimitMax = 100;
+
+export const listRefusedTurnsQueryCursorMax = 4096;
+
+export const listRefusedTurnsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const ListRefusedTurnsQueryParams = zod.object({
+  botId: zod
+    .string()
+    .min(1)
+    .max(listRefusedTurnsQueryBotIdMax)
+    .optional()
+    .describe("Only the turns of this Bot. Leave it out for every Bot's."),
+  limit: zod
+    .int()
+    .min(1)
+    .max(listRefusedTurnsQueryLimitMax)
+    .default(listRefusedTurnsQueryLimitDefault)
+    .describe("Most items in one page."),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(listRefusedTurnsQueryCursorMax)
+    .regex(listRefusedTurnsQueryCursorRegExp)
+    .optional()
+    .describe(
+      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+    ),
+});
+
+export const listRefusedTurnsResponseNextCursorMax = 4096;
+
+export const listRefusedTurnsResponseNextCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+
+export const ListRefusedTurnsResponse = zod.object({
+  refusedTurns: zod
+    .array(
+      zod
+        .object({
+          id: zod.string().describe("The refused turn's id. Opaque."),
+          botId: zod.string().describe("The Bot the turn was for."),
+          threadId: zod
+            .string()
+            .describe("The thread the turn would have run in."),
+          afterMessageId: zod
+            .string()
+            .nullable()
+            .describe(
+              "The id of the thread's message the turn came after, as the app that sent it held the thread. Null where nothing says (a routine's or a task's turn, or the first turn of a thread): draw it after the thread's messages.",
+            ),
+          message: zod
+            .union([
+              zod
+                .object({
+                  id: zod
+                    .string()
+                    .nullable()
+                    .describe(
+                      "The message's id, as the app that sent it named it. Null for what a routine or a task asked.",
+                    ),
+                  text: zod.string().describe("What it said."),
+                })
+                .describe("The message a refused turn was for."),
+              zod.null(),
+            ])
+            .describe(
+              "What the turn was for: the person's message, or what a routine or a task asked. Null when nothing was said.",
+            ),
+          initiator: zod
+            .string()
+            .describe(
+              "Who started the turn: the person (person), a routine, check-in or goal (routine), or a task a Bot handed the work to (task).",
+            ),
+          code: zod
+            .string()
+            .describe("Why it was refused, as the refusal's problem code."),
+          detail: zod
+            .string()
+            .describe("The refusal, in the words the person was told."),
+          model: zod
+            .string()
+            .nullable()
+            .describe(
+              "The model it was refused on, as provider/model, for MODEL_NOT_ALLOWED. Null otherwise.",
+            ),
+          createdAt: zod.iso
+            .datetime({ offset: true })
+            .describe("When it was refused."),
+        })
+        .describe(
+          "One of the caller's turns that was refused before it ran, so nothing of it is in the conversation's thread: what it was for, and why.",
+        ),
+    )
+    .describe("Newest first."),
+  nextCursor: zod
+    .string()
+    .max(listRefusedTurnsResponseNextCursorMax)
+    .regex(listRefusedTurnsResponseNextCursorRegExp)
+    .nullable()
+    .describe(
+      "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
+});
+
+/**
  * Upload one file to send with the caller's next message in the conversation. The file is held until that message is sent, or removed, or a day has passed. OpenBot refuses a file no Bot could read, and says what the file was. A message takes up to 8 files.
  * @summary Attach a file to the next message
  */

@@ -46,8 +46,8 @@ import { settleReactWork } from "./settle-react-work";
  *
  * The home screen starts a conversation with whichever Bot the message is routed to, so the picker
  * there starts on the catalogue default and the pick is saved with the conversation that Bot answers
- * in, before the first message runs, as `/channel/new` saves it. A Bot that hands work to agents
- * takes no pick: nothing is saved, and the person is told where its model is set.
+ * in, before the first message runs, as `/channel/new` saves it. A Bot connected from outside
+ * OpenBot takes no pick: nothing is saved, and the person is told the Bot picks its own model.
  *
  * Everything below the HTTP boundary is real: the home route, its composer and picker, routing, the
  * start sequence, the hand-over to `ChannelChat` and the run request. Only `fetch` is a fixture.
@@ -259,6 +259,7 @@ afterEach(() => {
   trail = [];
   saved = { model: null, effort: null };
   mode = "self";
+  bot.runsOnOpenBotModel = true;
 });
 
 afterAll(async () => {
@@ -387,4 +388,27 @@ test("a routed Bot set to hand work to agents takes the pick, as a Bot that does
   ]);
   expect(saved).toEqual({ model: "gpt-6.1-terra", effort: "xhigh" });
   expect(view.queryByText(/hands work to agents/)).toBeNull();
+});
+
+/*
+ * A Bot connected from outside OpenBot picks its own model. The pick is not saved, and the person is
+ * told so in words about the Bot, with nothing about agents or what runs it.
+ */
+test("a routed Bot that picks its own model saves no pick, and says so", async () => {
+  bot.runsOnOpenBotModel = false;
+  const view = renderHome();
+  const user = userEvent.setup({ document });
+
+  await pickTerraExtraHigh(view, user);
+  await user.click(await view.findByRole("textbox", { name: "Message" }));
+  await user.keyboard("Plan the launch.{Enter}");
+
+  await waitFor(() => expect(trail).toContain("run"), { timeout: 5000 });
+  expect(trail.some((step) => step.startsWith("save"))).toBe(false);
+  expect(
+    await view.findByText(
+      "Terra Bot picks its own model, so it doesn't use the one you picked.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/agent/i)).toBeNull();
 });

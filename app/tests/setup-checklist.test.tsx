@@ -188,10 +188,10 @@ test("a required gap is red, an optional one amber, and Ready green", async () =
     "text-destructive",
   );
   expect(rowOf(view, "chat").getByText("Needs setup").className).toContain(
-    "text-amber-600",
+    "text-warning",
   );
   expect(rowOf(view, "apps").getByText("Ready").className).toContain(
-    "text-emerald-600",
+    "text-success",
   );
 });
 
@@ -251,7 +251,7 @@ test("a member's gaps are one neutral line: no amber or red pill, no Required, n
   }
   const list = view.getByRole("list", { name: "Setup" });
   expect(list.innerHTML).not.toContain("text-destructive");
-  expect(list.innerHTML).not.toContain("text-amber-600");
+  expect(list.innerHTML).not.toContain("text-warning");
   // What works still says so.
   expect(rowOf(view, "intelligence").getByText("Ready")).not.toBeNull();
   expect(view.getByRole("status").textContent).toBe(

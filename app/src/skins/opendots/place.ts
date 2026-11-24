@@ -110,9 +110,6 @@ export function parsePlace(
   if (path === "/bots") {
     return { section: "bots", label: "All Bots", ownsWatch: false };
   }
-  if (path === "/agents") {
-    return { section: "bots", label: "Agents", ownsWatch: false };
-  }
   if (path === "/s/routines" || path === "/routines") {
     return { section: "routines", label: "Routines", ownsWatch: false };
   }

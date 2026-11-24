@@ -13,6 +13,7 @@ import type {
 import { personBody } from "./accounts-api";
 import { teamBotOf } from "./bots-api";
 import { personLearningBody, reviewBody } from "./learning-api";
+import { marksPlugin } from "./marks-plugin";
 import { SKILLS_PATH, skillBody } from "./skills-api";
 
 /**
@@ -254,6 +255,9 @@ function answer(
   }
   if (path === `${ORGANIZATION}/teams`)
     return { teams, canCreate: admin, nextCursor: null };
+  // No team here limits its models (team-models-screens-layout.test.tsx draws those that do).
+  if (/\/teams\/[^/]+\/models$/.test(path))
+    return { models: null, updatedBy: null, updatedAt: null };
   const one = /\/teams\/([^/]+)(\/members)?$/.exec(path);
   if (one) {
     const found = teams.find((candidate) => candidate.id === one[1]);
@@ -298,6 +302,8 @@ async function bundle(): Promise<string> {
     entrypoints: [join(import.meta.dir, "teams-screens.fixture.tsx")],
     target: "browser",
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    // A team's Models dialog draws each model's maker.
+    plugins: [marksPlugin],
   });
   if (!built.success) throw new AggregateError(built.logs, "bundle failed");
   const script = built.outputs.find((output) => output.kind === "entry-point");

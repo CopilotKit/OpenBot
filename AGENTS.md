@@ -6,6 +6,10 @@
 or `release-policy.json`. OpenBot is live: anything a released app uses keeps working for 12 months,
 and a migration never breaks a running server.
 
+Before you plan a screen or a feature for the phone app, the web app or OpenBot Desktop, read
+[docs/app-guidelines.md](docs/app-guidelines.md): the one color scheme every app keeps to, what the
+phone app is for, and the stack it is built with.
+
 Skills for coding agents live in `.claude/skills/<name>/SKILL.md`. Claude Code finds them on its
 own. Other agents: when a task matches a skill, read its `SKILL.md` before starting.
 

@@ -1413,7 +1413,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     const view = await renderApp();
     const radios = view.getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
-      "OpenBot CloudUse OpenBot here. Your Bots run in our cloud.",
+      "OpenBot CloudYour Bots run in our cloud. Free usage-based trial.",
       "OpenBot for BusinessYour own cloud or on-prem. Book a demo.",
     ]);
     expect(radios.map((radio) => [radio.value, radio.checked])).toEqual([
@@ -4960,6 +4960,71 @@ describe("the move to OpenBot Cloud, due at a launch that would update OpenBot",
     expect(
       invokeCalls.some((call) => call.command === "keep_self_contained"),
     ).toBe(false);
+  });
+
+  /*
+   * FOUND IN A MAC UPGRADE CHECK of 1.2: "Move to OpenBot Cloud?" said the move removes about
+   * 23.1 GB, and the next screen 26.6 GB, measured after the update the start for the move ran had
+   * added the new release's files. One figure now: the choice says none, since the update is still
+   * to come, and the next screen says the one measured from the updated OpenBot, and no other.
+   */
+  test("offered before the update, the choice and the next screen never say two sizes", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-one-size",
+      localStatus("ready", "valid"),
+    );
+    const updating = deferred<unknown>();
+    withOlderDeployment(() => updating.promise);
+    const preview = withMoveDue();
+    const due = invokeHandler;
+    invokeHandler = async (command, args) => {
+      if (command === "move_offer")
+        return {
+          due: true,
+          fromSettings: false,
+          footprintBytes: 23_100_000_000,
+        };
+      if (command === "move_footprint") return 23_100_000_000;
+      return due(command, args);
+    };
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    const cloud = view.getByRole("radio", { name: /^OpenBot Cloud/ });
+    const choice = cloud.closest("label")?.textContent ?? "";
+    expect(choice).toContain(
+      "Your Bots, conversations, memory, skills, routines and files move to your OpenBot Cloud account.",
+    );
+    expect(choice).not.toMatch(/GB/);
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud" });
+    // While OpenBot updates and starts, no figure yet.
+    await view.findByText(
+      "Getting your Bots ready to move. This can take a few minutes.",
+    );
+    expect(document.body.textContent).not.toMatch(/GB/);
+    await act(async () =>
+      updating.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+    );
+    await waitFor(() =>
+      expect(invokeCalls.some((call) => call.command === "move_preview")).toBe(
+        true,
+      ),
+    );
+    await act(async () =>
+      preview.resolve({
+        counts: [{ kind: "bots", count: 3 }],
+        apps: [],
+        footprintBytes: 26_600_000_000,
+        modelKeysAvailable: false,
+      }),
+    );
+    await view.findByText("3 Bots");
+    expect(
+      view.getByText(
+        /Removes about 26\.6 GB of OpenBot files\. Nothing is removed/,
+      ),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("23.1 GB");
   });
 
   test("Keep: OpenBot updates and opens as it always has", async () => {

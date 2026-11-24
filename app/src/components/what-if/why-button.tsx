@@ -112,7 +112,7 @@ export function WhyButton({ event }: { event: AuditEvent }) {
                   </span>
                 </div>
                 {differs ? (
-                  <p className="text-amber-700 text-sm dark:text-amber-500">
+                  <p className="text-warning text-sm">
                     Today's settings decide this differently. Something has
                     changed since it happened.
                   </p>

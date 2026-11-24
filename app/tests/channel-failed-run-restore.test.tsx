@@ -11,6 +11,7 @@ import {
   type AgentChannel,
   type ChannelPage,
   channelKeys,
+  type RefusedTurn,
 } from "@/lib/channels/queries";
 import { quietRunPeriod, RUN_ENDED_UNHEARD } from "@/lib/copilot/quiet-run";
 import { TURN_CUT_OFF } from "@/lib/copilot/stopped-turn";
@@ -64,6 +65,11 @@ type RunPlan =
   | { kind: "stalls"; text: string }
   /** The runtime refuses the run for a Bot that is not this person's, as it does: 404, agent not found. */
   | { kind: "refused" }
+  /**
+   * OpenBot's server refuses the run for the person, with its own problem and a sentence for them,
+   * as it does for a model their teams don't allow (403, MODEL_NOT_ALLOWED).
+   */
+  | { kind: "forbidden"; detail: string }
   /** The back end answers the run request with a server error. */
   | { kind: "breaks" }
   /** The run request never reaches a back end at all. */
@@ -78,6 +84,8 @@ let recorded = new Map<string, unknown[]>();
 /** The thread's stored messages: what was said, and nothing about how a run ended. */
 let stored = new Map<string, Message[]>();
 let stopRequests: string[] = [];
+/** The turns the server refused, as it keeps them: what `listRefusedTurns` answers, oldest first. */
+let refusedTurns: RefusedTurn[] = [];
 /**
  * How the API answers a read of the Bot once a run has been asked for: it is this person's, it is not
  * (404), or the server broke. Before that it is found, as it was for a person already talking to the
@@ -135,6 +143,48 @@ function run(input: RunAgentInput): Response {
       },
       { status: 404 },
     );
+  if (plan.kind === "forbidden") {
+    /*
+     * The server keeps the turn it refused (`listRefusedTurns`): the person's message, the thread
+     * message it came after as this app sent it, and the sentence. Nothing reaches the thread.
+     */
+    const asked = input.messages.at(-1);
+    const before = input.messages.at(-2);
+    refusedTurns.push({
+      id: `refused-${refusedTurns.length + 1}`,
+      botId: "failed-run-bot",
+      threadId: input.threadId,
+      afterMessageId: before?.id ?? null,
+      message:
+        asked?.role === "user"
+          ? {
+              id: asked.id,
+              text: typeof asked.content === "string" ? asked.content : "",
+            }
+          : null,
+      initiator: "person",
+      code: "MODEL_NOT_ALLOWED",
+      detail: plan.detail,
+      model: "openai/gpt-4.1",
+      createdAt: new Date(Date.now() + refusedTurns.length).toISOString(),
+    });
+    return NativeResponse.json(
+      {
+        type: "https://open.bot/errors/model-not-allowed",
+        title: "That model isn't allowed.",
+        status: 403,
+        detail: plan.detail,
+        code: "MODEL_NOT_ALLOWED",
+        category: "permission",
+        retryable: false,
+        error: plan.detail,
+      },
+      {
+        status: 403,
+        headers: { "content-type": "application/problem+json" },
+      },
+    );
+  }
   if (plan.kind === "breaks")
     return NativeResponse.json({ error: "Bad gateway" }, { status: 502 });
   if (plan.kind === "unreachable") throw new TypeError("Failed to fetch");
@@ -381,6 +431,16 @@ beforeAll(() => {
           },
           { status: 201 },
         );
+      // The turns the server refused in this conversation, newest first, on one page.
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/refused-turns$/.test(
+          url.pathname,
+        )
+      )
+        return NativeResponse.json({
+          refusedTurns: [...refusedTurns].reverse(),
+          nextCursor: null,
+        });
       const thread = url.pathname.match(/\/threads\/([^/]+)\/messages$/);
       if (thread)
         return NativeResponse.json({
@@ -402,6 +462,7 @@ afterEach(() => {
   recorded = new Map();
   stored = new Map();
   stopRequests = [];
+  refusedTurns = [];
   stalled = null;
   stepsRun = 0;
   botRead = "found";
@@ -736,6 +797,129 @@ test("a turn the server says to carry on keeps its message sent, even before it 
     expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
   );
   expect(typed(live)).toBe("");
+});
+
+/*
+ * FOUND ON THE PER-TEAM MODELS END-TO-END RUN. A later turn the server refused (the Bot's model
+ * isn't one the person's teams allow) put its words back in the box with Send ready, under a notice
+ * saying an admin has to change the team's models; sent again, it was refused again. The same
+ * refusal on a conversation's first message leaves the box empty, its message sent. Now a later
+ * turn does too.
+ */
+test("a turn the server refused for the person keeps its message sent, and the box stays empty, as on a first message", async () => {
+  const MODEL_REFUSED =
+    "This Bot uses GPT-4.1, which your team's models don't include. Ask an admin to change your team's models.";
+  transport = "intelligence";
+  stored.set(channel.threadId, [
+    {
+      id: "asked",
+      role: "user",
+      content: "Name one primary colour, one word only.",
+    },
+    { id: "answered", role: "assistant", content: "Red" },
+  ]);
+  const live = open();
+  await settled(live, "Red");
+
+  plans = [{ kind: "forbidden", detail: MODEL_REFUSED }];
+  await send(live, "Name one more primary colour, one word only.");
+  const stopped = await live.findByTestId("transcript-stopped");
+  expect(within(stopped).getByRole("alert").textContent).toBe(MODEL_REFUSED);
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+  // Not handed back to be refused again: the box is empty, the message shown once, where it was sent.
+  expect(typed(live)).toBe("");
+  expect(
+    live.getAllByText("Name one more primary colour, one word only."),
+  ).toHaveLength(1);
+});
+
+test("two turns refused in a row each keep their own notice, under their own message", async () => {
+  const MODEL_REFUSED =
+    "This Bot uses GPT-4.1, which your team's models don't include. Ask an admin to change your team's models.";
+  transport = "intelligence";
+  stored.set(channel.threadId, [
+    {
+      id: "asked",
+      role: "user",
+      content: "Name one primary colour, one word only.",
+    },
+    { id: "answered", role: "assistant", content: "Red" },
+  ]);
+  const live = open();
+  await settled(live, "Red");
+
+  plans = [{ kind: "forbidden", detail: MODEL_REFUSED }];
+  await send(live, "Say goodbye in one word.");
+  await live.findByTestId("transcript-stopped");
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+
+  // The first turn is over: its message stays sent and the box is empty again.
+  await waitFor(() => expect(typed(live)).toBe(""));
+
+  plans = [{ kind: "forbidden", detail: MODEL_REFUSED }];
+  const user = userEvent.setup({ document: live.container.ownerDocument });
+  await user.type(
+    await live.findByRole("textbox", { name: "Message" }),
+    "And once more, one word.",
+  );
+  await user.click(await live.findByRole("button", { name: "Send message" }));
+  // The second refusal adds its notice; the first one's stays. One drew, the second's, before.
+  await waitFor(() =>
+    expect(live.getAllByTestId("transcript-stopped")).toHaveLength(2),
+  );
+  // Each under its own message: the message's row holds its notice.
+  for (const words of [
+    "Say goodbye in one word.",
+    "And once more, one word.",
+  ]) {
+    const row = live
+      .getByText(words)
+      .closest("[data-slot=message-scroller-item]") as HTMLElement;
+    expect(within(row).getByTestId("transcript-stopped").textContent).toBe(
+      MODEL_REFUSED,
+    );
+  }
+  // The server's record, read again after each live refusal, adds nothing twice.
+  await waitFor(() => expect(refusedTurns).toHaveLength(2));
+  await new Promise((settle) => setTimeout(settle, 50));
+  expect(live.getAllByTestId("transcript-stopped")).toHaveLength(2);
+  expect(live.getAllByText("Say goodbye in one word.")).toHaveLength(1);
+
+  // Reloaded: a fresh page and query cache, the thread holding none of it. The server's record
+  // puts both messages back where they were sent, each with its notice under it.
+  cleanup();
+  queryClient.clear();
+  const back = open();
+  await back.findByText("Red");
+  await waitFor(() =>
+    expect(back.getAllByTestId("transcript-stopped")).toHaveLength(2),
+  );
+  const rows = back
+    .getAllByText(
+      /^(Name one primary colour, one word only\.|Red|Say goodbye in one word\.|And once more, one word\.)$/,
+    )
+    .map((node) => node.textContent);
+  expect(rows).toEqual([
+    "Name one primary colour, one word only.",
+    "Red",
+    "Say goodbye in one word.",
+    "And once more, one word.",
+  ]);
+  for (const words of [
+    "Say goodbye in one word.",
+    "And once more, one word.",
+  ]) {
+    const row = back
+      .getByText(words)
+      .closest("[data-slot=message-scroller-item]") as HTMLElement;
+    expect(within(row).getByTestId("transcript-stopped").textContent).toBe(
+      MODEL_REFUSED,
+    );
+  }
 });
 
 test("a turn that failed before it did anything hands the words back to send again", async () => {

@@ -214,6 +214,8 @@ let server: {
   organizations: Listed[];
   /** The one her session works in. */
   active: string;
+  /** How many of a list one page holds. */
+  pageSize: number;
   /** Acme's members, in the order they joined. */
   members: OrganizationMemberSummary[];
   /** The invitations Acme sent that nobody accepted. */
@@ -246,11 +248,13 @@ function problem(status: number, code: string, detail: string): Response {
 }
 
 const page = <T,>(key: string, items: T[], url: URL) => {
-  // Two to a page, so a list longer than that is only whole when every page is read.
+  // Two to a page unless a test says otherwise, so a list longer than that is only whole when
+  // every page is read.
+  const size = server.pageSize;
   const from = Number(url.searchParams.get("cursor") ?? 0);
-  const next = from + 2 < items.length ? String(from + 2) : null;
+  const next = from + size < items.length ? String(from + size) : null;
   return Response.json({
-    [key]: items.slice(from, from + 2),
+    [key]: items.slice(from, from + size),
     nextCursor: next,
   });
 };
@@ -474,6 +478,7 @@ beforeEach(() => {
     hosted: false,
     organizations: [{ ...OWN }, { ...ACME, role: "owner", personal: false }],
     active: ACME.id,
+    pageSize: 2,
     members: [
       member("dana", "Dana Fresh", "owner"),
       member("lee", "Lee Park", "admin"),
@@ -647,6 +652,13 @@ describe("the words and the controls", () => {
     expect(
       memberControl(row("dana", "owner"), { id: "dana", role: "owner" }),
     ).toBeNull();
+    // With two owners either can go, but only an owner removes one. An owner may still leave.
+    const coOwner = row("ona", "owner", true);
+    expect(memberControl(coOwner, { id: "dana", role: "owner" })).toBe(
+      "remove",
+    );
+    expect(memberControl(coOwner, { id: "dana", role: "admin" })).toBeNull();
+    expect(memberControl(coOwner, { id: "ona", role: "owner" })).toBe("leave");
   });
 
   test("somebody who hasn't opened OpenBot yet is offered no role, and removal only where the server says they can be removed", () => {
@@ -1014,6 +1026,12 @@ describe("the account menu", () => {
 });
 
 describe("organization settings, for its owner", () => {
+  // Its lists show a page at a time, as the API's 50 by default: everybody here fits on one.
+  // Paging itself is people-lists.test.tsx's, in a real browser.
+  beforeEach(() => {
+    server.pageSize = 50;
+  });
+
   test("renames it from the Name row, and a refusal stays in the dialog in the server's sentence", async () => {
     const app = await open("/settings/organization");
     const page = within(await app.view.findByRole("main"));
@@ -1407,6 +1425,10 @@ describe("organization settings, for its owner", () => {
 });
 
 describe("invitations on a hosted OpenBot", () => {
+  beforeEach(() => {
+    server.pageSize = 50;
+  });
+
   /** Opens the Invite dialog and answers what it says the person will see. */
   async function inviteDialogSays(app: Awaited<ReturnType<typeof open>>) {
     const page = within(await app.view.findByRole("main"));
@@ -1450,6 +1472,10 @@ describe("invitations on a hosted OpenBot", () => {
 });
 
 describe("organization settings, for a member", () => {
+  beforeEach(() => {
+    server.pageSize = 50;
+  });
+
   test("shows the name and the members, and nothing a member cannot use", async () => {
     asMember();
     const app = await open("/settings/organization");

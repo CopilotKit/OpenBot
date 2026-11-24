@@ -4,14 +4,20 @@ import {
   IconChevronRight,
   IconPencil,
   IconPlus,
+  IconSearch,
   IconShieldCheck,
   IconSitemap,
   IconUser,
   IconUsers,
 } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+} from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { TeamPage } from "@/components/edition/for-a-team";
 import {
   PageEmpty,
@@ -56,25 +62,30 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { personName } from "@/lib/organizations/words";
+import { SEARCH_MAX } from "@/lib/people/queries";
 import { NO_PARENT, teamDetailsFrom } from "@/lib/teams/form";
 import {
   deleteTeamMutationOptions,
+  forgetTeam,
   putTeamMemberMutationOptions,
   removeTeamMemberMutationOptions,
   updateTeamMutationOptions,
 } from "@/lib/teams/mutations";
 import {
+  isInTeam,
   type OrganizationPerson,
   possibleParents,
   type TeamPerson,
   type TeamSummary,
   teamListQueryOptions,
-  teamMembersQueryOptions,
+  teamMemberMatchesQueryOptions,
+  teamMemberPagesQueryOptions,
   teamQueryOptions,
 } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
 import { parentLabels } from "./new-team-page";
 import { PeopleTypeahead } from "./people-typeahead";
+import { TeamModelsRow } from "./team-models";
 import {
   backToTeams,
   type TeamPaths,
@@ -204,6 +215,8 @@ function TeamDetail({
               </ItemActions>
             ) : null}
           </Item>
+          <Separator />
+          <TeamModelsRow team={team} />
         </PageRows>
       </PageSection>
 
@@ -238,23 +251,30 @@ function TeamDetail({
 }
 
 /**
- * The team's people, one row each. Somebody who may manage the team changes a person's role and
- * removes them, and adds a member of the organization. Anybody else reads the list, and may leave.
+ * The team's people, one row each, a page at a time, with a search above them that asks the server
+ * (as Admin's People does). Somebody who may manage the team changes a person's role and removes
+ * them, and adds a member of the organization. Anybody else reads the list, and may leave.
  */
 function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
-  const members = useQuery(teamMembersQueryOptions(team.id));
+  const [search, setSearch] = useState("");
+  // Debounced, so typing a name is one request rather than one per keystroke.
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const members = useInfiniteQuery(teamMemberPagesQueryOptions(team.id, query));
   const putMember = useMutation(putTeamMemberMutationOptions(queryClient));
   const removeMember = useMutation(
     removeTeamMemberMutationOptions(queryClient),
   );
   const [adding, setAdding] = useState(false);
-  const [leaving, setLeaving] = useState(false);
+  // The person reading, from their own row (the server marks it), once they press Leave team.
+  const [leaving, setLeaving] = useState<TeamPerson | null>(null);
   const fromDirectory = team.source === "directory";
   const busy = putMember.isPending || removeMember.isPending;
   const failure = putMember.error ?? removeMember.error;
-  const rows = members.data ?? [];
-  // The person reading, as the server marks them among the team's people.
-  const self = rows.find((person) => person.isCaller);
+  const rows = members.data?.pages.flatMap((page) => page.members) ?? [];
 
   const addPerson = (variant: "ghost" | "outline") => (
     <Button onClick={() => setAdding(true)} size="sm" variant={variant}>
@@ -273,10 +293,28 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
           {failure.message}
         </p>
       ) : null}
+      {/*
+        Server-side search, as on Admin's People: filtering what already arrived would only search
+        the first page. Shown once there is somebody to search, or something typed.
+      */}
+      {search || query || rows.length > 0 ? (
+        <Input
+          aria-label="Search people in this team"
+          className="mt-4"
+          maxLength={SEARCH_MAX}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search by name or address"
+          value={search}
+        />
+      ) : null}
       {members.isPending ? null : members.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {members.error.message}
         </p>
+      ) : rows.length === 0 && query ? (
+        <PageEmpty icon={IconSearch} title="No matches">
+          {`Nobody in this team matches "${query}".`}
+        </PageEmpty>
       ) : rows.length === 0 ? (
         <PageEmpty
           action={canEdit ? addPerson("outline") : undefined}
@@ -365,7 +403,7 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
                     {fromDirectory ? null : isSelf ? (
                       <Button
                         disabled={busy}
-                        onClick={() => setLeaving(true)}
+                        onClick={() => setLeaving(person)}
                         size="sm"
                         variant="outline"
                       >
@@ -395,17 +433,25 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
           })}
         </PageRows>
       )}
-      {adding ? (
-        <AddPersonDialog
-          inTeam={rows}
-          onClose={() => setAdding(false)}
-          team={team}
-        />
+      {/* Only when the server says there is another page, as on Admin's People. */}
+      {members.hasNextPage ? (
+        <Button
+          className="mt-4"
+          disabled={members.isFetchingNextPage}
+          onClick={() => members.fetchNextPage()}
+          size="sm"
+          variant="outline"
+        >
+          {members.isFetchingNextPage ? "Loading…" : "Show more"}
+        </Button>
       ) : null}
-      {leaving && self ? (
+      {adding ? (
+        <AddPersonDialog onClose={() => setAdding(false)} team={team} />
+      ) : null}
+      {leaving ? (
         <LeaveDialog
-          memberId={self.id}
-          onClose={() => setLeaving(false)}
+          memberId={leaving.id}
+          onClose={() => setLeaving(null)}
           team={team}
         />
       ) : null}
@@ -591,31 +637,68 @@ function ParentDialog({
 
 /**
  * Adding people to a team: a type-ahead box over the organization's own members, searched on the
- * server as the admin types (PeopleTypeahead). Adding is one write a person, done as they are
- * chosen, so several go in one after another and nothing waits on a Save. Whoever was added here is
- * listed under the box until the dialog closes.
+ * server as the admin types (PeopleTypeahead). Who of those found is in the team already comes from
+ * the team's own search with the same words, never from reading the whole team, and is asked again
+ * just before somebody is added (adding sets their role, which would make a maintainer a member).
+ * Adding is one write a person, done as they are chosen, so several go in one after another and
+ * nothing waits on a Save. Whoever was added here is listed under the box until the dialog closes.
  */
 function AddPersonDialog({
   team,
-  inTeam,
   onClose,
 }: {
   team: TeamSummary;
-  inTeam: readonly TeamPerson[];
   onClose: () => void;
 }) {
   const add = useMutation(putTeamMemberMutationOptions(queryClient));
+  const [search, setSearch] = useState("");
+  const matches = useQuery({
+    ...teamMemberMatchesQueryOptions(team.id, search),
+    enabled: search !== "",
+    // Kept while the next search's answer is on its way, as the people found are.
+    placeholderData: keepPreviousData,
+  });
+  const inTeam = matches.data;
   const [added, setAdded] = useState<OrganizationPerson[]>([]);
+  // Found to be in the team already when they were chosen.
+  const [already, setAlready] = useState<ReadonlySet<string>>(new Set());
+  const [failure, setFailure] = useState<string | null>(null);
   // Chosen and not yet answered: offered as in the team, and given back if the server refuses.
   const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
   const taken = new Set([
-    ...inTeam.map((person) => person.id),
+    ...(inTeam ?? []),
+    ...already,
     ...added.map((person) => person.id),
     ...adding,
   ]);
   const settle = (id: string) =>
     setAdding((now) => new Set([...now].filter((one) => one !== id)));
   const last = added[0];
+
+  const choose = async (person: OrganizationPerson) => {
+    setAdding((now) => new Set([...now, person.id]));
+    setFailure(null);
+    try {
+      if (await isInTeam(team.id, person)) {
+        setAlready((now) => new Set([...now, person.id]));
+        return;
+      }
+      await add.mutateAsync({
+        teamId: team.id,
+        memberId: person.id,
+        role: "member",
+      });
+      setAdded((now) => [person, ...now.filter((one) => one.id !== person.id)]);
+    } catch (error) {
+      setFailure(
+        error instanceof Error
+          ? error.message
+          : "Couldn't add them. Try again in a moment.",
+      );
+    } finally {
+      settle(person.id);
+    }
+  };
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       {/*
@@ -635,26 +718,17 @@ function AddPersonDialog({
             announcement={
               last ? `${personName(last)} added to ${team.name}` : undefined
             }
-            inTeam={taken}
-            onChoose={(person) => {
-              setAdding((now) => new Set([...now, person.id]));
-              add.mutate(
-                { teamId: team.id, memberId: person.id, role: "member" },
-                {
-                  onSuccess: () =>
-                    setAdded((now) => [
-                      person,
-                      ...now.filter((one) => one.id !== person.id),
-                    ]),
-                  onSettled: () => settle(person.id),
-                },
-              );
-            }}
-            teamName={team.name}
+            label={`People to add to ${team.name}`}
+            onChoose={(person) => void choose(person)}
+            onSearch={setSearch}
+            unavailable={(person) =>
+              taken.has(person.id) ? "In this team" : null
+            }
+            waiting={search !== "" && matches.isPending}
           />
-          {add.error ? (
+          {failure ? (
             <p className="text-destructive text-sm" role="alert">
-              {add.error.message}
+              {failure}
             </p>
           ) : null}
           {added.length > 0 ? (
@@ -785,7 +859,11 @@ function DeleteDialog({
             disabled={remove.isPending}
             onClick={() =>
               remove.mutate(team.id, {
-                onSuccess: () => void navigate(paths.list()),
+                // To the list, then drop the team's reads: its page never reads it again.
+                onSuccess: () =>
+                  void navigate(paths.list()).then(() =>
+                    forgetTeam(queryClient, team.id),
+                  ),
               })
             }
             size="sm"

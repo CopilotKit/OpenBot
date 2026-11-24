@@ -14,6 +14,7 @@ import {
   createFileRoute,
   Link,
   type LinkOptions,
+  linkOptions,
 } from "@tanstack/react-router";
 import * as React from "react";
 import {
@@ -24,19 +25,23 @@ import {
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
 import { MovedAppsNotice } from "@/components/moves/moved-apps-notice";
+import { directoryPressMode } from "@/components/plugins/broker-directory";
 import { AppInitial, PluginLogo } from "@/components/plugins/plugin-logo";
+import {
+  type DirectoryPress,
+  useDirectoryPress,
+} from "@/components/plugins/use-directory-press";
 import { providerIcon } from "@/components/settings/linked-accounts";
 import {
   linkedNotice,
   visibleLinkedNotice,
 } from "@/components/settings/linked-notice";
+import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Item,
   ItemActions,
@@ -45,15 +50,22 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { Skeleton } from "@/components/ui/skeleton";
+import { myAppRequestsQueryOptions } from "@/lib/app-access/queries";
 import {
   appSetupQueryOptions,
   appsQueryOptions,
   catalogueQueryOptions,
+  type DirectoryApp,
+  directoryAppsQueryOptions,
 } from "@/lib/apps/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
   connectionRows,
+  directoryRows,
   personalConnectionRows,
 } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -72,6 +84,7 @@ import {
 } from "@/lib/plugins/listed";
 import {
   directoryProvider,
+  directoryReadFailure,
   moreAppsRow,
 } from "@/lib/plugins/provider-vocabulary";
 import {
@@ -377,21 +390,73 @@ function RouteComponent() {
   /** Undefined until it answers, and on a failed read: neither edition's guidance is assumed. */
   const edition = capabilities.data?.edition;
   const personal = edition === "personal";
+  /*
+   * A server added by its address is added for everyone in the organization, so only an admin adds
+   * one (the personal edition's one person is its admin). Nobody else is offered a button the server
+   * would refuse.
+   */
+  const role = useQuery(currentUserQueryOptions()).data?.role;
+  /*
+   * WHO ADDS AN APP, decided by the one rule the app has for it (`isOrganizationAdmin`: an owner or
+   * an admin of the organization being worked in), which is the server's `admin` too. On OpenBot
+   * Cloud that is usually the one person who made their own organization, and they add and connect
+   * an app here in one press, never by way of Admin. A member asks an admin for it.
+   */
+  const mayAdd = personal || isOrganizationAdmin(role);
+  const mayAddServer = mayAdd;
   const connectApp = useConnectApp();
   const paths = useManagePaths();
   // The broker's directory of more apps, as one more tile, where a broker is set up.
   const provider = directoryProvider(setup.data);
-  const moreApps = moreAppsRow(
-    provider,
-    setup.data?.directoryAvailable ?? false,
-    paths.edition,
-  );
-  const browse = personal && moreApps.linked ? moreApps : null;
+  const directoryAvailable = setup.data?.directoryAvailable ?? false;
+  const moreApps = moreAppsRow(provider, directoryAvailable, "personal");
+  /*
+   * IN BOTH EDITIONS, and in the team edition it opens Browse apps under Connections, never Admin's
+   * copy: a member can't open Admin, and an admin opening it there adds an app for everybody without
+   * connecting their own account.
+   */
+  const browse =
+    edition !== undefined && moreApps.linked
+      ? {
+          title: moreApps.title,
+          description: mayAdd
+            ? moreApps.description
+            : "Find more apps and ask an admin to add them.",
+        }
+      : null;
+  const browseLink =
+    provider === "arcade"
+      ? linkOptions({ to: "/connections/browse/arcade" })
+      : linkOptions({ to: "/connections/browse/composio" });
   const authorizationNotice = authorizationNoticeFor(
     arrival.authorized,
     paths.edition,
   );
   const query = search.trim().toLocaleLowerCase();
+  /*
+   * THE SEARCH REACHES THE WHOLE DIRECTORY, not only what is on the page: the directory's own
+   * search, asked once the typing settles (each distinct term is a request to the vendor), and
+   * never with an empty term, so the page never reads all of it up front.
+   */
+  const [directoryTerm, setDirectoryTerm] = React.useState("");
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDirectoryTerm(search.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const searchesDirectory =
+    edition !== undefined && directoryAvailable && query !== "";
+  const directory = useQuery({
+    ...directoryAppsQueryOptions(directoryTerm),
+    enabled: searchesDirectory && directoryTerm !== "",
+  });
+  const pressMode = directoryPressMode({
+    edition: edition ?? "team",
+    place: "connections",
+    role,
+  });
+  const press = useDirectoryPress(pressMode);
+  const mine = useQuery(myAppRequestsQueryOptions(pressMode === "request"));
+  const requested = new Set((mine.data ?? []).map((request) => request.appKey));
   const rows = personal
     ? personalConnectionRows({
         catalogue: catalogue.data ?? [],
@@ -422,6 +487,39 @@ function RouteComponent() {
   const yourApps = matching.filter((row) => row.state !== "available");
   const toAdd = matching.filter((row) => row.state === "available");
   /*
+   * The directory's apps for this search that aren't on the page already, as tiles under Add an app.
+   * Read only while the answer is for what is typed now, so a tile never stands for an older term.
+   */
+  const directoryCurrent =
+    searchesDirectory &&
+    directoryTerm.toLocaleLowerCase() === query &&
+    !directory.isPending &&
+    !directory.error;
+  const directoryEntries: DirectoryApp[] = directoryCurrent
+    ? (directory.data ?? [])
+    : [];
+  const found = directoryRows({
+    entries: directoryEntries,
+    mayAdd,
+    listed: new Set(rows.map((row) => row.title.toLocaleLowerCase())),
+    requested,
+  });
+  // Waiting on the directory for what is typed now: nothing claims "No matches" until it answers.
+  const directoryWaiting =
+    searchesDirectory &&
+    (directoryTerm.toLocaleLowerCase() !== query || directory.isPending);
+  /* The app whose sign-in this page opened, connected now: the wait ends. */
+  const signingInApp = press.signingIn
+    ? (apps.data ?? []).find(
+        (server) => server.directoryEntryId === press.signingIn,
+      )
+    : undefined;
+  const signedIn = signingInApp ? connected.has(signingInApp.id) : false;
+  const { signedIn: endSignIn } = press;
+  React.useEffect(() => {
+    if (signedIn) endSignIn();
+  }, [signedIn, endSignIn]);
+  /*
    * The apps decide whether there is a list at all, and the account links only add to it: a failed
    * links read costs the GitHub and Slack rows and says so, not the whole page.
    */
@@ -433,15 +531,26 @@ function RouteComponent() {
     // Which rows there are depends on the edition, so the team list never flashes before the personal one.
     capabilities.isPending;
   /*
-   * Whether the apps are on screen at all: loaded, read without error, and something matches the
-   * search. A search that matches nothing says so once, with no section or directory tile under it.
+   * Whether there is a list to draw: apps here, or the directory to find more in. A new
+   * organization with no apps yet still has its search and Browse apps.
    */
-  const showingApps =
+  const listable =
     !loading &&
     !appsError &&
     !connections.error &&
-    rows.length > 0 &&
-    matching.length > 0;
+    (rows.length > 0 || browse !== null);
+  /*
+   * A search that matches nothing, here or in the directory, says so once, with no section or
+   * directory tile under it.
+   */
+  const nothingMatches =
+    query !== "" &&
+    matching.length === 0 &&
+    found.length === 0 &&
+    !directoryWaiting &&
+    // A directory that couldn't be searched says so below; it isn't "No matches".
+    !(searchesDirectory && directory.error);
+  const showingApps = listable && !nothingMatches;
 
   return (
     <PageShell
@@ -450,14 +559,16 @@ function RouteComponent() {
        * because it takes a name, an address and sometimes a key (the layout skill's Procedure 5).
        */
       action={
-        <Button
-          render={(props) => <Link {...props} to="/connections/new" />}
-          size="sm"
-          variant="outline"
-        >
-          <IconPlus />
-          Add server
-        </Button>
+        mayAddServer ? (
+          <Button
+            render={(props) => <Link {...props} to="/connections/new" />}
+            size="sm"
+            variant="outline"
+          >
+            <IconPlus />
+            Add server
+          </Button>
+        ) : undefined
       }
       className="@container"
       description={
@@ -503,6 +614,20 @@ function RouteComponent() {
           {connectApp.error}
         </p>
       ) : null}
+      {press.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {press.error}
+        </p>
+      ) : null}
+      <SignInNote
+        name={
+          directoryEntries.find((entry) => entry.id === press.signingIn)
+            ?.title ??
+          signingInApp?.title ??
+          "the app"
+        }
+        press={press}
+      />
       {/* What a move to OpenBot Cloud left to connect again, and the way to the list of it. */}
       <MovedAppsNotice />
       {/*
@@ -557,7 +682,7 @@ function RouteComponent() {
               ) : null}
             </div>
           </div>
-        ) : rows.length === 0 ? (
+        ) : !listable ? (
           <PageEmpty
             action={
               edition === "personal" ? (
@@ -592,13 +717,22 @@ function RouteComponent() {
                 onChange={(event) => setSearch(event.target.value)}
               />
             </InputGroup>
-            {matching.length === 0 ? (
+            {nothingMatches ? (
               <PageEmpty icon={IconSearch} title="No matches">
                 Nothing matches “{search.trim()}”.
               </PageEmpty>
-            ) : personal ? null : (
-              <ConnectionGrid connectApp={connectApp} rows={matching} />
+            ) : personal || matching.length === 0 ? null : (
+              <ConnectionGrid
+                connectApp={connectApp}
+                press={press}
+                rows={matching}
+              />
             )}
+            {searchesDirectory && directory.error ? (
+              <p className="mt-4 text-destructive text-sm" role="alert">
+                {directoryReadFailure(provider)}
+              </p>
+            ) : null}
           </>
         )}
         {links.error || providers.error ? (
@@ -610,21 +744,33 @@ function RouteComponent() {
       </PageSection>
       {showingApps && personal && yourApps.length > 0 ? (
         <PageSection title="Your apps">
-          <ConnectionGrid connectApp={connectApp} rows={yourApps} />
+          <ConnectionGrid
+            connectApp={connectApp}
+            press={press}
+            rows={yourApps}
+          />
         </PageSection>
       ) : null}
-      {showingApps && personal && (toAdd.length > 0 || browse) ? (
+      {/*
+       * Add an app, in both editions: the apps you could add (the personal edition's catalogue), the
+       * directory's matches for a search, and Browse apps last. In the team edition an admin's press
+       * adds and connects, and a member's asks an admin.
+       */}
+      {showingApps &&
+      ((personal ? toAdd.length : 0) + found.length > 0 || browse) ? (
         <PageSection title="Add an app">
-          <ConnectionGrid connectApp={connectApp} rows={toAdd}>
-            {browse ? (
-              <BrowseTile
-                browse={browse}
-                link={paths.brokerDirectory(provider)}
-              />
-            ) : null}
+          <ConnectionGrid
+            connectApp={connectApp}
+            press={press}
+            rows={[...(personal ? toAdd : []), ...found]}
+            directory={directoryEntries}
+          >
+            {browse ? <BrowseTile browse={browse} link={browseLink} /> : null}
           </ConnectionGrid>
         </PageSection>
       ) : null}
+      {/* OpenBot's step before a sign-in, in OpenBot Desktop's window. */}
+      {press.tab.consentStep}
       {/*
        * The rest of what a Bot signs in with. Saved logins and keys live in the Vault, under
        * Settings; this row is a way in from beside the apps that use them.
@@ -662,31 +808,97 @@ function RouteComponent() {
 function ConnectionGrid({
   rows,
   connectApp,
+  press,
+  directory = [],
   children,
 }: {
   rows: ConnectionRow[];
   connectApp: ReturnType<typeof useConnectApp>;
+  /** The press for a tile from the directory (`directoryEntryId`), shared with Browse apps. */
+  press: DirectoryPress;
+  /** The directory entries those tiles stand for. */
+  directory?: readonly DirectoryApp[];
   children?: React.ReactNode;
 }) {
   return (
     <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
-      {rows.map((row) => (
-        <ConnectionItem
-          key={row.key}
-          onPress={
-            row.state === "available" &&
-            (row.action === "connect" || row.action === "add")
-              ? () =>
-                  void connectApp.run(row.key, row.action as "connect" | "add")
-              : undefined
-          }
-          pending={connectApp.pending === row.key}
-          row={row}
-        />
-      ))}
+      {rows.map((row) => {
+        const entry = row.directoryEntryId
+          ? directory.find((candidate) => candidate.id === row.directoryEntryId)
+          : undefined;
+        if (entry) {
+          const pending =
+            press.adding.has(entry.id) ||
+            press.requesting.has(row.key) ||
+            (press.signingIn === entry.id && press.tab.pending);
+          return (
+            <ConnectionItem
+              key={`directory-${row.key}`}
+              onPress={row.requested ? undefined : () => press.press(entry)}
+              pending={pending}
+              row={row}
+            />
+          );
+        }
+        return (
+          <ConnectionItem
+            key={row.key}
+            onPress={
+              row.state === "available" &&
+              (row.action === "connect" || row.action === "add")
+                ? () =>
+                    void connectApp.run(
+                      row.key,
+                      row.action as "connect" | "add",
+                    )
+                : undefined
+            }
+            pending={connectApp.pending === row.key}
+            row={row}
+          />
+        );
+      })}
       {children}
     </div>
   );
+}
+
+/**
+ * Under the notices, while a sign-in this page opened is out: where to finish it, or the link when
+ * the browser blocked the tab. The tile itself has left the directory's matches by then.
+ */
+function SignInNote({
+  press,
+  name,
+}: {
+  press: DirectoryPress;
+  /** The app the sign-in is for. */
+  name: string;
+}) {
+  const { tab, signingIn } = press;
+  if (!signingIn) return null;
+  if (tab.blockedUrl)
+    return (
+      <p className="mt-4 text-sm" role="status">
+        This browser blocked the tab.{" "}
+        <a
+          className="underline underline-offset-2"
+          href={tab.blockedUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          Open {name}'s sign-in
+        </a>
+        .
+      </p>
+    );
+  if (tab.waiting)
+    return (
+      <p className="mt-4 text-muted-foreground text-sm" role="status">
+        Finish signing in to {name} in the tab that opened.
+      </p>
+    );
+  return null;
 }
 
 /**
@@ -760,11 +972,17 @@ function ConnectionItem({
   return (
     <Item
       className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5 text-left"
-      data-testid={`account-${row.key}`}
+      data-testid={
+        row.directoryEntryId ? `directory-${row.key}` : `account-${row.key}`
+      }
+      /*
+       * A tile asked for and waiting draws as a plain tile, like Shared account: nothing to press,
+       * and never a disabled button, which faded the whole tile and its mark.
+       */
       render={
         onPress ? (
           <button disabled={pending} onClick={onPress} type="button" />
-        ) : (
+        ) : row.requested ? undefined : (
           <Link params={{ key: row.key }} to="/connections/$key" />
         )
       }
@@ -807,7 +1025,18 @@ function ConnectionMark({
 }
 
 /** Where a tile stands, or the word for what pressing it does. */
-const ACTION_LABEL = { connect: "Connect", add: "Add", setup: "Set up" };
+const ACTION_LABEL = {
+  connect: "Connect",
+  add: "Add",
+  setup: "Set up",
+  request: "Request",
+};
+const PENDING_LABEL = {
+  connect: "Connecting…",
+  add: "Adding…",
+  setup: "Connecting…",
+  request: "Requesting…",
+};
 
 function ConnectionStateLabel({
   row,
@@ -820,10 +1049,7 @@ function ConnectionStateLabel({
   if (state === "connected") {
     return (
       <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <IconCheck
-          aria-hidden="true"
-          className="size-3.5 text-emerald-600 dark:text-emerald-400"
-        />
+        <IconCheck aria-hidden="true" className="size-3.5 text-success" />
         {row.noAccount ? "On" : "Connected"}
       </span>
     );
@@ -833,12 +1059,14 @@ function ConnectionStateLabel({
       <span className="text-xs text-muted-foreground">Shared account</span>
     );
   }
+  // Asked for, and waiting on an admin: said in words, as Shared account is, with nothing to press.
+  if (row.requested) {
+    return <span className="text-xs text-muted-foreground">Requested</span>;
+  }
   const pill = (
     <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
       {pending
-        ? row.action === "add"
-          ? "Adding…"
-          : "Connecting…"
+        ? PENDING_LABEL[row.action ?? "connect"]
         : state === "needs_reconnect"
           ? "Reconnect"
           : ACTION_LABEL[row.action ?? "connect"]}
