@@ -212,6 +212,20 @@ function journeyOf(screen: ReturnType<typeof view>) {
   return screen.getByRole("region", { name: "How far along" });
 }
 
+/**
+ * A row the journey is on, while the journey runs: marked as the current one, never spun, and
+ * without its own "Step 1 of 4". The journey's bar is the one thing that spins, and it says how
+ * far along the whole Start is.
+ */
+function expectQuietRunning(screen: ReturnType<typeof view>, name: string) {
+  const now = row(screen, name);
+  expect(now.querySelector(".step-status")?.textContent).toBe("In progress");
+  expect(now.textContent).not.toMatch(/Step \d of \d/);
+  expect(now.querySelector(".step-spinner")).toBeNull();
+  expect(now.querySelector(".step-current")).not.toBeNull();
+  expect(journeyOf(screen).querySelector(".step-spinner")).not.toBeNull();
+}
+
 const SETUP = "Setting up OpenBot";
 const CONNECT = "Connecting OpenBot";
 const WAIT = "Getting OpenBot ready";
@@ -264,6 +278,26 @@ test("the whole sequence runs by itself: set up, connect, wait for ready and val
   expect(screen.queryByRole("button", { name: /Connect/ })).toBeNull();
 });
 
+/*
+ * Finishing setup showed two spinners at once, the journey's and the running row's, and the row's
+ * own "Step 1 of 4" beside the journey read as the Start starting over. While the journey runs it
+ * is the one spinner on the screen; the row it is on is marked, not spun, and says no step count.
+ */
+test("while the journey runs, it is the one spinner and its rows say no step of their own", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [new Promise(() => {})],
+    local_eval_download: [null],
+    cancel_local_eval: [null],
+  });
+  const screen = view();
+  await waitFor(() =>
+    expect(row(screen, SETUP).textContent).toContain("In progress"),
+  );
+  expectQuietRunning(screen, SETUP);
+  expect(screen.container.querySelectorAll(".step-spinner")).toHaveLength(1);
+  expect(screen.container.textContent).not.toMatch(/Step \d of \d/);
+});
+
 /**
  * The Windows fresh-install probe: "Setting up OpenBot · In progress" said nothing while ~690 MB of
  * back-end images came down, and the person waited behind the AI screen with nothing either. A
@@ -282,8 +316,9 @@ test("a first setup shows its download on the journey and on the screen in front
   };
   const screen = view({ prepare: true });
   await waitFor(() =>
-    expect(row(screen, SETUP).textContent).toContain("Step 1 of 4"),
+    expect(row(screen, SETUP).textContent).toContain("In progress"),
   );
+  expectQuietRunning(screen, SETUP);
   arrived = { done: 245_000_000, total: 690_000_000 };
   await waitFor(
     () =>
@@ -529,8 +564,8 @@ test("a services update the CLI refuses is a note on their own row while the Sta
   const services = await screen.findByRole("listitem", {
     name: "Updating OpenBot's services",
   });
-  // OpenBot's own start, its update included, is still running.
-  expect(row(screen, START).querySelector(".step-spinner")).not.toBeNull();
+  // OpenBot's own start, its update included, is still running: the journey on its row.
+  expectQuietRunning(screen, START);
   const said =
     "OpenBot's services couldn't update, so they run the version they had. Your data is kept, and OpenBot tries again the next time it starts.";
   const isNote = () => {
@@ -2620,7 +2655,7 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
   });
   const working = view({ prepare: true });
   await waitFor(() =>
-    expect(row(working, SETUP).textContent).toContain("Step 1 of 4"),
+    expect(row(working, SETUP).textContent).toContain("In progress"),
   );
   expect(working.queryByRole("alert", { name: "Setup" })).toBeNull();
   cleanup();
