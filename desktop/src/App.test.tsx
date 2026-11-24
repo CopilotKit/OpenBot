@@ -277,7 +277,7 @@ function expectBehind(
   { waiting = false }: { waiting?: boolean } = {},
 ) {
   const row = view.getByRole("listitem", {
-    name: "Installing OpenBot in the background",
+    name: "Preparing OpenBot",
   });
   expect(row.closest("aside.rail > .rail-foot")).not.toBeNull();
   expect(row.closest(".sheet")).toBeNull();
@@ -415,9 +415,7 @@ test("the Install step shows one step in progress at a time while both downloads
   // Step 2 done: the third step is the one in progress, its download as far as it has got.
   await act(async () => preparation.resolve());
   await view.findByRole("heading", { name: "Connect your AI" });
-  expect(inProgress()).toEqual([
-    "Installing OpenBot in the background | Step 3 of 4",
-  ]);
+  expect(inProgress()).toEqual(["Preparing OpenBot | Step 3 of 4"]);
   expect(view.container.textContent).toContain("400.0 MB of 1.6 GB");
 });
 
@@ -2943,7 +2941,7 @@ type Beat = { beat: string; text: string; behind: string | null };
 /** The background install's row as a person reads it, less its ticking time: status | line. */
 function behindNow(view: ReturnType<typeof render>): string | null {
   const row = view.queryByRole("listitem", {
-    name: "Installing OpenBot in the background",
+    name: "Preparing OpenBot",
   });
   if (!row) return null;
   const status = row

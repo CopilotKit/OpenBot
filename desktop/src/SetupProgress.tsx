@@ -933,6 +933,8 @@ export function formatDownloadBytes(bytes: number): string {
 
 function label(step: string): string {
   switch (step) {
+    case INSTALLING_BEHIND:
+      return "Preparing OpenBot";
     case "engine":
     case "install-engine":
       return "Software OpenBot runs on";

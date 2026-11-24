@@ -396,7 +396,7 @@ test("the background row says a setup paused for room calmly, with Try again", a
   );
   const item = within(
     view.getByRole("listitem", {
-      name: "Installing OpenBot in the background",
+      name: "Preparing OpenBot",
     }),
   );
   expect(item.getByText("Step 3 of 4 · Paused")).toBeTruthy();

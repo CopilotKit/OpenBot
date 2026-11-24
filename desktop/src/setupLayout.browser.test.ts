@@ -372,7 +372,7 @@ describe.skipIf(!asked)("a setup step's foot", () => {
           page,
           await page
             .getByRole("listitem", {
-              name: "Installing OpenBot in the background",
+              name: "Preparing OpenBot",
             })
             .boundingBox(),
           "the background row",
@@ -692,9 +692,7 @@ describe.skipIf(!asked)("the background row on every step", () => {
         page.evaluate(() => {
           const named = (root: Element | null) =>
             [...(root?.querySelectorAll(".step") ?? [])].filter(
-              (step) =>
-                step.getAttribute("aria-label") ===
-                "Installing OpenBot in the background",
+              (step) => step.getAttribute("aria-label") === "Preparing OpenBot",
             );
           const rail = document.querySelector("main > .rail");
           const sheet = document.querySelector("main > .rail + .sheet");
@@ -1608,7 +1606,7 @@ describe.skipIf(!asked)("the offer to pause the person's Podman", () => {
         const button = page.getByRole("button", { name: "Pause my Podman" });
         const box = await button.boundingBox();
         const behind = page.getByRole("listitem", {
-          name: "Installing OpenBot in the background",
+          name: "Preparing OpenBot",
         });
         const foot = await page.locator(".step-footer").boundingBox();
         expect(box).not.toBeNull();
@@ -1816,7 +1814,7 @@ describe.skipIf(!asked)(
           await page.waitForTimeout(1100);
           const plain = await read();
           expect(plain).toEqual({
-            name: "Installing OpenBot in the background",
+            name: "Preparing OpenBot",
             cut: false,
             badge: expect.stringMatching(/^Step 3 of 4 · 4m \d+s elapsed$/),
             fits: true,
@@ -2676,7 +2674,7 @@ describe.skipIf(!asked)(
           .getByRole("heading", { name: "Accept the license agreement" })
           .waitFor();
         const row = page.getByRole("listitem", {
-          name: "Installing OpenBot in the background",
+          name: "Preparing OpenBot",
         });
         await page.getByText(/The rest of the install starts/).waitFor();
         const said = (await row.textContent()) ?? "";
