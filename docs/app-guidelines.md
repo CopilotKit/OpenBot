@@ -20,6 +20,11 @@ light and a dark value and what it means: `background`, `foreground`, `card`, `p
 `secondary`, `muted`, `accent`, `destructive`, `success`, `warning`, `border`, `input` and `ring`,
 and the chart and sidebar sets.
 
+The grays are Tailwind's slate. In light each gray is slate at its own lightness; in dark, slate's
+hue moves from 265 to 252 with 40% of its tint, since slate's own dark leans indigo and reads purple.
+CopilotKit's lavender marks only what it means: the `ring`, the selected sidebar row
+(`sidebar-accent`) and the empty pattern. `tokens/tests/slate.test.ts` holds both.
+
 - **Only the tokens.** No color value in a screen or a component: no hex, no `rgb()`, no `oklch()`.
   No class from Tailwind's palette either (`bg-blue-500`, `text-amber-600`). Write `bg-background`,
   `text-muted-foreground`, `border-border`. A tint is the token with an opacity: `bg-warning/10`.
