@@ -2946,6 +2946,9 @@ main:has(> .rail) {
 }
 
 main > .rail + .sheet {
+  /* Its column less its margins, not the card's 100% of it: with `width: 100%` the right margin
+     fell outside the window and the page ran to its right edge (Dusty, a real build on a Mac). */
+  width: auto;
   --sheet-pad: 48px;
   /* The card's colour, which the Windows cover draws before the page (first_paint.rs). */
   --sheet-ground: var(--card);
