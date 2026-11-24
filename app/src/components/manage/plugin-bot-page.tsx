@@ -457,7 +457,7 @@ export function PluginBotPage({
           {toolsListError(server.lastError, {
             title: server.title,
             personal: false,
-          }) ?? "Refresh its tools to check again."}
+          })?.text ?? "Refresh its tools to check again."}
         </PageEmpty>
       ) : (
         <>
