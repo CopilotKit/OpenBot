@@ -23,7 +23,10 @@ import {
   ListOrganizationMembersResponse,
   ListOrganizationsResponse,
 } from "@/lib/api/generated/organizations/organizations.zod";
-import { GetPreferencesResponse } from "@/lib/api/generated/people/people.zod";
+import {
+  GetPreferencesResponse,
+  GetServiceTermsResponse,
+} from "@/lib/api/generated/people/people.zod";
 import { ListRoutinesResponse } from "@/lib/api/generated/routines/routines.zod";
 import {
   GetTeamModelsResponse,
@@ -131,6 +134,11 @@ export class FakeServer {
   holdWrites = false;
   /** Each write asked of Northwind, as `METHOD /path`, in order. */
   wrote: string[] = [];
+  /**
+   * OpenBot Cloud's terms, which Dana has agreed to. Without them the server answers as an OpenBot
+   * that has no terms, and the gate never asks again.
+   */
+  cloudTerms = false;
 
   /** Hold Northwind from now, until `ms` after the first request the hold refuses. */
   holdFromFirstRefusal(ms: number): void {
@@ -216,6 +224,10 @@ export class FakeServer {
         };
       case "/people/me/preferences":
         return { status: 200, json: PREFERENCES };
+      case "/people/me/terms":
+        return this.cloudTerms
+          ? { status: 200, json: AGREED_TERMS }
+          : this.notFound();
       case "/routines":
         return {
           status: 200,
@@ -379,6 +391,17 @@ const DEPLOYMENT = {
   hostedSignIn: true,
 };
 
+/** OpenBot Cloud's terms in force, and Dana's agreement to them. */
+const AGREED_TERMS = GetServiceTermsResponse.parse({
+  current: {
+    version: "2026-11-21",
+    termsOfServiceUrl: "https://open.bot/terms",
+    acceptableUseUrl: "https://open.bot/acceptable-use",
+  },
+  accepted: { version: "2026-11-21", acceptedAt: "2026-11-21T09:00:00.000Z" },
+  acceptanceNeeded: false,
+});
+
 const PREFERENCES = GetPreferencesResponse.parse({
   messageListEmphasis: "thread",
   selfHostBannerDismissed: false,
@@ -408,6 +431,9 @@ async function bundle(fixture: string): Promise<string> {
     entrypoints: [join(import.meta.dir, fixture)],
     target: "browser",
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    // The signed-in gate's module brings the app behind it, whose chat loads a map library only
+    // when a Bot draws a map. Nothing here does.
+    external: ["maplibre-gl"],
     plugins: [
       {
         name: "marks",

@@ -3,6 +3,7 @@ import type { ServiceTerms } from "@/lib/api/generated/model";
 import { getServiceTerms } from "@/lib/api/generated/people/people";
 import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { unavailableSaid } from "@/lib/load-failure";
 
 /**
  * The terms of service a person agrees to before they use OpenBot (getServiceTerms): the version in
@@ -64,6 +65,12 @@ export function serviceTermsQueryOptions() {
  * OpenBot Cloud person use it without agreeing, so the terms screen takes them instead, says the
  * read failed and offers Try again. An OpenBot with no terms answers no without failing, and an
  * older one's 404 is read as no terms above, so neither ever shows the screen.
+ *
+ * Except a hold: OpenBot moving the organization, or its database out of reach for a moment (503
+ * with its sentence and Retry-After, lib/load-failure.tsx). That says nothing about the terms, and
+ * somebody who agreed long ago was shown "Agree to the terms". It is thrown on, so the gate's page
+ * says the hold calmly ("Back in a moment") and goes on by itself once OpenBot answers, as every
+ * other page does. Nobody gets in without the answer.
  */
 export async function serviceTermsRequired(
   queryClient: QueryClient,
@@ -71,7 +78,8 @@ export async function serviceTermsRequired(
   try {
     return (await queryClient.ensureQueryData(serviceTermsQueryOptions()))
       .acceptanceNeeded;
-  } catch {
+  } catch (error) {
+    if (unavailableSaid(error) !== undefined) throw error;
     return true;
   }
 }
