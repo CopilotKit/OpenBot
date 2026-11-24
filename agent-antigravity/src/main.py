@@ -47,6 +47,8 @@ from fastapi.responses import JSONResponse
 from google.antigravity.models import GeminiAPIEndpoint
 from google.antigravity.types import BuiltinTools, CapabilitiesConfig
 
+from .canvas_content import plan_canvas_content
+from .decision_canvas import decision_brief, gemini_decisions, stream_decision_canvas
 from .express_canvas import (
     HYDROGEN_MODEL,
     CanvasVersions,
@@ -65,8 +67,14 @@ _GOOGLE = SPEC["providers"]["google"]
 _canvas_catalog: ContextVar = ContextVar("openbot_canvas_catalog", default=None)
 _CANVAS_ROUTING = (
     "The canvas is the pane beside the chat. When the user asks for the canvas, call render_canvas "
-    "to draw or edit it yourself. Inline widgets draw in chat. If you have the data you need, "
-    "call render_canvas directly."
+    "to draw or edit it. Requests to create a dashboard, form, or report can use the canvas even "
+    "if the user does not name it. If a canvas already exists, route requests to revise its "
+    "content or layout through render_canvas, even when the user refers to it implicitly. "
+    "Inline widgets draw in chat. If you have the data you need, call render_canvas directly."
+)
+_DEMO_DATA_GUIDANCE = (
+    "For this demo, fill in any missing details with realistic, clearly labeled illustrative "
+    "samples where useful. Preserve facts that the user actually supplied."
 )
 _HARNESS_WORKSPACE_TOOLS = frozenset({
     BuiltinTools.LIST_DIR,
@@ -80,13 +88,16 @@ _HARNESS_WORKSPACE_TOOLS = frozenset({
 
 
 class CanvasAgent(OpenBotAntigravityAgent):
-    def __init__(self, *, model, text_chunks, **kwargs):
+    def __init__(self, *, model, text_chunks, content_planner, decisions, **kwargs):
         super().__init__(model=model, **kwargs)
         self._express_model = model
         self._text_chunks = text_chunks
+        self._content_planner = content_planner
+        self._decisions = decisions
         self._canvas_versions = CanvasVersions()
+        self._decision_versions = CanvasVersions()
 
-    def _draw(self, run, catalog, brief):
+    def _draw_express(self, run, catalog, brief):
         props = run.forwarded_props
         model = (
             HYDROGEN_MODEL
@@ -101,6 +112,13 @@ class CanvasAgent(OpenBotAntigravityAgent):
             metrics=metrics,
         )
 
+    def _draw_decision(self, run, catalog, manifest, brief, *, new_canvas=False):
+        return stream_decision_canvas(
+            run, brief, self._content_planner, self._decisions, catalog=catalog, manifest=manifest,
+            previous=None if new_canvas else self._decision_versions.get(run.thread_id),
+            remember=partial(self._decision_versions.remember, run.thread_id),
+        )
+
     async def run(self, input_data):
         offer = canvas_tool(input_data)
         props = input_data.forwarded_props
@@ -111,9 +129,21 @@ class CanvasAgent(OpenBotAntigravityAgent):
                 catalog = catalog_from_offer(manifest)
             except (A2uiError, ValueError, KeyError, TypeError, AttributeError):
                 pass
-        brief = express_brief(input_data)
-        if catalog is not None and brief is not None:
-            events = self._draw(input_data, catalog, brief)
+        decision = decision_brief(input_data)
+        express = express_brief(input_data)
+        latest = input_data.messages[-1] if input_data.messages else None
+        if catalog is not None and express is not None:
+            events = self._draw_express(input_data, catalog, express)
+        elif decision is not None:
+            events = self._draw_decision(input_data, catalog, manifest, decision)
+        elif (
+            catalog is not None and props.get("openbotCanvasDemoPrompt") is True
+            and latest is not None and latest.role == "user" and isinstance(latest.content, str)
+        ):
+            events = self._draw_decision(
+                input_data, catalog, manifest, f"{latest.content}\n\n{_DEMO_DATA_GUIDANCE}",
+                new_canvas=True,
+            )
         elif catalog is not None:
             parameters = offer.parameters
             properties = parameters["properties"]
@@ -180,23 +210,14 @@ class CanvasAgent(OpenBotAntigravityAgent):
             if not request and not context:
                 return "The conversation has no canvas request."
             brief = f"{request}\n\nSupporting context\n{context}" if context else request
-            # Retry an invalid first response only while no drawing has been
-            # published. Both attempts use the same catalog and request.
-            for _ in range(2):
-                published = False
-                failure = None
-                async with aclosing(self._draw(run, catalog, brief)) as events:
-                    async for event in events:
-                        if event.type in ("ACTIVITY_SNAPSHOT", "ACTIVITY_DELTA"):
-                            bridge.emit(event)
-                            published = True
-                        elif event.type == "RUN_ERROR":
-                            failure = event.message
-                if failure is None:
-                    return "The canvas is ready."
-                if published:
-                    break
-            return f"{failure} Report the failure to the user."
+            manifest = run.forwarded_props[CATALOG_PROP]
+            async with aclosing(self._draw_decision(run, catalog, manifest, brief)) as events:
+                async for event in events:
+                    if event.type in ("ACTIVITY_SNAPSHOT", "ACTIVITY_DELTA"):
+                        bridge.emit(event)
+                    elif event.type == "RUN_ERROR":
+                        return f"{event.message} Report the failure to the user."
+            return "The canvas is ready."
 
         tools = self._static_tools
         instructions = self._system_instructions
@@ -217,7 +238,12 @@ class CanvasAgent(OpenBotAntigravityAgent):
         self._static_tools = [*tools, render_canvas]
         self._capabilities = capabilities.model_copy(update=overrides)
         self._system_instructions = "\n\n".join(
-            text for text in (instructions, _CANVAS_ROUTING) if text
+            text for text in (
+                instructions,
+                _CANVAS_ROUTING,
+                "This thread already has a Decision canvas to edit."
+                if self._decision_versions.get(input_data.thread_id) is not None else None,
+            ) if text
         )
         try:
             return super()._build_agent(bridge, input_data, previous_conversation_id)
@@ -266,15 +292,22 @@ def _agent() -> OpenBotAntigravityAgent:
         api_key=api_key,
         base_url=base_url or "https://generativelanguage.googleapis.com",
     )
+    decisions = partial(gemini_decisions, api_key=api_key)
+    content_planner = partial(plan_canvas_content, api_key=api_key)
     if base_url:
         return CanvasAgent(
             text_chunks=text_chunks,
+            content_planner=content_planner,
+            decisions=decisions,
             model=model,
             endpoint=GeminiAPIEndpoint(base_url=base_url, api_key=api_key),
         )
     # Named rather than left to the SDK's own environment read, so a missing key is this Bot's
     # failure at start-up rather than a stream that opens and dies.
-    return CanvasAgent(model=model, api_key=api_key, text_chunks=text_chunks)
+    return CanvasAgent(
+        model=model, api_key=api_key, text_chunks=text_chunks,
+        content_planner=content_planner, decisions=decisions,
+    )
 
 
 app = create_antigravity_app(_agent(), path="/")

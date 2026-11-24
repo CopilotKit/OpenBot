@@ -1,0 +1,29 @@
+{
+  "name": "decision-a2ui-spike",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test spike.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild browser.ts --bundle --outfile=.dist/browser.js",
+    "test:live": "node --test live.test.ts",
+    "demo": "npm run build && node demo.ts",
+    "test:browser": "npm run build && node --test browser.test.ts",
+    "bench": "node bench.ts"
+  },
+  "dependencies": {
+    "@a2ui/agent": "0.1.0",
+    "@a2ui/lit": "0.15.0",
+    "@a2ui/web_core": "0.15.0",
+    "@google/genai": "3.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "esbuild": "0.28.2",
+    "playwright-core": "1.65.1",
+    "typescript": "6.0.3"
+  }
+}

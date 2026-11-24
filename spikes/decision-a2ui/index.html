@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A2UI inference spike</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; margin: 3rem auto; max-width: 44rem; padding: 0 1rem; }
+    h1 { font-size: 1.4rem; }
+    form { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+    label { display: grid; gap: .25rem; }
+    select, button { font: inherit; padding: .4rem; }
+    a2ui-surface { display: block; margin-top: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>A2UI inference spike</h1>
+  <form>
+    <label>Fixture path
+      <select name="mode">
+        <option value="decision">Mocked decisions</option>
+        <option value="express">Express fixture</option>
+      </select>
+    </label>
+    <label>Screen
+      <select name="family">
+        <option value="settings">Settings</option>
+        <option value="results">Results</option>
+        <option value="confirmation">Confirmation</option>
+      </select>
+    </label>
+    <button type="submit">Render fixture</button>
+  </form>
+  <p role="status"></p>
+  <a2ui-surface></a2ui-surface>
+  <script type="module" src="/browser.js"></script>
+</body>
+</html>

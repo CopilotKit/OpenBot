@@ -146,7 +146,7 @@ def _system_instruction(body: dict) -> str:
     return json.dumps(body.get("systemInstruction", {}))
 
 
-def test_canvas_planning_does_not_offer_harness_workspace_tools(monkeypatch, tmp_path):
+def _canvas_conversation():
     draw = conversation()
     draw["tools"].append({
         "name": "render_ui",
@@ -166,6 +166,11 @@ def test_canvas_planning_does_not_offer_harness_workspace_tools(monkeypatch, tmp
             },
         },
     }
+    return draw
+
+
+def test_canvas_planning_does_not_offer_harness_workspace_tools(monkeypatch, tmp_path):
+    draw = _canvas_conversation()
     with fresh_bot(monkeypatch, tmp_path) as run:
         canvas_body = run(draw)
         chat = conversation()
@@ -183,6 +188,41 @@ def test_canvas_planning_does_not_offer_harness_workspace_tools(monkeypatch, tmp
     ask_for_canvas = "When the user asks for the canvas, call render_canvas"
     assert ask_for_canvas in _system_instruction(canvas_body)
     assert ask_for_canvas not in _system_instruction(chat_body)
+
+
+def test_canvas_tool_and_demo_prompt_default_to_decision(monkeypatch, tmp_path):
+    from ag_ui.core import ActivitySnapshotEvent, RunFinishedEvent
+
+    calls = []
+
+    async def draw_decision(self, run, catalog, manifest, brief, *, new_canvas=False):
+        calls.append((catalog.catalog_id, brief, new_canvas))
+        yield ActivitySnapshotEvent(
+            type="ACTIVITY_SNAPSHOT", activity_type="generative-ui-surface",
+            message_id="test-drawing", replace=True, content={"target": "canvas"},
+        )
+        yield RunFinishedEvent(type="RUN_FINISHED", thread_id=run.thread_id, run_id=run.run_id)
+
+    replies = [_answer({"functionCall": {"name": "render_canvas", "args": {}}})]
+    with fresh_bot(monkeypatch, tmp_path, replies) as run:
+        from src.main import CanvasAgent
+
+        monkeypatch.setattr(CanvasAgent, "_draw_decision", draw_decision)
+        demo = _canvas_conversation()
+        demo["forwardedProps"]["openbotCanvasDemoPrompt"] = True
+        demo["messages"][-1]["content"] = "Build a dashboard for our Q4 team goals."
+        assert any(event["type"] == "ACTIVITY_SNAPSHOT" for event in run.post(demo))
+        assert not run.bodies, "a marked starter should go straight to the canvas composer"
+
+        follow_up = _canvas_conversation()
+        follow_up["messages"][-1]["content"] = "Make the canvas more compact."
+        assert any(event["type"] == "ACTIVITY_SNAPSHOT" for event in run.post(follow_up))
+
+    assert calls[0][0] == calls[1][0] == "test/canvas"
+    assert calls[0][1].startswith("Build a dashboard for our Q4 team goals.\n")
+    assert calls[0][2] is True
+    assert calls[1][1] == "Make the canvas more compact."
+    assert calls[1][2] is False
 
 
 def _user_turn(body: dict) -> str:
