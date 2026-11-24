@@ -73,7 +73,7 @@ import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
-import { failureSaid, loadFailure } from "@/lib/load-failure";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { keyedLookup } from "@/lib/lookup";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
@@ -734,12 +734,22 @@ function RouteComponent() {
             )}
             {searchesDirectory && directory.error ? (
               <p className="mt-4 text-destructive text-sm" role="alert">
-                {directoryReadFailure(provider)}
+                {loadFailure(directory.error, directoryReadFailure(provider))}
               </p>
             ) : null}
           </>
         )}
-        {links.error || providers.error ? (
+        {/*
+         * OpenBot holding off (a move, a brief outage) is said once: when the list above already
+         * says it, the same sentence is not said again for GitHub and Slack.
+         */}
+        {(links.error || providers.error) &&
+        !(
+          !loading &&
+          (appsError || connections.error) &&
+          isHeld([...appReads.map((read) => read.error), connections.error]) &&
+          isHeld([links.error, providers.error])
+        ) ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             {loadFailure(
               [links.error, providers.error],

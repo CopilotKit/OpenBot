@@ -62,7 +62,7 @@ import {
   type EnterpriseOverview,
   enterpriseOverviewQueryOptions,
 } from "@/lib/enterprise/queries";
-import { failureSaid, loadFailure } from "@/lib/load-failure";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/proactive")({
@@ -150,7 +150,16 @@ export function CheckInsPage() {
       ) : (
         <CheckInSettings data={overview.data} />
       )}
-      <Activity days={days} metrics={metrics} onDays={setDays} />
+      <Activity
+        days={days}
+        heldAbove={
+          edition !== "personal" &&
+          !overview.isPending &&
+          isHeld(overview.error)
+        }
+        metrics={metrics}
+        onDays={setDays}
+      />
     </PageShell>
   );
 }
@@ -262,10 +271,16 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
 
 function Activity({
   days,
+  heldAbove,
   metrics,
   onDays,
 }: {
   days: Days;
+  /**
+   * The section above already says OpenBot is holding off (a move, a brief outage). The same
+   * sentence is said once on a page, so this section doesn't say it again (lib/load-failure.tsx).
+   */
+  heldAbove: boolean;
   metrics: UseQueryResult<CheckInMetrics>;
   onDays: (days: Days) => void;
 }) {
@@ -294,12 +309,14 @@ function Activity({
       title="How check-ins went"
     >
       {metrics.isPending ? null : metrics.error ? (
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          {loadFailure(
-            metrics.error,
-            "Couldn't load check-in activity. Try again in a moment.",
-          )}
-        </p>
+        heldAbove && isHeld(metrics.error) ? null : (
+          <p className="mt-4 text-destructive text-sm" role="alert">
+            {loadFailure(
+              metrics.error,
+              "Couldn't load check-in activity. Try again in a moment.",
+            )}
+          </p>
+        )
       ) : (
         <>
           <PageRows>

@@ -44,7 +44,7 @@ import {
 } from "@/lib/computers/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
-import { failureSaid } from "@/lib/load-failure";
+import { FailureNotice, failureSaid } from "@/lib/load-failure";
 
 /**
  * A computer's saved copies, on a Bot's Computer page, and restoring one.
@@ -134,9 +134,7 @@ export function RestoreComputerDialog({
         </DialogHeader>
         <DialogBody className="mt-4">
           {snapshots.isPending ? null : snapshots.error ? (
-            <p className={DESTRUCTIVE_NOTICE} role="alert">
-              {failureSaid(snapshots.error)}
-            </p>
+            <FailureNotice error={snapshots.error} />
           ) : !snapshots.data.available ? (
             <p className="text-muted-foreground text-sm">
               This OpenBot doesn't keep saved copies of computers.

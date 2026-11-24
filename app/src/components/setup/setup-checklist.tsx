@@ -21,6 +21,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import { loadFailure } from "@/lib/load-failure";
 import { recheckSetupMutationOptions } from "@/lib/setup/mutations";
 import {
   type SetupFix,
@@ -99,16 +100,20 @@ export function SetupChecklist({
 
   return (
     <div className="flex w-full flex-col gap-3" data-setup-checklist="">
+      {/* OpenBot holding off (a move, or the database out of reach) is said calmly, in its words. */}
       {recheck.error ? (
         <p className="text-sm text-destructive" role="alert">
-          Couldn't check again. Try again.
+          {loadFailure(recheck.error, "Couldn't check again. Try again.")}
         </p>
       ) : null}
       {/* Nothing while the first answer is on its way: OpenBot has no loading placeholder. */}
       {checklist.isPending ? null : checklist.error ? (
         <>
           <p className="text-sm text-destructive" role="alert">
-            Couldn't check your setup. Check again.
+            {loadFailure(
+              checklist.error,
+              "Couldn't check your setup. Check again.",
+            )}
           </p>
           {checkAgain}
         </>
