@@ -1384,6 +1384,7 @@ export * from "./savedLoginNotFoundResponse";
 export * from "./savedLoginPage";
 export * from "./saveVoiceSessionHeaders";
 export * from "./scrollComputerHeaders";
+export * from "./seatRequiredResponse";
 export * from "./sendComputerHumanInputHeaders";
 export * from "./sendConversationMessageHeaders";
 export * from "./sendConversationMessageRequest";
