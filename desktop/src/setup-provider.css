@@ -1,8 +1,6 @@
-/* The selected identity stays with the heading; only the authentication body scrolls. */
-main > .rail + .sheet.setup-layout.provider-layout > fieldset.picker.providers {
-  flex: none;
-  margin: 24px 0 0;
-  min-width: 0;
+/* The anchored identity reserves the same native scrollbar room as the catalogue below it. */
+main > .rail + .sheet.setup-layout.provider-layout > .setup-body {
+  scrollbar-gutter: stable;
 }
 
 .setup-layout.provider-layout fieldset.picker.providers {
@@ -20,7 +18,7 @@ main > .rail + .sheet.setup-layout.provider-layout > fieldset.picker.providers {
 main
   > .rail
   + .sheet.setup-layout.provider-layout
-  > fieldset.picker.providers
+  > .setup-provider-identity
   .tile.chosen {
   padding-block: 16px;
   border-color: var(--ring);
@@ -46,6 +44,21 @@ main
   overflow: visible;
 }
 
+/* The selected identity stays with the heading; only the authentication body scrolls. */
+main > .rail + .sheet.setup-layout.provider-layout > .setup-provider-identity {
+  flex: none;
+  margin: 24px 0 0;
+  min-width: 0;
+  overflow: hidden;
+  scrollbar-gutter: stable;
+}
+
+.setup-layout.provider-layout
+  .setup-provider-identity
+  > fieldset.picker.providers {
+  margin: 0;
+}
+
 .setup-layout.provider-layout .setup-panel.chosen-provider {
   margin-top: 0;
 }
@@ -61,7 +74,12 @@ main
   max-width: 100%;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 0 0 6px;
+  margin: 0;
+}
+
+/* The panel gap owns spacing around status feedback, including its div wrapper. */
+.setup-layout.provider-layout .chosen-provider > .status-line {
+  margin: 0;
 }
 
 .setup-layout.provider-layout .chosen-provider > .segmented button {
@@ -109,10 +127,14 @@ main
 }
 
 @media (max-width: 860px) {
+  .setup-layout.provider-layout .setup-panel.chosen-provider {
+    gap: 12px;
+  }
+
   main
     > .rail
     + .sheet.setup-layout.provider-layout
-    > fieldset.picker.providers
+    > .setup-provider-identity
     .tile.chosen {
     padding: 12px 12px 42px;
   }

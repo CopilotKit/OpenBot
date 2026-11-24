@@ -261,7 +261,9 @@ test("provider catalogue scrolls separately from the anchored selection and acti
       view.getByRole("radio", { name: /^OpenAI-compatible/ }),
   ).toBe(true);
   expect(
-    view.getByRole("group", { name: "Model provider" }).parentElement,
+    view
+      .getByRole("group", { name: "Model provider" })
+      .closest(".setup-provider-identity")?.parentElement,
   ).toBe(sheet);
   expect(
     view
@@ -307,7 +309,10 @@ test("plan wait, signed-in confirmation and API key share one body with stable f
   expect(panel).not.toBeNull();
   expect(footer).not.toBeNull();
   if (!footer) throw new Error("Provider actions must have a footer.");
-  expect(identity.parentElement).toBe(footer.parentElement);
+  expect(identity.closest(".setup-provider-identity")?.parentElement).toBe(
+    footer.parentElement,
+  );
+  expect(identity.closest(".setup-body")).toBeNull();
   await userEvent.click(
     view.getByRole("button", { name: "Sign in with OpenAI" }),
   );
@@ -683,6 +688,13 @@ test.each([
     expect(view.getByRole("status").textContent).toBe(
       "Waiting for you to approve it…",
     );
+    // The current wait must appear before the secondary reopen link.
+    expect(
+      view.getByRole("status").nextElementSibling ===
+        view
+          .getByRole("link", { name: "Open the sign-in page" })
+          .closest(".fallback"),
+    ).toBe(true);
     // The browser comes back: signed in, with nothing typed.
     await act(async () => finished.resolve(`synthetic-${signIn}-plan-token`));
     await view.findByText(new RegExp(`Signed in to ${name}`));

@@ -290,7 +290,7 @@ export function ProviderPicker({
   const providerPickerRef = useRef<HTMLFieldSetElement>(null);
   const restoreProviderFocus = useRef(false);
   useEffect(() => {
-    if (!restoreProviderFocus.current) return;
+    if (!open || !restoreProviderFocus.current) return;
     restoreProviderFocus.current = false;
     providerPickerRef.current
       ?.querySelector<HTMLInputElement>('input[name="provider"]:checked')
@@ -745,7 +745,7 @@ export function ProviderPicker({
           </p>
         </div>
 
-        {row && providerPicker}
+        {row && <div className="setup-provider-identity">{providerPicker}</div>}
 
         <div className="setup-body">
           {!row && providerPicker}
@@ -881,6 +881,7 @@ export function ProviderPicker({
                       Approve the request in your browser. {row.name} will
                       finish this on its own.
                     </p>
+                    <StatusLine>Waiting for you to approve it…</StatusLine>
                     {/* Shown as well as opened. On a machine with no registered
                     browser the open does nothing and says nothing, and a wait
                     with no link is then a dead end. */}
@@ -890,7 +891,6 @@ export function ProviderPicker({
                         Open the sign-in page
                       </a>
                     </p>
-                    <StatusLine>Waiting for you to approve it…</StatusLine>
                   </>
                 ) : (
                   <>
