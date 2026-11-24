@@ -226,6 +226,10 @@ export function PluginsListPage({
             ) : (
               <PageRows>
                 {plugins.data?.map((server, index) => {
+                  const note = toolsListError(server.lastError, {
+                    title: server.title,
+                    personal: edition === "personal",
+                  });
                   return (
                     <React.Fragment key={server.id}>
                       {/*
@@ -250,17 +254,15 @@ export function PluginsListPage({
                           {/*
                            * The vendor's last failure takes the description's place when there is
                            * one. A server with no tools and no explanation reads as a server that
-                           * offers nothing, which sends somebody looking in the wrong place.
+                           * offers nothing, which sends somebody looking in the wrong place. Red
+                           * only for a failure: an app waiting for somebody to connect is not one.
                            */}
                           <ItemDescription
                             className={
-                              server.lastError ? "text-destructive" : undefined
+                              note?.error ? "text-destructive" : undefined
                             }
                           >
-                            {toolsListError(server.lastError, {
-                              title: server.title,
-                              personal: false,
-                            }) ?? server.summary}
+                            {note?.text ?? server.summary}
                           </ItemDescription>
                         </ItemContent>
                         <ItemActions>
