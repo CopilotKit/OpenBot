@@ -13,6 +13,9 @@
   "components/app-sidebar/account-label.tsx": {
     "text": 1
   },
+  "components/app-sidebar/channel-item-content.tsx": {
+    "text": 3
+  },
   "components/approvals/question-notice.tsx": {
     "darkColor": 2
   },

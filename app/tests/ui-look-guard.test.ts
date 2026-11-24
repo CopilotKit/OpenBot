@@ -218,7 +218,9 @@ const CLEAN = [
   "components/app-sidebar/conversations-panel.tsx",
   "components/app-sidebar/bots-panel.tsx",
   "components/app-sidebar/channel.tsx",
-  "components/app-sidebar/channel-item-content.tsx",
+  // Not channel-item-content.tsx: its time, Working label and preview line keep their 12px, which
+  // no step on this scale draws (text-xs is 11.25px, text-sm 13.1px). They stay on the allowlist
+  // with that reason, held by conversation-row-text.test.ts.
   // The message box.
   "components/channels/composer/composer.tsx",
   // Home, and a Bot's tile on it and on Bots.

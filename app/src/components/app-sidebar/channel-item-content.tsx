@@ -56,11 +56,11 @@ export function ChannelItemContent({
    * working: said as well as shown by the orb, and the time is news only once the work is done.
    */
   const time = busy ? (
-    <span className="shrink-0 whitespace-nowrap font-medium text-sm text-success leading-4">
+    <span className="shrink-0 whitespace-nowrap font-medium text-[12px] text-success leading-4">
       Working
     </span>
   ) : (
-    <span className="shrink-0 whitespace-nowrap text-sm leading-4 text-muted-foreground/70">
+    <span className="shrink-0 whitespace-nowrap text-[12px] leading-4 text-muted-foreground/70">
       {lastMessageAt}
     </span>
   );
@@ -102,7 +102,7 @@ export function ChannelItemContent({
   }
 
   const primaryText = `text-sm leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-medium"}`;
-  const secondaryText = "text-sm leading-4 text-muted-foreground";
+  const secondaryText = "text-[12px] leading-4 text-muted-foreground";
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
