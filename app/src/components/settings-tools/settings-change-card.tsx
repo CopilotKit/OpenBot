@@ -294,11 +294,14 @@ export function SettingsChangeCard({
   state,
   reason,
   link,
+  lead,
   children,
 }: {
   /** What was changed, as its screen is titled: "Your settings", "Organization settings". */
   title: string;
   icon?: TablerIcon;
+  /** What the rows are about, drawn over them: the app a Bot's actions are in. */
+  lead?: ReactNode;
   /** Null while it runs, or when it was refused before a change was worked out. */
   change: SettingsChange | null;
   state: SettingsChangeState;
@@ -309,7 +312,7 @@ export function SettingsChangeCard({
 }) {
   const badge = STATE[state];
   // Nothing under the header yet (a change still running): the header is the whole card.
-  const body = Boolean(reason || change || children || link);
+  const body = Boolean(reason || change || lead || children || link);
   return (
     <figure
       aria-busy={state === "running"}
@@ -338,6 +341,7 @@ export function SettingsChangeCard({
       </figcaption>
       {body ? (
         <div className="flex flex-col gap-3 px-4 py-3">
+          {lead}
           {reason ? (
             <p
               className={cn(
