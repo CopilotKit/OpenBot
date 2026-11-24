@@ -154,7 +154,9 @@ function notePlanRefusal(reported: unknown, said: string): void {
     reported instanceof Error
       ? (reported as Error & { status?: unknown }).status
       : undefined;
-  if (status === 402 || isPlanRequired(refusedBody(said))) showCardNeeded();
+  const body = refusedBody(said);
+  if (isPlanRequired(body)) showCardNeeded(body);
+  else if (status === 402) showCardNeeded({});
 }
 
 /** Where OpenBot's own problems (RFC 9457) say what kind they are: `https://open.bot/errors/<code>`. */

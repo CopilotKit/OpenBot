@@ -40,7 +40,7 @@ const STATES: State[] = [
   { name: "not-required", plan: "not_required", admin: true },
 ];
 const SCENES = ["shell", "settings", "chat"] as const;
-type Scene = (typeof SCENES)[number] | "dialog";
+type Scene = (typeof SCENES)[number] | "dialog" | "signin";
 
 async function bundle(): Promise<string> {
   const built = await Bun.build({
@@ -267,6 +267,57 @@ describe.skipIf(!asked)(
   () => {
     for (const theme of THEMES)
       for (const width of WINDOWS) {
+        /*
+         * Found on the end-to-end run: the trial, added to the line under the heading, took it to
+         * three lines and split "usage-" from "based" at a line's end. The line under the heading
+         * keeps its two lines, and the trial is a line of its own with the word whole.
+         */
+        test(`OpenBot Cloud's sign-in says the trial tidily, ${theme}, ${width}px`, async () => {
+          const page = await open("signin", STATES[5], {
+            width,
+            theme,
+            ready: "[data-testid=cloud-trial-line]",
+          });
+          try {
+            await shot(page, `signin-${theme}-${width}`);
+            const laid = await page.evaluate(() => {
+              const lines = (element: Element | null) => {
+                if (!element) return -1;
+                const height = Number.parseFloat(
+                  getComputedStyle(element).lineHeight,
+                );
+                return Math.round(
+                  element.getBoundingClientRect().height / height,
+                );
+              };
+              const lede = [...document.querySelectorAll("p")].find((p) =>
+                p.textContent?.startsWith("We run OpenBot for you."),
+              );
+              const trial = document.querySelector(
+                "[data-testid=cloud-trial-line]",
+              );
+              const word = [...(trial?.querySelectorAll("span") ?? [])].find(
+                (span) => span.textContent === "usage-based",
+              );
+              return {
+                lede: lines(lede ?? null),
+                trial: lines(trial),
+                wordWhole: word ? word.getClientRects().length === 1 : false,
+                says: trial?.textContent,
+              };
+            });
+            expect(laid).toEqual({
+              lede: 2,
+              trial: 1,
+              wordWhole: true,
+              says: "New accounts start on a free usage-based trial.",
+            });
+            expect(await sideways(page)).toBe(false);
+          } finally {
+            await page.close();
+          }
+        }, 60_000);
+
         test(`the Plan row's bar, ${theme}, ${width}px`, async () => {
           const page = await open("settings", STATES[0], {
             width,

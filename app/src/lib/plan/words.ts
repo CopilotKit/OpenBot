@@ -27,9 +27,14 @@ export function blockedNotice(plan: PlanStatus): string {
     return admin
       ? "Your last payment didn't go through, so Bots can't run. Update your card to carry on."
       : "Bots can't run until an admin updates this organization's card.";
+  /*
+   * As the server begins its refusal of a run, so the bar, the refused turn and the dialog say the
+   * same thing. The price is the dialog's to say (`PRICE`): here it would take the bar onto a
+   * second line over every page.
+   */
   return admin
-    ? "Your free trial is used up. Add a card to keep your Bots running."
-    : "Your free trial is used up. Bots can't run until an admin adds a card to this organization.";
+    ? "You've used your free trial. Add a card to keep your Bots running."
+    : "You've used your free trial. Ask an admin to add a card to keep your Bots running.";
 }
 
 /** "42% used": how much of the free trial is gone, never the count or the cap. */
@@ -70,8 +75,12 @@ export type StoppedWords = {
  * (`freeRunsAllowance`, never sent before then), says what OpenBot costs from here, and tells an
  * admin to add a card and a member who to ask. A failed payment says so instead.
  */
-export function stoppedWords(plan: PlanStatus | undefined): StoppedWords {
-  const admin = Boolean(plan?.addCardUrl);
+export function stoppedWords(
+  plan: PlanStatus | undefined,
+  /** Where the reader adds a card: only an owner or an admin is sent one. */
+  addCardUrl: string | null | undefined = plan?.addCardUrl,
+): StoppedWords {
+  const admin = Boolean(addCardUrl);
   if (plan?.status === "past_due")
     return {
       title: "Your last payment didn't go through",
@@ -81,12 +90,13 @@ export function stoppedWords(plan: PlanStatus | undefined): StoppedWords {
         : "Ask an admin of this organization to update the card.",
     };
   const allowance = plan?.freeRunsAllowance;
+  // The title as the bar and the server's refusal begin, so the three read as one.
   return {
-    title: "Your free trial is used up",
+    title: "You've used your free trial",
     said: `${
       typeof allowance === "number"
-        ? `Your free trial was ${allowance.toLocaleString()} Bot runs, and you've used them all.`
-        : "You've used all the Bot runs in your free trial."
+        ? `Your free trial was ${allowance.toLocaleString()} Bot runs, and they're all used.`
+        : "All the Bot runs in your free trial are used."
     } From now on, OpenBot is ${PRICE}.`,
     next: admin
       ? "Add a card to keep your Bots running."

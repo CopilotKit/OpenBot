@@ -228,7 +228,7 @@ async function refusal(
    * A run refused for want of a plan, from whichever screen asked for it: the one dialog that says
    * why opens, so an action no screen checked first still tells the person (`lib/plan/card-needed.ts`).
    */
-  if (error.code === PLAN_REQUIRED) showCardNeeded();
+  if (error.code === PLAN_REQUIRED) showCardNeeded(error.body ?? {});
   /*
    * A hosted OpenBot's sign-in needing renewal, which is never being signed out: renewed in the
    * background, and the write it interrupted is sent again once the page is back.

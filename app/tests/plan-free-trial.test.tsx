@@ -25,17 +25,19 @@ import {
 import type { ReactNode } from "react";
 import { Composer } from "@/components/channels/composer/composer";
 import { OrganizationSettingsPage } from "@/components/organizations/organization-settings-page";
-import {
-  CardNeededDialog,
-  forgetCardNeededAnnounced,
-} from "@/components/plan/card-needed-dialog";
+import { CardNeededDialog } from "@/components/plan/card-needed-dialog";
 import { GoalPage } from "@/components/responsibilities/goal-page";
 import { RoutinePage } from "@/components/routines/routine-page";
 import type { OrganizationPlan } from "@/lib/api/generated/model";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { organizationKeys } from "@/lib/organizations/queries";
-import { hideCardNeeded } from "@/lib/plan/card-needed";
+import { authKeys } from "@/lib/auth/queries";
+import {
+  forgetCardNeededRefusal,
+  forgetTrialUsedUpAnnounced,
+  hideCardNeeded,
+} from "@/lib/plan/card-needed";
 import { planKeys } from "@/lib/plan/queries";
 import type { ResponsibilityRecord } from "@/lib/responsibilities";
 import type { RoutineRecord } from "@/lib/routines/queries";
@@ -62,7 +64,19 @@ const PLAN_PATH = `/api/v2/organizations/${ORG}/plan`;
 let plan: OrganizationPlan;
 /** What the server answers a write with: a run started, or refused for want of a plan. */
 let refuseRuns = false;
+/** While set, the plan read waits for it: a server slow to answer. */
+let planHeld: Promise<void> | null = null;
 const writes: string[] = [];
+
+/** Ana, signed in, as the app has read her before any screen draws. */
+function signedIn() {
+  queryClient.setQueryData(authKeys.currentUser(), {
+    id: "ana",
+    email: "ana@example.com",
+    name: "Ana Lopez",
+    role: "owner",
+  });
+}
 
 const originalFetch = global.fetch;
 let wasServer = true;
@@ -80,11 +94,14 @@ afterAll(async () => {
 
 beforeEach(() => {
   queryClient.clear();
-  forgetCardNeededAnnounced();
+  forgetTrialUsedUpAnnounced();
+  forgetCardNeededRefusal();
   hideCardNeeded();
   writes.length = 0;
   refuseRuns = false;
+  planHeld = null;
   setCurrentOrganization(ORG);
+  signedIn();
   global.fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = new URL(String(input), "http://openbot.invalid/");
@@ -98,7 +115,7 @@ beforeEach(() => {
               title: "This organization needs a plan.",
               status: 402,
               detail:
-                "You've used your free trial. Add a card to keep your Bots running, $5 a month.",
+                "You've used your free trial. Add a card to keep your Bots running for $5 a month for each member.",
               code: "PLAN_REQUIRED",
               addCardUrl: ADD_CARD,
             },
@@ -109,7 +126,10 @@ beforeEach(() => {
           );
         return Response.json({ queued: true }, { status: 202 });
       }
-      if (url.pathname === PLAN_PATH) return Response.json(plan);
+      if (url.pathname === PLAN_PATH) {
+        if (planHeld) await planHeld;
+        return Response.json(plan);
+      }
       // Every list a screen here reads, empty.
       return Response.json({
         members: [],
@@ -303,7 +323,7 @@ test("once the trial is used up, the dialog says so once, and then opens in plac
   // The first read that says it's used up opens it, saying it plainly.
   await opened();
   const said = dialog()?.textContent ?? "";
-  expect(said).toContain("Your free trial is used up");
+  expect(said).toContain("You've used your free trial");
   expect(said).toContain("Your free trial was 500 Bot runs");
   expect(said).toContain("$5 a month for each member of this organization");
   const pay = view.getByRole("link", { name: "Add a card" });
@@ -409,4 +429,82 @@ test("a run the server refuses for want of a plan opens the dialog, from a REST 
     );
   });
   await opened();
+});
+
+/*
+ * Found on the end-to-end run: the dialog opened by itself again on every full page load (a
+ * reload, a link opened afresh, Back from the payment page), because only the page remembered it
+ * had. It opens by itself once for a person in an organization; after that only on an AI try.
+ */
+test("it opens by itself once, and not again when the page loads again", async () => {
+  plan = usedUp(true);
+  open(null);
+  await opened();
+  await dismiss();
+  cleanup();
+
+  // The page loaded again: its memory is gone, the browser's is not.
+  forgetTrialUsedUpAnnounced("page");
+  queryClient.clear();
+  signedIn();
+  const again = open(
+    <Composer compact initialValue="Try again" onSubmit={() => undefined} />,
+  );
+  for (let tries = 0; tries < 5; tries++) await settled();
+  expect(dialog()).toBeNull();
+
+  // Still opens on an AI try.
+  await act(async () => {
+    fireEvent.click(again.getByLabelText("Send message"));
+  });
+  await opened();
+});
+
+/*
+ * Found on the end-to-end run: opened by a refusal while the plan as last read still said runs were
+ * left, an admin read the member's "Ask an admin" until the plan read again had answered. The
+ * refusal carries the payment page only for an owner or an admin, so that decides it at once.
+ */
+test("opened by a refusal before the plan is read again, an admin is told to add a card", async () => {
+  plan = {
+    required: true,
+    status: "free",
+    freeRunsUsedPercent: 99,
+    trialEndsAt: null,
+    renewsAt: null,
+    addCardUrl: null,
+  };
+  await planRead();
+  refuseRuns = true;
+  const view = open(<RoutinePage back={{ to: "/" }} routine={routine} />);
+  await settled();
+
+  // The server is slow to say the plan again.
+  let answer = () => {};
+  planHeld = new Promise((resolve) => {
+    answer = resolve;
+  });
+  plan = usedUp(true);
+  await act(async () => {
+    fireEvent.click(
+      view.getByRole("button", {
+        name: "Run the routine scheduled Weekdays at 09:00 now",
+      }),
+    );
+  });
+  await opened();
+  const said = dialog()?.textContent ?? "";
+  expect(said).toContain("Add a card to keep your Bots running.");
+  expect(said).not.toContain("Ask an admin");
+  expect(
+    view.getByRole("link", { name: "Add a card" }).getAttribute("href"),
+  ).toBe(ADD_CARD);
+
+  await act(async () => {
+    answer();
+  });
+  await waitFor(() =>
+    expect(dialog()?.textContent).toContain("Your free trial was 500 Bot runs"),
+  );
+  expect(dialog()?.textContent).not.toContain("Ask an admin");
 });

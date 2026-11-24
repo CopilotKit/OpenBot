@@ -83,7 +83,7 @@ test("an admin of an organization with no card is told Bots can't run, and given
 
   const bar = await view.findByRole("complementary", { name: "Plan" });
   expect(bar.textContent).toContain(
-    "Your free trial is used up. Add a card to keep your Bots running.",
+    "You've used your free trial. Add a card to keep your Bots running.",
   );
   const links = view.getAllByRole("link", { name: "Add a card" });
   // The bar's link, and the one beside a refused run: both leave for the same page.
@@ -100,7 +100,7 @@ test("a member of an organization with no card is told to ask an admin, with not
 
   const bar = await view.findByRole("complementary", { name: "Plan" });
   expect(bar.textContent).toBe(
-    "Your free trial is used up. Bots can't run until an admin adds a card to this organization.",
+    "You've used your free trial. Ask an admin to add a card to keep your Bots running.",
   );
   expect(view.queryAllByRole("link")).toHaveLength(0);
 });

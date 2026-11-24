@@ -15,28 +15,26 @@ import {
   ProgressLabel,
   ProgressValue,
 } from "@/components/ui/progress";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   cardNeededShown,
   hideCardNeeded,
+  refusalAddCardUrl,
+  rememberTrialUsedUpAnnounced,
   showCardNeeded,
   subscribeCardNeeded,
+  trialUsedUpAnnounced,
 } from "@/lib/plan/card-needed";
-import { planKeys, planQueryOptions, trialUsedUp } from "@/lib/plan/queries";
+import {
+  needsCard,
+  planKeys,
+  planQueryOptions,
+  trialUsedUp,
+} from "@/lib/plan/queries";
 import { cardAction, stoppedWords, trialUsed } from "@/lib/plan/words";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
-
-/**
- * Opened once, the first time this page reads that the free trial is used up. After that it opens
- * only when the person tries something that uses the AI.
- */
-let announced = false;
-
-/** For tests, which share one module: as if the page were loaded again. */
-export function forgetCardNeededAnnounced(): void {
-  announced = false;
-}
 
 /**
  * Bots can't run until a card is added: the free trial is used up, or the last payment failed.
@@ -45,13 +43,17 @@ export function forgetCardNeededAnnounced(): void {
  * is told who to ask.
  *
  * One for the whole app, mounted once in the signed-in layout so every skin, and OpenBot Desktop's
- * window, which shows the same app, has it. It opens by itself once, when the plan read first says
- * the trial is used up, and then every time the person tries something that uses the AI
- * (`stopIfNeedsCard`, and any PLAN_REQUIRED refusal from the server). Closing it lasts until the
- * next try.
+ * window, which shows the same app, has it. It opens by itself once for a person in an
+ * organization, when the plan read first says the trial is used up, and this browser remembers it
+ * did: a reload, a link opened afresh, or coming Back from the payment page don't open it again.
+ * After that it opens every time the person tries something that uses the AI (`stopIfNeedsCard`,
+ * and any PLAN_REQUIRED refusal from the server). Closing it lasts until the next try.
  *
  * The plan is read again each time it opens, so the words follow what the server says now; and when
- * that read says Bots can run (a card was added on another page), it closes by itself.
+ * that read says Bots can run (a card was added on another page), it closes by itself. Opened by a
+ * refusal while the plan as last read still says runs are left, who it is talking to comes from the
+ * refusal, which carries the payment page only for an owner or an admin: an admin never reads the
+ * member's line while the plan is read again.
  */
 export function CardNeededDialog() {
   const open = useSyncExternalStore(
@@ -59,8 +61,11 @@ export function CardNeededDialog() {
     cardNeededShown,
     cardNeededShown,
   );
-  const known = useCurrentOrganizationId() !== undefined;
+  const organizationId = useCurrentOrganizationId();
+  const known = organizationId !== undefined;
   const read = useQuery({ ...planQueryOptions(), enabled: known });
+  const personId = useQuery({ ...currentUserQueryOptions(), enabled: known })
+    .data?.id;
   const plan = read.data;
   const usedUp = trialUsedUp(plan);
 
@@ -68,10 +73,11 @@ export function CardNeededDialog() {
   useEffect(() => () => hideCardNeeded(), []);
 
   useEffect(() => {
-    if (!usedUp || announced) return;
-    announced = true;
+    if (!usedUp || !personId || !organizationId) return;
+    if (trialUsedUpAnnounced(personId, organizationId)) return;
+    rememberTrialUsedUpAnnounced(personId, organizationId);
     showCardNeeded();
-  }, [usedUp]);
+  }, [usedUp, personId, organizationId]);
 
   // When it opened, so only a plan read after that can close it.
   const openedAt = useRef(0);
@@ -87,8 +93,10 @@ export function CardNeededDialog() {
     if (runs) hideCardNeeded();
   }, [open, plan, read.dataUpdatedAt]);
 
-  const words = stoppedWords(plan);
-  const addCardUrl = plan?.addCardUrl ?? null;
+  // The plan once it says a card is needed; until then, what the refusal that opened it said.
+  const addCardUrl =
+    plan && needsCard(plan) ? plan.addCardUrl : refusalAddCardUrl();
+  const words = stoppedWords(plan, addCardUrl);
   return (
     <Dialog
       onOpenChange={(next) => (next ? showCardNeeded() : hideCardNeeded())}

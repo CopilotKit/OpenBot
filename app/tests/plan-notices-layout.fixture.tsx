@@ -8,6 +8,10 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { createRoot } from "react-dom/client";
+import {
+  CLOUD_SIGN_IN_TITLE,
+  CloudSignIn,
+} from "@/components/auth/cloud-sign-in";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
 import { PlanBanner } from "@/components/layout/plan-banner";
 import { OrganizationSettingsPage } from "@/components/organizations/organization-settings-page";
@@ -27,7 +31,7 @@ import { queryClient } from "@/query-client";
  * is used up. Every answer the screens read is put in the cache first, as the server would answer
  * it, and nothing is fetched.
  *
- * `?scene=shell|settings|chat|dialog`, `?plan=<status>`, `?admin=1` for an owner, `?theme=dark`.
+ * `?scene=shell|settings|chat|dialog|signin`, `?plan=<status>`, `?admin=1` for an owner, `?theme=dark`.
  */
 const query = new URLSearchParams(location.search);
 const scene = query.get("scene") ?? "shell";
@@ -135,14 +139,28 @@ const REFUSED =
   status === "past_due"
     ? "This organization's last payment didn't go through, so Bots can't run until the card is updated."
     : plan.addCardUrl !== null
-      ? "You've used your free trial. Add a card to keep your Bots running, $5 a month."
-      : "This organization's free trial is used up. Ask an admin to add a card.";
+      ? "You've used your free trial. Add a card to keep your Bots running for $5 a month for each member."
+      : "You've used your free trial. Ask an admin to add a card to keep your Bots running.";
 const ASKED: Message[] = [
   { id: "u1", role: "user", content: "Summarize this week's signups for me" },
 ];
 
 function Scene() {
   if (scene === "settings") return <OrganizationSettingsPage />;
+  // OpenBot Cloud's sign-in, in the column and under the heading routes/sign.tsx draws it in.
+  if (scene === "signin")
+    return (
+      <div className="flex w-full justify-center">
+        <div className="flex w-full max-w-82 flex-col items-center p-4">
+          <h1 className="mt-8 text-center font-medium text-2xl tracking-tight">
+            {CLOUD_SIGN_IN_TITLE}
+          </h1>
+          <div className="mt-3 w-full">
+            <CloudSignIn />
+          </div>
+        </div>
+      </div>
+    );
   // The dialog over the page it opens on, as the signed-in layout mounts it.
   if (scene === "dialog")
     return (
