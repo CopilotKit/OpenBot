@@ -5,6 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -26,7 +31,7 @@ beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
 afterAll(() => GlobalRegistrator.unregister());
 
-test("a Select's trigger and its options keep their arrows, Space and Enter", async () => {
+test("a Select's trigger and its options keep their keys: arrows, Space, Enter and typeahead", async () => {
   const view = render(
     <Select value="1">
       <SelectTrigger aria-label="Speed">
@@ -41,18 +46,41 @@ test("a Select's trigger and its options keep their arrows, Space and Enter", as
   const trigger = view.getByRole("combobox", { name: "Speed" });
   expect(usesArrows(trigger)).toBe(true);
   expect(pressable(trigger)).toBe(true);
-  expect(isTextField(trigger)).toBe(false);
+  // A closed Select picks an option by its first letters, so C, "." and "/" do nothing there.
+  expect(isTextField(trigger)).toBe(true);
   await userEvent.setup({ document }).click(trigger);
   const option = await within(document.body).findByRole("option", {
     name: "10×",
   });
   expect(usesArrows(option)).toBe(true);
   expect(pressable(option)).toBe(true);
+  expect(isTextField(option)).toBe(true);
+  expect(isTextField(within(document.body).getByRole("listbox"))).toBe(true);
 });
 
-test("a Slider's thumb keeps its arrows", () => {
+test("a Slider's thumb keeps its arrows, and the other keys do nothing there", () => {
   const view = render(<Slider value={[0]} thumbLabel="Time" />);
-  expect(usesArrows(view.getByRole("slider", { name: "Time" }))).toBe(true);
+  const thumb = view.getByRole("slider", { name: "Time" });
+  expect(usesArrows(thumb)).toBe(true);
+  expect(isTextField(thumb)).toBe(true);
+  expect(isTextField(thumb.closest("[data-slot=slider-thumb]"))).toBe(true);
+});
+
+test("in a popup, on the popup or a button in it, the page's keys do nothing", async () => {
+  render(
+    <Popover>
+      <PopoverTrigger>Keys</PopoverTrigger>
+      <PopoverContent aria-label="Keys">
+        <button type="button">Cancel</button>
+      </PopoverContent>
+    </Popover>,
+  );
+  const body = within(document.body);
+  expect(isTextField(body.getByRole("button", { name: "Keys" }))).toBe(false);
+  await userEvent.setup({ document }).click(body.getByText("Keys"));
+  const popup = await body.findByRole("dialog", { name: "Keys" });
+  expect(isTextField(popup)).toBe(true);
+  expect(isTextField(body.getByRole("button", { name: "Cancel" }))).toBe(true);
 });
 
 test("an Input and a Textarea are text fields, so C types a letter there", () => {
