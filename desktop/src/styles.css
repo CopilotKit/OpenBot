@@ -2558,8 +2558,6 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
   padding-top: 24px;
 }
 
-
-
 /*
  * Usage data, on the last screen of setup: a small checkbox and a line or two beside it, in the
  * footnote's size and colour. No card: it is a choice, not a step. Under the step's words and above
@@ -2929,13 +2927,41 @@ main:has(> .rail) {
 
 /* At the foot of the sidebar, whatever else it holds: what runs behind the step. */
 .rail-foot {
+  flex: none;
   margin-top: auto;
   padding: 14px 12px 0;
   border-top: 1px solid var(--border);
 }
 
+/*
+ * The background row holds the foot's height, hung from its top: its name and the foot's line
+ * stay where they are as what it says changes. At the sidebar's bottom and as tall as the row, the
+ * foot grew upward with each line: in the workbench (install-mac) the row's name moved up 20 px as
+ * its line wrapped, 20 px more as a download's bar came, and 60 px down as the download ended.
+ *
+ * Held at the row's tallest usual form in Windows' wider type: its name, its badge on a line of
+ * its own, two lines of what it says, and a download's bar and bytes (`setupLayout.browser.test.ts`).
+ * A longer line (an engine update that asks for a password) makes it taller, as it must be read
+ * whole; the sections above then scroll before the row leaves the window.
+ */
+.rail-foot:has(> .steps) {
+  min-height: 160px;
+}
+
+.rail > .sections {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .rail-foot > :first-child {
   margin-top: 0;
+}
+
+/* Self-Contained's line, on the first screen with OpenBot Cloud on: the foot's own rule sets it off. */
+.rail-foot > .this-computer-foot {
+  padding-top: 0;
+  border-top: 0;
 }
 
 main > .rail + .sheet {
@@ -3125,6 +3151,11 @@ main > .rail + .sheet > * {
 @media (max-width: 860px) {
   main:has(> .rail) {
     --rail-width: 248px;
+  }
+
+  /* The row's name and its lines wrap once more in the narrower sidebar. */
+  .rail-foot:has(> .steps) {
+    min-height: 180px;
   }
 
   main > .rail + .sheet {

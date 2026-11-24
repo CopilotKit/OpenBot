@@ -322,22 +322,19 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
         () => globalThis.__workbenchRunInfo?.end ?? 0,
       );
       await page.evaluate((ms) => window.__workbenchPage?.seek(ms), end);
-      const warning = (await warningsOf(page)).find(
-        (w) =>
-          w.kind === "moved" &&
-          w.label.includes("Installing OpenBot in the background"),
-      );
-      if (warning?.kind !== "moved")
-        throw new Error("No move of the background row.");
+      // Any move does. The background row's name used to move here; it holds still now that the
+      // sidebar's foot holds its height, so the move is whichever the run still has.
+      const warning = (await warningsOf(page)).find((w) => w.kind === "moved");
+      if (warning?.kind !== "moved") throw new Error("No move in install-mac.");
       // The warning has where the row was and where it went.
       expect(warning.to.y - warning.from.y).toBe(warning.dy);
 
-      // The row's moves come after an input: expected, so behind the toggle.
+      // A move after an input is expected, so behind the toggle: show them all.
       await page
         .mainFrame()
         .getByRole("checkbox", { name: "Show expected moves" })
         .click();
-      // The first move of the row is earlier than the end: the hover seeks back.
+      // The move is earlier than the end: the hover seeks back.
       await page
         .mainFrame()
         .getByRole("button", { name: warningText(warning) })
