@@ -3,6 +3,8 @@ import {
   IconAdjustments,
   IconArrowUpRight,
   IconChecks,
+  IconCloudComputing,
+  IconCode,
   IconDeviceDesktop,
   IconHistory,
   IconListCheck,
@@ -23,12 +25,13 @@ import {
   BUSINESS_URL,
   type BusinessFeatureIcon,
   bookingCalendarSrc,
-  DEPLOY_LINE,
 } from "../../shared/openbot-for-business";
 import { ExternalLink } from "./ExternalLink";
 
 /** The same icons the app's OpenBot for Business dialog draws each feature with. */
 const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
+  deploy: IconCloudComputing,
+  agents: IconCode,
   "sign-in": IconLogin2,
   people: IconUsers,
   "shared-bots": IconUsersGroup,
@@ -44,8 +47,8 @@ const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
 
 /**
  * The first screen's lower half when OpenBot for Business is picked: the app's OpenBot for Business
- * view, stacked for the setup card. Where it runs and what it adds, then the calendar to book a
- * call. The words and the Calendly event are the app's own (`shared/openbot-for-business`).
+ * view, stacked for the setup card. Its name, then where it runs and what it adds, then the calendar
+ * to book a call. The words and the Calendly event are the app's own (`shared/openbot-for-business`).
  *
  * A calendar that can't load (offline, blocked, silent) gives way to Book a demo, which opens the
  * OpenBot for Business page in the person's browser, as the app's does on the Desktop.
@@ -67,7 +70,7 @@ export function BusinessBooker() {
   return (
     <section className="business-booker" aria-labelledby="business-deploy">
       <p id="business-deploy" className="business-deploy">
-        {DEPLOY_LINE}
+        OpenBot for Business
       </p>
       <div className="business-book">
         <button type="button" onClick={toBooking}>

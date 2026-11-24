@@ -797,7 +797,7 @@ export const GetOrganizationPlanResponse = zod
     status: zod
       .string()
       .describe(
-        "not_required when this OpenBot needs no plan. free when the organization isn't on the plan and the person reading has free runs left. active on the plan. past_due when a payment failed and the card needs updating. none when a card is needed: the person's free runs are used up, or there are none, or the plan ended. trialing during a free trial that ends on a date (trialEndsAt); OpenBot Cloud's free allowance is counted in runs and doesn't use it. unknown when the plan couldn't be read just now; Bots keep running meanwhile.",
+        "not_required when this OpenBot needs no plan. free when the organization isn't on the plan and the person reading has free runs left, or works for the company that makes OpenBot (copilotKitEmployee) and would otherwise read none. active on the plan. past_due when a payment failed and the card needs updating. none when a card is needed: the person's free runs are used up, or there are none, or the plan ended. trialing during a free trial that ends on a date (trialEndsAt); OpenBot Cloud's free allowance is counted in runs and doesn't use it. unknown when the plan couldn't be read just now; Bots keep running meanwhile.",
       ),
     freeRunsUsedPercent: zod
       .int()
@@ -812,7 +812,13 @@ export const GetOrganizationPlanResponse = zod
       .min(1)
       .optional()
       .describe(
-        "How many free runs each person gets. Present only once the reading person has used them all (freeRunsUsedPercent is 100 and status is none), so the number is never shown while runs are left; absent otherwise.",
+        "How many free runs each person gets. Present only once the reading person has used them all (freeRunsUsedPercent is 100, and status is none, or free for copilotKitEmployee), so the number is never shown while runs are left; absent otherwise.",
+      ),
+    copilotKitEmployee: zod
+      .boolean()
+      .optional()
+      .describe(
+        "True when the reading person works for the company that makes OpenBot: their verified email address is on the copilotkit.ai domain exactly. An employee's own runs are never refused for want of a plan, in any organization, whatever status says. status is still the organization's own (active, past_due and the rest), with one exception: where it would be none, an employee reads free, so once their free allowance is used they get freeRunsUsedPercent 100 and freeRunsAllowance. Their addCardUrl is null, unless they are an owner or an admin and the organization needs a card for members who aren't employees: then it is set, so they can pay for the others. past_due keeps its addCardUrl for an owner or an admin, since the organization's payment still needs updating for everyone else in it. Present only while required is true and the reader is an employee; absent otherwise. It is about the reader alone: other members of the same organization are unaffected, and the organization's plan is unchanged.",
       ),
     trialEndsAt: zod.iso
       .datetime({ offset: true })

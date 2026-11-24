@@ -766,10 +766,10 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
   expect(
     view.queryByRole("heading", { name: "What this computer needs" }),
   ).toBeNull();
-  // What it adds, in the app's words.
+  // What it adds, in the app's words, where it runs first.
   expect(
     view.getByText(
-      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
+      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
     ),
   ).toBeTruthy();
   expect(
@@ -790,6 +790,9 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
   );
   expect(src.searchParams.get("embed_type")).toBe("Inline");
   expect(src.searchParams.get("embed_domain")).toBe(window.location.host);
+  // Tagged as booked from inside the app, which Calendly keeps on the booking.
+  expect(src.searchParams.get("utm_source")).toBe("openbot_app");
+  expect(src.searchParams.get("utm_medium")).toBe("in_app");
   expect(view.getByText("Loading the calendar")).toBeTruthy();
   // Calendly says it is there: the spinner goes.
   await act(async () => {
