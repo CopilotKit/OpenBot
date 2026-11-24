@@ -4,10 +4,12 @@ import type {
   OrganizationMember,
   Team,
   TeamMember,
+  TeamModels,
 } from "@/lib/api/generated/model";
 import { listOrganizationMembers } from "@/lib/api/generated/organizations/organizations";
 import {
   getTeam,
+  getTeamModels,
   listTeamMembers,
   listTeams,
 } from "@/lib/api/generated/teams/teams";
@@ -27,6 +29,13 @@ export type TeamPerson = TeamMember;
 
 /** One member of the organization, for choosing who to add to a team. */
 export type OrganizationPerson = OrganizationMember;
+
+/**
+ * The models a team's people may run: the API's `TeamModels`. `models` is null when the team sets
+ * none, so its people run whatever the organization allows; otherwise each is `provider/model`, and
+ * one the organization no longer allows stays listed and lets nobody run it.
+ */
+export type TeamModelList = TeamModels;
 
 /** The organization's teams, and the server's verdict on whether this person may create one. */
 export type TeamList = {
@@ -51,6 +60,7 @@ export const teamKeys = {
   listPages: (search = "") => ["teams", "list", { search }] as const,
   detail: (teamId: string) => ["teams", "detail", teamId] as const,
   members: (teamId: string) => ["teams", "members", teamId] as const,
+  models: (teamId: string) => ["teams", "models", teamId] as const,
   /** One search of a team's people, a page at a time, under `members`. */
   memberPages: (teamId: string, search = "") =>
     ["teams", "members", teamId, { search }] as const,
@@ -149,6 +159,18 @@ export function teamMembersQueryOptions(teamId: string) {
           { signal, fallback: FALLBACK },
         );
         return { items: page.members, nextCursor: page.nextCursor };
+      }),
+  });
+}
+
+/** The models the team's people may run, or null models when it sets none. Anybody may read it. */
+export function teamModelsQueryOptions(teamId: string) {
+  return queryOptions({
+    queryKey: teamKeys.models(teamId),
+    queryFn: ({ signal }): Promise<TeamModelList> =>
+      getTeamModels(organizationId(), teamId, {
+        signal,
+        fallback: "Couldn't load this team's models. Try again in a moment.",
       }),
   });
 }

@@ -11,6 +11,12 @@ import type { ModelCatalogue } from "@/lib/models/queries";
  * where the composer puts it, with a catalogue like a provider's (OpenBot's own model first, taking
  * thinking efforts, and two more).
  */
+/*
+ * `?thinking=none`: no model takes a thinking effort, so the popup is the models alone, one narrow
+ * column, as a team limited to models that don't think sees it.
+ */
+const thinks = new URLSearchParams(location.search).get("thinking") !== "none";
+
 const catalogue: ModelCatalogue = {
   provider: "openai",
   source: "openai",
@@ -22,7 +28,9 @@ const catalogue: ModelCatalogue = {
       id: "gpt-6.1-terra",
       label: "GPT-6.1 Terra",
       vendor: "openai",
-      efforts: ["none", "low", "medium", "high", "xhigh", "max"],
+      ...(thinks
+        ? { efforts: ["none", "low", "medium", "high", "xhigh", "max"] }
+        : {}),
     },
     { id: "gpt-4.1-mini", label: "GPT-4.1 Mini", vendor: "openai" },
     { id: "gpt-4.1", label: "GPT-4.1", vendor: "openai" },

@@ -332,12 +332,12 @@ export function AuditPage({
      * below it, the log is bounded so the page can scroll down to those controls too.
      */
     <PageShell description={description} title={paths.auditLabel} width="full">
-      {/* With admin settings below the log, the page scrolls and the log keeps its own bounded
-          viewport. Without settings, the table fills the panel as before. */}
+      {/* With admin settings below the log, the page scrolls, and the log's rows scroll with it,
+          whole, with the settings after the last of them. The log used to keep a 60vh box of its
+          own: on a phone its toolbar took most of it, and on a laptop it showed six rows with the
+          last cut mid-line. Without settings, the table fills the panel as before. */}
       <div className={children ? "min-h-0 flex-1 overflow-y-auto" : "contents"}>
-        <div
-          className={children ? "flex h-[60vh] min-h-80 flex-col" : "contents"}
-        >
+        <div className={children ? "flex flex-col" : "contents"}>
           {/*
            * Above the table rather than in its toolbar: a question being typed and its answer outlast
            * anything the table draws again. The answer's chips are the toolbar's, beside the search.
@@ -403,13 +403,14 @@ export function AuditPage({
                 <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
                   {/*
                    * The saved views are one control with one answer, so they are drawn as a segmented
-                   * group: the pressed one is filled, the rest sit flat inside the same outline.
+                   * group: the pressed one is filled, the rest sit flat inside the same outline. On a
+                   * phone they wrap inside it: in one line the last two ran off the window's edge.
                    */}
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-muted-foreground text-xs">View</span>
                     <fieldset
                       aria-label="View"
-                      className="inline-flex items-center gap-0.5 rounded-lg border border-border p-0.5"
+                      className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg border border-border p-0.5"
                     >
                       {FILTERS.map((filter) => {
                         const active = view === filter.search;
