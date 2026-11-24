@@ -22477,7 +22477,7 @@ paths:
       operationId: createExport
       summary: Start exporting what the caller has here
       description: |-
-        Start writing a bundle of everything the caller has in this organization, to move it to OpenBot Cloud: their Bots (settings, instructions and skills), conversations with every message, memories, routines, goals and check-ins, files, standing instructions and preferences, and, when the caller is an administrator, the organization's own skills. Connections to apps travel as their app and account name only: no token or password ever leaves, and each one is listed in reconnect so the person connects it again on Cloud. A model key travels only when includeModelKeys is true, and then only sealed to recipientKey, the key the import on Cloud gave (createImport), so the bundle never holds it readable.
+        Start writing a bundle of everything the caller has in this organization, to move it to OpenBot Cloud: their Bots (settings, instructions and skills), conversations with every message, memories, routines, goals and check-ins, files, standing instructions and preferences, and, when the caller is an administrator, the organization's own skills. A connection to an app the person signed in to travels as its app and account name only: no token or password ever leaves, and it is listed in reconnect so the person signs in again on Cloud. A connection made with a key this OpenBot holds travels connected when recipientKey is given: its key is sealed to recipientKey, the app is listed in carried, and the import connects it on Cloud with that key. Without recipientKey it is listed in reconnect like any other. A model key travels only when includeModelKeys is true, and then only sealed to recipientKey, the key the import on Cloud gave (createImport). The bundle never holds a key readable.
 
         The bundle is written in the background; read getExport until status is ready. It is cut into parts of at most 32 MiB, each with its size and SHA-256, so a dropped download resumes where it stopped. One export is kept for each person: starting another removes the one before. An export is removed 7 days after it was made, or with deleteExport. Served only by an OpenBot that runs on the person's own computer; elsewhere it answers 404 with the code MOVE_UNAVAILABLE.
       security:
@@ -40502,6 +40502,34 @@ components:
           description: The Bots that used it, so the person knows which to check.
           items:
             type: string
+        reason:
+          type: string
+          minLength: 1
+          description: 'Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn''t allow it. Absent for an app the person signs in to again.'
+    CarriedApp:
+      type: object
+      description: 'A connection to an app made with a key, which moves connected: the key travels sealed to the import''s recipientKey, and the import connects the app with it on OpenBot Cloud and gives it back to the Bots that used it. Never carries the key itself.'
+      required:
+        - appId
+        - appName
+      properties:
+        appId:
+          type: string
+          minLength: 1
+          description: The app's id in the app directory, or the id it had on the person's computer.
+        appName:
+          type: string
+          minLength: 1
+          description: The app's name as a person reads it.
+        iconUrl:
+          type: string
+          format: uri
+          description: The app's icon, when the directory has one.
+        botNames:
+          type: array
+          description: The Bots that use it.
+          items:
+            type: string
     ExportEstimate:
       type: object
       required:
@@ -40525,8 +40553,14 @@ components:
           description: How much this OpenBot keeps on disk for the person (its database and files), which removing it frees. OpenBot Desktop adds what the engine itself takes.
         reconnect:
           type: array
+          description: The apps the person will sign in to again on OpenBot Cloud. The apps in carried are not listed here.
           items:
             $ref: '#/components/schemas/ReconnectApp'
+        carried:
+          type: array
+          description: The apps connected with a key this OpenBot holds, which move connected when the export is given recipientKey.
+          items:
+            $ref: '#/components/schemas/CarriedApp'
         modelKeysAvailable:
           type: boolean
           description: True when there is a model key the person could choose to bring.
@@ -40569,6 +40603,7 @@ components:
           description: Bring the person's model key, sealed to recipientKey. Without recipientKey this is refused.
         recipientKey:
           $ref: '#/components/schemas/MoveRecipientKey'
+          description: The import's public key. Given, the keys of the apps connected with a key travel sealed to it and those apps move connected (carried), and the model key does too when includeModelKeys is true.
     BundlePart:
       type: object
       required:
@@ -40634,6 +40669,11 @@ components:
           description: The apps to connect again on OpenBot Cloud.
           items:
             $ref: '#/components/schemas/ReconnectApp'
+        carried:
+          type: array
+          description: The apps whose keys the bundle carries sealed, once ready, so they move connected.
+          items:
+            $ref: '#/components/schemas/CarriedApp'
         includesModelKeys:
           type: boolean
         progress:
@@ -40745,9 +40785,14 @@ components:
             $ref: '#/components/schemas/MoveNote'
         reconnect:
           type: array
-          description: The apps to connect again here, once part 1 arrived.
+          description: The apps to connect again here, once part 1 arrived. Once imported, an app the bundle carried that couldn't be connected here is listed too, with its reason.
           items:
             $ref: '#/components/schemas/ReconnectApp'
+        carried:
+          type: array
+          description: The apps that came across connected, with their Bots given them again, once imported. Before that, the apps the bundle carries.
+          items:
+            $ref: '#/components/schemas/CarriedApp'
         error:
           type: string
           minLength: 1
@@ -40838,6 +40883,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ReconnectApp'
+        carried:
+          type: array
+          description: The apps that came across connected.
+          items:
+            $ref: '#/components/schemas/CarriedApp'
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -52239,6 +52289,11 @@ components:
             botNames:
               - Inbox helper
               - Standup
+        carried:
+          - appId: fireflies
+            appName: Fireflies
+            botNames:
+              - Standup
         modelKeysAvailable: true
     ExportInputExample:
       value:
@@ -52367,6 +52422,14 @@ components:
           - appId: gmail
             appName: Gmail
             accountLabel: sam@example.com
+          - appId: team-wiki
+            appName: Team wiki
+            reason: Your organization doesn't allow Team wiki yet. Ask an admin to approve it, then connect it here.
+        carried:
+          - appId: fireflies
+            appName: Fireflies
+            botNames:
+              - Standup
     ImportReceivingExample:
       value:
         id: imp_0e1f2a3b4c5d6f1d

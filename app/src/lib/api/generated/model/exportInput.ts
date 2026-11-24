@@ -6,5 +6,6 @@ import type { MoveRecipientKey } from "./moveRecipientKey";
 export interface ExportInput {
   /** Bring the person's model key, sealed to recipientKey. Without recipientKey this is refused. */
   includeModelKeys?: boolean;
+  /** The import's public key. Given, the keys of the apps connected with a key travel sealed to it and those apps move connected (carried), and the model key does too when includeModelKeys is true. */
   recipientKey?: MoveRecipientKey;
 }
