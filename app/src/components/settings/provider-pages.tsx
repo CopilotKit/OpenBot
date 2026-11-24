@@ -247,6 +247,8 @@ function ProviderDetails({
   const left = list.connections.filter((other) => other.id !== entry.id);
   const onlyOne = left.length === 1 ? left[0] : undefined;
   const choosing = entry.isDefault && !onlyOne && others.length > 0;
+  // The default goes with others left, none of which can run: they stay, and none is the default.
+  const noneCanTakeOver = entry.isDefault && left.length > 1 && !choosing;
   const [nextDefault, setNextDefault] = useState<string | null>(
     others[0]?.id ?? null,
   );
@@ -388,7 +390,9 @@ function ProviderDetails({
                       ? `Bots will use ${connectionName(onlyOne)} when nobody picked a model.`
                       : choosing
                         ? "It's the default AI. Choose which one Bots use when nobody picked a model."
-                        : lastGoes(scope, organizationWide, personal)}
+                        : noneCanTakeOver
+                          ? "It's the default AI, and none of the others can run now. Disconnect it and there's no default until you fix one and make it the default."
+                          : lastGoes(scope, organizationWide, personal)}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>

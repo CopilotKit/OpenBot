@@ -420,7 +420,8 @@ export function makeDefaultAiConnectionMutationOptions(
   return mutationOptions({
     mutationFn: (variables: MakeDefaultVariables) =>
       makeDefault(scope, variables),
-    onSuccess: () => invalidateAiConnection(queryClient),
+    // A refusal (409: the connection can't run now) also means the list read here is out of date.
+    onSettled: () => invalidateAiConnection(queryClient),
   });
 }
 
@@ -432,8 +433,9 @@ export type RemoveVariables = {
 };
 
 /**
- * Remove one connection. The server never moves the default by itself, so when another takes over
- * it is made the default first, and only then is this one removed.
+ * Remove one connection. The server makes the default move by itself only when a removal leaves
+ * exactly one connection; with more left, the one the person chose to take over is made the default
+ * first, and only then is this one removed.
  */
 export function removeAiConnectionMutationOptions(
   queryClient: QueryClient,

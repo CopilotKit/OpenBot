@@ -116,6 +116,8 @@ let orgSignIns: AiConnectionProvider[];
 /** The person's own list, or null for 404. */
 let personalList: AiConnectionEntry[] | null;
 let personal: PersonalAiConnection | null;
+/** Set: make-default is refused (409) because the connection stopped since the list was read. */
+let stopsBeforeMakeDefault: AiConnectionEntry["problem"];
 
 function json(status: number, body: unknown) {
   return new NativeResponse(JSON.stringify(body), {
@@ -191,6 +193,27 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit) {
     const makeDefault = new RegExp(`^${base}/([^/]+)/make-default$`).exec(path);
     if (makeDefault && method === "POST" && list) {
       const id = decodeURIComponent(makeDefault[1] ?? "");
+      if (stopsBeforeMakeDefault) {
+        const stopping = list.find((connection) => connection.id === id);
+        if (stopping)
+          Object.assign(stopping, {
+            ready: false,
+            problem: stopsBeforeMakeDefault,
+          });
+        return new NativeResponse(
+          JSON.stringify({
+            type: "https://open.bot/errors/conflict",
+            title: "Conflict.",
+            status: 409,
+            detail: "That connection can't run now.",
+            code: "AI_CONNECTION_NOT_READY",
+          }),
+          {
+            status: 409,
+            headers: { "content-type": "application/problem+json" },
+          },
+        );
+      }
       for (const connection of list)
         connection.isDefault = connection.id === id;
       const made = list.find((connection) => connection.id === id);
@@ -228,6 +251,7 @@ beforeEach(() => {
   orgSignIns = [];
   personalList = null;
   personal = null;
+  stopsBeforeMakeDefault = null;
   global.fetch = Object.assign(fakeFetch, {
     preconnect: originalFetch.preconnect,
   }) as typeof fetch;
@@ -377,6 +401,24 @@ test("two connections: the default is tagged, and Make default on the other's pa
     expect(writes()).toEqual([
       { method: "POST", path: `${ORG}/ai-connections/openai/make-default` },
     ]),
+  );
+});
+
+test("a refused Make default reads the list again, so the page shows the connection stopped", async () => {
+  orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
+  stopsBeforeMakeDefault = {
+    code: "key-refused",
+    detail: "OpenAI refused the key.",
+  };
+  const user = userEvent.setup({ document });
+  const { view } = renderAt("/settings/providers/openai");
+  await user.click(await view.findByRole("button", { name: "Make default" }));
+  expect(await view.findByText("OpenAI refused the key.")).toBeDefined();
+  await waitFor(() =>
+    expect(
+      (view.getByRole("button", { name: "Make default" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true),
   );
 });
 
@@ -635,6 +677,52 @@ test("disconnecting the default with exactly one other left removes it alone, an
   await waitFor(() =>
     expect(writes().map((call) => `${call.method} ${call.path}`)).toEqual([
       `DELETE ${ORG}/ai-connections/anthropic`,
+    ]),
+  );
+});
+
+test("disconnecting the default when none of the others can run says they stay, with no default", async () => {
+  const stopped = {
+    ready: false,
+    problem: { code: "key-refused", detail: "The key was refused." },
+  };
+  orgList = [
+    entry("anthropic", { isDefault: true }),
+    entry("openai", stopped),
+    entry("google", {
+      login: "endpoint",
+      model: "gemini-3.8-flash",
+      ...stopped,
+    }),
+  ];
+  const { view } = renderAt("/settings/providers/anthropic");
+  expect(
+    await view.findByText(
+      "It's the default AI, and none of the others can run now. Disconnect it and there's no default until you fix one and make it the default.",
+    ),
+  ).toBeDefined();
+  expect(view.queryByText(/until you connect another/)).toBeNull();
+  expect(view.queryByRole("radio")).toBeNull();
+});
+
+test("Change on a connection that isn't the default changes that one: its provider, no other to pick", async () => {
+  orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
+  const user = userEvent.setup({ document });
+  const { view, router } = renderAt("/settings/providers/openai");
+  await user.click(await view.findByRole("link", { name: /^Change/ }));
+  await view.findAllByRole("heading", { name: "Change OpenAI API key" });
+  expect(at(router)).toBe("/settings/providers/openai/change");
+  // Open on its provider: no grid of others to choose from.
+  expect(view.queryByRole("button", { name: /Anthropic/ })).toBeNull();
+  await user.type(view.getByLabelText(/API key/), "sk-example");
+  await user.click(view.getByRole("button", { name: /Connect/ }));
+  await waitFor(() =>
+    expect(writes()).toEqual([
+      {
+        method: "POST",
+        path: `${ORG}/ai-connections`,
+        body: { provider: "openai", login: "api-key", apiKey: "sk-example" },
+      },
     ]),
   );
 });

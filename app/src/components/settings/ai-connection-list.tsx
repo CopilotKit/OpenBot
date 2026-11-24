@@ -37,8 +37,9 @@ export const SEVERAL =
  * conversation.
  *
  * Each row is a link to the provider's own page (provider-pages.tsx), where it is made the default,
- * changed or disconnected. The last row links to the page that connects another AI. The server
- * never moves the default by itself, so connections with no default say so above the rows.
+ * changed or disconnected. The last row links to the page that connects another AI. Connections
+ * can be left with no default (the server picks one only when a removal leaves exactly one), and
+ * then say so above the rows.
  *
  * The section around it reads the list (aiConnectionsQueryOptions) and draws the single
  * connection it drew before when the server is older than the list.
