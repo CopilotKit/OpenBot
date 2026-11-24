@@ -273,8 +273,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   everyone in the organization, so the button shows only for an admin, and for the one person of
   a personal OpenBot. Anybody else who opens the Add server page is told that only an admin can add
   a server, and to ask one.
-- Admin, Apps: the MCP servers section is now Connectors. Turning on Only approved servers starts with
-  your added apps approved, and an app an admin adds is approved in the same press.
+- Admin, Apps: the MCP servers section is now Connectors, and its switches say what each app can do.
+  While Only approved connectors is off, every app can be used and its switch can't be changed.
+  Turning it on starts with your added apps approved, an app an admin adds is approved in the same
+  press, and turning one app off no longer takes the others off the list with it.
 - **Only an owner removes another owner.** An admin could remove a co-owner, though they couldn't
   change one's role. That is now refused with "Only an owner of this organization can remove
   another owner." The last owner still can't be removed. In Organization settings, Members offers
