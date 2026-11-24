@@ -1,9 +1,9 @@
 // Canvas text-glyph particles (Sleep Zzz / Music Notes). Glyphs spawn in the
 // top-right area, rise with a gentle sway, scale 0.8→1.2, and fade in/out. Drawn
 // as canvas text so there is no emoji-font dependency ("Z", "♪" render anywhere).
-import { type CanvasStep, mountCanvas } from "./engine-canvas.ts";
-import type { ResolvedLayer } from "./layers.ts";
-import type { BuddyPreset } from "./presets.ts";
+import { type CanvasStep, mountCanvas } from "./engine-canvas";
+import type { ResolvedLayer } from "./layers";
+import type { BuddyPreset } from "./presets";
 
 type Glyph = {
   x: number;

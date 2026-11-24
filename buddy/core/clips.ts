@@ -1,4 +1,4 @@
-import type { BuddyClips, PoseClips } from "./types.ts";
+import type { BuddyClips, PoseClips } from "./types";
 
 /**
  * Normalize a BuddyClips value — either a pose→src map or an array of

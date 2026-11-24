@@ -1,4 +1,6 @@
 import type { CSSProperties } from "react";
+import { BotBuddy } from "@/components/agents/bot-buddy";
+import { useBotLook } from "@/components/agents/bot-look";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { orbPalette } from "@/lib/orb-palette";
 
@@ -28,6 +30,24 @@ export function BotOrb({
   state?: "idle" | "working" | "waiting";
 }) {
   const colors = orbPalette(seed);
+  // Where Bots are buddies, every orb is the Bot's buddy instead, playing what the Bot is doing.
+  const buddies = useBotLook() === "buddy";
+  if (buddies) {
+    return (
+      <BotBuddy
+        activity={
+          state === "working"
+            ? "working"
+            : state === "waiting"
+              ? "waiting"
+              : "idle"
+        }
+        name={name}
+        seed={seed}
+        size={size}
+      />
+    );
+  }
 
   if (size <= STATIC_MAX_SIZE && state === "idle") {
     return (

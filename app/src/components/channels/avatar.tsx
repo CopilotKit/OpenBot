@@ -30,7 +30,7 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   size?: number;
   typing?: boolean;
 }) {
-  const orbs = useBotLook() === "orb";
+  const orbs = useBotLook() !== "face";
   const face = orbs ? orbFace : boringFace;
   const avatar =
     participantIds.length === 1 ? (

@@ -30,11 +30,12 @@ function packagesStartedBy(script: string, workspaces: string[]): string[] {
 describe("OpenBot workspace", () => {
   // The clients and what they share. The server and the worker run from the published OpenBot
   // images (backend-images.env).
-  test("defines the app, shared, extension and management agent packages, and no back end", () => {
+  test("defines the app, shared, buddy, extension and management agent packages, and no back end", () => {
     const manifest = rootManifest();
     const names: Record<string, string> = {
       app: "app",
       shared: "@openbot/shared",
+      buddy: "@openbot/buddy",
       extension: "@openbot/recorder-extension",
       "management-agent": "@openbot/management-agent",
     };

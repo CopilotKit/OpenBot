@@ -44,6 +44,8 @@ export default defineConfig({
         operations: {
           // A part of a move's bundle is bytes, which no example in the spec can be: an empty one.
           downloadExportPart: { mock: { data: new Blob([]) } },
+          // A buddy's picture or clip is bytes too.
+          getBuddyFile: { mock: { data: new Blob([]) } },
         },
       },
     },

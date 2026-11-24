@@ -7,7 +7,7 @@ import {
   type NamePosition,
   type ShadowLevel,
   type StatusPosition,
-} from "../core/index.ts";
+} from "../core/index";
 
 export type BuddyAvatarProps = {
   videoSrc?: string | null;

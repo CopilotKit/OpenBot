@@ -2,8 +2,8 @@
 // ball: a hanging faceted ball built from DOM elements with a slow CSS shine
 // sweep (keyframes in styles.ts, gated behind prefers-reduced-motion). No image
 // assets.
-import type { ResolvedLayer } from "./layers.ts";
-import type { BuddyPreset } from "./presets.ts";
+import type { ResolvedLayer } from "./layers";
+import type { BuddyPreset } from "./presets";
 
 export function mountLayer(
   el: HTMLElement,

@@ -7,7 +7,7 @@ import type {
   LayerAnchor,
   LayerBlend,
   LayerSlot,
-} from "./types.ts";
+} from "./types";
 
 export type PresetEngine = "particles" | "painter" | "css" | "glyphs" | "macro";
 

@@ -7,11 +7,11 @@ import {
   mimeFor,
   parseBuddyMetaBytes,
   readBuddySeedFromZip,
-} from "./format.ts";
+} from "./format";
 
 // Re-export the isomorphic format so client code can get everything it needs
 // (types, poses, pack, loaders, cache) from the single "/browser" entry.
-export * from "./format.ts";
+export * from "./format";
 
 function blobUrl(data: Uint8Array, name: string): string {
   // Copy into a fresh ArrayBuffer-backed view so it satisfies BlobPart.

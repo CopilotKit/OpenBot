@@ -3,7 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
-    "allowImportingTsExtensions": true,
+
     "types": []
   },
   "include": ["**/*.ts", "**/*.tsx"]

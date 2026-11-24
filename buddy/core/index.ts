@@ -1,6 +1,6 @@
-export { toPoseClips } from "./clips.ts";
-export { type BuddyController, createBuddyController } from "./controller.ts";
-export { type ResolvedLayer, resolveLayers } from "./layers.ts";
+export { toPoseClips } from "./clips";
+export { type BuddyController, createBuddyController } from "./controller";
+export { type ResolvedLayer, resolveLayers } from "./layers";
 export {
   ALL_PRESETS,
   BACKGROUND_PRESETS,
@@ -8,10 +8,10 @@ export {
   EFFECT_PRESETS,
   getPreset,
   type PresetEngine,
-} from "./presets.ts";
-export { type BuddyAvatarInstance, createBuddyAvatar } from "./renderer.ts";
-export { resolvePose } from "./resolve.ts";
-export { buddyCss, injectBuddyStyles } from "./styles.ts";
+} from "./presets";
+export { type BuddyAvatarInstance, createBuddyAvatar } from "./renderer";
+export { resolvePose } from "./resolve";
+export { buddyCss, injectBuddyStyles } from "./styles";
 export type {
   BackgroundPresetId,
   BuddyAvatarRenderProps,
@@ -31,4 +31,4 @@ export type {
   SetPoseOptions,
   ShadowLevel,
   StatusPosition,
-} from "./types.ts";
+} from "./types";

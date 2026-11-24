@@ -3,7 +3,7 @@ import type {
   BuddyControllerState,
   PoseClips,
   SetPoseOptions,
-} from "./types.ts";
+} from "./types";
 
 export type BuddyController = {
   getState: () => BuddyControllerState;

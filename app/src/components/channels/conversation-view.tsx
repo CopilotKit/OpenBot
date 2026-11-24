@@ -165,7 +165,7 @@ export function ConversationView({
    * See `composer/queue.ts` for what this state is worth: it is memory in one tab, it does not
    * survive a reload, and it is not an outbox.
    */
-  const orbs = useBotLook() === "orb";
+  const orbs = useBotLook() !== "face";
   const [queued, setQueued] = useState<readonly QueuedMessage[]>([]);
   const queuedRef = useRef<readonly QueuedMessage[]>(queued);
 

@@ -3,8 +3,8 @@
 Animated Bot avatars ("buddies"): a still picture and a short looping clip per pose.
 
 Vendored from labs-buddy (`packages/buddy-core`, `buddy-react` and `buddy-file`, commit 15fa48f),
-whose packages are not published yet. The only change is that `react/` imports `../core` instead of
-`@tanstack/buddy-core`. Replace this folder with the published `@tanstack/buddy-*` packages once
+whose packages are not published yet. The only changes: `react/` imports `../core` instead of `@tanstack/buddy-core`,
+imports drop their `.ts` extension, and Biome formatted it. Replace this folder with the published `@tanstack/buddy-*` packages once
 they exist.
 
 - `core`: the pose controller and the DOM renderer.

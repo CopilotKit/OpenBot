@@ -2,13 +2,13 @@
 // can mount: expand macros, apply preset defaults under caller overrides, drop
 // invalid entries (never throw — a bad layer is a dev warning and a no-op).
 
-import { type BuddyPreset, getPreset } from "./presets.ts";
+import { type BuddyPreset, getPreset } from "./presets";
 import type {
   BuddyLayer,
   LayerAnchor,
   LayerBlend,
   LayerSlot,
-} from "./types.ts";
+} from "./types";
 
 export type ResolvedLayer = {
   preset?: string;

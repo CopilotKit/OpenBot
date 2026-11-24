@@ -3,9 +3,9 @@
 // hearts, bubbles, and the macro sub-layers). Config is read from the preset and
 // tuned by the layer's density/speed/tint. Particles are pre-allocated and
 // reused — nothing is allocated in the draw loop.
-import { type CanvasStep, mountCanvas } from "./engine-canvas.ts";
-import type { ResolvedLayer } from "./layers.ts";
-import type { BuddyPreset } from "./presets.ts";
+import { type CanvasStep, mountCanvas } from "./engine-canvas";
+import type { ResolvedLayer } from "./layers";
+import type { BuddyPreset } from "./presets";
 
 type Particle = {
   x: number;

@@ -2,9 +2,9 @@
 // receives (ctx, w, h, t, dt); stateless except where noted (rainy-window keeps
 // droplet state; nebula/clouds derive positions from seeded pseudo-random by
 // index — deterministic, no Math.random in the draw loop).
-import { type CanvasStep, mountCanvas, seeded } from "./engine-canvas.ts";
-import type { ResolvedLayer } from "./layers.ts";
-import type { BuddyPreset } from "./presets.ts";
+import { type CanvasStep, mountCanvas, seeded } from "./engine-canvas";
+import type { ResolvedLayer } from "./layers";
+import type { BuddyPreset } from "./presets";
 
 const TAU = Math.PI * 2;
 type Painter = (

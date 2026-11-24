@@ -1,18 +1,18 @@
-import { prefersReducedMotion } from "./engine-canvas.ts";
-import * as cssEngine from "./engine-css.ts";
-import * as glyphsEngine from "./engine-glyphs.ts";
-import * as painterEngine from "./engine-painter.ts";
-import * as particlesEngine from "./engine-particles.ts";
-import { type ResolvedLayer, resolveLayers } from "./layers.ts";
-import { getPreset } from "./presets.ts";
-import { injectBuddyStyles } from "./styles.ts";
+import { prefersReducedMotion } from "./engine-canvas";
+import * as cssEngine from "./engine-css";
+import * as glyphsEngine from "./engine-glyphs";
+import * as painterEngine from "./engine-painter";
+import * as particlesEngine from "./engine-particles";
+import { type ResolvedLayer, resolveLayers } from "./layers";
+import { getPreset } from "./presets";
+import { injectBuddyStyles } from "./styles";
 import type {
   BuddyAvatarRenderProps,
   LabelContent,
   LayerSlot,
   NamePosition,
   StatusPosition,
-} from "./types.ts";
+} from "./types";
 
 export type BuddyAvatarInstance = {
   update: (props: BuddyAvatarRenderProps) => void;

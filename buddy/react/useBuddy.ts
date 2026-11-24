@@ -6,7 +6,7 @@ import {
   createBuddyController,
   type SetPoseOptions,
   toPoseClips,
-} from "../core/index.ts";
+} from "../core/index";
 
 export type { BuddyClips };
 /** React `useBuddy` options — the shared adapter options shape. */

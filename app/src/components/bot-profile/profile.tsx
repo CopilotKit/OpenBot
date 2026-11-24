@@ -8,6 +8,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { useBotLook } from "@/components/agents/bot-look";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
@@ -46,6 +47,7 @@ import {
 } from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
 import { BotActivityGlance, BotActivityRow } from "./activity";
+import { BotBuddyRow } from "./buddy";
 import { BotPausedBanner } from "./pause-banner";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
@@ -102,6 +104,7 @@ export function BotProfile({
   const notify = useMutation(setBotNotifyMutationOptions(queryClient));
   // The browser's answer, shared with the prompt a conversation offers, so a yes there shows here.
   const permission = useNotificationPermission();
+  const buddies = useBotLook() === "buddy";
 
   return (
     <>
@@ -221,6 +224,12 @@ export function BotProfile({
                     </Button>
                   </ItemActions>
                 </Item>
+              </>
+            ) : null}
+            {buddies ? (
+              <>
+                <Separator />
+                <BotBuddyRow agent={agent} />
               </>
             ) : null}
             <Separator />

@@ -1,4 +1,4 @@
-import type { PoseClips } from "./types.ts";
+import type { PoseClips } from "./types";
 
 /**
  * Resolve which pose id to actually play for a (possibly custom) pose.
