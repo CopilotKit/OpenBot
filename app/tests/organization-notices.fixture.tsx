@@ -14,12 +14,14 @@ import { OrganizationBoundary } from "@/components/organizations/organization-bo
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { signedInUser } from "@/lib/auth/queries";
+import { ReportedErrorComponent } from "@/lib/error-reporting";
 import { queryClient } from "@/query-client";
 import { Route as AppRoute } from "@/routes/_authed/_app";
 import { Route as RoutinesRoute } from "@/routes/_authed/_app/routines";
 
 /**
- * The app as organization-moving.test.tsx and organization-removed.test.tsx load it in a browser:
+ * The app as organization-moving.test.tsx, organization-removed.test.tsx and
+ * organization-held-reload.test.tsx load it in a browser:
  * the signed-in gate's first step (who is signed in, and the organization they work in), the
  * organization boundary `_authed` puts around everything, and the app's real frame (`_authed/_app`:
  * the strip, its panels and every bar over the page). Inside it, Routines is the real page; home is
@@ -60,6 +62,8 @@ const routinesRoute = createRoute({
 
 const router = createRouter({
   history: createBrowserHistory(),
+  // The app's own error boundary, as router.tsx gives every route.
+  defaultErrorComponent: ReportedErrorComponent,
   routeTree: rootRoute.addChildren([
     appRoute.addChildren([homeRoute, routinesRoute]),
   ]),

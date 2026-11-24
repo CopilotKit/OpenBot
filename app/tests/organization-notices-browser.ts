@@ -61,6 +61,9 @@ export const OWN = {
 /** What a person reads while their organization is moved (organizations/holds.ts in the backend). */
 export const MOVING =
   "OpenBot is moving this organization. Try again in a moment.";
+/** What a person reads while their organization's database can't be reached (db/shard-health.ts). */
+export const UNAVAILABLE =
+  "This organization is unavailable right now. Try again in a moment.";
 /** What an address the session decides answers somebody who left it (organizations/request.ts). */
 export const LEFT_REFUSAL =
   "You're no longer a member of the organization you were working in. Switch to another one.";
@@ -108,6 +111,16 @@ export class FakeServer {
   movingUntil = 0;
   /** How long the server asks a client to wait while it moves Northwind. */
   retryAfterSeconds = 2;
+  /** What the hold says: a move, or Northwind's database out of reach. Both answer the same way. */
+  holdSaid: string = MOVING;
+  /** A hold that lasts this long from the first request it refuses, however long that takes to come. */
+  private holdFromFirstRefusalMs: number | undefined;
+
+  /** Hold Northwind from now, until `ms` after the first request the hold refuses. */
+  holdFromFirstRefusal(ms: number): void {
+    this.holdFromFirstRefusalMs = ms;
+    this.movingUntil = Number.POSITIVE_INFINITY;
+  }
   /** How an address refuses somebody removed from Northwind; undefined while they are a member. */
   removed: "404" | "403" | undefined;
   /** Every organization the app asked the session to work in. */
@@ -150,10 +163,14 @@ export class FakeServer {
     if (organization === NORTHWIND.id && this.removed === "403")
       return { status: 403, json: { error: LEFT_REFUSAL } };
     if (organization === NORTHWIND.id && Date.now() < this.movingUntil) {
+      if (this.holdFromFirstRefusalMs !== undefined) {
+        this.movingUntil = Date.now() + this.holdFromFirstRefusalMs;
+        this.holdFromFirstRefusalMs = undefined;
+      }
       this.refusedForMove.set(rest, (this.refusedForMove.get(rest) ?? 0) + 1);
       return {
         status: 503,
-        json: problemBody(503, MOVING, "SERVICE_UNAVAILABLE"),
+        json: problemBody(503, this.holdSaid, "SERVICE_UNAVAILABLE"),
         contentType: "application/problem+json",
         headers: { "Retry-After": String(this.retryAfterSeconds) },
       };

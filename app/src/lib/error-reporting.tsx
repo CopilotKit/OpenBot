@@ -2,6 +2,7 @@ import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { CompanySignInPage } from "@/components/auth/company-sign-in-page";
 import { RouteError } from "@/components/layout/route-error";
+import { UnavailablePage } from "@/components/layout/unavailable-page";
 import { NoOrganizationPage } from "@/components/organizations/no-organization-page";
 import type { AppErrorSource } from "@/lib/api/generated/model";
 import { recordAppError } from "@/lib/api/generated/product-events/product-events";
@@ -9,6 +10,7 @@ import { idempotencyKey } from "@/lib/api/request";
 import { heldOutBySso } from "@/lib/auth/held-out";
 import { desktopShell } from "@/lib/desktop/shell";
 import { appVersion } from "@/lib/error-details";
+import { askAgainAfterMs, unavailableSaid } from "@/lib/load-failure";
 import { currentOrganizationId } from "@/lib/organizations/current";
 import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 
@@ -116,13 +118,24 @@ export function ReportedErrorComponent(props: ErrorComponentProps) {
   const { error } = props;
   const none = inNoOrganization(error);
   const heldOut = heldOutBySso(error);
+  // OpenBot holding off for now (an organization being moved, its database out of reach), in its own words.
+  const unavailable = unavailableSaid(error);
+  const answer = none || heldOut || unavailable !== undefined;
   useEffect(() => {
-    // Somebody in no organization, or held out until they sign in through their company, is an answer, not a fault:
-    // there is nothing to tell OpenBot.
-    if (!none && !heldOut) reportAppError("error_boundary", error);
-  }, [error, none, heldOut]);
+    // Somebody in no organization, or held out until they sign in through their company, or an organization that is
+    // briefly unavailable, is an answer, not a fault: there is nothing to tell OpenBot.
+    if (!answer) reportAppError("error_boundary", error);
+  }, [error, answer]);
   // Wherever it was found, it is answered with its own page, never the router's error screen.
   if (heldOut) return <CompanySignInPage refusal={error.message} />;
   if (none) return <NoOrganizationPage />;
+  if (unavailable !== undefined)
+    return (
+      <UnavailablePage
+        reset={props.reset}
+        retryAfterMs={askAgainAfterMs(error) ?? 0}
+        said={unavailable}
+      />
+    );
   return <RouteError {...props} />;
 }
