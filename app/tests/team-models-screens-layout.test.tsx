@@ -817,8 +817,9 @@ describe.skipIf(!asked)("a team's models", () => {
             await page.getByText("Recording and export").waitFor();
             await look(page, `activity-team-models-${tag}`);
 
-            // The Blocked view asks the server for refusals, a model's among them.
-            await page.getByRole("button", { name: "Blocked" }).click();
+            // The Blocked view asks the server for refusals, a model's among them. A tab of the
+            // current kit's views, as Figma's Activity draws them.
+            await page.getByRole("tab", { name: "Blocked" }).click();
             await page
               .getByRole("row")
               .filter({ hasText: "Use a model" })

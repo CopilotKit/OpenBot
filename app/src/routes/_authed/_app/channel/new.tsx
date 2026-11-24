@@ -37,11 +37,14 @@ import {
   agentQueryOptions,
 } from "@/lib/agents/queries";
 import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
-import { useStartChannel } from "@/lib/channels/start";
+import { fallbackBot, useStartChannel } from "@/lib/channels/start";
 import { useAttachmentLimits } from "@/lib/deployment/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
-import { useSkillCommands } from "@/lib/plugins/skill-commands";
+import {
+  useAnyBotSkillCommands,
+  useSkillCommands,
+} from "@/lib/plugins/skill-commands";
 import { searchTextEntry } from "@/lib/search-text";
 import { cn } from "@/lib/utils";
 import { newId } from "../../../../lib/new-id";
@@ -128,15 +131,17 @@ function NewConversation({ composition }: { composition: string }) {
   const { agent } = Route.useSearch();
   const queryClient = useQueryClient();
   const [creatingBot, setCreatingBot] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState<boolean | undefined>(undefined);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const navigate = Route.useNavigate();
-  const { startChosen, startGroup, pending } = useStartChannel();
+  const { startChosen, startGroup, startPicked, pending } = useStartChannel();
   const { data: profiles, isError: rosterError } = useQuery(
     agentListQueryOptions(),
   );
+  /** Who OpenBot can send to when nobody is in To:. Undefined only when the person has no Bot. */
+  const fallback = fallbackBot(profiles);
 
   const [error, setError] = useState<string | null>(null);
-  /** Enter or Send was pressed with nobody in To:. Said until a Bot is chosen. */
+  /** Enter or Send was pressed with no Bot to send to at all. Said until a Bot is chosen. */
   const [askedForBot, setAskedForBot] = useState(false);
   const pickerInput = useRef<HTMLInputElement>(null);
   // Optimistic seed shown before the first channel record exists.
@@ -160,13 +165,17 @@ function NewConversation({ composition }: { composition: string }) {
   });
   /*
    * The URL names a recipient up front (a Bot's own Message link). Without one, To: starts empty
-   * with the Bot menu open, in either edition and however many Bots there are: + is a question,
-   * who is this for, and the menu is the answer to pick from. A Bot picked on the person's behalf
-   * was one they had to notice and remove.
+   * and closed, and the caret is in the message, as on home: OpenBot picks the Bot when the
+   * message is sent (`startPicked`, home's own path), and To: is there for choosing one or more
+   * yourself. Asking who every conversation was for, with the menu open, was a question most
+   * people did not need to answer.
    *
-   * FOUND ON WINDOWS: a message typed with nobody in To: once went nowhere. The open menu says
-   * from the start that a Bot is needed, and Send with nobody picked says "Choose a Bot first."
-   * and opens it again, keeping the message.
+   * Nobody is put in To: on the person's behalf. A Bot picked for them there was one they had to
+   * notice and remove; To: says instead that OpenBot picks.
+   *
+   * FOUND ON WINDOWS: a message typed with nobody in To: once went nowhere. It now goes to the Bot
+   * OpenBot picks, and a failed start keeps it in the box with the reason. With no Bot at all to
+   * pick, Send keeps the message, says "Choose a Bot first." and opens To:, which offers New Bot.
    */
   const chosen = listed ?? (fetched?.id === agent ? fetched : undefined);
   const needsUrlAgentDetail =
@@ -217,15 +226,57 @@ function NewConversation({ composition }: { composition: string }) {
   const skillCommands = useSkillCommands(
     group ? "" : (recipients[0]?.id ?? ""),
   );
+  /*
+   * Nobody in To: is home's composer: `/` offers every skill any Bot has, and sending picks a Bot
+   * that has the one used.
+   */
+  const { commands: anyBotCommands } = useAnyBotSkillCommands(
+    recipients.length === 0
+      ? (profiles?.map((profile) => profile.id) ?? [])
+      : [],
+  );
   const attachmentLimits = useAttachmentLimits();
+
+  /** Nobody in To:: OpenBot picks the Bot, or the one named with `@`, exactly as home does. */
+  const submitToPicked = async (draft: ComposerDraft) => {
+    if (!draft.text.trim() && draft.attachments.length === 0) return;
+    setError(null);
+    setSent(seedMessage(draft.text, newId()));
+    try {
+      if (draft.agentId)
+        await startChosen(
+          draft.agentId,
+          draft.text,
+          null,
+          undefined,
+          draft.attachments,
+        );
+      else
+        await startPicked({
+          text: draft.text,
+          skills: draft.commandIds,
+          roster: profiles,
+          files: draft.attachments,
+        });
+    } catch (caught) {
+      // The words stay in the box, with the reason under them.
+      setSent(null);
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Couldn't start the conversation. Try again.",
+      );
+      throw caught;
+    }
+  };
 
   const submit = async (draft: ComposerDraft) => {
     const recipient = recipients[0];
-    if (
-      !recipient ||
-      !canSend(recipients, draft.text, draft.attachments.length)
-    )
+    if (!recipient) {
+      if (fallback) await submitToPicked(draft);
       return;
+    }
+    if (!canSend(recipients, draft.text, draft.attachments.length)) return;
     if (group) {
       // A group's messages carry words only, in this first message as in every later one. Files
       // held before a second Bot was added are refused out loud and stay on the strip.
@@ -294,8 +345,8 @@ function NewConversation({ composition }: { composition: string }) {
         <SidebarToggle className="-ml-3.5" />
         <span className="text-sm">To:</span>
         <Combobox
-          // Do not auto-open when a recipient is already chosen; the field is already answered.
-          open={pickerOpen ?? (!chosen && !loadError && !waitingForUrlAgent)}
+          // Never opens by itself: OpenBot picks unless the person opens it to choose.
+          open={pickerOpen}
           onOpenChange={setPickerOpen}
           autoHighlight
           multiple
@@ -335,14 +386,13 @@ function NewConversation({ composition }: { composition: string }) {
             ))}
             <ComboboxChipsInput
               ref={pickerInput}
-              // The popup opening is not enough on its own: typing filters through this input, so
-              // the caret starts here whenever the recipient question is still open. A recipient
-              // already chosen means the composer takes focus instead.
-              autoFocus={!chosen}
+              // Home's hint, said where the choice is made: nobody here means OpenBot picks.
               placeholder={
                 selected.length
                   ? "Add another Bot for a group…"
-                  : "Choose a Bot…"
+                  : fallback
+                    ? "OpenBot picks the right Bot, or choose one…"
+                    : "Choose a Bot…"
               }
             />
           </ComboboxChips>
@@ -429,13 +479,12 @@ function NewConversation({ composition }: { composition: string }) {
          * sent, so the people it is with are the ones picked here, and a first message can address
          * one of them as every later one can.
          */
-        agents={toAgentOptions(selected)}
-        // Choosing a coworker answers the "To:" field, so the message is what remains: the caret
-        // lands in the composer the moment a recipient exists, whether picked here or in the URL.
-        // Not before: an empty To: keeps the caret, even though the composer below takes words.
-        autoFocus={recipients.length > 0}
+        agents={toAgentOptions(selected.length ? selected : profiles)}
+        // The message is what the page is for, so the caret starts in it, with or without a Bot
+        // in To:. A Bot the URL names is waited for first (the composer is disabled until then).
+        autoFocus
         // Commands must be loaded before the first channel message is sent.
-        commands={skillCommands}
+        commands={recipients.length ? skillCommands : anyBotCommands}
         /*
          * Files are held until the first message creates the conversation, then sent with it. Not
          * for a group: its messages carry words only, so its composer offers no `+`.
@@ -452,13 +501,13 @@ function NewConversation({ composition }: { composition: string }) {
         }
         disabled={Boolean(loadError) || waitingForUrlAgent}
         /*
-         * WRITING FIRST IS FINE; SENDING WAITS FOR A BOT. The composer used to be disabled until To:
-         * had somebody in it, and a disabled composer is a dead end: it took a paste but no typing,
-         * no caret, and an Enter that went nowhere with nothing said. Now it takes words as home's
-         * does, and Enter or Send with nobody chosen opens To: and says why. The words stay put, and
-         * the caret comes back to them once a Bot is picked.
+         * NO BOT AT ALL: SENDING WAITS FOR ONE. The composer used to be disabled until To: had
+         * somebody in it, and a disabled composer is a dead end: it took a paste but no typing, no
+         * caret, and an Enter that went nowhere with nothing said. It takes words as home's does.
+         * With a Bot for OpenBot to pick, Enter sends; with none, Enter opens To: (where New Bot is)
+         * and says why. The words stay put, and the caret comes back to them once a Bot is picked.
          */
-        {...(recipients.length === 0
+        {...(recipients.length === 0 && !fallback
           ? {
               onSendHeld: () => {
                 setAskedForBot(true);

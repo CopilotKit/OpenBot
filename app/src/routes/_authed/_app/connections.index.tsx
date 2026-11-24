@@ -62,7 +62,7 @@ import {
   directoryAppsQueryOptions,
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { mayAddApps } from "@/lib/auth/roles";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
@@ -402,12 +402,12 @@ function RouteComponent() {
    */
   const role = useQuery(currentUserQueryOptions()).data?.role;
   /*
-   * WHO ADDS AN APP, decided by the one rule the app has for it (`isOrganizationAdmin`: an owner or
+   * WHO ADDS AN APP, decided by the one rule the app has for it (`mayAddApps`: an owner or
    * an admin of the organization being worked in), which is the server's `admin` too. On OpenBot
    * Cloud that is usually the one person who made their own organization, and they add and connect
    * an app here in one press, never by way of Admin. A member asks an admin for it.
    */
-  const mayAdd = personal || isOrganizationAdmin(role);
+  const mayAdd = mayAddApps(personal, role);
   const mayAddServer = mayAdd;
   const connectApp = useConnectApp();
   const paths = useManagePaths();
@@ -572,7 +572,7 @@ function RouteComponent() {
             variant={currentKit ? "default" : "outline"}
           >
             <IconPlus />
-            Add server
+            Add custom MCP
           </Button>
         ) : undefined
       }
