@@ -1692,6 +1692,97 @@ async function toTheAiStep(page: Page, hash = "") {
   await page.waitForTimeout(600);
 }
 
+describe.skipIf(!asked)("restored provider focus", () => {
+  test("at 720x560, Change and Escape reveal the whole previous provider and reselection reveals the form start", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 720, height: 560 },
+    });
+    try {
+      await toTheAiStep(page);
+      const heading = await page
+        .getByRole("heading", { name: "Connect your AI" })
+        .boundingBox();
+      await page.getByText("Any OpenAI-compatible endpoint").click();
+      await page.getByLabel("Base URL", { exact: true }).waitFor();
+      for (const key of ["Enter", "Escape", "Enter", "Escape"]) {
+        // Reading the first field leaves the form at the top before returning to the list.
+        await page.evaluate(() => {
+          document.querySelector<HTMLElement>(
+            ".provider-layout .setup-body",
+          )!.scrollTop = 0;
+          document
+            .querySelector<HTMLButtonElement>(".change-provider")!
+            .focus();
+        });
+        await page.keyboard.press(key);
+        await settled(page);
+        const restored = await page.evaluate(() => {
+          const body = document.querySelector<HTMLElement>(
+            ".provider-layout .setup-body",
+          )!;
+          const focused = document.activeElement as HTMLInputElement;
+          const tile = focused.closest(".tile")!;
+          const bounds = body.getBoundingClientRect();
+          const box = tile.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            box.left + box.width / 2,
+            box.top + box.height / 2,
+          );
+          return {
+            provider: focused.value,
+            whole:
+              box.top >= bounds.top &&
+              box.bottom <= bounds.bottom &&
+              box.left >= bounds.left &&
+              box.right <= bounds.right,
+            hit: !!hit && tile.contains(hit),
+            overflow:
+              document.documentElement.scrollHeight > innerHeight ||
+              document.documentElement.scrollWidth > innerWidth,
+          };
+        });
+        expect(restored).toEqual({
+          provider: "openai-compatible",
+          whole: true,
+          hit: true,
+          overflow: false,
+        });
+        expect(
+          await page
+            .getByRole("heading", { name: "Connect your AI" })
+            .boundingBox(),
+        ).toEqual(heading);
+        // Space activates the restored radio without a pointer scrolling it for us.
+        await page.keyboard.press("Space");
+        await page.getByLabel("Base URL", { exact: true }).waitFor();
+        await settled(page);
+        expect(
+          await page.evaluate(() => {
+            const body = document.querySelector<HTMLElement>(
+              ".provider-layout .setup-body",
+            )!;
+            const bounds = body.getBoundingClientRect();
+            const field = body.querySelector<HTMLInputElement>("#base")!;
+            const box = field.getBoundingClientRect();
+            return {
+              atStart: body.scrollTop === 0,
+              firstFieldWhole:
+                box.top >= bounds.top && box.bottom <= bounds.bottom,
+            };
+          }),
+        ).toEqual({ atStart: true, firstFieldWhole: true });
+        expect(
+          await page
+            .getByRole("heading", { name: "Connect your AI" })
+            .boundingBox(),
+        ).toEqual(heading);
+      }
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+});
+
 const PROVIDERS = [
   "OpenAI",
   "Anthropic",

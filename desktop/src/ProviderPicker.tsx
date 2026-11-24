@@ -288,20 +288,26 @@ export function ProviderPicker({
   // stringifying it printed "[object Object]" where the diagnosis should have been.
   const [failure, setFailure] = useState<Problem | null>(null);
   const providerPickerRef = useRef<HTMLFieldSetElement>(null);
+  const setupBodyRef = useRef<HTMLDivElement>(null);
   const restoreProviderFocus = useRef<string | null>(null);
   useEffect(() => {
+    // A new authentication form starts at its beginning, regardless of catalogue scroll.
+    if (open !== null && setupBodyRef.current)
+      setupBodyRef.current.scrollTop = 0;
     if (!restoreProviderFocus.current) return;
     const provider = open ?? restoreProviderFocus.current;
     restoreProviderFocus.current = null;
     // The fieldset remounts when moving between the catalogue and anchored selection.
     // Returning clears the selection, so find the previous provider by value, not :checked.
-    Array.from(
+    const input = Array.from(
       providerPickerRef.current?.querySelectorAll<HTMLInputElement>(
         'input[name="provider"]',
       ) ?? [],
-    )
-      .find((input) => input.value === provider)
-      ?.focus({ preventScroll: true });
+    ).find((input) => input.value === provider);
+    input?.focus({ preventScroll: open !== null });
+    // The hidden radio is only one pixel tall; reveal its whole visible label as well.
+    if (open === null)
+      input?.closest(".tile")?.scrollIntoView({ block: "nearest" });
   }, [open]);
   const openRef = useRef(open);
   const signInRunRef = useRef(0);
@@ -755,7 +761,7 @@ export function ProviderPicker({
 
         {row && <div className="setup-provider-identity">{providerPicker}</div>}
 
-        <div className="setup-body">
+        <div ref={setupBodyRef} className="setup-body">
           {!row && providerPicker}
 
           {row && (

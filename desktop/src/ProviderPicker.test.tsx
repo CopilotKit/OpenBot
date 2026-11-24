@@ -259,7 +259,9 @@ test("provider catalogue scrolls separately from the anchored selection and acti
   ).toBe(body);
   expect(body?.querySelector(".setup-panel")).toBeNull();
 
+  body.scrollTop = 100;
   await pick(view, /^OpenAI-compatible/);
+  expect(body.scrollTop).toBe(0);
   expect(
     document.activeElement ===
       view.getByRole("radio", { name: /^OpenAI-compatible/ }),
