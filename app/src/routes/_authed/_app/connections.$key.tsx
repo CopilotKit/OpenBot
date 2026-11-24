@@ -24,6 +24,7 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import { GrantList } from "@/components/plugins/grant-list";
+import { KeyVersionOffer } from "@/components/plugins/key-version";
 import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { Button } from "@/components/ui/button";
 import {
@@ -669,6 +670,15 @@ function AppConnectionPage({
             />
             {switchRow}
           </PageRows>
+          {/*
+           * The same app with its key, for an app the directory lists as a sign-in in place of its
+           * key, offered to somebody who may add apps: adding it here connects it, as Browse apps
+           * does from Connections.
+           */}
+          {server.connectsWith === "sign-in" &&
+          (paths.edition === "personal" || isOrganizationAdmin(role)) ? (
+            <KeyVersionOffer appId={key} mode="connect" title={server.title} />
+          ) : null}
         </PageSection>
 
         {perActionGrants ? (

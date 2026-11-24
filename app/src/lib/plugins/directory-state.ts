@@ -42,6 +42,20 @@ export function directoryConnect(
   }
 }
 
+/**
+ * The directory entry that offers this app's key version, while it isn't added: for an app added as
+ * the sign-in an entry lists in place of its key. Undefined for any other app, and from a server that
+ * doesn't say (no `keyVersion`).
+ */
+export function keyVersionOffer(
+  entries: readonly DirectoryApp[] | undefined,
+  appId: string,
+): DirectoryApp | undefined {
+  return entries?.find(
+    (entry) => entry.appId === appId && entry.keyVersion?.appId === null,
+  );
+}
+
 export function directoryAppState(
   app: Pick<DirectoryApp, "appId" | "connectsWith">,
   input: {

@@ -3,6 +3,7 @@ import type {
   App,
   AppDirectoryEntry,
   AppSetup,
+  DirectoryKeyVersion,
 } from "@/lib/api/generated/model";
 import { appKeys, type CatalogueItem } from "@/lib/apps/queries";
 
@@ -101,6 +102,8 @@ export type TodayDirectoryApp = {
     kind: "consent" | "self-registering" | "fields" | "no-auth" | "unsupported";
   };
   enabled?: boolean;
+  /** The same app connected with a key, for one listed as a sign-in in place of its key. */
+  keyVersion?: DirectoryKeyVersion;
 };
 
 /** A deployment, described as today's routes answered it. */
@@ -288,6 +291,7 @@ export function appDirectoryEntries(
                   : app.connection.kind === "no-auth"
                     ? "nothing"
                     : "sign-in",
+              ...(app.keyVersion ? { keyVersion: app.keyVersion } : {}),
             };
           });
   return [...catalogue, ...directory];

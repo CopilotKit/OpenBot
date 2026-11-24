@@ -24,6 +24,7 @@ import {
   NotConnected,
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
+import { KeyVersionOffer } from "@/components/plugins/key-version";
 import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
 import { AppTeamGrantsRow } from "@/components/team-grants/team-grants-row";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,8 @@ import {
   appsQueryOptions,
   catalogueQueryOptions,
 } from "@/lib/apps/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { storeMcpToken } from "@/lib/credentials/mutations";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -278,6 +281,8 @@ export function PluginPage({
   // One person: adding and connecting are one step, and nothing here is about other people.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  // Whether this person may add apps, for the offer of an app's key version below.
+  const role = useQuery(currentUserQueryOptions()).data?.role;
   // Whose vault a secret saved here goes into: each organization has its own.
   const vaultOwner = personal ? "OpenBot" : "this organization";
   // Routines is on for every Bot in every edition and has no off switch. See personal-defaults.ts.
@@ -1318,6 +1323,21 @@ export function PluginPage({
               </>
             ) : null}
           </PageRows>
+
+          {/*
+           * THE SAME APP WITH ITS KEY, for an app the directory lists as a sign-in in place of its
+           * key: a quiet second way to add it, for somebody who may add apps. Connected as you add
+           * it in the personal edition; only added in Admin, where each person connects their own.
+           */}
+          {auth === "brokered" &&
+          server?.connectsWith === "sign-in" &&
+          (personal || isOrganizationAdmin(role)) ? (
+            <KeyVersionOffer
+              appId={key}
+              mode={personal ? "connect" : "add"}
+              title={server.title}
+            />
+          ) : null}
 
           {auth === "user-oauth" ? (
             <div className="mt-3 p-3">
