@@ -31,6 +31,11 @@ import {
 import { personBody } from "./accounts-api";
 import { type AppsFixture, answerAppsApi, appBody } from "./apps-api";
 import { connectionBody } from "./connections-api";
+import {
+  MEMBERS_PATH,
+  membersResponse,
+  organizationMember,
+} from "./organizations-api";
 
 /**
  * After a move to OpenBot Cloud, the apps the move listed to connect again (their sign-ins stay on
@@ -73,6 +78,15 @@ const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";
 const ORGANIZATION = "/api/v2/organizations/default";
 const ME = `${ORGANIZATION}/people/me`;
+/** The organization's people: a member says who its owner and admin are. */
+const ORGANIZATION_MEMBERS = [
+  organizationMember("Sam Rivera", "sam@example.com", "member"),
+  organizationMember("Ines Duarte", "ines@example.com", "admin"),
+  organizationMember("Priya Raman", "priya@example.com", "owner"),
+];
+/** What a member reads about an app only an admin can turn on, with who the admins are. */
+const SLACK_WAITS =
+  "An admin has to turn Slack on before you can connect it: Priya Raman (priya@example.com) or Ines Duarte (ines@example.com).";
 
 const WIDE = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
@@ -282,6 +296,8 @@ class FakeServer {
   saves: unknown[] = [];
   /** Every request this server could not answer. */
   unanswered: string[] = [];
+  /** How many times the app read the organization's members. */
+  membersAsks = 0;
   /** The organization's apps, which an admin's add grows. */
   apps: AppsFixture = { ...APPS, servers: [...(APPS.servers ?? [])] };
   /** Every app added, by the entry it was asked for. */
@@ -487,6 +503,12 @@ class FakeServer {
         status: 200,
         json: ConnectAppResponse.parse(this.start(appId, body.values)),
       };
+    }
+    // Who a member is told to go to for an app only an admin can turn on.
+    if (path === MEMBERS_PATH && method === "GET") {
+      this.membersAsks += 1;
+      const members = membersResponse(url.toString(), ORGANIZATION_MEMBERS);
+      return { status: members.status, json: await members.json() };
     }
     const apps = answerAppsApi(url.toString(), { method }, this.apps);
     if (apps) return { status: apps.status, json: await apps.json() };
@@ -966,10 +988,14 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
       const page = await open("/reconnect", server, engine);
       try {
         await row(page, "googlecalendar").waitFor();
-        // Slack isn't added in this organization, and only an admin may add it.
-        await row(page, "slack")
-          .getByText("An admin has to turn Slack on before you can connect it.")
-          .waitFor();
+        // Slack isn't added in this organization, and only an admin may add it: named, owner first.
+        await row(page, "slack").getByText(SLACK_WAITS).waitFor();
+        await shoot(page, "member-waits", engine, "light", WIDE);
+        if (shots) {
+          await page.setViewportSize(PHONE);
+          await shoot(page, "member-waits", engine, "light", PHONE);
+          await page.setViewportSize(WIDE);
+        }
         expect(
           await row(page, "slack")
             .getByRole("button", { name: "Reconnect" })
@@ -978,9 +1004,7 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         // Opened straight from OpenBot Desktop: back to the list, never a page that isn't there.
         await page.goto(`${ORIGIN}/reconnect/slack`);
         await page.waitForURL((url) => url.pathname === "/reconnect");
-        await row(page, "slack")
-          .getByText("An admin has to turn Slack on before you can connect it.")
-          .waitFor();
+        await row(page, "slack").getByText(SLACK_WAITS).waitFor();
         expect(server.added).toEqual([]);
         await row(page, "googlecalendar")
           .getByRole("button", { name: "Dismiss Google Calendar" })
@@ -1061,6 +1085,11 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
           .getByRole("button", { name: "Try again" })
           .waitFor();
         expect(server.added).toEqual(["directory:slack", "directory:linear"]);
+        // An admin adds it themselves, so is never told who the admins are.
+        expect(await page.getByText(/northwind|example\.com\)/).count()).toBe(
+          0,
+        );
+        expect(server.membersAsks).toBe(0);
         await shoot(page, "admin-refused", engine, "light", WIDE);
       } finally {
         await page.close();

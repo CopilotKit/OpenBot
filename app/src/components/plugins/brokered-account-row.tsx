@@ -1,6 +1,6 @@
 import { IconArrowUpRight, IconUser } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ConnectionFields } from "@/components/plugins/connection-fields";
 import { ConsentHandoffDialog } from "@/components/plugins/consent-handoff";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,9 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { vendorNameOf } from "@/lib/apps/vendor-name";
+import { failureSaid } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
+import { type AdminName, withAdmins } from "@/lib/organizations/admin-names";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import {
   brokeredConsentFor,
@@ -253,7 +255,7 @@ export type BrokeredAccount = {
    * broker key at all, which is an administrator's to set. A dialog saying "that app could not be
    * asked what it needs" is true of all four and useful about none.
    */
-  fieldsError: string | null;
+  fieldsError: ReactNode;
   /**
    * Finish the connection with what the person typed.
    *
@@ -818,7 +820,7 @@ export function useBrokeredAccount(input: {
       fieldsRequest.mutate(serverId);
     },
     requestingFields: fieldsRequest.isPending,
-    fieldsError: fieldsRequest.error?.message ?? null,
+    fieldsError: failureSaid(fieldsRequest.error),
     submitFields: (values: Record<string, string>) => {
       report(null);
       submission.mutate({ serverId, values });
@@ -881,6 +883,8 @@ function formatDate(iso: string): string {
  */
 function accountSentence(input: {
   account: BrokeredAccount;
+  /** Who a member is told to ask where connecting apps isn't set up (`withAdmins`). */
+  admins: readonly AdminName[];
   /** The app's own name, as the screen drawing this row knows it. */
   title: string;
   connectedDescription: string;
@@ -898,6 +902,7 @@ function accountSentence(input: {
 }): string {
   const {
     account,
+    admins,
     connectedDescription,
     edition,
     disconnectedDescription,
@@ -910,7 +915,11 @@ function accountSentence(input: {
   } = input;
 
   if (!account.configured) {
-    return brokeredKeyMissing(provider, edition, reader, hosted);
+    const missing = brokeredKeyMissing(provider, edition, reader, hosted);
+    // Only a person's sentence asks an admin; the admin's names what to set.
+    return reader === "person" && edition === "team"
+      ? withAdmins(missing, admins)
+      : missing;
   }
 
   if (account.kind === "no-auth") {
@@ -1088,6 +1097,7 @@ export function NotConnected() {
  */
 export function BrokeredAccountRow({
   account,
+  admins = [],
   connectedDescription,
   edition = "team",
   disconnectedDescription,
@@ -1099,6 +1109,11 @@ export function BrokeredAccountRow({
   startConnect = false,
   title,
 }: {
+  /**
+   * The organization's admins, for a member told to ask one to set connecting apps up: the sentence
+   * names them (`withAdmins`). Empty for an admin, and wherever nobody is to be named.
+   */
+  admins?: readonly AdminName[];
   /**
    * Start connecting on arrival, once, for an app that isn't connected: the key form for an app that
    * takes a key (Browse apps sends somebody here straight after adding one), the sign-in for one
@@ -1287,6 +1302,7 @@ export function BrokeredAccountRow({
               ? `You connected ${accounts.length} ${vendorNameOf(title)} accounts. Bots use your default account unless you ask for another.`
               : accountSentence({
                   account,
+                  admins,
                   connectedDescription,
                   edition,
                   disconnectedDescription,

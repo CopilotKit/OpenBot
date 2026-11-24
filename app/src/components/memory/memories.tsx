@@ -41,6 +41,7 @@ import {
   updateMemoryMutationOptions,
 } from "@/lib/memory";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * A fact the person tells their Bots directly. It reaches every one of them.
@@ -105,7 +106,7 @@ export function RememberFact() {
             </form>
             {remember.error ? (
               <p role="alert" className="text-destructive text-sm">
-                {remember.error.message}
+                {failureSaid(remember.error)}
               </p>
             ) : null}
           </DialogBody>
@@ -153,7 +154,7 @@ export function MemoryList({
     >
       {memories.isPending ? null : memories.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {memories.error.message}
+          {failureSaid(memories.error)}
         </p>
       ) : memories.data.length ? (
         <PageRows>
@@ -311,7 +312,7 @@ function MemoryRow({
         </ItemFooter>
         {!editing && (save.error || forget.error) && (
           <p role="alert" className="text-destructive text-sm">
-            {save.error?.message || forget.error?.message}
+            {failureSaid(save.error ?? forget.error)}
           </p>
         )}
       </ItemContent>
@@ -336,7 +337,7 @@ function MemoryRow({
               { onSuccess: () => setEditing(false) },
             )
           }
-          error={save.error?.message ?? null}
+          error={failureSaid(save.error)}
           saving={save.isPending}
         />
       ) : null}
@@ -360,7 +361,7 @@ function EditMemoryDialog({
 }: {
   memory: MemoryRecord;
   saving: boolean;
-  error: string | null;
+  error: ReactNode;
   onSave: (content: string) => void;
   onClose: () => void;
 }) {

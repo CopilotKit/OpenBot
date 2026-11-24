@@ -29,6 +29,7 @@ import {
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import { loadFailure } from "@/lib/load-failure";
 import {
   afterOnboarding,
   onboardingDestination,
@@ -493,7 +494,10 @@ function OnboardingSteps() {
           className="text-sm text-center text-destructive lg:text-left"
           role="alert"
         >
-          Couldn't load your setup. Try again to continue.
+          {loadFailure(
+            capabilitiesError,
+            "Couldn't load your setup. Try again to continue.",
+          )}
         </p>
         <Button
           disabled={loadingCapabilities}

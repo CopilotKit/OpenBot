@@ -15,6 +15,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { CopyButton } from "@/components/copy-button";
 import {
   PageCard,
   PageEmpty,
@@ -22,7 +23,6 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { CopyButton } from "@/components/copy-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import {
   helmLines,
   MANAGEMENT_SENTENCE,
@@ -125,7 +126,12 @@ export function ManagementPage() {
   if (!personal && management.error)
     return (
       <PageShell description={DESCRIPTION} title={TITLE}>
-        <Notice>Couldn't load managed updates. Try again in a moment.</Notice>
+        <Notice>
+          {loadFailure(
+            management.error,
+            "Couldn't load managed updates. Try again in a moment.",
+          )}
+        </Notice>
       </PageShell>
     );
   if (personal || !management.data?.applies)

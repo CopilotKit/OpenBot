@@ -25,6 +25,7 @@ import {
 import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * One thing a Bot's check-in found: what it is, a line of why, where it was read, and what to do
@@ -156,7 +157,7 @@ export function SuggestionRow({
         ) : null,
         error ? (
           <span className="text-destructive" key="error" role="alert">
-            {error.message}
+            {failureSaid(error)}
           </span>
         ) : null,
       ]}

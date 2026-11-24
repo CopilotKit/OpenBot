@@ -23,7 +23,14 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
+import {
+  type AdminName,
+  sentTo,
+  withAdmins,
+} from "@/lib/organizations/admin-names";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * One work app's state for the person looking, and the one thing they can do about it.
@@ -48,15 +55,36 @@ import { queryClient } from "@/query-client";
  */
 
 /**
+ * Whether the sentence for this app tells the person looking that only an admin can take the step:
+ * a member of the team edition, for the states an admin fixes. Where it does, the screen reads the
+ * organization's admins (`useOrganizationAdmins`) and the sentence names them.
+ */
+export function namesAnAdmin(
+  access: AppAccess,
+  edition: "team" | "personal",
+  admin: boolean,
+): boolean {
+  if (admin || edition !== "team") return false;
+  return (
+    access.state === "not_granted" ||
+    access.state === "disabled" ||
+    access.state === "shared_not_connected" ||
+    access.state === "shared_not_approved"
+  );
+}
+
+/**
  * What the person is told about one app, in words that say whose move it is. `bot` is the Bot's name,
  * for the one state that asks the person a question about it. `admin` is whether the person looking
  * is an admin, who is offered the step itself (`AdminAction`) and so is never told to ask one.
+ * `admins` are who a member is told to go to where only an admin can take the step (`withAdmins`).
  */
 export function appAccessSentence(
   access: AppAccess,
   bot?: string,
   edition: "team" | "personal" = "team",
   admin = false,
+  admins: readonly AdminName[] = [],
 ): string {
   const name = access.displayName;
   const owners = access.accountHolder === "owner";
@@ -93,13 +121,22 @@ export function appAccessSentence(
         ? `This Bot uses its owner's ${name} account, which needs reconnecting. Only the Bot's owner can reconnect it.`
         : `Your ${name} connection needs reconnecting.`;
     case "shared_not_connected":
-      return `Your organisation's ${name} account isn't connected yet. Only an admin can connect it.`;
+      return withAdmins(
+        `Your organisation's ${name} account isn't connected yet. Only an admin can connect it.`,
+        admins,
+      );
     case "shared_not_approved":
-      return `This Bot reaches more people than an admin approved for your organisation's ${name} account. Only an admin can approve it.`;
+      return withAdmins(
+        `This Bot reaches more people than an admin approved for your organisation's ${name} account. Only an admin can approve it.`,
+        admins,
+      );
     case "disabled":
-      return disabledSentence(access, edition);
+      return disabledSentence(access, edition, admins);
     case "not_granted":
-      return `This Bot hasn't been given ${name}. Only an admin can give it.`;
+      return withAdmins(
+        `This Bot hasn't been given ${name}. Only an admin can give it.`,
+        admins,
+      );
     case "owner_grantable": {
       const yours = access.account === "personal" ? `your ${name}` : name;
       const ask = `Let ${bot ?? "this Bot"} use ${yours}?`;
@@ -144,6 +181,7 @@ function adminSentence(access: AppAccess): string | null {
 function disabledSentence(
   access: AppAccess,
   edition: "team" | "personal",
+  admins: readonly AdminName[],
 ): string {
   const name = access.displayName;
   // Nobody else to ask in the personal edition: the person is told what is missing, and Set it up
@@ -154,13 +192,22 @@ function disabledSentence(
       : `${name} isn't fully set up yet. Set it up to finish.`;
   switch (access.unavailable) {
     case "directory_unavailable":
-      return `${name} isn't set up yet. An admin has to turn it on.`;
+      return withAdmins(
+        `${name} isn't set up yet. An admin has to turn it on.`,
+        admins,
+      );
     case "scheme_unreadable":
     case "oauth_client_missing":
     case "token_missing":
-      return `${name} isn't fully set up yet. Only an admin can finish setting it up.`;
+      return withAdmins(
+        `${name} isn't fully set up yet. Only an admin can finish setting it up.`,
+        admins,
+      );
     default:
-      return `${name} isn't turned on yet. Only an admin can turn it on.`;
+      return withAdmins(
+        `${name} isn't turned on yet. Only an admin can turn it on.`,
+        admins,
+      );
   }
 }
 
@@ -179,13 +226,19 @@ function disabledSentence(
  * - the three an administrator fixes — Request access, which files the request the server decides
  *   the kind of, and then Requested with a way to withdraw it. Pressed by an administrator, it would
  *   be a request to themselves, so they get the fix itself instead: see `AdminAction`.
+ *
+ * `actions` are the actions of the app a Bot that holds it needs and wasn't given, from a card the
+ * Bot put up for them (`AppAccessCard`, a `tools` prompt). Every press below then gives, or asks
+ * for, exactly those, where without them it gives the app's read-only actions.
  */
 export function AppAccessAction({
   agentId,
   access,
+  actions,
 }: {
   agentId: string;
   access: AppAccess;
+  actions?: string[];
 }) {
   /*
    * WHO IS LOOKING decides only which button is drawn, never what is allowed: the server answers
@@ -216,7 +269,14 @@ export function AppAccessAction({
    */
   return (
     <>
-      {appAccessButton({ access, agentId, personal, role: me?.role, tab })}
+      {appAccessButton({
+        access,
+        actions,
+        agentId,
+        personal,
+        role: me?.role,
+        tab,
+      })}
       {tab.consentStep}
     </>
   );
@@ -329,12 +389,14 @@ function signsInFirst(access: AppAccess): boolean {
 /** Which of the buttons below an app's state calls for, or nothing where it is ready. */
 function appAccessButton({
   access,
+  actions,
   agentId,
   personal,
   role,
   tab,
 }: {
   access: AppAccess;
+  actions: string[] | undefined;
   agentId: string;
   personal: boolean;
   role: string | null | undefined;
@@ -342,8 +404,13 @@ function appAccessButton({
 }) {
   if (access.state === "ready" || access.state === "shared_not_approved")
     return null;
+  /*
+   * The personal edition's Connect is for an app not turned on yet. Actions not given, of an app the
+   * Bot already holds, are the give itself, which the one person takes as an admin does.
+   */
   if (
     personal &&
+    !(actions && access.state === "not_granted") &&
     (access.state === "not_granted" ||
       (access.state === "disabled" &&
         (access.unavailable === null || access.unavailable === "absent")))
@@ -357,10 +424,24 @@ function appAccessButton({
     return <ConnectAction access={access} tab={tab} />;
   // Theirs to give, admin or not: an owner's grant keeps every call on the asker's own account.
   if (access.state === "owner_grantable")
-    return <OwnerGiveAction access={access} agentId={agentId} tab={tab} />;
+    return (
+      <OwnerGiveAction
+        access={access}
+        actions={actions}
+        agentId={agentId}
+        tab={tab}
+      />
+    );
   if (isOrganizationAdmin(role))
-    return <AdminAction agentId={agentId} access={access} tab={tab} />;
-  return <RequestAction agentId={agentId} access={access} />;
+    return (
+      <AdminAction
+        access={access}
+        actions={actions}
+        agentId={agentId}
+        tab={tab}
+      />
+    );
+  return <RequestAction access={access} actions={actions} agentId={agentId} />;
 }
 
 /**
@@ -384,14 +465,21 @@ function appAccessButton({
  * nobody connected all need something only typed or consented to on the app's admin page. That page
  * opens in a new tab so the conversation stays where it is, and the card reads the app again when
  * this tab has the focus back.
+ *
+ * NAMED ACTIONS ARE GIVEN AS NAMED. With `actions` the press gives exactly those, and never waits
+ * for a sign-in first: the actions are already known, so there is no list to wait for. A sign-in
+ * the admin still owes comes after, as above, and an app they have already connected is given with
+ * no tab opened at all.
  */
 function AdminAction({
   agentId,
   access,
+  actions,
   tab,
 }: {
   agentId: string;
   access: AppAccess;
+  actions: string[] | undefined;
   tab: ConnectInNewTab;
 }) {
   const paths = useManagePaths();
@@ -421,7 +509,7 @@ function AdminAction({
     stopWaiting();
     // Its tools are listed now, so this press gives them. A refusal is drawn from `approve.error`.
     approve
-      .mutateAsync({ agentId, app: access.key })
+      .mutateAsync({ agentId, app: access.key, actions })
       .then(() => queryClient.invalidateQueries())
       .catch(() => queryClient.invalidateQueries());
   }, [signedIn, access.state]);
@@ -472,15 +560,16 @@ function AdminAction({
           disabled={approve.isPending || tab.pending}
           onClick={() => {
             approve.reset();
-            pending.current = signsInFirst(access);
+            pending.current = !actions && signsInFirst(access);
             /*
              * Awaited, not given callbacks: turning it on refetches this app and can swap this
              * button for another, and TanStack Query drops a `mutate()` callback once nothing is
              * listening. A refusal is drawn from `approve.error`.
              */
             const turnOn = () =>
-              approve.mutateAsync({ agentId, app: access.key });
-            if (access.connect === "key")
+              approve.mutateAsync({ agentId, app: access.key, actions });
+            // Named actions with no sign-in owed: given, and no tab is claimed only to be closed.
+            if (access.connect === "key" || (actions && !signsInFirst(access)))
               connectOnceOn.withoutTab(access.key, turnOn);
             else connectOnceOn.claimingTab(access.key, turnOn);
           }}
@@ -552,14 +641,18 @@ function AdminAction({
  *
  * AND THEN THE TASK CARRIES ON. Every query is read again once the app is given, so the card sees the
  * app ready and carries the conversation on (`lib/copilot/carry-on.ts`).
+ *
+ * With `actions`, the press gives exactly those, for a Bot that holds the app and needs them too.
  */
 function OwnerGiveAction({
   agentId,
   access,
+  actions,
   tab,
 }: {
   agentId: string;
   access: AppAccess;
+  actions: string[] | undefined;
   tab: ConnectInNewTab;
 }) {
   const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
@@ -571,7 +664,7 @@ function OwnerGiveAction({
 
   const giveNow = () =>
     give.mutate(
-      { agentId, app: access.key },
+      { agentId, app: access.key, actions },
       { onSuccess: () => void queryClient.invalidateQueries() },
     );
 
@@ -895,19 +988,29 @@ function ConnectAction({
   );
 }
 
-/** A step only an administrator can take: ask for it, and withdraw the ask. */
+/**
+ * A step only an administrator can take: ask for it, and withdraw the ask. With `actions`, the
+ * request asks for exactly those, and approving it gives them.
+ */
 function RequestAction({
   agentId,
   access,
+  actions,
 }: {
   agentId: string;
   access: AppAccess;
+  actions: string[] | undefined;
 }) {
   const request = useMutation(requestAppAccessMutationOptions(queryClient));
   const cancel = useMutation(
     cancelAppAccessRequestMutationOptions(queryClient),
   );
   const error = request.error ?? cancel.error;
+  /*
+   * WHO IT WENT TO, beside Requested: the organization's admins, any of whom can answer it, so the
+   * person knows who to follow up with. Nothing more while they are read, or if they can't be.
+   */
+  const sent = sentTo(useOrganizationAdmins(access.request !== null));
 
   /*
    * FOCUS FOLLOWS THE PRESS. Request access and Withdraw replace each other, so the button somebody
@@ -943,14 +1046,28 @@ function RequestAction({
     <div className="flex flex-wrap items-center justify-end gap-2">
       {error ? (
         <p className="text-destructive text-xs" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {access.request ? (
         <>
-          <span className="text-muted-foreground text-xs" role="status">
-            Requested
-          </span>
+          {sent ? (
+            /*
+             * Requested, and under it who it went to, in a narrow column: on a Bot's Apps row the
+             * names wrap beside Withdraw and the app's own sentence keeps the width it had.
+             */
+            <span
+              className="flex max-w-56 flex-col items-end text-right text-muted-foreground text-xs"
+              role="status"
+            >
+              <span>Requested</span>
+              <span>{sent}</span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground text-xs" role="status">
+              Requested
+            </span>
+          )}
           <Button
             aria-label={
               cancel.isPending
@@ -981,7 +1098,7 @@ function RequestAction({
           onClick={() => {
             cancel.reset();
             pressed.current = true;
-            request.mutate({ agentId, app: access.key }, refocus);
+            request.mutate({ agentId, app: access.key, actions }, refocus);
           }}
           ref={control}
           size="sm"

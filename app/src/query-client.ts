@@ -4,6 +4,7 @@ import {
   focusManager,
   hashKey,
   MutationCache,
+  type Query,
   QueryCache,
   QueryClient,
   type QueryKey,
@@ -23,7 +24,10 @@ import {
   currentOrganizationId,
   onOrganizationChange,
 } from "@/lib/organizations/current";
+import { askAgainAfterMs } from "@/lib/load-failure";
 import { inNoOrganization } from "@/lib/organizations/in-no-organization";
+import { refusedInOrganization } from "@/lib/organizations/left";
+import { askWhetherStillMember } from "@/lib/organizations/queries";
 
 /**
  * What is the same whichever organization the person works in: the list of their organizations,
@@ -86,7 +90,10 @@ focusManager.setEventListener((handleFocus) => {
  *
  * Being in no organization is an answer, not a failure: asking again at once says the same and only
  * holds the page back, so it is never retried. So is being held out until signing in through the
- * company (`heldOutBySso`). Said here rather than in one query's options, where it
+ * company (`heldOutBySso`), and a refusal that may mean the person left the organization
+ * (`refusedInOrganization`), which reads their organizations instead. A 503 that says when to ask
+ * again is not retried at once either: the screen shows its sentence, and the read is asked again
+ * after the time it gave (`askAgainWhenTold`). Said here rather than in one query's options, where it
  * would replace the retry rule this client was given.
  */
 class OpenBotQueryClient extends QueryClient {
@@ -136,7 +143,13 @@ class OpenBotQueryClient extends QueryClient {
       ...retryWhileConnectionLost<TError>(
         this,
         (failureCount, error) => {
-          if (inNoOrganization(error) || heldOutBySso(error)) return false;
+          if (
+            inNoOrganization(error) ||
+            heldOutBySso(error) ||
+            refusedInOrganization(error) ||
+            askAgainAfterMs(error) !== undefined
+          )
+            return false;
           if (typeof retry === "function") return retry(failureCount, error);
           if (typeof retry === "number") return failureCount < retry;
           return retry;
@@ -156,9 +169,63 @@ function holdOutWhenRefusedForIt(error: unknown): void {
   holdOut(error instanceof Error ? error.message : HELD_OUT_NOW);
 }
 
+/** Any read in the cache, as its events hand it over. */
+type AnyQuery = Query<unknown, unknown, unknown>;
+
+/** The reads already asked again once after a 503's Retry-After, until one of them answers. */
+const askedAgain = new WeakSet<AnyQuery>();
+
+/**
+ * A read refused 503 with a Retry-After (an organization being moved, `lib/load-failure.ts`): asked
+ * again once, by itself, after that long, so the screen fills in when OpenBot is back. Not when the
+ * read is gone by then (the person works in another organization now) or nobody shows it any more:
+ * the next screen that wants it asks for it afresh.
+ */
+function askAgainWhenTold(error: unknown, query: AnyQuery): void {
+  const wait = askAgainAfterMs(error);
+  if (wait === undefined || askedAgain.has(query)) return;
+  askedAgain.add(query);
+  setTimeout(() => {
+    if (queryClient.getQueryCache().get(query.queryHash) !== query) return;
+    if (!query.isActive()) {
+      askedAgain.delete(query);
+      return;
+    }
+    void query.fetch().catch(() => undefined);
+  }, wait);
+}
+
+/**
+ * A refusal that may mean the person is no longer a member of the organization they work in: their
+ * organizations are read again, which moves them to one they are still in when it is so
+ * (lib/organizations/left.ts). Not for a read of that list itself, which would ask it again forever.
+ */
+function askWhetherStillMemberWhenRefused(
+  error: unknown,
+  queryKey: QueryKey | undefined,
+): void {
+  if (!refusedInOrganization(error) || queryKey?.[0] === "organizations")
+    return;
+  void askWhetherStillMember(queryClient);
+}
+
 export const queryClient = new OpenBotQueryClient({
-  queryCache: new QueryCache({ onError: holdOutWhenRefusedForIt }),
-  mutationCache: new MutationCache({ onError: holdOutWhenRefusedForIt }),
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      holdOutWhenRefusedForIt(error);
+      askAgainWhenTold(error, query);
+      askWhetherStillMemberWhenRefused(error, query.queryKey);
+    },
+    onSuccess: (_data, query) => {
+      askedAgain.delete(query);
+    },
+  }),
+  mutationCache: new MutationCache({
+    onError: (error) => {
+      holdOutWhenRefusedForIt(error);
+      askWhetherStillMemberWhenRefused(error, undefined);
+    },
+  }),
   defaultOptions: {
     queries: {
       retry: 1,

@@ -620,6 +620,8 @@ function connectPromptOf(event: AuditEvent): ConnectPrompt | null {
 function notConnectedText(event: AuditEvent): string | undefined {
   const prompt = connectPromptOf(event);
   if (!prompt) return undefined;
+  // Connected and held: what was missing was actions of it the Bot wasn't given.
+  if (prompt.reason === "tools") return "Not given";
   return prompt.reason === "reconnect"
     ? "No longer connected"
     : "Not connected";
@@ -632,6 +634,10 @@ function notConnectedText(event: AuditEvent): string | undefined {
  */
 function notConnectedLine(prompt: ConnectPrompt, storedNames: boolean): string {
   if (storedNames && prompt.message) return prompt.message;
+  if (prompt.reason === "tools")
+    return prompt.need
+      ? `The Bot needed more of ${prompt.title} to ${prompt.need.replace(/^to\s+/i, "").replace(/[\s.]+$/, "")}.`
+      : `The Bot needed more of ${prompt.title} than it was given.`;
   if (prompt.reason === "reconnect")
     return `${prompt.title} is no longer connected. Reconnect it in Connections.`;
   if (prompt.reason === "shared")

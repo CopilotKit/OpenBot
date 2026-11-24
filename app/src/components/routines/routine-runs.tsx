@@ -3,6 +3,7 @@ import { relativeTime } from "@/lib/relative-time";
 import type { RoutineRecord, RoutineRunRecord } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { useRoutineRuns } from "./use-routine-runs";
+import { failureSaid } from "@/lib/load-failure";
 
 /*
  * What a routine has done, where a person sees a routine: its own row on the Routines list, and each
@@ -146,7 +147,7 @@ export function RoutineRuns({ routine }: { routine: RoutineRecord }) {
   if (runs.error)
     return (
       <p className="text-destructive text-xs" role="alert">
-        {runs.error.message}
+        {failureSaid(runs.error)}
       </p>
     );
   if (!runs.data?.length)

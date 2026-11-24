@@ -23,6 +23,7 @@ import {
 import { ActionChips } from "@/components/what-if/action-chips";
 import { WhatIfResultView } from "@/components/what-if/what-if-result";
 import { isComposing } from "@/lib/composing";
+import { loadFailure } from "@/lib/load-failure";
 import {
   askWhatIf,
   checkWhatIf,
@@ -201,7 +202,10 @@ function WhatIfPage() {
         >
           {vocabulary.isError ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't load this OpenBot's Bots and apps. Try again in a moment.
+              {loadFailure(
+                vocabulary.error,
+                "Couldn't load this OpenBot's Bots and apps. Try again in a moment.",
+              )}
             </p>
           ) : (
             <ActionChips

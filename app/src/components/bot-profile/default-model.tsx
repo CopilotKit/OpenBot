@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/item";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
+import { loadFailure } from "@/lib/load-failure";
 import {
   effortLabel,
   type ModelPick,
@@ -209,7 +210,10 @@ export function DefaultModelSection({
                       {!catalogue ? (
                         <p className="text-sm text-muted-foreground">
                           {models.isError
-                            ? "Couldn't load the models."
+                            ? loadFailure(
+                                models.error,
+                                "Couldn't load the models.",
+                              )
                             : "Loading models…"}
                         </p>
                       ) : null}

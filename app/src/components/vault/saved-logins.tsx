@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { useNoBotComputers } from "@/lib/deployment/queries";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { deleteSavedLoginMutationOptions } from "@/lib/passwords/mutations";
 import { savedLoginsQueryOptions } from "@/lib/passwords/queries";
 import { queryClient } from "@/query-client";
@@ -35,7 +36,10 @@ export function SavedLogins() {
     <>
       {logins.isPending ? null : logins.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your saved logins. Try again in a moment.
+          {loadFailure(
+            logins.error,
+            "Couldn't load your saved logins. Try again in a moment.",
+          )}
         </p>
       ) : !logins.data.passwordManager ? (
         /*
@@ -96,7 +100,7 @@ export function SavedLogins() {
       )}
       {remove.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          {remove.error.message}
+          {failureSaid(remove.error)}
         </p>
       ) : null}
     </>

@@ -55,6 +55,7 @@ import type {
 import { conversationTitle } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
 import { routinesQueryOptions } from "@/lib/routines/queries";
@@ -492,7 +493,10 @@ export function BotActivitySections({
     return (
       <PageSection title="Activity">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load this Bot's activity. Try again in a moment.
+          {loadFailure(
+            activity.error,
+            "Couldn't load this Bot's activity. Try again in a moment.",
+          )}
         </p>
       </PageSection>
     );
@@ -505,7 +509,10 @@ export function BotActivitySections({
       {/* The tasks failing to load leaves the rest listed, and says which part is missing. */}
       {taskList.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot's tasks. Try again in a moment.
+          {loadFailure(
+            taskList.error,
+            "Couldn't load this Bot's tasks. Try again in a moment.",
+          )}
         </p>
       ) : null}
       {groups.length === 0 && !taskList.error ? (

@@ -23,6 +23,7 @@ import {
   removePushDeviceMutationOptions,
 } from "@/lib/delivery";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 const PLATFORM: Record<"ios" | "android", string> = {
   ios: "iOS",
@@ -92,7 +93,7 @@ export function NativeDevices() {
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {devices.isPending || !devices.data ? null : devices.data.length === 0 ? (
@@ -137,7 +138,7 @@ export function RecentDeliveries() {
     <PageSection title="Recent deliveries">
       {deliveries.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {deliveries.error.message}
+          {failureSaid(deliveries.error)}
         </p>
       ) : null}
       {deliveries.isPending || !deliveries.data ? null : deliveries.data

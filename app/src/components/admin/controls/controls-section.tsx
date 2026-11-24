@@ -12,6 +12,7 @@ import {
   type EnterpriseSettings,
   enterpriseOverviewQueryOptions,
 } from "@/lib/enterprise/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /** What a section of the admin's controls reads and changes. */
@@ -82,7 +83,10 @@ export function ControlsSection({
     return (
       <PageSection title={title}>
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load these settings. Try again in a moment.
+          {loadFailure(
+            overview.error,
+            "Couldn't load these settings. Try again in a moment.",
+          )}
         </p>
       </PageSection>
     );

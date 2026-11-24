@@ -17,6 +17,7 @@ import {
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
 import { RuleForm, RuleRow } from "./rules";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The person's approval rules for one Bot, and the team rules that reach it, locked, as one card of
@@ -65,7 +66,7 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {saved === 0 ? (

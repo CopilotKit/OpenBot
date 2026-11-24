@@ -254,11 +254,23 @@ export function FuseEmpty({
   );
 }
 
-export function ErrorNotice({ error }: { error?: string | null }) {
+export function ErrorNotice({
+  error,
+  held = false,
+}: {
+  error?: string | null;
+  /** OpenBot holding off for now (lib/load-failure.tsx): drawn calm, never as a failure. */
+  held?: boolean;
+}) {
   if (!error) return null;
   return (
     <div
-      className="my-2.5 rounded-[14px] bg-[var(--openfuse-danger-tint)] p-4 text-[15px] text-destructive leading-[23px]"
+      className={cn(
+        "my-2.5 rounded-[14px] p-4 text-[15px] leading-[23px]",
+        held
+          ? "bg-muted text-muted-foreground"
+          : "bg-[var(--openfuse-danger-tint)] text-destructive",
+      )}
       role="alert"
     >
       {error}
