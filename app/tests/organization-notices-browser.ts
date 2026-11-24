@@ -513,6 +513,35 @@ export async function cutOff(page: Page) {
   }));
 }
 
+/**
+ * The color `text` is drawn in, beside the color the app's destructive token draws (`text-destructive`,
+ * measured on a probe in the same page and theme).
+ */
+export async function drawnColor(
+  page: Page,
+  text: string,
+): Promise<{ drawn: string | null; destructive: string }> {
+  return page.evaluate((words) => {
+    const holders = [...document.querySelectorAll("body *")].filter(
+      (element) => element.textContent?.trim() === words,
+    );
+    // The innermost element that holds the words is the one that draws them.
+    const holder = holders.find(
+      (element) =>
+        !holders.some((other) => other !== element && element.contains(other)),
+    );
+    const probe = document.createElement("span");
+    probe.className = "text-destructive";
+    document.body.append(probe);
+    const destructive = getComputedStyle(probe).color;
+    probe.remove();
+    return {
+      drawn: holder ? getComputedStyle(holder).color : null,
+      destructive,
+    };
+  }, text);
+}
+
 /** The words of the page's alerts, in order. */
 export async function alerts(page: Page): Promise<string[]> {
   return page

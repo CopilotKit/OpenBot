@@ -40,7 +40,7 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailureText, unavailableSaid } from "@/lib/load-failure";
 import { useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
@@ -138,10 +138,11 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
         </label>
         {channels.isPending ? null : channels.error ? (
           <ErrorNotice
-            error={loadFailure(
+            error={loadFailureText(
               channels.error,
               "Couldn't load your conversations.",
             )}
+            held={unavailableSaid(channels.error) !== undefined}
           />
         ) : shown.length === 0 ? (
           <p className={fuseText.muted}>

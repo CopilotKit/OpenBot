@@ -3,6 +3,7 @@ import {
   alerts,
   asked,
   cutOff,
+  drawnColor,
   engines,
   FakeServer,
   go,
@@ -26,7 +27,8 @@ import {
  *
  * In a real browser, Chromium and WebKit, at 1440 and 390 wide, light and dark: the person is on
  * home in Northwind when its move begins, and opens Routines. Each of the page's reads is refused
- * once, the page says the server's sentence and nothing of its own, and after the Retry-After the
+ * once, the page says the server's sentence and nothing of its own, drawn calm and never in the
+ * destructive red the app keeps for what failed (a move is not a failure), and after the Retry-After the
  * page fills in with Northwind's routine without anything being pressed.
  *
  *   OPENBOT_APP_BROWSER=1 OPENBOT_APP_ENGINES=chromium,webkit bun test app/tests/organization-moving.test.tsx
@@ -62,6 +64,10 @@ describe.skipIf(!asked)("Routines while the organization is moved", () => {
           await shoot(page, "organization-moving", "during", engine, look);
           // Said once for the page, never twice, and nothing in the page's own words.
           expect(await alerts(page)).toEqual([MOVING]);
+          // A move is not a failure: never drawn in the destructive red the app keeps for those.
+          const color = await drawnColor(page, MOVING);
+          expect(color.drawn).not.toBeNull();
+          expect(color.drawn).not.toBe(color.destructive);
           expect(await cutOff(page)).toEqual({ sideways: false, cut: [] });
 
           // Nothing pressed: the page fills in once OpenBot answers again.

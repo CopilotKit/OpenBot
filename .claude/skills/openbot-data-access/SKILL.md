@@ -390,8 +390,10 @@ factories already hold.
   entity in it ("Learning settings could not be loaded."). Do not print a status code to a person.
 - **A screen's own load-failure sentence**: pass it through `loadFailure(query.error, "Couldn't load
   your …")` (`lib/load-failure.ts`). A 503 that carries the server's sentence and a `Retry-After`
-  ("OpenBot is moving this organization. Try again in a moment.") is shown in its words, and the
-  query client asks the read again once by itself after that long. Any other failure, a 503 without
+  ("OpenBot is moving this organization. Try again in a moment.") is shown in its words, drawn as
+  muted text and never in the destructive red (a move isn't a failure), and the query client asks the
+  read again once by itself after that long. A place that wraps the sentence in a red box or border
+  draws that calm too when `unavailableSaid(error)` says so. Any other failure, a 503 without
   `Retry-After` included, keeps the screen's sentence.
 - **A refusal that may mean the person left the organization** (404 `ORGANIZATION_NOT_FOUND`, or a 403
   with no code): handled once for the whole app. The query client reads their organizations again, and

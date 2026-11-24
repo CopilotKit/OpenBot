@@ -14,7 +14,13 @@
  *
  * Such a 503 is asked again once, by itself, after its `Retry-After` (query-client.ts), so the screen
  * fills in when OpenBot is back without the person doing anything.
+ *
+ * AND IT IS NOT DRAWN AS A FAILURE. The app keeps the destructive red for what failed or deletes. A
+ * move or a brief outage is neither: it is temporary, and OpenBot is already waiting it out. So the
+ * server's sentence comes back as muted text (`data-held`), which wins over the red of the line the
+ * screen drew it in. The screen's own sentence keeps the screen's own look.
  */
+import type { ReactNode } from "react";
 import { ClientError } from "@/lib/client";
 
 /** The server's own sentence when `error` is a 503 that carries one and a `Retry-After`. */
@@ -26,20 +32,44 @@ export function unavailableSaid(error: unknown): string | undefined {
     : undefined;
 }
 
-/**
- * The sentence a screen shows for a failed read: the server's own for a 503 that carries one and a
- * `Retry-After`, and `own` otherwise. Given several reads, the first such 503 speaks for them all.
- */
-export function loadFailure(
-  failed: unknown | readonly unknown[],
-  own: string,
-): string {
+/** The server's own sentence for the first of `failed` that is such a 503, if any is. */
+function heldSaid(failed: unknown | readonly unknown[]): string | undefined {
   const errors: readonly unknown[] = Array.isArray(failed) ? failed : [failed];
   for (const error of errors) {
     const said = unavailableSaid(error);
     if (said) return said;
   }
-  return own;
+  return undefined;
+}
+
+/**
+ * What a screen shows for a failed read: the server's own sentence for a 503 that carries one and a
+ * `Retry-After`, drawn calm and muted, and `own` otherwise, in the screen's look. Given several reads,
+ * the first such 503 speaks for them all.
+ */
+export function loadFailure(
+  failed: unknown | readonly unknown[],
+  own: string,
+): ReactNode {
+  const said = heldSaid(failed);
+  return said === undefined ? (
+    own
+  ) : (
+    <span className="text-muted-foreground" data-held="">
+      {said}
+    </span>
+  );
+}
+
+/**
+ * The same choice as {@link loadFailure}, as plain words, for a place that takes a string (a title,
+ * a prop typed `string`). A place that draws it should draw a held 503 calmly too.
+ */
+export function loadFailureText(
+  failed: unknown | readonly unknown[],
+  own: string,
+): string {
+  return heldSaid(failed) ?? own;
 }
 
 /**

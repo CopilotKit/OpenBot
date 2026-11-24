@@ -13,13 +13,14 @@ import { TaskBoardRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, unavailableSaid } from "@/lib/load-failure";
 import {
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
 import type { ReadFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
+import { cn } from "@/lib/utils";
 import { countsAsWaiting, heldByTaskOf } from "@/lib/tasks/groups";
 import { useNeedsYou } from "./needs-you";
 import { StalledHandoffBoardRow, useStalledHandoffs } from "./stalled-handoffs";
@@ -209,7 +210,13 @@ function ReadFailureNotice({
 }) {
   return (
     <div
-      className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5"
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-lg border px-3.5 py-2.5",
+        // OpenBot holding off for now is not a failure, and isn't drawn as one (lib/load-failure.tsx).
+        unavailableSaid(failure.error)
+          ? "border-border bg-muted/40"
+          : "border-destructive/30 bg-destructive/5",
+      )}
       data-needs-you-failure={what}
       role="alert"
     >

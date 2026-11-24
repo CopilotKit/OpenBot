@@ -61,7 +61,7 @@ import {
   deploymentCapabilitiesQueryOptions,
   useNoBotComputers,
 } from "@/lib/deployment/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, unavailableSaid } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   RestoreComputerDialog,
@@ -209,6 +209,8 @@ export function ComputersPage({
         "Couldn't load the computers. Try again in a moment.",
       )
     : null;
+  // OpenBot holding off for now: said calmly, and not as a list that failed (lib/load-failure.tsx).
+  const held = unavailableSaid(fleet.error) !== undefined;
   const hostProblem = hostAccess.error
     ? hostAccess.error.message
     : requestGrant.error
@@ -306,7 +308,11 @@ export function ComputersPage({
     <>
       {problem ? (
         <p
-          className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
+          className={
+            held
+              ? "mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm"
+              : "mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
+          }
           role="alert"
         >
           {problem}
@@ -389,7 +395,7 @@ export function ComputersPage({
               Bots can't browse or run commands on this OpenBot. Set up
               computers for Bots, and they show up here.
             </PageEmpty>
-          ) : computers === null && problem ? (
+          ) : computers === null && problem && !held ? (
             <PageEmpty
               icon={IconAlertTriangle}
               title="Couldn't load the list"

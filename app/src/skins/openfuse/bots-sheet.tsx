@@ -18,7 +18,7 @@ import { shownSubtitle } from "@/lib/agents/subtitle";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailureText, unavailableSaid } from "@/lib/load-failure";
 import { cn } from "@/lib/utils";
 import { chooseBot } from "./chosen-bot";
 import { useFuse } from "./context";
@@ -60,10 +60,11 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
       <div className="flex flex-col gap-3.5">
         {agents.isPending ? null : agents.error ? (
           <ErrorNotice
-            error={loadFailure(
+            error={loadFailureText(
               agents.error,
               "Couldn't load your Bots. Try again in a moment.",
             )}
+            held={unavailableSaid(agents.error) !== undefined}
           />
         ) : agents.data.length === 0 ? (
           <p className={fuseText.muted}>You don't have a Bot yet.</p>
