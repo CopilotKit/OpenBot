@@ -123,6 +123,7 @@ import {
   markdownPlugins,
   replyRemarkPluginsFor,
 } from "@/lib/markdown";
+import { type Failure, failureSaid, isHeld } from "@/lib/load-failure";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import {
   RESEARCH_RESULTS_LABELS,
@@ -223,9 +224,10 @@ type ChatTranscriptProps = {
    *
    * A sentence rather than a flag, because the reasons are not interchangeable: a Bot that refused,
    * a Bot whose endpoint is down and a Bot that simply stopped talking are three different things to
-   * be told, and only the thing that ended the turn knows which one happened.
+   * be told, and only the thing that ended the turn knows which one happened. OpenBot holding off
+   * (a move, a brief outage) is the server's refusal kept whole, and is drawn calmly.
    */
-  stopped?: string;
+  stopped?: Failure;
   /**
    * The turns the server refused for the person, by the id of the person's message each answered:
    * the sentence it said. Each is drawn under its own message, as `stopped` is under the last, and
@@ -438,12 +440,17 @@ function Stopped({
   onCarryOn,
   notice,
 }: {
-  reason: string;
+  reason: Failure;
   /** A turn cut off part way can be carried on from here. See `onCarryOn` on the transcript. */
   onCarryOn?: () => void;
   /** More about why, drawn under it. See `stoppedNotice` on the transcript. */
   notice?: React.ReactNode;
 }) {
+  /*
+   * OpenBot holding off (a move, or the organization's database briefly out of reach) is no failure:
+   * the server's sentence in muted words, a clock in place of the warning, and nothing to press.
+   */
+  const held = isHeld(reason);
   /*
    * The app's notice: one outlined row, its icon in the media tile, the sentence in the foreground
    * where it reads as words rather than as an error code in red, and the one way on beside it (on a
@@ -458,24 +465,29 @@ function Stopped({
        * read as a filled block with no edge.
        */
       className="w-full bg-card dark:border-border"
+      data-held={held ? "" : undefined}
       data-testid="transcript-stopped"
       size="sm"
       variant="outline"
     >
       <ItemMedia variant="icon">
-        <IconAlertTriangle className="text-destructive" />
+        {held ? (
+          <IconClock className="text-muted-foreground" />
+        ) : (
+          <IconAlertTriangle className="text-destructive" />
+        )}
       </ItemMedia>
       <ItemContent className="min-w-0">
         <ItemDescription
           className="line-clamp-none text-foreground text-sm"
           role="alert"
         >
-          {reason}
+          {failureSaid(reason)}
         </ItemDescription>
       </ItemContent>
       {/* Nothing drawn when there is no way on: the actions below render nothing then. */}
       <ItemActions className="empty:hidden max-sm:basis-full">
-        {onCarryOn ? (
+        {held ? null : onCarryOn ? (
           <Button onClick={onCarryOn} size="sm" variant="outline">
             Carry on
           </Button>
@@ -484,7 +496,7 @@ function Stopped({
             {/* A run refused because the organization needs a card is answered where it was refused. */}
             <AddCardButton />
             {/* And one with no model key, for an admin who can add it. */}
-            <AddModelKeyLink reason={reason} />
+            <AddModelKeyLink reason={reason.message} />
           </>
         )}
       </ItemActions>
@@ -2712,7 +2724,7 @@ export function ChatTranscript({
           <div className="mt-6">
             <Stopped
               notice={item.id === noticeUnder ? stoppedNotice : undefined}
-              reason={refusal}
+              reason={{ message: refusal }}
             />
           </div>
         ) : null}

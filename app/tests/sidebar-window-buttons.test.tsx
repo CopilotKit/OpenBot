@@ -3,13 +3,18 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { ListConnectionsResponse } from "@/lib/api/generated/connections/connections.zod";
+import { ListImportsResponse } from "@/lib/api/generated/moving-to-openbot-cloud/moving-to-openbot-cloud.zod";
+import { GetPreferencesResponse } from "@/lib/api/generated/people/people.zod";
 import { personBody } from "./accounts-api";
+import { type AppsFixture, answerAppsApi } from "./apps-api";
 import { conversationPage } from "./conversations-api";
 
 /**
  * In OpenBot Desktop on macOS the window's close, minimise and zoom buttons sit over the sidebar's
  * top-left corner, and nothing of the sidebar is drawn under them: not the strip's orb, not its
- * icons, not the open panel's heading. The top of the sidebar still moves the window.
+ * icons, not the open panel's heading. The top of the sidebar still moves the window, and so does
+ * the rest of the window's top strip, over the page beside it, while its controls stay controls.
  *
  * The desktop marks the page `data-desktop-titlebar="overlay"` on macOS only and draws the buttons
  * 20pt in and 21 to 37pt down (`TRAFFIC_LIGHTS` in the desktop's main.rs). The strip of sections
@@ -50,6 +55,11 @@ type Case = {
   hidden?: boolean;
   /** What to do once the shell is drawn, such as opening the sheet. */
   prepare?: (page: Page) => Promise<void>;
+  /**
+   * The bars over the app's page showing, as after a move to OpenBot Cloud: apps to reconnect, and
+   * the offer to self-host.
+   */
+  banners?: boolean;
 };
 
 const CASES: Case[] = [
@@ -87,6 +97,21 @@ const CASES: Case[] = [
       // The sheet slides in; measure where it comes to rest.
       await page.waitForTimeout(600);
     },
+  },
+  {
+    name: "app-banners",
+    shell: "app",
+    path: "/",
+    width: DEFAULT_WIDTH,
+    banners: true,
+  },
+  {
+    name: "app-banners-hidden",
+    shell: "app",
+    path: "/",
+    width: DEFAULT_WIDTH,
+    hidden: true,
+    banners: true,
   },
   { name: "admin", shell: "admin", path: "/admin", width: DEFAULT_WIDTH },
   {
@@ -129,8 +154,69 @@ const CONVERSATION = {
   lastReadAt: "2026-11-20T10:00:00.000Z",
 };
 
-/** What the server answers: an admin of a company's own OpenBot with one conversation. */
-function answer(path: string): unknown {
+/** Gmail, as OpenBot Cloud's organization has it, for the move's app to reconnect. */
+const APPS: AppsFixture = {
+  servers: [
+    {
+      id: "composio-gmail",
+      title: "Gmail",
+      provenance: "composio",
+      url: "composio://gmail",
+      authScheme: "OAUTH2",
+      accountMode: "personal",
+      summary: "Read and send mail.",
+    },
+  ],
+};
+
+/** A finished move to OpenBot Cloud that left Gmail to connect again. */
+const MOVE = {
+  id: "imp_0e1f2a3b4c5d6f1d",
+  status: "imported",
+  sourceName: "Sam's MacBook",
+  createdAt: "2026-11-21T10:00:00Z",
+  finishedAt: "2026-11-21T10:03:12Z",
+  recipientKey: {
+    kty: "RSA",
+    alg: "RSA-OAEP-256",
+    kid: "imp_0e1f2a3b4c5d6f1d",
+    e: "AQAB",
+    n: "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+  },
+  maxBundleBytes: 10737418240,
+  maxPartBytes: 33554432,
+  receivedParts: [1],
+  reconnect: [
+    { appId: "gmail", appName: "Gmail", accountLabel: "dana@example.com" },
+  ],
+};
+
+/**
+ * What the server answers: an admin of a company's own OpenBot with one conversation. With
+ * `banners`, OpenBot Cloud after a move: Gmail to connect again, and the offer to self-host open.
+ */
+function answer(path: string, banners = false): unknown {
+  if (banners) {
+    switch (path) {
+      case `${ORGANIZATION}/imports`:
+        return ListImportsResponse.parse({ items: [MOVE], nextCursor: null });
+      case `${ORGANIZATION}/people/me/connections`:
+        return ListConnectionsResponse.parse({
+          connections: [],
+          nextCursor: null,
+        });
+      case `${ORGANIZATION}/people/me/preferences`:
+        return GetPreferencesResponse.parse({
+          messageListEmphasis: "thread",
+          selfHostBannerDismissed: false,
+          dismissedNotices: [],
+          noticesDue: [],
+          narration: null,
+          skin: "openbot",
+          proactive: "on",
+        });
+    }
+  }
   switch (path) {
     case `${ORGANIZATION}/conversations`:
       return conversationPage([CONVERSATION]);
@@ -161,12 +247,13 @@ function answer(path: string): unknown {
     case `${ORGANIZATION}/deployment`:
       return {
         generativeUi: true,
-        selfHostBanner: false,
+        selfHostBanner: banners,
         localEvaluation: false,
         edition: "team",
         authProviders: [],
         ssoConfigured: false,
         ssoRequired: false,
+        hostedSignIn: banners,
       };
     case "/api/v2/people/me/organizations":
       return {
@@ -261,6 +348,8 @@ const overlayScript = (() => {
 
 let script: string;
 let css: string;
+/** Every change to the person's preferences the pages sent, such as closing a bar. */
+const preferenceSaves: Record<string, unknown>[] = [];
 const engines: [string, Browser][] = [];
 
 beforeAll(async () => {
@@ -275,6 +364,7 @@ beforeAll(async () => {
     ),
     "components/admin/admin-sidebar.tsx",
     "components/settings/settings-sidebar.tsx",
+    "components/moves/moved-apps-notice.tsx",
     "components/agents/bot-orb.tsx",
     "../tests/sidebar-window-buttons.fixture.tsx",
   ].flatMap((file) =>
@@ -309,7 +399,7 @@ async function open(
   const stored = shown.hidden
     ? `<script>localStorage.setItem("openbot-sidebar", "collapsed")</script>`
     : "";
-  await page.route(`${ORIGIN}/**`, (route) => {
+  await page.route(`${ORIGIN}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/")
       return route.fulfill({
@@ -323,7 +413,28 @@ async function open(
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (path.startsWith("/api/")) {
-      const json = answer(path);
+      const method = route.request().method();
+      if (method === "PATCH" && path.endsWith("/people/me/preferences")) {
+        const sent = route.request().postDataJSON() as Record<string, unknown>;
+        preferenceSaves.push(sent);
+        return route.fulfill({
+          json: GetPreferencesResponse.parse({
+            messageListEmphasis: "thread",
+            selfHostBannerDismissed: sent.selfHostBannerDismissed === true,
+            dismissedNotices: [],
+            noticesDue: [],
+            narration: null,
+            skin: "openbot",
+            proactive: "on",
+          }),
+        });
+      }
+      const apps = shown.banners
+        ? answerAppsApi(route.request().url(), { method }, APPS)
+        : undefined;
+      if (apps)
+        return route.fulfill({ status: apps.status, json: await apps.json() });
+      const json = answer(path, shown.banners);
       return json === undefined
         ? route.fulfill({ status: 404, json: { detail: "Not found." } })
         : route.fulfill({ json });
@@ -333,6 +444,10 @@ async function open(
   const search = new URLSearchParams({ shell: shown.shell, path: shown.path });
   await page.goto(`${ORIGIN}/?${search}`);
   await page.locator("[data-page]").waitFor();
+  if (shown.banners) {
+    await page.locator('aside[aria-label="Apps to reconnect"]').waitFor();
+    await page.locator('aside[aria-label="Self-host OpenBot"]').waitFor();
+  }
   await shown.prepare?.(page);
   // The strip's sections, once the person's menu has loaded (in a narrow window, once the sheet is open).
   if (shown.shell === "app" && (shown.width >= 768 || shown.prepare))
@@ -485,8 +600,8 @@ async function deadTop(page: Page): Promise<string[]> {
           continue;
         const target = document.elementFromPoint(x, y);
         if (!target || press(target) !== "dead") continue;
-        // The 8px of window tint around the inset page, and past its rounded corners, which was
-        // never a handle in any shell.
+        // The 8px of window tint around the inset page, and past its rounded corners, which no mark
+        // makes a handle: a press there is lent one as it comes (`topStrip` presses it).
         const slot = target.getAttribute("data-slot");
         if (slot === "sidebar-wrapper" || slot === "sidebar-container")
           continue;
@@ -501,6 +616,209 @@ async function deadTop(page: Page): Promise<string[]> {
     }
     return dead;
   }, WINDOW_BUTTONS);
+}
+
+/**
+ * What pressing across the window's top strip does, with the desktop's macOS script running, over
+ * the sidebar and over the page beside it alike.
+ *
+ * The strip runs down to the lowest of: the sidebar's top row (the open panel's title, or the
+ * sidebar's header), the bars over the page, and the page's own top bar (the app page's, or
+ * `PageShell`'s while the sidebar is hidden). Each press is a real mousedown and mouseup at that
+ * point, dispatched on what is drawn there, and what Tauri's drag script would do with it is read
+ * (as `deadTop` reads it) from a listener on the document, where Tauri's own listens, so whatever
+ * the desktop's script does before it on the way down is seen as Tauri sees it.
+ *
+ * `dead` lists every point that neither moves the window nor reaches a control; `controls` names
+ * what each named control does when pressed; `below` is what a press under the strip, on the
+ * middle of the page, does.
+ */
+async function topStrip(page: Page, controls: string[] = []) {
+  await page.evaluate(overlayScript);
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => resolve(0))),
+  );
+  return page.evaluate(
+    ({ area, controls }) => {
+      const DRAG = "data-tauri-drag-region";
+      const CLICKABLE = new Set([
+        "A",
+        "BUTTON",
+        "INPUT",
+        "SELECT",
+        "TEXTAREA",
+        "LABEL",
+        "SUMMARY",
+      ]);
+      const ROLES = new Set([
+        "button",
+        "link",
+        "menuitem",
+        "tab",
+        "checkbox",
+        "radio",
+        "switch",
+        "option",
+      ]);
+      const clickable = (el: HTMLElement) =>
+        CLICKABLE.has(el.tagName) ||
+        (el.hasAttribute("contenteditable") &&
+          el.getAttribute("contenteditable") !== "false") ||
+        (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1") ||
+        ROLES.has(el.getAttribute("role") ?? "");
+      // Tauri's `isDragRegion`, walking the pressed element's path as its listener does.
+      const tauri = (path: readonly (EventTarget | undefined)[]) => {
+        for (const el of path) {
+          if (!(el instanceof HTMLElement)) continue;
+          const attr = el.getAttribute(DRAG);
+          if (clickable(el) && attr === null) return "control";
+          if (attr === null) continue;
+          if (attr === "false") return "dead";
+          if (attr === "deep") return "drag";
+          if (attr === "" || attr === "true")
+            return el === path[0] ? "drag" : "dead";
+        }
+        return "dead";
+      };
+      const marks = document.querySelectorAll(`[${DRAG}]`).length;
+      let seen = "dead";
+      let lent = false;
+      const listen = (event: MouseEvent) => {
+        seen = tauri(event.composedPath());
+      };
+      document.addEventListener("mousedown", listen);
+      const press = (target: Element, x: number, y: number) => {
+        seen = "dead";
+        const before = target.hasAttribute(DRAG);
+        lent = false;
+        const check = () => {
+          lent = !before && target.hasAttribute(DRAG);
+        };
+        document.addEventListener("mousedown", check, { once: true });
+        const init = {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          clientX: x,
+          clientY: y,
+          button: 0,
+          detail: 1,
+        };
+        target.dispatchEvent(new MouseEvent("mousedown", init));
+        target.dispatchEvent(new MouseEvent("mouseup", init));
+        // Nothing the press was lent is left behind.
+        if (document.querySelectorAll(`[${DRAG}]`).length !== marks)
+          return "left a mark";
+        return seen;
+      };
+
+      const shownHere = (el: Element) => {
+        const box = el.getBoundingClientRect();
+        if (box.width <= 0 || box.height <= 0) return false;
+        const x = Math.min(
+          Math.max((box.left + box.right) / 2, 1),
+          window.innerWidth - 1,
+        );
+        const y = Math.min(Math.max((box.top + box.bottom) / 2, 1), 400);
+        const top = document.elementFromPoint(x, y);
+        return top !== null && (el.contains(top) || top.contains(el));
+      };
+      // The sidebar beside the page, when it is: down to its top row (the window buttons' room
+      // where the panel is folded away and only the strip shows).
+      const beside = document.querySelector(
+        '[data-slot="sidebar-wrapper"] > [data-slot="sidebar"] [data-slot="sidebar-inner"]',
+      );
+      const sidebarBox =
+        beside && shownHere(beside) ? beside.getBoundingClientRect() : null;
+      const sidebarBottom = Math.max(
+        40,
+        ...[
+          ...document.querySelectorAll(
+            '[data-slot="section-panel"]:not([hidden]) > [data-desktop-drag], [data-slot="sidebar-wrapper"] [data-slot="sidebar-header"]',
+          ),
+        ]
+          .filter(shownHere)
+          .map((el) => el.getBoundingClientRect().bottom),
+      );
+      // The page: down to the sidebar's top row, the bars over the page and the page's top bar.
+      const bottoms = [sidebarBox ? sidebarBottom : 0];
+      for (const el of document.querySelectorAll(
+        "main > aside, [data-page-bar]",
+      ))
+        bottoms.push(el.getBoundingClientRect().bottom);
+      const toggle = document.querySelector('main [aria-label="Show sidebar"]');
+      if (toggle?.parentElement)
+        bottoms.push(toggle.parentElement.getBoundingClientRect().bottom);
+      const bottom = Math.max(...bottoms);
+
+      const dead: string[] = [];
+      const rows: number[] = [];
+      for (let y = 2; y < bottom - 2; y += 6) rows.push(y);
+      rows.push(Math.floor(bottom) - 2);
+      for (const y of rows) {
+        for (let x = 2; x < window.innerWidth - 2; x += 8) {
+          if (sidebarBox && x < sidebarBox.right && y >= sidebarBottom - 2)
+            continue;
+          if (
+            x >= area.left &&
+            x <= area.right &&
+            y >= area.top &&
+            y <= area.bottom
+          )
+            continue;
+          const target = document.elementFromPoint(x, y);
+          if (!target) continue;
+          const did = press(target, x, y);
+          if (did === "drag" || did === "control") continue;
+          const name =
+            target.getAttribute("aria-label") ??
+            target.getAttribute("data-slot") ??
+            target.className;
+          dead.push(
+            `${Math.round(x)},${y} ${did} ${target.tagName.toLowerCase()} ${String(name).slice(0, 40)}`,
+          );
+        }
+      }
+
+      const pressed: Record<string, string> = {};
+      for (const name of controls) {
+        const el = [...document.querySelectorAll("main button, main a")].find(
+          (each) =>
+            (each.getAttribute("aria-label") ?? each.textContent?.trim()) ===
+            name,
+        );
+        if (!el) {
+          pressed[name] = "missing";
+          continue;
+        }
+        const box = el.getBoundingClientRect();
+        const x = (box.left + box.right) / 2;
+        const y = (box.top + box.bottom) / 2;
+        const target = document.elementFromPoint(x, y);
+        pressed[name] = target
+          ? `${y < bottom ? "in the strip" : "below it"}: ${press(target, x, y)}`
+          : "not drawn";
+      }
+
+      const main = document.querySelector(
+        '[data-slot="sidebar-wrapper"] > main',
+      );
+      const box = main?.getBoundingClientRect();
+      const x = box ? (box.left + box.right) / 2 : 0;
+      const y = Math.max(bottom + 40, window.innerHeight - 60);
+      const under = document.elementFromPoint(x, y);
+      if (under) press(under, x, y);
+      // Under the strip a press is never lent the mark: what it does is what it always did.
+      const below = under
+        ? lent
+          ? "lent the mark"
+          : "as before"
+        : "not drawn";
+      document.removeEventListener("mousedown", listen);
+      return { dead, controls: pressed, below };
+    },
+    { area: WINDOW_BUTTONS, controls },
+  );
 }
 
 /** Where the corner's pieces start, rounded to the pixel: the orb, the panel's heading, Back to app. */
@@ -574,6 +892,71 @@ describe.skipIf(!asked)("the sidebar and the window's buttons", () => {
     }, 120_000);
   }
 
+  /*
+   * The window moves from its whole top strip, over the page as well as over the sidebar. MEASURED
+   * in OpenBot Desktop on a Mac: only the top of the sidebar moved it, and a press over the page
+   * beside it (on the bars over the page, the page's top bar, the window's tint above them) did
+   * nothing. The controls in the strip stay controls. Not the open sheet's case: there the scrim
+   * covers the page, and pressing it closes the sheet (`deadTop` covers the sheet's own top).
+   */
+  for (const shown of CASES.filter((each) => !each.prepare)) {
+    test(`${shown.name}: in the macOS desktop, the window's whole top strip moves the window, its controls stay controls`, async () => {
+      const controls = [
+        ...(shown.banners ? ["Reconnect", "Book a call", "Dismiss"] : []),
+        ...(shown.shell === "app" ? ["This conversation's Bot"] : []),
+        ...(shown.hidden || shown.width < 768 ? ["Show sidebar"] : []),
+      ];
+      for (const [engine, browser] of engines) {
+        const page = await open(browser, shown, true);
+        try {
+          expect({ engine, ...(await topStrip(page, controls)) }).toEqual({
+            engine,
+            dead: [],
+            controls: Object.fromEntries(
+              controls.map((name) => [name, "in the strip: control"]),
+            ),
+            below: "as before",
+          });
+        } finally {
+          await page.close();
+        }
+      }
+    }, 120_000);
+  }
+
+  test("in the macOS desktop, the bars' controls in the top strip still do what they say", async () => {
+    for (const [engine, browser] of engines) {
+      const shown = CASES.find((each) => each.name === "app-banners") as Case;
+      const page = await open(browser, shown, true);
+      try {
+        await page.evaluate(overlayScript);
+        preferenceSaves.length = 0;
+        await page
+          .locator('aside[aria-label="Self-host OpenBot"]')
+          .getByRole("button", { name: "Dismiss" })
+          .click();
+        await page
+          .locator('aside[aria-label="Self-host OpenBot"]')
+          .waitFor({ state: "detached" });
+        expect({ engine, saves: preferenceSaves }).toEqual({
+          engine,
+          saves: [{ selfHostBannerDismissed: true }],
+        });
+        // Reconnect leads to the list, where the bar no longer shows.
+        await page
+          .locator('aside[aria-label="Apps to reconnect"] a', {
+            hasText: "Reconnect",
+          })
+          .click();
+        await page
+          .locator('aside[aria-label="Apps to reconnect"]')
+          .waitFor({ state: "detached" });
+      } finally {
+        await page.close();
+      }
+    }
+  }, 120_000);
+
   test("in the macOS desktop, the orb and the panel's heading start below the window's buttons", async () => {
     for (const [engine, browser] of engines) {
       const page = await open(browser, CASES[0] as Case, true);
@@ -597,12 +980,13 @@ describe.skipIf(!asked)("the sidebar and the window's buttons", () => {
   }, 120_000);
 
   test("without the mark, on Windows or in a browser, every corner is where it has always been", async () => {
-    // Measured on main before the room was made, so a sidebar that moves outside the desktop fails.
+    // Measured on main without the mark, so a sidebar that moves outside the desktop fails. Measured
+    // again after the strip was redrawn wider (#2124), which moved its pieces on purpose.
     const before: Record<string, Awaited<ReturnType<typeof corner>>> = {
       "app-conversations": {
-        orb: { x: 18, y: 22 },
-        firstSection: { x: 14, y: 64 },
-        heading: { x: 72, y: 21 },
+        orb: { x: 22, y: 22 },
+        firstSection: { x: 8, y: 64 },
+        heading: { x: 80, y: 21 },
         back: null,
       },
       admin: {

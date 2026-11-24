@@ -27,7 +27,7 @@ import { useBotThread } from "@/lib/copilot/bot-thread";
 import { LiveThreadUpdates } from "@/lib/copilot/live-thread-updates";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
 import { useNoBotComputers } from "@/lib/deployment/queries";
-import { isHeld, loadFailure } from "@/lib/load-failure";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { searchTextEntry } from "@/lib/search-text";
 
 export const Route = createFileRoute("/_authed/_app/bot")({
@@ -253,14 +253,21 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
          * beside the gap it explains; what it buys is that it is always on screen, whatever the
          * transcript has been scrolled to, and that it survives the next release of the chat.
          */}
+        {/* OpenBot holding off (a move, a brief outage) is said calmly: nothing failed. */}
         {stopped ? (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-destructive/10 px-6 py-2">
+          <div
+            className={
+              isHeld(stopped)
+                ? "flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-muted/40 px-6 py-2"
+                : "flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-destructive/10 px-6 py-2"
+            }
+          >
             <p
               className="text-destructive text-sm"
               data-testid="bot-chat-stopped"
               role="alert"
             >
-              {stopped}
+              {failureSaid(stopped)}
             </p>
             {/* A run refused because the organization needs a card is answered here. */}
             <AddCardButton />

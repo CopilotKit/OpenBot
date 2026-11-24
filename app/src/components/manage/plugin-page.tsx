@@ -103,7 +103,10 @@ import {
   describeApproval,
 } from "@/lib/plugins/shared-use";
 import { toolInWords, toolName } from "@/lib/plugins/tool-words";
-import { toolsListError } from "@/lib/plugins/tools-error";
+import {
+  listsToolsOnceConnected,
+  toolsListError,
+} from "@/lib/plugins/tools-error";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 
 /**
@@ -1445,11 +1448,20 @@ export function PluginPage({
           />
           {server.tools.length === 0 ? (
             <PageEmpty icon={IconTool} title="No tools listed">
-              {/* A server that signs each person in lists its tools once somebody has. */}
+              {/*
+               * A server that signs each person in lists its tools once somebody has. The personal
+               * edition's one person is pointed at the Connect above; an admin is never told to
+               * connect their own account for it.
+               */}
               {server.signIn && !youConnected
-                ? `Connect your ${vendorNameOf(title)} account to see its tools.`
-                : (toolsListError(server.lastError, { title, personal }) ??
-                  "Refresh tools to check again.")}
+                ? personal
+                  ? `Connect your ${vendorNameOf(title)} account to see its tools.`
+                  : listsToolsOnceConnected(title)
+                : (toolsListError(server.lastError, {
+                    title,
+                    personal,
+                    connectAbove: true,
+                  })?.text ?? "Refresh tools to check again.")}
             </PageEmpty>
           ) : (
             <PageRows>

@@ -348,7 +348,7 @@ test("an app's empty tools in personal point to Connect, and never show the mark
   expect(text).not.toMatch(TEAM_WORDS);
 });
 
-test("an app's empty tools in team keep the refusal's sentence, without the marker", async () => {
+test("an app's empty tools in team say it lists them once someone connects, without the marker", async () => {
   const text = await pageText(
     draw({
       edition: "team",
@@ -357,8 +357,9 @@ test("an app's empty tools in team keep the refusal's sentence, without the mark
     }),
   );
   expect(text).toContain(
-    "You have not connected your Notion account. Connect it and ask again.",
+    "Notion lists its tools once someone connects their account.",
   );
+  expect(text).not.toContain("You have not connected your Notion account.");
   expect(text).not.toContain(CONNECT_APP_MARKER);
   expect(text).not.toContain("serverId");
 });

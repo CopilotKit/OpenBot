@@ -65,8 +65,9 @@ export type NavigationItem =
     }
   | {
       /**
-       * Not a page: the personal edition's list of team features, opened as a dialog beside Admin.
-       * See `components/edition/team-features-dialog.tsx`, which every frame draws it through.
+       * Not a page: OpenBot for Business, opened as a dialog before Settings, in the personal
+       * edition and on OpenBot Cloud. See `components/edition/team-features-dialog.tsx`, which every
+       * frame draws it through.
        */
       kind: "dialog";
       id: "team-features";
@@ -164,10 +165,15 @@ export const NAVIGATION: readonly NavigationItem[] = [
  * personal edition that is the one person, whom single-user mode makes the admin. The personal
  * edition also lists what the team edition adds, right after Admin, and has no Memory (see
  * `offersMemory`) and no Teams.
+ *
+ * `cloud` is OpenBot Cloud (`hostedSignIn`): the team edition, run by OpenBot by CopilotKit, which
+ * offers OpenBot for Business in the same place. An OpenBot a company runs itself already is
+ * OpenBot for Business, so it never does.
  */
 export function navigationFor(
   role: string | undefined,
   edition: "team" | "personal" = "team",
+  cloud = false,
 ): readonly NavigationItem[] {
   const offered = NAVIGATION.filter(
     (item) =>
@@ -180,7 +186,7 @@ export function navigationFor(
     .filter(
       (item) => item.kind === "dialog" || !item.teamOnly || edition === "team",
     );
-  if (edition !== "personal") return offered;
+  if (edition !== "personal" && !cloud) return offered;
   const settings = offered.findIndex((item) => item.id === "settings");
   return [
     ...offered.slice(0, settings),
@@ -196,7 +202,11 @@ export function navigationFor(
 export function useNavigationItems(): readonly NavigationItem[] {
   const { data: user } = useQuery(currentUserQueryOptions());
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
-  const items = navigationFor(user?.role, capabilities?.edition ?? "team");
+  const items = navigationFor(
+    user?.role,
+    capabilities?.edition ?? "team",
+    capabilities?.hostedSignIn === true,
+  );
   return capabilities
     ? items
     : items.filter(

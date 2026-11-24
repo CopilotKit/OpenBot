@@ -82,7 +82,7 @@ test("with `stopped` showing, the notice goes under it, not under a refusal", ()
         messages={messages}
         refusals={new Map([["u1", REFUSED]])}
         restoring={false}
-        stopped="OpenBot couldn't reach the Bot."
+        stopped={{ message: "OpenBot couldn't reach the Bot." }}
         stoppedNotice={notice}
       />,
     ),

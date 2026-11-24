@@ -48,7 +48,7 @@ import {
   Details,
   ProviderTile,
 } from "./ai-connection-chooser";
-import { failureSaid } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import {
   AiConnectionRows,
   SEVERAL,
@@ -435,7 +435,10 @@ function DesktopAiConnectionRow({
             </p>
             {change.error ? (
               <p className="text-destructive" role="alert">
-                Couldn't open the setup window. Try again.
+                {loadFailure(
+                  change.error,
+                  "Couldn't open the setup window. Try again.",
+                )}
               </p>
             ) : null}
           </DialogBody>

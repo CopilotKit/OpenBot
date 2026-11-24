@@ -108,20 +108,22 @@ function LiveAppAccessCard({
   const admins = useOrganizationAdmins(
     me.isSuccess && access !== null && namesAnAdmin(access, edition, admin),
   );
-  const { carried, offer } = useCarryOn({
-    place,
-    ready: access ? access.state === "ready" : null,
-    // A refusal was blocked by definition; `show_app_access` says what it found.
-    blockedWhenAsked: prompt.reason !== "access" || prompt.blocked === true,
-    app: name,
-  });
   /*
    * A read that failed falls back to what this card was before it read anything, where that was a
    * card at all: a person's own missing connection still gets its Connect button. The other reasons
    * had only ever been a sentence, and the sentence is what is left.
    */
-  if (live.error && (prompt.reason ?? "connect") === "connect")
-    return <ConnectAppCard {...prompt} place={place} />;
+  const fallsBack =
+    Boolean(live.error) && (prompt.reason ?? "connect") === "connect";
+  const { carried, inHand, offer } = useCarryOn({
+    // The Connect card drawn instead carries on for this call; this one, never ready, must not wait.
+    place: fallsBack ? undefined : place,
+    ready: access ? access.state === "ready" : null,
+    // A refusal was blocked by definition; `show_app_access` says what it found.
+    blockedWhenAsked: prompt.reason !== "access" || prompt.blocked === true,
+    app: name,
+  });
+  if (fallsBack) return <ConnectAppCard {...prompt} place={place} />;
   return (
     <div
       className="my-2 flex w-full max-w-2xl flex-col gap-3 rounded-xl border border-border p-4"
@@ -144,7 +146,7 @@ function LiveAppAccessCard({
             <p className="text-muted-foreground text-sm">
               {access.state !== "ready"
                 ? refusedSentence(access, prompt, bot, edition, admin, admins)
-                : carried || offer
+                : carried || inHand || offer
                   ? `${name} is ready now.`
                   : prompt.reason !== "access"
                     ? `${name} is ready now. Ask again and the Bot can use it.`

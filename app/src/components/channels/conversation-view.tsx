@@ -31,6 +31,7 @@ import { StarPrompt } from "@/components/star-prompt/star-prompt";
 import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
+import type { Failure } from "@/lib/load-failure";
 import { useNotificationPermission } from "@/lib/notifications/permission";
 import { newId } from "../../lib/new-id";
 
@@ -112,7 +113,7 @@ export function ConversationView({
   /** Focus the composer the moment it can take a caret; forwarded to the composer. */
   autoFocus?: boolean;
   /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
-  stopped?: string;
+  stopped?: Failure;
   /** Turns the server refused, each under its own message; see the transcript's `refusals`. */
   refusals?: ReadonlyMap<string, string>;
   /** Drawn under `stopped`, or else the latest refusal (the transcript's `stoppedNotice`). */
