@@ -1,0 +1,77 @@
+import { useMutation } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemFooter,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Switch } from "@/components/ui/switch";
+import { removePluginServerMutationOptions } from "@/lib/apps/mutations";
+import { queryClient } from "@/query-client";
+
+/**
+ * The words of the switch that turns an app on or off for the whole organization, in the team edition.
+ * Admin's page for the app draws them, and so does the app's page under Connections for an admin, so
+ * the two say the same thing about the same decision.
+ */
+export const ORGANIZATION_SWITCH = {
+  title: "Enable for this organization",
+  on: "Bots can be given its tools. Turning this off removes it and every Bot's access to its tools.",
+  label: (title: string) => `Enable ${title} for this organization`,
+} as const;
+
+/**
+ * Admin's "Enable for this organization" row, for an app that is on, drawn on the app's page under
+ * Connections for an organization's owner or admin. Turning it off removes the app for everybody, as
+ * it does in Admin, and goes back to Connections, where the app is no longer listed. Then a person
+ * who runs their own organization (OpenBot Cloud's usual case) adds and removes an app without
+ * opening Admin. A member is never shown it: the server refuses them.
+ */
+export function OrganizationAppSwitch({
+  appId,
+  title,
+}: {
+  appId: string;
+  title: string;
+}) {
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+  const remove = useMutation({
+    ...removePluginServerMutationOptions(queryClient),
+    onError: (thrown: Error) => setError(thrown.message),
+    onSuccess: async () => {
+      await navigate({ to: "/connections" });
+    },
+  });
+  return (
+    <Item data-testid="organization-app-switch" size="sm">
+      <ItemContent>
+        <ItemTitle>{ORGANIZATION_SWITCH.title}</ItemTitle>
+        <ItemDescription>{ORGANIZATION_SWITCH.on}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Switch
+          aria-label={ORGANIZATION_SWITCH.label(title)}
+          checked={!remove.isPending && !remove.isSuccess}
+          disabled={remove.isPending}
+          onCheckedChange={(next) => {
+            if (next) return;
+            setError(null);
+            remove.mutate(appId);
+          }}
+        />
+      </ItemActions>
+      {error ? (
+        <ItemFooter>
+          <p className="text-destructive text-sm" role="alert">
+            {error}
+          </p>
+        </ItemFooter>
+      ) : null}
+    </Item>
+  );
+}
