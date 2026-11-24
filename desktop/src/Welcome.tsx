@@ -278,6 +278,9 @@ export function Welcome({
           // (Self-Contained) last of all, never the way back from anywhere.
           <>
             {connectAside}
+            {!resumes && startDownloads && (
+              <EarlyDownloadsLine firstScreen quiet />
+            )}
             {cloudOn && (
               <section
                 className="this-computer-foot"
@@ -517,7 +520,6 @@ function Install({
           Install
         </button>
       </div>
-      <EarlyDownloadsLine firstScreen />
     </>
   );
 }

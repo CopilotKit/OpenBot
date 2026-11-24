@@ -1283,61 +1283,150 @@ async function routeCalendar(page: Page) {
 describe.skipIf(!asked)("the first screen while its downloads run", () => {
   for (const [width, height] of [
     [1000, 800],
+    [1000, 760],
     [720, 560],
   ] as const) {
-    test(`at ${width}x${height}, the card holds its height under the download line`, async () => {
-      const page = await browser.newPage({ viewport: { width, height } });
-      try {
-        await open(page);
-        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
-        await page.waitForTimeout(400);
-        // The card's bottom edge: nothing under the line moves, and the card does not shrink.
-        const usage = async () => {
-          const box = await page.locator("main > .sheet").boundingBox();
-          return Math.round(box ? box.y + box.height : -1);
-        };
-        const say = async (payload: Record<string, unknown>) => {
-          await page.evaluate((sent) => {
-            (
-              globalThis as unknown as {
-                __fake: { emit: (name: string, payload: unknown) => void };
-              }
-            ).__fake.emit("setup:downloads", sent);
-          }, payload);
-          await page.waitForTimeout(300);
-        };
-        const GB = 1_000_000_000;
-        const seen: Array<[string, number]> = [["nothing yet", await usage()]];
-        for (const [state, payload] of [
-          ["starting", { state: "downloading", bytes: 0 }],
-          [
-            "downloading",
-            {
-              state: "downloading",
-              bytes: 0.15 * GB,
-              size: 0.31 * GB,
-              bytesPerSecond: 9_000_000,
-            },
-          ],
-          ["done", { state: "done", bytes: 0.31 * GB, size: 0.31 * GB }],
-          ["failed", { state: "failed", bytes: 0.2 * GB, size: 0.31 * GB }],
-          [
-            "short of disk",
-            { state: "short", bytes: 0, free: 14.6 * GB, needed: 44.3 * GB },
-          ],
-        ] as const) {
-          await say(payload);
-          seen.push([state, await usage()]);
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`at ${width}x${height}, downloads stay in the sidebar foot and Install holds its place (${colorScheme})`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        try {
+          await open(page);
+          await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+          await page.waitForTimeout(400);
+          // The card's bottom edge: nothing under the line moves, and the card does not shrink.
+          const usage = async () => {
+            return page.evaluate(() => {
+              const sheet = document.querySelector(
+                "main > .rail + .sheet",
+              ) as HTMLElement;
+              const foot = document.querySelector(".rail-foot") as HTMLElement;
+              const download = foot.querySelector(
+                ".early-downloads",
+              ) as HTMLElement;
+              const button = [...sheet.querySelectorAll("button")].find(
+                (button) => button.textContent === "Install",
+              );
+              const children = [...foot.children].filter(
+                (child) => child.getBoundingClientRect().height > 0,
+              );
+              const boxes = children.map((child) =>
+                child.getBoundingClientRect(),
+              );
+              return {
+                sheetBottom: Math.round(sheet.getBoundingClientRect().bottom),
+                installTop: Math.round(
+                  button?.getBoundingClientRect().top ?? -1,
+                ),
+                inFoot: Boolean(download),
+                inSheet: Boolean(sheet.querySelector(".early-downloads")),
+                overlap: boxes.some(
+                  (box, index) =>
+                    index > 0 && box.top < boxes[index - 1]!.bottom - 1,
+                ),
+                cut: download.scrollWidth > download.clientWidth,
+                footBottom: foot.getBoundingClientRect().bottom,
+                pageHeight: document.documentElement.scrollHeight,
+              };
+            });
+          };
+          const say = async (payload: Record<string, unknown>) => {
+            await page.evaluate((sent) => {
+              (
+                globalThis as unknown as {
+                  __fake: { emit: (name: string, payload: unknown) => void };
+                }
+              ).__fake.emit("setup:downloads", sent);
+            }, payload);
+            await page.waitForTimeout(300);
+          };
+          const GB = 1_000_000_000;
+          const seen: Array<[string, Awaited<ReturnType<typeof usage>>]> = [
+            ["nothing yet", await usage()],
+          ];
+          for (const [state, payload] of [
+            ["starting", { state: "downloading", bytes: 0 }],
+            [
+              "downloading",
+              {
+                state: "downloading",
+                bytes: 0.15 * GB,
+                size: 0.31 * GB,
+                bytesPerSecond: 9_000_000,
+              },
+            ],
+            ["done", { state: "done", bytes: 0.31 * GB, size: 0.31 * GB }],
+            ["failed", { state: "failed", bytes: 0.2 * GB, size: 0.31 * GB }],
+            [
+              "short of disk",
+              {
+                state: "short",
+                bytes: 0,
+                free: 14.6 * GB,
+                needed: 44.3 * GB,
+                moveTo: "F:",
+              },
+            ],
+          ] as const) {
+            await say(payload);
+            seen.push([state, await usage()]);
+            if (state === "downloading" && process.env.OPENBOT_APP_SHOTS)
+              await page.screenshot({
+                path: `${process.env.OPENBOT_APP_SHOTS}/welcome-download-${width}x${height}-${colorScheme}.png`,
+              });
+          }
+          const first = seen[0]?.[1];
+          expect(first?.installTop).toBeGreaterThan(0);
+          for (const [state, current] of seen) {
+            expect(current.sheetBottom).toBe(first?.sheetBottom);
+            expect(current.installTop).toBe(first?.installTop);
+            expect(current.inFoot).toBe(true);
+            expect(current.inSheet).toBe(false);
+            expect(current.overlap).toBe(false);
+            expect(current.cut).toBe(false);
+            // A short disk adds its move action and warning; the sidebar scrolls to read them.
+            if (state !== "short of disk")
+              expect(current.footBottom).toBeLessThanOrEqual(height);
+            expect(current.pageHeight).toBeLessThanOrEqual(height);
+          }
+          const move = page.getByRole("button", {
+            name: "Move OpenBot's storage to F:",
+          });
+          await page.evaluate(() => {
+            const button = [
+              ...document.querySelectorAll(".rail-foot button"),
+            ].find((button) =>
+              button.textContent?.includes("Move OpenBot's storage"),
+            );
+            button?.scrollIntoView({ block: "center" });
+          });
+          const moveBox = await move.boundingBox();
+          expect(moveBox).not.toBeNull();
+          if (moveBox) {
+            expect(moveBox.x).toBeGreaterThanOrEqual(0);
+            expect(moveBox.y).toBeGreaterThanOrEqual(0);
+            expect(moveBox.y + moveBox.height).toBeLessThanOrEqual(height);
+            const railBox = await page.locator("main > .rail").boundingBox();
+            expect(moveBox.x + moveBox.width).toBeLessThanOrEqual(
+              (railBox?.x ?? 0) + (railBox?.width ?? 0),
+            );
+          }
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/welcome-move-${width}x${height}-${colorScheme}.png`,
+            });
+          await move.click();
+          await page
+            .getByText(
+              "OpenBot's storage is on F: now. OpenBot checks the free space again.",
+            )
+            .waitFor();
+        } finally {
+          await page.close();
         }
-        const first = seen[0]?.[1];
-        expect(first).toBeGreaterThan(0);
-        expect(seen.map(([state, y]) => [state, y - (first ?? 0)])).toEqual(
-          seen.map(([state]) => [state, 0]),
-        );
-      } finally {
-        await page.close();
-      }
-    }, 30_000);
+      }, 30_000);
   }
 });
 
@@ -2375,6 +2464,7 @@ function updateScreen(page: Page) {
       return rect ? { top: rect.top, bottom: rect.bottom } : null;
     };
     return {
+      shell: Boolean(document.querySelector("main > .rail + .sheet")),
       heading: document.querySelector("main h1")?.textContent,
       // What shows, as a person reads it.
       note: note?.innerText ?? null,
@@ -2404,10 +2494,12 @@ function expectWholeUnderProgress(
   if (journey && rows && noteBox && sheetBox) {
     expect(noteBox.top).toBeGreaterThan(journey.bottom);
     expect(noteBox.top).toBeGreaterThan(rows.bottom);
-    expect(noteBox.bottom).toBeLessThanOrEqual(sheetBox.bottom);
+    if (seen.window >= 760)
+      expect(noteBox.bottom).toBeLessThanOrEqual(sheetBox.bottom);
     expect(sheetBox.bottom).toBeLessThanOrEqual(seen.window);
   }
-  expect(seen.scrolls).toBeLessThanOrEqual(0);
+  if (seen.window >= 760) expect(seen.scrolls).toBeLessThanOrEqual(0);
+  expect(seen.shell).toBe(true);
   expect(seen.page).toBeLessThanOrEqual(seen.window);
   expect(seen.cut).toBe(false);
 }
@@ -2415,100 +2507,119 @@ function expectWholeUnderProgress(
 describe.skipIf(!asked)(
   "the Start screen that updates OpenBot says why",
   () => {
-    for (const scheme of ["light", "dark"] as const) {
-      test(`in ${scheme}, at 1000x760, it says it runs on this computer under the progress, whole and without a scroll`, async () => {
-        const page = await browser.newPage({
-          viewport: { width: 1000, height: 760 },
-          colorScheme: scheme,
-        });
-        try {
-          await toStart(page);
-          // OpenBot updating itself, its download under way, as in the report.
-          await emitProgress(page, {
-            step: "release",
-            ok: true,
-            running: true,
-            detail: "Downloading the update.",
+    for (const [width, height] of [
+      [1000, 800],
+      [1000, 760],
+      [720, 560],
+    ] as const)
+      for (const scheme of ["light", "dark"] as const) {
+        test(`in ${scheme}, at ${width}x${height}, it says it runs on this computer under the progress in the setup shell`, async () => {
+          const page = await browser.newPage({
+            viewport: { width, height },
+            colorScheme: scheme,
           });
-          await page
-            .locator(".journey-said", { hasText: "Downloading the update" })
-            .waitFor();
-          await page.waitForTimeout(400);
-          const shots = process.env.OPENBOT_APP_SHOTS;
-          if (shots)
-            await page.screenshot({
-              path: `${shots}/update-screen-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}.png`,
+          try {
+            await toStart(page);
+            // OpenBot updating itself, its download under way, as in the report.
+            await emitProgress(page, {
+              step: "release",
+              ok: true,
+              running: true,
+              detail: "Downloading the update.",
             });
+            await page
+              .locator(".journey-said", { hasText: "Downloading the update" })
+              .waitFor();
+            await page.waitForTimeout(400);
+            const shots = process.env.OPENBOT_APP_SHOTS;
+            if (shots)
+              await page.screenshot({
+                path: `${shots}/update-screen-${width}x${height}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}.png`,
+              });
 
-          const seen = await updateScreen(page);
-          expect(seen.heading).toBe("Updating OpenBot (Self-Contained)");
-          expect(seen.note).toContain("Everything runs on this computer");
-          expect(seen.note).toContain("This OpenBot is self-contained.");
-          expect(seen.said).toBe(true);
-          expect(seen.note).toContain("OpenBot for Business");
-          expect(seen.note).not.toMatch(/—/);
-          // Nothing to click to go on: its one link opens a page, and the update carries on.
-          expect(seen.buttons).toBe(0);
-          expect(seen.link).toBe("https://open.bot/business");
-          expectWholeUnderProgress(seen);
+            const seen = await updateScreen(page);
+            expect(seen.heading).toBe("Updating OpenBot (Self-Contained)");
+            expect(seen.note).toContain("Everything runs on this computer");
+            expect(seen.note).toContain("This OpenBot is self-contained.");
+            expect(seen.said).toBe(true);
+            expect(seen.note).toContain("OpenBot for Business");
+            expect(seen.note).not.toMatch(/—/);
+            // Nothing to click to go on: its one link opens a page, and the update carries on.
+            expect(seen.buttons).toBe(0);
+            expect(seen.link).toBe("https://open.bot/business");
+            expectWholeUnderProgress(seen);
 
-          // Docker Desktop's hand-off, its three lines, while the update waits on Docker: the
-          // journey grows 44px. The note says less while it shows, and the card still doesn't scroll.
-          await emitProgress(page, {
-            step: "engine",
-            ok: true,
-            running: true,
-            elsewhere: true,
-            detail: DOCKER_STARTING,
-          });
-          await page.locator(".journey.handing-off").waitFor();
-          await page.waitForTimeout(400);
-          if (shots)
-            await page.screenshot({
-              path: `${shots}/update-screen-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}-docker.png`,
+            // Docker Desktop's hand-off, its three lines, while the update waits on Docker: the
+            // journey grows 44px. The note says less while it shows, and the card still doesn't scroll.
+            await emitProgress(page, {
+              step: "engine",
+              ok: true,
+              running: true,
+              elsewhere: true,
+              detail: DOCKER_STARTING,
             });
-          const handingOff = await updateScreen(page);
-          expect(handingOff.journeyHeight).toBe(seen.journeyHeight + 44);
-          expect(handingOff.heading).toBe("Updating OpenBot (Self-Contained)");
-          expect(handingOff.note).toContain("Everything runs on this computer");
-          expect(handingOff.said).toBe(false);
-          expect(handingOff.note).toContain("OpenBot for Business");
-          expect(handingOff.link).toBe("https://open.bot/business");
-          expectWholeUnderProgress(handingOff);
+            await page.locator(".journey.handing-off").waitFor();
+            await page.waitForTimeout(400);
+            if (shots)
+              await page.screenshot({
+                path: `${shots}/update-screen-${width}x${height}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}-docker.png`,
+              });
+            const handingOff = await updateScreen(page);
+            expect(handingOff.journeyHeight).toBe(seen.journeyHeight + 44);
+            expect(handingOff.heading).toBe(
+              "Updating OpenBot (Self-Contained)",
+            );
+            expect(handingOff.note).toContain(
+              "Everything runs on this computer",
+            );
+            expect(handingOff.said).toBe(false);
+            expect(handingOff.note).toContain("OpenBot for Business");
+            expect(handingOff.link).toBe("https://open.bot/business");
+            expectWholeUnderProgress(handingOff);
+            if (height < 760) {
+              await page.evaluate(() =>
+                document
+                  .querySelector(".self-contained")
+                  ?.scrollIntoView({ block: "end" }),
+              );
+              const scrolled = await updateScreen(page);
+              expect(scrolled.noteBox?.bottom).toBeLessThanOrEqual(height);
+              expect(scrolled.noteBox?.top).toBeGreaterThanOrEqual(0);
+            }
 
-          // Docker answers and the hand-off goes: the note says all of it again.
-          await emitProgress(page, {
-            step: "engine",
-            ok: true,
-            running: false,
-            detail: "Docker is answering.",
-          });
-          await page
-            .locator(".journey.handing-off")
-            .waitFor({ state: "hidden" });
-          expect((await updateScreen(page)).said).toBe(true);
+            // Docker answers and the hand-off goes: the note says all of it again.
+            await emitProgress(page, {
+              step: "engine",
+              ok: true,
+              running: false,
+              detail: "Docker is answering.",
+            });
+            await page
+              .locator(".journey.handing-off")
+              .waitFor({ state: "hidden" });
+            expect((await updateScreen(page)).said).toBe(true);
 
-          // Book a demo opens OpenBot for Business's page in the person's browser.
-          await page.getByRole("link", { name: "Book a demo" }).click();
-          await page.waitForTimeout(200);
-          expect(
-            await page.evaluate(
-              () =>
-                (globalThis as unknown as { __fake: { opened: string[] } })
-                  .__fake.opened,
-            ),
-          ).toEqual(["https://open.bot/business"]);
-          // Still the update, on the same screen.
-          expect(
-            await page.evaluate(
-              () => document.querySelector("main h1")?.textContent,
-            ),
-          ).toBe("Updating OpenBot (Self-Contained)");
-        } finally {
-          await page.close();
-        }
-      }, 30_000);
-    }
+            // Book a demo opens OpenBot for Business's page in the person's browser.
+            await page.getByRole("link", { name: "Book a demo" }).click();
+            await page.waitForTimeout(200);
+            expect(
+              await page.evaluate(
+                () =>
+                  (globalThis as unknown as { __fake: { opened: string[] } })
+                    .__fake.opened,
+              ),
+            ).toEqual(["https://open.bot/business"]);
+            // Still the update, on the same screen.
+            expect(
+              await page.evaluate(
+                () => document.querySelector("main h1")?.textContent,
+              ),
+            ).toBe("Updating OpenBot (Self-Contained)");
+          } finally {
+            await page.close();
+          }
+        }, 30_000);
+      }
   },
 );
 

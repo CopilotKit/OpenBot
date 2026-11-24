@@ -195,6 +195,11 @@ test("on the first screen, the line says how far the downloads are, with one bar
     "Downloading OpenBot. About 3 minutes left.",
   );
   const bar = view.getByRole("progressbar", { name: "Download progress" });
+  expect(bar.closest(".rail-foot")).not.toBeNull();
+  expect(
+    bar.closest(".rail-foot")?.querySelectorAll(".step-spinner").length,
+  ).toBe(0);
+  expect(bar.closest("main > .sheet")).toBeNull();
   expect(Number(bar.getAttribute("value"))).toBeCloseTo(1.2 / 2.9, 3);
   expect(bar.getAttribute("aria-valuetext")).toBe("1.2 GB of 2.9 GB");
 });

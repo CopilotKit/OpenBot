@@ -1807,6 +1807,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       !localStarting && !installingAfresh && appTooOld(displayedFailure);
     return (
       <main>
+        <SetupRail />
         <div className="sheet connection-sheet">
           <h1>
             {updatingSelf

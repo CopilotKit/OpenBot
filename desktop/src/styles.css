@@ -3004,6 +3004,11 @@ main > .rail + .sheet.welcome {
   padding-top: calc(var(--head-top) - 11px - 5.4px);
 }
 
+/* The update keeps its progress and explanation in view, including Docker's longer hand-off. */
+main > .rail + .sheet:has(> .self-contained) {
+  padding-bottom: 16px;
+}
+
 main > .rail + .sheet > * {
   max-width: var(--measure);
 }
@@ -3191,12 +3196,17 @@ main > .rail + .sheet > * {
 }
 
 /*
- * The first screen's downloads line holds its tallest height so what is under it never moves. With
- * nothing to say, in the page, only a failure is under it, and that belongs under Install, not
- * 72 px further down and off the page's foot.
+ * An idle download has no line to read at the sidebar's foot.
  */
-.rail + .sheet .early-downloads.first-screen:empty {
+.rail-foot .early-downloads.first-screen:empty {
   min-height: 0;
+  display: none;
+}
+
+/* The storage move remains a complete, clickable action in the narrow sidebar. */
+.rail-foot .early-downloads button {
+  max-width: 100%;
+  white-space: normal;
 }
 
 /*

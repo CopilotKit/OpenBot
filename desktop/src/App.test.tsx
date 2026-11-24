@@ -5386,6 +5386,8 @@ test("updating OpenBot says it runs on this computer, and Book a demo opens Open
       name: "Updating OpenBot (Self-Contained)",
     }),
   ).toBeTruthy();
+  // A returning installation uses the same sidebar and inset page as a first setup.
+  expect(view.getByRole("complementary", { name: /^Setup$/ })).toBeTruthy();
   const note = view.getByRole("region", {
     name: "Everything runs on this computer",
   });
