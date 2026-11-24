@@ -7985,9 +7985,9 @@ fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String>
 /// The setup screens' background in light and in dark, which the macOS title bar takes while they
 /// show. The same values as `--surface-main` in styles.css (OpenBot's `--sidebar`, in sRGB).
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-const SETUP_BACKGROUND: tauri::window::Color = tauri::window::Color(0xed, 0xed, 0xf5, 0xff);
+const SETUP_BACKGROUND: tauri::window::Color = tauri::window::Color(0xe9, 0xee, 0xf4, 0xff);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-const SETUP_BACKGROUND_DARK: tauri::window::Color = tauri::window::Color(0x0d, 0x0b, 0x13, 0xff);
+const SETUP_BACKGROUND_DARK: tauri::window::Color = tauri::window::Color(0x07, 0x0d, 0x14, 0xff);
 
 /// Whether `url` is the setup page rather than OpenBot.
 fn on_setup_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> bool {
@@ -20783,10 +20783,10 @@ mod tests {
     fn the_windows_title_bar_is_dark_from_its_first_show_and_redrawn_on_every_change() {
         let dark = title_bar_attributes(Some(true));
         assert_eq!(dark[0], (IMMERSIVE_DARK_MODE, 1), "{dark:?}");
-        assert!(dark.contains(&(CAPTION_COLOR, 0x0013_0b0d)), "{dark:?}");
+        assert!(dark.contains(&(CAPTION_COLOR, 0x0014_0d07)), "{dark:?}");
         let light = title_bar_attributes(Some(false));
         assert_eq!(light[0], (IMMERSIVE_DARK_MODE, 0), "{light:?}");
-        assert!(light.contains(&(CAPTION_COLOR, 0x00f5_eded)), "{light:?}");
+        assert!(light.contains(&(CAPTION_COLOR, 0x00f4_eee9)), "{light:?}");
         // Windows's own colours, and the window's theme left to decide its dark or light.
         let own = title_bar_attributes(None);
         assert!(own

@@ -2,6 +2,7 @@ import { IconArrowRight } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import type { AgentProfile } from "@/lib/agents/queries";
 
 export function AgentCard({
@@ -17,7 +18,7 @@ export function AgentCard({
        * The avatar beside the name rather than above it: a tall card left most of its height empty
        * between the two, and a row reads the name and what the Bot is for in one glance.
        */
-      <div className="flex h-16 min-w-0 items-center gap-3 rounded-xl border border-border bg-card px-3 transition-colors hover:border-ring dark:border-transparent">
+      <Card className="flex h-16 min-w-0 items-center gap-3 px-3 transition-colors hover:border-ring">
         <div aria-hidden="true" className="flex shrink-0">
           <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={32} />
         </div>
@@ -29,12 +30,12 @@ export function AgentCard({
             {agent.roleDescription}
           </span>
         </div>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="relative flex h-[160px] w-full min-w-0 flex-col gap-2 overflow-hidden rounded-2xl border border-border bg-card p-3 dark:border-transparent">
+    <Card className="relative flex h-40 w-full min-w-0 flex-col gap-2 overflow-hidden p-3">
       <div aria-hidden="true" className="mb-1 flex shrink-0">
         <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={28} />
       </div>
@@ -66,6 +67,6 @@ export function AgentCard({
           stroke={1.5}
         />
       </div>
-    </div>
+    </Card>
   );
 }

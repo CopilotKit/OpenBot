@@ -47,11 +47,11 @@ const ZOOMED = { width: 820, height: 540 };
 const ZOOMED_MOST = Math.floor(ZOOMED.width * 0.4);
 
 /**
- * The narrowest each shape may be dragged: the panel's floor, plus the 3rem strip beside one; and
+ * The narrowest each shape may be dragged: the panel's floor, plus the 3.5rem strip beside one; and
  * where a drag stopped before (`was`), which it now goes well past.
  */
 const SHAPES = [
-  { name: "app", strip: true, floor: 180 + 48, was: 220 + 48 },
+  { name: "app", strip: true, floor: 180 + 56, was: 220 + 56 },
   { name: "admin-settings", strip: false, floor: 180, was: 220 },
 ] as const;
 type Shape = (typeof SHAPES)[number];
@@ -395,7 +395,7 @@ describe.skipIf(!asked)("the sidebar's edge at any zoom", () => {
       for (const [engine, browser] of engines) {
         const page = await open(browser, shape, ZOOMED);
         try {
-          // 340px by default, which is more than two-fifths of the zoomed window.
+          // 360px by default, which is more than two-fifths of the zoomed window.
           expect(await measured(page)).toMatchObject({
             width: ZOOMED_MOST,
             window: ZOOMED.width,

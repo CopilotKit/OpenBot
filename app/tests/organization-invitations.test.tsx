@@ -970,7 +970,9 @@ describe("the account menu", () => {
         ...app.view.container.querySelectorAll(
           "[data-slot=strip] [aria-current=page], [data-slot=strip] [aria-pressed=true]",
         ),
-      ].map((item) => item.querySelector(".sr-only")?.textContent);
+      ].map(
+        (item) => item.querySelector("[data-slot=strip-label]")?.textContent,
+      );
     await waitFor(() => expect(marked()).toEqual(["Bots"]));
     const menu = await app.openAccountMenu();
     await app.person.click(

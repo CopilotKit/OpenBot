@@ -69,8 +69,8 @@ describe("sidebar width", () => {
     entries[key] ?? null;
 
   test("every shell starts at the app's width until somebody drags one", () => {
-    expect(SIDEBAR_WIDTH).toBe("340px");
-    expect(storedSidebarWidth(storage({}))).toBe("340px");
+    expect(SIDEBAR_WIDTH).toBe("360px");
+    expect(storedSidebarWidth(storage({}))).toBe("360px");
   });
 
   test("a dragged width is shared, ahead of the app's old one", () => {
@@ -95,13 +95,13 @@ describe("sidebar width", () => {
           "openbot-sidebar-width:admin": "260",
         }),
       ),
-    ).toBe("340px");
+    ).toBe("360px");
   });
 
   test("a width out of bounds falls back to the default", () => {
     expect(
       storedSidebarWidth(storage({ [SIDEBAR_WIDTH_STORAGE_KEY]: "9000" })),
-    ).toBe("340px");
+    ).toBe("360px");
   });
 });
 

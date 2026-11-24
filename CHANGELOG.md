@@ -477,6 +477,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **A sharper look, at the same sizes.** Corners come from one 8px radius, cards are flat with a
+  hairline border you can see in both themes, and shadows show only on what floats: menus and
+  popovers, then dialogs and sheets over the app. The grays are slate, a quiet blue-gray in dark,
+  with CopilotKit's lavender kept for the focus ring and the selected sidebar row. The message box
+  glows while you type in it. On Home, OpenBot's orb sits behind the message box as a pale field
+  with rings of dots that brighten as you type, and the page rises in on the first Home of a visit.
+  Nothing moves when your system asks for less motion. Skins keep their own look.
 - **Product telemetry says which kind of install sent it.** An event's `environment` was read from
   `NODE_ENV`, which a Compose install and OpenBot Desktop leave empty, so every event said
   `unknown`. It now comes from the build: a release, a release candidate or an internal build says
