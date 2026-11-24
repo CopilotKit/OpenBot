@@ -245,7 +245,7 @@ paths:
       operationId: getBuddyFile
       summary: Download a buddy's picture or one of its clips
       description: >-
-        The still picture (avatar.png or avatar.jpg) or one pose's clip
+        The still picture (avatar.png, .jpg, .webp or .gif) or one pose's clip
         (<pose>.webm or <pose>.mp4) of a buddy the caller made, as the buddy's
         avatarUrl and poses name them. A file is never changed once written, so
         a client may keep it.
@@ -259,12 +259,24 @@ paths:
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateImmutable'
+            ETag:
+              description: Names these bytes, for If-None-Match.
+              schema:
+                type: string
           content:
             image/png:
               schema:
                 type: string
                 format: binary
             image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            image/gif:
               schema:
                 type: string
                 format: binary
@@ -276,6 +288,8 @@ paths:
               schema:
                 type: string
                 format: binary
+        '304':
+          description: The copy the caller holds is current.
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -308,7 +322,7 @@ components:
         type: string
         minLength: 1
         maxLength: 64
-        pattern: ^[A-Za-z0-9_-]+\.(png|jpg|webm|mp4)$
+        pattern: ^[A-Za-z0-9_-]+\.(png|jpg|webp|gif|webm|mp4)$
       example: idle.webm
   headers:
     PrivateImmutable:
@@ -472,11 +486,11 @@ components:
           examples:
             notReady:
               value:
-                type: https://open.bot/errors/invalid-request
-                title: Invalid request.
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
                 status: 400
                 detail: That buddy isn't ready yet. Choose it once it's made.
-                code: INVALID_REQUEST
+                code: VALIDATION_ERROR
                 category: validation
                 retryable: false
                 requestId: req_example

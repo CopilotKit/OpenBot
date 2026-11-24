@@ -722,7 +722,7 @@ export const getGetBuddyFileUrl = (
 };
 
 /**
- * The still picture (avatar.png or avatar.jpg) or one pose's clip (<pose>.webm or <pose>.mp4) of a buddy the caller made, as the buddy's avatarUrl and poses name them. A file is never changed once written, so a client may keep it.
+ * The still picture (avatar.png, .jpg, .webp or .gif) or one pose's clip (<pose>.webm or <pose>.mp4) of a buddy the caller made, as the buddy's avatarUrl and poses name them. A file is never changed once written, so a client may keep it.
  * @summary Download a buddy's picture or one of its clips
  */
 export const getBuddyFile = async (
@@ -753,6 +753,7 @@ export const getGetBuddyFileQueryKey = (
 export const getGetBuddyFileQueryOptions = <
   TData = Awaited<ReturnType<typeof getBuddyFile>>,
   TError =
+    | void
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | BuddyNotFoundResponse
@@ -805,6 +806,7 @@ export type GetBuddyFileQueryResult = NonNullable<
   Awaited<ReturnType<typeof getBuddyFile>>
 >;
 export type GetBuddyFileQueryError =
+  | void
   | InvalidRequestResponse
   | UnauthenticatedResponse
   | BuddyNotFoundResponse
@@ -814,6 +816,7 @@ export type GetBuddyFileQueryError =
 export function useGetBuddyFile<
   TData = Awaited<ReturnType<typeof getBuddyFile>>,
   TError =
+    | void
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | BuddyNotFoundResponse
@@ -844,6 +847,7 @@ export function useGetBuddyFile<
 export function useGetBuddyFile<
   TData = Awaited<ReturnType<typeof getBuddyFile>>,
   TError =
+    | void
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | BuddyNotFoundResponse
@@ -874,6 +878,7 @@ export function useGetBuddyFile<
 export function useGetBuddyFile<
   TData = Awaited<ReturnType<typeof getBuddyFile>>,
   TError =
+    | void
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | BuddyNotFoundResponse
@@ -900,6 +905,7 @@ export function useGetBuddyFile<
 export function useGetBuddyFile<
   TData = Awaited<ReturnType<typeof getBuddyFile>>,
   TError =
+    | void
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | BuddyNotFoundResponse

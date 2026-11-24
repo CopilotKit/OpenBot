@@ -290,7 +290,7 @@ export const DeleteBuddyHeader = zod.object({
 export const DeleteBuddyResponse = zod.void();
 
 /**
- * The still picture (avatar.png or avatar.jpg) or one pose's clip (<pose>.webm or <pose>.mp4) of a buddy the caller made, as the buddy's avatarUrl and poses name them. A file is never changed once written, so a client may keep it.
+ * The still picture (avatar.png, .jpg, .webp or .gif) or one pose's clip (<pose>.webm or <pose>.mp4) of a buddy the caller made, as the buddy's avatarUrl and poses name them. A file is never changed once written, so a client may keep it.
  * @summary Download a buddy's picture or one of its clips
  */
 
@@ -300,7 +300,7 @@ export const getBuddyFilePathBuddyIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 export const getBuddyFilePathBuddyFileMax = 64;
 
 export const getBuddyFilePathBuddyFileRegExp = new RegExp(
-  "^[A-Za-z0-9_-]+\\.(png|jpg|webm|mp4)$",
+  "^[A-Za-z0-9_-]+\\.(png|jpg|webp|gif|webm|mp4)$",
 );
 
 export const GetBuddyFileParams = zod.object({
