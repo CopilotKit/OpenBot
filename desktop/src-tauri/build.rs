@@ -66,6 +66,8 @@ fn main() {
                     // The page's own problems as they happen, for Get Troubleshooting Logs…. See
                     // `src/page_problems.rs`.
                     "record_problem",
+                    // The web app's Get troubleshooting logs: the menus' file, saved and shown.
+                    "save_logs",
                     // A Bot's notification, opening OpenBot at a page when clicked. See `src/notice.rs`.
                     "notify",
                     // Settings' AI model row, and its Change. See `src/ai_connection.rs`.

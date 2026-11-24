@@ -42,7 +42,10 @@ mod connected_ipc {
         fn recording_problems() -> Self {
             Self::with_page_plugin(
                 tauri::plugin::Builder::<tauri::test::MockRuntime>::new(desktop_page::PLUGIN)
-                    .invoke_handler(tauri::generate_handler![desktop_page::record_problem])
+                    .invoke_handler(tauri::generate_handler![
+                        desktop_page::record_problem,
+                        desktop_page::save_logs
+                    ])
                     .build(),
             )
         }
@@ -982,7 +985,7 @@ mod connected_ipc {
         wait_until("the gathering finished", || {
             !GATHERING_LOGS.load(std::sync::atomic::Ordering::SeqCst)
         });
-        let text = std::fs::read_to_string(saved.unwrap()).unwrap();
+        let text = std::fs::read_to_string(saved.as_ref().unwrap()).unwrap();
 
         for expected in [
             "connected to 127.0.0.1".to_owned(),
@@ -1015,6 +1018,39 @@ mod connected_ipc {
         ] {
             assert!(!text.contains(absent), "{absent:?} in\n{text}");
         }
+
+        // The web app's own Get troubleshooting logs, inside this app, saves the same file. Another
+        // page may not ask for it.
+        let saved_by_menu = saved.unwrap();
+        std::fs::remove_file(&saved_by_menu).unwrap();
+        assert!(shell
+            .ask(
+                "http://127.0.0.1:3011/",
+                "plugin:openbot-desktop|save_logs"
+            )
+            .is_err());
+        assert!(!saved_by_menu.exists());
+        assert_eq!(
+            shell.ask(RELAY, "plugin:openbot-desktop|save_logs"),
+            Ok(serde_json::Value::Null)
+        );
+        let from_page = std::fs::read_dir(&folder)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name().is_some_and(|name| {
+                    name.to_string_lossy()
+                        .starts_with("openbot-troubleshooting-")
+                })
+            })
+            .expect("the page's ask saved the file");
+        let text = std::fs::read_to_string(from_page).unwrap();
+        assert!(
+            text.contains("request id req_5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10"),
+            "{text}"
+        );
+        assert!(!text.contains(key.as_str()));
         drop(shell);
         let _ = std::fs::remove_dir_all(&home);
     }
