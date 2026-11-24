@@ -72,7 +72,11 @@ import {
   roleName,
 } from "@/lib/organizations/words";
 import { SEARCH_MAX } from "@/lib/people/queries";
-import { employeeTrialUsedUp, needsCard, usePlan } from "@/lib/plan/queries";
+import {
+  employeeTrialUsedUp,
+  organizationNeedsCard,
+  usePlan,
+} from "@/lib/plan/queries";
 import {
   COPILOTKIT_EMPLOYEE_LINE,
   cardAction,
@@ -244,7 +248,8 @@ function PlanRow() {
           <ItemTitle>Plan</ItemTitle>
           <ItemDescription>{planSummary(plan)}</ItemDescription>
         </ItemContent>
-        {needsCard(plan) && plan.addCardUrl ? (
+        {/* The organization's bill: shown to a CopilotKit employee too, whose own runs go on. */}
+        {organizationNeedsCard(plan) && plan.addCardUrl ? (
           <ItemActions>
             <a
               className={cn(buttonVariants({ size: "sm", variant: "outline" }))}

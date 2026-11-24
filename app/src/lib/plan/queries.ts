@@ -61,10 +61,21 @@ export function planQueryOptions() {
 }
 
 /**
- * Whether Bots in the organization can't run until a card is added or updated: the free trial is
- * used up (`none`), or the last payment failed. Never while runs are left on the free trial (`free`).
+ * Whether the person's Bots can't run until a card is added or updated: the free trial is used up
+ * (`none`), or the last payment failed. Never while runs are left on the free trial (`free`), and
+ * never for a CopilotKit employee, whose own runs are never refused for want of a plan, whatever the
+ * organization's status says.
  */
 export function needsCard(plan: PlanStatus | undefined): boolean {
+  return organizationNeedsCard(plan) && plan?.copilotKitEmployee !== true;
+}
+
+/**
+ * Whether the organization's card needs adding or updating, for the Plan row in Settings: the
+ * organization's own bill, which a CopilotKit employee's colleagues depend on even though the
+ * employee's own runs go on (`needsCard` is false for them).
+ */
+export function organizationNeedsCard(plan: PlanStatus | undefined): boolean {
   return (
     plan?.required === true &&
     (plan.status === "none" || plan.status === "past_due")
@@ -86,14 +97,17 @@ export function trialUsedUp(plan: PlanStatus | undefined): boolean {
 }
 
 /**
- * Whether the person is a CopilotKit employee who has used up the free trial. Their own runs are
- * never refused for want of a plan, so the plan stays `free` (no card, never blocked): the dialog
- * says the trial is used up once, with a thank-you in place of the way to pay.
+ * Whether the person is a CopilotKit employee who has used up the free trial in an organization
+ * with no plan. Their own runs are never refused for want of a plan, so where everyone else reads
+ * `none` they read `free` (no card, never blocked): the dialog says the trial is used up once, with
+ * a thank-you in place of the way to pay. An organization on the plan or behind on a payment keeps
+ * its own status, and this is false there.
  */
 export function employeeTrialUsedUp(plan: PlanStatus | undefined): boolean {
   return (
     plan?.required === true &&
     plan.copilotKitEmployee === true &&
+    plan.status === "free" &&
     typeof plan.freeRunsAllowance === "number"
   );
 }

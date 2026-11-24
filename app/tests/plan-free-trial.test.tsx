@@ -600,6 +600,68 @@ test("a CopilotKit employee past the cap is told once, with thanks and no way to
   expect(dialog()).toBeNull();
 });
 
+/*
+ * An organization behind on its payment keeps that status for a CopilotKit employee in it: their
+ * own runs still go on, with no dialog and no banner, but the Plan row shows the failed payment and
+ * gives an admin Update card, since the bill is the organization's and everyone else in it is
+ * stopped.
+ */
+test("a CopilotKit employee in an organization whose payment failed can still send, and the Plan row shows the failed payment", async () => {
+  plan = {
+    required: true,
+    status: "past_due",
+    freeRunsUsedPercent: 100,
+    freeRunsAllowance: 500,
+    copilotKitEmployee: true,
+    trialEndsAt: null,
+    renewsAt: null,
+    addCardUrl: ADD_CARD,
+  };
+  queryClient.setQueryData(organizationKeys.mine(), {
+    organizations: [
+      {
+        id: ORG,
+        slug: "ana",
+        name: "Ana's organization",
+        role: "owner",
+        active: true,
+        personal: true,
+      },
+    ],
+    canCreate: true,
+    currentId: ORG,
+  });
+  const sent: string[] = [];
+  const view = open(
+    <>
+      <PlanBanner />
+      <OrganizationSettingsPage />
+      <Composer
+        compact
+        initialValue="Summarize this week's signups"
+        onSubmit={(draft) => {
+          sent.push(draft.text);
+        }}
+      />
+    </>,
+  );
+
+  await view.findByText("Last payment failed");
+  expect(
+    view.getByRole("link", { name: "Update card" }).getAttribute("href"),
+  ).toBe(ADD_CARD);
+  for (let tries = 0; tries < 5; tries++) await settled();
+  expect(dialog()).toBeNull();
+  expect(document.querySelector('aside[aria-label="Plan"]')).toBeNull();
+
+  await act(async () => {
+    fireEvent.click(view.getByLabelText("Send message"));
+  });
+  await settled();
+  expect(dialog()).toBeNull();
+  await waitFor(() => expect(sent).toEqual(["Summarize this week's signups"]));
+});
+
 test("the Plan row tells a CopilotKit employee past the cap their runs are free", async () => {
   plan = employeeUsedUp();
   queryClient.setQueryData(organizationKeys.mine(), {

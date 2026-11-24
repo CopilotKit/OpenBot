@@ -58,7 +58,8 @@ import { queryClient } from "@/query-client";
  *
  * A CopilotKit employee's runs are never refused for want of a plan. Once their trial is used up it
  * opens by itself once with the same words, plus a thank-you in place of the way to pay. Nothing
- * stops their AI actions (`needsCard` is false for them), so it never opens again on one.
+ * stops their AI actions (`needsCard` is false for them, whatever the organization's status, a
+ * failed payment included), so it never opens on one.
  */
 export function CardNeededDialog() {
   const open = useSyncExternalStore(
