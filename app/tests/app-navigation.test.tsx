@@ -198,7 +198,9 @@ test.each(["user", "admin"] as const)(
     // (Bots) as a button that switches the panel, any other as a link to its page.
     const names = [
       ...footer.querySelectorAll<HTMLElement>("a[href], button"),
-    ].map((item) => item.querySelector(".sr-only")?.textContent);
+    ].map(
+      (item) => item.querySelector('[data-slot="strip-label"]')?.textContent,
+    );
     expect(names).toEqual([
       "Conversations",
       ...expected(role, "primary").map((item) => item.label),
