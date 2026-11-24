@@ -308,7 +308,7 @@ describe.skipIf(!asked)("the settings read cards", () => {
               "Stop inactive computers": "After 7 days without use",
               "Only allowed models":
                 "On: anthropic/claude-sonnet-4-5, openai/gpt-5.5, google/gemini-3-pro",
-              "Only approved servers": "Off",
+              "Only approved connectors": "Off",
               "Use Bots": "On",
               "Browse the web": "On, 1 override",
               "Custom rules": "Off, 2 overrides",
