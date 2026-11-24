@@ -37,8 +37,8 @@ import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
  * Every Bot the person can reach, in the one place they are listed: what needs the person first,
- * then pinned, then their own, then the ones shared with them, and the ones they hid folded away at
- * the end.
+ * then pinned, then their own, then the ones shared with them, then the ones included with OpenBot,
+ * and the ones they hid folded away at the end.
  *
  * Needs you is where the sidebar's badge leads, so it holds everything behind that number in one
  * card: the Bots with a question, an approval or a stalled hand-off (answered on the Bot's page),
@@ -70,8 +70,20 @@ export function BotRoster() {
     );
   }
   // Every Bot stays in its own section; what it waits on is on the board above, by name.
-  const { pinned, yours, shared } = groupRoster(agents.data);
-  const available = pinned.length + yours.length + shared.length;
+  const roster = groupRoster(agents.data);
+  const { pinned, yours } = roster;
+  /*
+   * A Bot OpenBot provides is included with OpenBot, never "shared with you": nobody shared it, and
+   * on OpenBot Cloud, where each person has an organization of their own, "shared" read as their
+   * conversations being out in the open. The personal edition has nobody to share with, so every
+   * Bot that isn't the person's comes with OpenBot.
+   */
+  const shared = personal ? [] : roster.shared;
+  const included = personal
+    ? [...roster.shared, ...roster.included]
+    : roster.included;
+  const available =
+    pinned.length + yours.length + shared.length + included.length;
   const hiddenCount = hidden.data?.length ?? 0;
   const newBot = (
     <Button
@@ -108,10 +120,13 @@ export function BotRoster() {
         </PageSection>
       ) : null}
       {shared.length ? (
-        <PageSection
-          title={personal ? "Included with OpenBot" : "Shared with you"}
-        >
+        <PageSection title="Shared with you">
           <RosterRows agents={shared} byId={byId} />
+        </PageSection>
+      ) : null}
+      {included.length ? (
+        <PageSection title="Included with OpenBot">
+          <RosterRows agents={included} byId={byId} />
         </PageSection>
       ) : null}
       {available === 0 ? (

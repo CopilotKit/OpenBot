@@ -289,13 +289,17 @@ export function NavigationTarget({
 }
 
 /**
- * The personal edition's way to learn about a computer for each Bot. It opens the OpenBot for
- * Business dialog, over whatever it sits in.
+ * The way to learn about a computer for each Bot, in the personal edition and on OpenBot Cloud. It
+ * opens the OpenBot for Business dialog, over whatever it sits in. Under a row's description it
+ * takes that description's size (`className="text-xs"`).
  */
-export function BusinessComputerLink() {
+export function BusinessComputerLink({ className }: { className?: string }) {
   return (
     <button
-      className="w-fit text-left text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+      className={cn(
+        "w-fit text-left text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground",
+        className,
+      )}
       onClick={openTeamFeatures}
       type="button"
     >

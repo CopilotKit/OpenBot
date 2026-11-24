@@ -34,6 +34,7 @@ import {
 } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
 import { memorySourcesQueryOptions } from "@/lib/memory";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
 import { primitive, SETUP } from "@/lib/primitives";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
@@ -87,6 +88,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
     enabled: !personal,
   });
   const published = teamBots.data?.find((bot) => bot.botId === agent.id);
+  const audience = useOrganizationAudience();
   const admin = isOrganizationAdmin(me?.role);
   // Its owner and admins change it there; anyone it is published to finds its link there.
   const canShare =
@@ -195,9 +197,11 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
             to: "/bots/$agentId/sharing" as const,
             title: "Sharing",
             icon: IconUsersGroup,
-            summary: teamBots.data
-              ? sharingSummary(published, agent.visibility)
-              : "",
+            summary:
+              teamBots.data &&
+              !(agent.visibility === "public" && audience.pending)
+                ? sharingSummary(published, agent.visibility, audience)
+                : "",
           },
         ]
       : []),

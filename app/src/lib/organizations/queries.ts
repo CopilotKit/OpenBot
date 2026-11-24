@@ -26,7 +26,11 @@ import {
   tellDesktopTheOrganization,
 } from "@/lib/desktop/organization";
 import { editionOf } from "@/lib/edition-guard";
-import { currentOrganizationId, setCurrentOrganization } from "./current";
+import {
+  currentOrganizationId,
+  setCurrentOrganization,
+  useCurrentOrganizationId,
+} from "./current";
 import { InNoOrganization } from "./in-no-organization";
 
 /** One of the person's organizations, with the server's verdicts: their role in it, and `active`. */
@@ -60,6 +64,9 @@ export const organizationKeys = {
   mine: () => ["organizations", "mine"] as const,
   members: (organizationId: string) =>
     ["organizations", "members", organizationId] as const,
+  /** Whether anybody besides the person is a member: under `members`, so what refreshes them refreshes it. */
+  others: (organizationId: string) =>
+    ["organizations", "members", organizationId, "others"] as const,
   /** One search of the members, a page at a time: under `members`, so what refreshes them refreshes it. */
   memberPages: (organizationId: string, search = "") =>
     ["organizations", "members", organizationId, { search }] as const,
@@ -350,6 +357,53 @@ export function organizationMembersQueryOptions(organizationId: string) {
         return { items: page.members, nextCursor: page.nextCursor };
       }),
   });
+}
+
+/**
+ * Whether an organization has a member besides the person asking, who is one of them. The first two
+ * members answer it, so a large organization is never read through.
+ */
+export function organizationHasOthersQueryOptions(organizationId: string) {
+  return queryOptions({
+    queryKey: organizationKeys.others(organizationId),
+    queryFn: async ({ signal }): Promise<boolean> => {
+      const page = await listOrganizationMembers(
+        organizationId,
+        { limit: 2 },
+        { signal, fallback: MEMBERS_FALLBACK },
+      );
+      return page.members.length > 1 || page.nextCursor !== null;
+    },
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Who "everyone" is for a public Bot, as a screen says it: the organization by name where the app
+ * knows it, and whether the person is its only member. `alone` is undefined until the members have
+ * answered, and when they can't be read; a screen then says "everyone in the organization".
+ */
+export type OrganizationAudience = {
+  organizationName: string | undefined;
+  alone: boolean | undefined;
+  /** Whether the members are still being read. */
+  pending: boolean;
+};
+
+export function useOrganizationAudience(): OrganizationAudience {
+  const team =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "team";
+  const organizationName = useCurrentOrganizationName();
+  const current = useCurrentOrganizationId();
+  const others = useQuery({
+    ...organizationHasOthersQueryOptions(current ?? ""),
+    enabled: team && current !== undefined,
+  });
+  return {
+    organizationName,
+    alone: others.data === undefined ? undefined : !others.data,
+    pending: team && current !== undefined && others.isPending,
+  };
 }
 
 /** One page of an organization's members, and where the next one starts. */
