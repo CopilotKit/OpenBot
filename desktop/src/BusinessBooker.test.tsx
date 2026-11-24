@@ -67,6 +67,8 @@ test("page booking retains its surface and footer through loading, ready and fai
   expect(surface).not.toBeNull();
   const back = view.getByRole("button", { name: "Back" });
   expect(back.parentElement?.classList.contains("setup-footer")).toBe(true);
+  expect(back.classList.contains("quiet")).toBe(true);
+  expect(back.querySelector("svg")).toBeNull();
   expect(view.getByRole("status").textContent).toContain(
     "Loading available times…",
   );

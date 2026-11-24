@@ -4,6 +4,7 @@ main > .rail + .sheet.welcome:has(> .booking-step.setup-layout) {
   scrollbar-gutter: auto;
   padding-right: var(--page-inline);
   padding-top: calc(var(--head-top) - 11px);
+  padding-bottom: 32px;
 }
 
 main > .rail + .sheet.welcome > .booking-step.setup-layout {
@@ -33,7 +34,7 @@ main > .rail + .sheet.welcome > .booking-step.setup-layout {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 1 0 390px;
+  flex: 0 0 390px;
   width: 100%;
   min-width: 0;
   min-height: 390px;
@@ -77,8 +78,12 @@ main > .rail + .sheet.welcome > .booking-step.setup-layout {
   overflow-wrap: anywhere;
 }
 
-.setup-layout .setup-footer button.text-link.booking-back {
+.booking-step.setup-layout > .setup-footer > button.quiet.booking-back {
+  min-height: 42px;
+  padding: 10px 15px;
   margin: 0;
+  border-radius: 7px;
+  background: transparent;
 }
 
 @media (max-width: 860px) {

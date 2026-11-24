@@ -3,7 +3,6 @@ import {
   IconAdjustments,
   IconArrowUpRight,
   IconChecks,
-  IconChevronLeft,
   IconDeviceDesktop,
   IconHistory,
   IconListCheck,
@@ -203,10 +202,9 @@ function BookADemo({
             {onBack && (
               <button
                 type="button"
-                className="text-link booking-back"
+                className="quiet booking-back"
                 onClick={onBack}
               >
-                <IconChevronLeft aria-hidden="true" stroke={1.75} />
                 Back
               </button>
             )}
