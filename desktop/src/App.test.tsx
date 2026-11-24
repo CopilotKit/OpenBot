@@ -913,7 +913,7 @@ test("picking OpenBot for Business shows its way, what it adds and Book a demo, 
   expect(
     surface?.firstElementChild?.classList.contains("booking-calendar"),
   ).toBe(true);
-  expect(calendar.style.height).toBe("");
+  expect(calendar.style.height).toBe("700px");
   // Calendly says it is there: the spinner goes.
   await act(async () => {
     window.dispatchEvent(
@@ -926,7 +926,7 @@ test("picking OpenBot for Business shows its way, what it adds and Book a demo, 
   });
   expect(view.queryByText("Loading available times…")).toBeNull();
   expect(calendar.closest(".setup-booking-surface")).toBe(surface);
-  expect(calendar.style.height).toBe("");
+  expect(calendar.style.height).toBe("640px");
   expectPlain(view);
   // Back: the features again, with Book a demo focused, and no calendar.
   await userEvent.click(view.getByRole("button", { name: "Back" }));

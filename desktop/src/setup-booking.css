@@ -27,18 +27,22 @@ main > .rail + .sheet.welcome > .booking-step.setup-layout {
   letter-spacing: -0.02em;
 }
 
-/* Page booking reserves its frame before Calendly arrives; card embeds keep their own sizing. */
+/* Booking uses all room between its heading and Back, including while the calendar loads. */
+main > .rail + .sheet.welcome > .booking-step.setup-layout > .setup-body {
+  padding-block: 18px 0;
+  overflow: hidden;
+}
 .setup-layout .setup-booking-surface {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 0 0 390px;
+  flex: 1 1 auto;
   width: 100%;
   min-width: 0;
-  min-height: 390px;
-  padding: 24px;
+  min-height: 0;
+  padding: 8px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -49,7 +53,7 @@ main > .rail + .sheet.welcome > .booking-step.setup-layout {
 /* Absolute placement keeps a frame's intrinsic height out of the reserved surface's geometry. */
 .setup-layout .setup-booking-surface > .booking-calendar {
   position: absolute;
-  inset: 24px;
+  inset: 8px;
   min-width: 0;
   border: 0;
   border-radius: 0;
@@ -94,12 +98,10 @@ main > .rail + .sheet.welcome > .booking-step.setup-layout {
   }
 
   .setup-layout .setup-booking-surface {
-    flex-basis: 300px;
-    min-height: 300px;
-    padding: 16px;
+    padding: 8px;
   }
 
   .setup-layout .setup-booking-surface > .booking-calendar {
-    inset: 16px;
+    inset: 8px;
   }
 }

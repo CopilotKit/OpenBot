@@ -13,7 +13,14 @@ import {
   IconUsers,
   IconUsersGroup,
 } from "@tabler/icons-react";
-import { type ReactNode, type Ref, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   BOOK_A_DEMO_LINE,
   BOOKING_CALENDAR_ORIGIN,
@@ -332,8 +339,7 @@ type CalendlyMessage = {
  * spinner stands in its place. Offline, an `error` from the frame, or no word from it in
  * {@link BOOKING_CALENDAR_TIMEOUT_MS} on screen, and `onFailed` hands back to Book a demo. Its height
  * follows what it reports, so it never scrolls inside the card. As the booking step (`fit`) it is
- * held to the reserved page surface throughout loading and fallback; a taller view of its own
- * (a day's times, the form) scrolls in its frame.
+ * fitted into the available page surface at its full reported height, including the day's times.
  */
 function BookingCalendar({
   fit = false,
@@ -344,11 +350,24 @@ function BookingCalendar({
   onFailed: () => void;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState(0);
   const [src] = useState(() =>
     bookingCalendarSrc(window.location.host, windowColors()),
   );
   const [ready, setReady] = useState(false);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!fit || !element) return;
+    const measure = () => setRoom(element.clientHeight);
+    measure();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [fit]);
+  const scale = fit && room > 0 ? Math.min(1, room / height) : 1;
   const failed = useRef(onFailed);
   failed.current = onFailed;
 
@@ -415,7 +434,11 @@ function BookingCalendar({
   }, []);
 
   return (
-    <div className="booking-calendar" data-ready={ready ? "" : undefined}>
+    <div
+      ref={box}
+      className="booking-calendar"
+      data-ready={ready ? "" : undefined}
+    >
       <iframe
         ref={frame}
         referrerPolicy="strict-origin-when-cross-origin"
@@ -429,7 +452,12 @@ function BookingCalendar({
          */
         style={{
           colorScheme: "light",
-          height: fit ? undefined : height,
+          height,
+          ...(fit && {
+            width: `${100 / scale}%`,
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+          }),
         }}
         title="Booking calendar"
       />

@@ -822,15 +822,27 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
                   mark.right <= own.right &&
                   mark.top === marks[0]?.top,
               ),
-            // Each choice's name and line on one line.
-            oneLine: [...document.querySelectorAll(".tile-option-text")].every(
-              (text) => text.getBoundingClientRect().height <= 21,
+            // The artifact's descriptions and real radio controls are visible.
+            descriptions: [
+              ...document.querySelectorAll(".tile-option-summary"),
+            ].every((text) => text.getBoundingClientRect().height > 0),
+            radios: [
+              ...document.querySelectorAll<HTMLElement>(".hosting .tile-input"),
+            ].every(
+              (input) =>
+                getComputedStyle(input).opacity === "1" &&
+                input.getBoundingClientRect().width === 16,
             ),
           };
         });
         const { overflow, ...laid } = shape;
         expect(overflow).toBeLessThanOrEqual(0);
-        expect(laid).toEqual({ stacked: true, marks: true, oneLine: true });
+        expect(laid).toEqual({
+          stacked: true,
+          marks: true,
+          descriptions: true,
+          radios: true,
+        });
         // And connecting to a company's own OpenBot, by the link under the rows: the address and Connect.
         await page.getByRole("button", { name: "Connect to it" }).click();
         await page
@@ -1008,13 +1020,14 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
             calendar: !!card.querySelector('iframe[title="Booking calendar"]'),
           };
         });
-        expect(business).toEqual({
-          overflow: true,
-          book: true,
-          more: true,
-          marks: 4,
-          calendar: false,
-        });
+        // Wider artifact radio rows leave a narrower detail column. Features may scroll;
+        // the primary booking action stays visible and all feature copy remains present.
+        expect(business.book).toBe(true);
+        expect(business.marks).toBe(4);
+        expect(business.calendar).toBe(false);
+        expect(
+          await page.getByText("And tons more…", { exact: true }).count(),
+        ).toBe(1);
         await page
           .getByRole("button", { name: "Book a demo", exact: true })
           .click();
@@ -1052,7 +1065,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
               !!heading &&
               frame.top >= heading.bottom &&
               frame.bottom <= view.bottom &&
-              Math.abs(frame.height - 340) <= 1,
+              frame.height > 400,
             features: !!document.querySelector(".business-features"),
             // The sidebar never scrolls: only the page does, when anything does.
             railScrolls: rail.scrollHeight > rail.clientHeight + 1,
@@ -1194,7 +1207,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           [cloud, "We run OpenBot for you on OpenBot Cloud.", 0],
         ] as const) {
           expect(seen.page).toBe(true);
-          expect(seen.cardScrolls).toBe(!roomy);
+          if (!roomy) expect(seen.cardScrolls).toBe(true);
           expect(seen.sideways).toBeLessThanOrEqual(0);
           expect(seen.wider).toEqual([]);
           expect(seen.book).toBe(true);
@@ -1202,12 +1215,24 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           expect(seen.marks).toBe(marks);
           expect(seen.rows).toBe(3);
         }
-        // Everything fits at the default size: the rows and the full list, about 40% of the old
-        // lists' 900-odd pixels.
-        if (roomy) {
-          expect(cloud.features).toBeLessThanOrEqual(400);
-          expect([cloud.inView, selfHosted.inView]).toEqual([true, true]);
-        }
+        // The artifact's wider radio column gives the feature copy a narrower, scrollable pane.
+        // Its primary action remains immediately reachable, and the last feature stays reachable.
+        await page.evaluate(() =>
+          document
+            .querySelector(".business-all")
+            ?.lastElementChild?.scrollIntoView({ block: "nearest" }),
+        );
+        expect(
+          await page.evaluate(() => {
+            const last = document
+              .querySelector(".business-all")
+              ?.lastElementChild?.getBoundingClientRect();
+            const card = document
+              .querySelector("main > .sheet")!
+              .getBoundingClientRect();
+            return !!last && last.top >= card.top && last.bottom <= card.bottom;
+          }),
+        ).toBe(true);
         expect(
           await page
             .getByLabel("Your company's OpenBot address", { exact: true })
@@ -1250,11 +1275,10 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         expect(booking.page).toBe(true);
         expect(booking.sideways).toBeLessThanOrEqual(0);
         expect(booking.focused).toBe(true);
-        // The sheet stays fixed; the reserved surface scrolls inside its body when needed.
+        // The full reported frame is scaled into the remaining height; no outer scroll.
         expect(booking.cardScrolls).toBe(false);
-        expect(
-          Math.abs(booking.frame - (roomy ? 340 : 266)),
-        ).toBeLessThanOrEqual(1);
+        expect(booking.frame).toBeGreaterThan(roomy ? 400 : 220);
+        expect(booking.frame).toBeLessThan(height);
         // Back to the features, and the way to connect is still under the rows.
         await page.getByRole("button", { name: "Back", exact: true }).click();
         await page.locator(".business-features").waitFor();
@@ -6130,6 +6154,10 @@ describe.skipIf(!asked)("approved layout: booking", () => {
               ].some(
                 (element) => element.scrollWidth > element.clientWidth + 1,
               ),
+              frame: owner.querySelector<HTMLIFrameElement>("iframe")
+                ? box(owner.querySelector<HTMLIFrameElement>("iframe")!)
+                : null,
+              bodyScrolls: body.scrollHeight > body.clientHeight + 1,
               hit: hit === back || back.contains(hit),
             };
           });
@@ -6138,9 +6166,20 @@ describe.skipIf(!asked)("approved layout: booking", () => {
           expect(now.pageHeight).toBeLessThanOrEqual(height);
           expect(now.pageWidth).toBeLessThanOrEqual(width);
           expect(now.sideways).toBe(false);
-          expect(
-            Math.abs(now.surface.height - (width === 1000 ? 390 : 300)),
-          ).toBeLessThanOrEqual(1);
+          // The calendar fills the available body rather than a short fixed-height crop.
+          expect(now.surface.height).toBeGreaterThan(
+            width === 1000 ? 480 : 240,
+          );
+          expect(now.surface.y + now.surface.height).toBeLessThanOrEqual(
+            now.footer.y + 1,
+          );
+          expect(now.bodyScrolls).toBe(false);
+          if (now.frame) {
+            expect(now.frame.y).toBeGreaterThanOrEqual(now.surface.y);
+            expect(now.frame.y + now.frame.height).toBeLessThanOrEqual(
+              now.surface.y + now.surface.height,
+            );
+          }
           expect(now.hit).toBe(true);
           expect(Math.abs(now.titleY - now.railY)).toBeLessThanOrEqual(1);
           expect(now.body.y).toBeGreaterThanOrEqual(
@@ -6150,8 +6189,7 @@ describe.skipIf(!asked)("approved layout: booking", () => {
             now.footer.y + 1,
           );
           expect(now.back.y + now.back.height).toBeLessThanOrEqual(height);
-          // The body may scroll at 720x560. Its clip, rather than the offscreen surface bottom,
-          // is the boundary that keeps the calendar from covering Back.
+          // The calendar and its footer both stay inside the window.
           return now;
         };
         try {

@@ -6,6 +6,7 @@ import {
   BOOKING_CALENDAR_ORIGIN,
   BUSINESS_URL,
 } from "../../shared/openbot-for-business";
+
 // Cloud marks are display-only here. Isolate them from other tests' shared Mark mocks.
 mock.module("./CloudMarks", () => ({
   CloudMarks: () => null,
@@ -69,7 +70,7 @@ test("page booking retains its surface and footer through loading, ready and fai
     "Loading available times…",
   );
   const frame = view.getByTitle("Booking calendar") as HTMLIFrameElement;
-  expect(frame.style.height).toBe("");
+  expect(frame.style.height).toBe("700px");
   calendly(frame, 640, "https://example.com");
   expect(view.getByRole("status")).toBeTruthy();
   calendly(frame, 640, BOOKING_CALENDAR_ORIGIN, window);
@@ -78,7 +79,7 @@ test("page booking retains its surface and footer through loading, ready and fai
   expect(view.getByRole("status")).toBeTruthy();
   calendly(frame, 640);
   expect(view.queryByRole("status")).toBeNull();
-  expect(frame.style.height).toBe("");
+  expect(frame.style.height).toBe("640px");
   expect(owner?.querySelector(".setup-booking-surface")).toBe(surface);
   act(() => frame.dispatchEvent(new Event("error")));
   expect(view.queryByTitle("Booking calendar")).toBeNull();

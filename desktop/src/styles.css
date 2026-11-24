@@ -255,15 +255,15 @@ main {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .sections li {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 36px;
-  padding: 0 12px;
+  gap: 12px;
+  min-height: 40px;
+  padding: 10px 12px;
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   line-height: 20px;
@@ -294,15 +294,9 @@ main {
 
 .sections li.current .section-mark {
   border-color: var(--ring);
-  opacity: 1;
-}
-
-.sections li.current .section-mark::after {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
   background: var(--ring);
+  box-shadow: inset 0 0 0 3px var(--active-tint);
+  opacity: 1;
 }
 
 .sections li.done .section-mark {
