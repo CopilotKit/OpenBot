@@ -3323,7 +3323,9 @@ button.text-link.booking-back {
   align-items: center;
   gap: 2px;
   align-self: flex-start;
-  margin: -4px 0 12px -4px;
+  /* Up in the page's top padding, so the step's heading keeps the sidebar title's line and the
+     calendar keeps the room: 20 px tall, its 12 px gap below, all of it above that line. */
+  margin: -32px 0 12px -4px;
   color: var(--text-secondary);
   text-decoration: none;
 }
@@ -3346,7 +3348,7 @@ button.text-link.booking-back:hover:not(:disabled) {
 }
 
 .booking-step .book-a-demo-line {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 /* Narrower windows (the window's least is 720 px): a narrower sidebar, its rows' lines left out. */
