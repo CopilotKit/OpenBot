@@ -147,6 +147,8 @@ const REFUSALS: {
   message: string;
   factory: (queryClient: QueryClient) => unknown;
   variables: unknown;
+  /** What it refetches, where that is not every plugin query. */
+  refetches?: { queryKey: readonly unknown[] }[];
 }[] = [
   {
     name: "granting a plugin to a Bot",
@@ -305,11 +307,7 @@ for (const refusal of REFUSALS) {
     refusing(refusal.status, refusal.message);
     expect(
       await refetchedOnRefusal(refusal.factory, refusal.variables),
-    ).toEqual(
-      "refetches" in refusal && refusal.refetches
-        ? refusal.refetches
-        : EVERY_PLUGIN_QUERY,
-    );
+    ).toEqual(refusal.refetches ?? EVERY_PLUGIN_QUERY);
   });
 }
 
