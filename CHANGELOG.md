@@ -438,6 +438,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   document and every other OpenBot registers.
 - With thousands of app tools, a Bot finds the right one: Claude uses Anthropic's own tool loading,
   and OpenBot's search finds tools by exact name, by a required word, or within one app.
+- GPT-5.4 and later on OpenAI's own API search for tools with OpenAI's own tool search, and keep what
+  they found across turns. Anywhere else, OpenBot's own search works as before.
+- Claude on Anthropic's own API with a key now reuses cached prompts across a run's steps, which cut
+  the cost of a multi-step task by about three quarters in our tests. A gateway or a Claude plan is
+  sent what it was before.
 - **A Bot asked for an app it doesn't hold puts up that app's card first.** Asked to find a
   Fireflies recording, a Bot that held only Gmail and Slack searched them for Fireflies' emails and
   said it couldn't reach Fireflies, and showed the Fireflies card only when asked why. Any app the
