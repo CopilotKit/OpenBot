@@ -1057,6 +1057,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1125,6 +1127,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1180,6 +1184,9 @@ paths:
       responses:
         '204':
           description: The connection was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -1221,6 +1228,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1285,6 +1294,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1330,6 +1341,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1385,6 +1398,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1438,6 +1453,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1497,6 +1514,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1545,6 +1564,9 @@ paths:
       responses:
         '204':
           description: The connection was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -1585,6 +1607,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -2480,6 +2504,9 @@ components:
       description: >-
         No AI connection has that id here: it was never connected, was
         removed, or belongs to somebody else.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2501,6 +2528,9 @@ components:
         The AI connection can't run now (ready false), so it can't be the
         default. Or the Idempotency-Key was already used for a different
         request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
