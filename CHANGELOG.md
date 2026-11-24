@@ -185,9 +185,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   says that too. Any failure before that removes nothing. A moved person skips first-run setup in
   OpenBot Cloud; the terms and their own AI still ask. When OpenBot Cloud still needs your AI, the
   result asks you to connect it first and names the apps as the next step. OpenBot Cloud then keeps
-  a Reconnect list of the apps that moved, and Connections points to it while any is left. Each
-  app's Reconnect opens that app, and connecting it brings you back to the list with the app marked
-  reconnected. An app you don't want can be dismissed, on every device. Onboarding and Connect your
+  a Reconnect list of the apps that moved, and Connections points to it while any is left. One
+  press of an app's Reconnect connects it: an app you sign in to goes straight to its sign-in, and
+  an app that takes a key opens with its key form, with no second Connect to press. Connecting it
+  brings you back to the list with the app marked reconnected. An app you don't want can be dismissed, on every device. Onboarding and Connect your
   AI now keep where you were headed, and take you there once they're done. On Windows, the Podman
   that OpenBot installed is removed too when nothing else uses it; a Podman you installed or use
   stays. While the move runs, the window stays on it: bringing the window back, from the Dock or
@@ -258,6 +259,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   own release still shows the uninstall command.
 - People, Remove says the person keeps their account and any other organization they're in. It no
   longer promises an organization of their own (Before upgrading).
+- **An admin gives a Bot an app from its card in one press.** Asked for Notion, a Bot drew a card
+  that told its admin "Only an admin can give it", and Give it answered "Notion has no tools to give
+  yet". An app that has listed none of its tools yet is asked again once you've signed in, and the
+  press stopped before your sign-in. It now turns the app on, opens your sign-in, and gives the app
+  to the Bot once you're in. On OpenBot Cloud that is the admin of their own organization. A card or
+  a Bot's Apps row shown to an admin says what is missing, never to ask an admin. Where the press
+  still can't go on, the card says "Couldn't get Notion ready for this Bot. Try again in a moment."
 - When an admin asks a Bot for an app it can't use yet, the Bot names the step the admin's own app
   card offers (Give it to, Turn on and give it to, Set it up, or Connect the shared account). It
   used to tell them to ask an administrator, even when they were the organization's only one.
@@ -265,6 +273,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   everyone in the organization, so the button shows only for an admin, and for the one person of
   a personal OpenBot. Anybody else who opens the Add server page is told that only an admin can add
   a server, and to ask one.
+- Admin, Apps: the MCP servers section is now Connectors, and its switches say what each app can do.
+  While Only approved connectors is off, every app can be used and its switch can't be changed.
+  Turning it on starts with your added apps approved, an app an admin adds is approved in the same
+  press, and turning one app off no longer takes the others off the list with it.
 - **Only an owner removes another owner.** An admin could remove a co-owner, though they couldn't
   change one's role. That is now refused with "Only an owner of this organization can remove
   another owner." The last owner still can't be removed. In Organization settings, Members offers
@@ -411,9 +423,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   swapped in a second Connect. Now Connect turns the app on and carries straight on: a key app opens
   its page under Connections with the key form open, and a sign-in app opens its sign-in in a new
   tab. An admin's Turn on and give it carries on the same way.
-- Reconnecting an app after moving to OpenBot Cloud takes one press.
 - A Bot shows one connect card per app, and no longer says an app's tools are ready before it's
   connected.
+- On OpenBot Cloud, Connections leads to every app in the directory, searching it finds apps you
+  haven't added yet, and an admin can turn an app off from its Connections page.
+- Connecting an app that asked for a key now takes you to a sign-in where there is one: the maker's
+  own, for PostHog, Fireflies and over a hundred others, or else the directory's version of the app
+  that signs in through its maker. An app already added with its key keeps working as it is.
+- The built-in Notion, Google Drive, Parallel Search, Exa Search and Firecrawl are no longer offered,
+  in any edition. Asking a Bot for Notion reaches the directory's Notion, and one already added keeps
+  working. OpenBot Personal's keyless web search stays on in the background.
+- Signing in to an app's own server works with servers that identify OpenBot by its published
+  client document, not only by registration. Where a server offers both, OpenBot Cloud uses its
+  document and every other OpenBot registers.
+- With thousands of app tools, a Bot finds the right one: Claude uses Anthropic's own tool loading,
+  and OpenBot's search finds tools by exact name, by a required word, or within one app.
 - **A Bot asked for an app it doesn't hold puts up that app's card first.** Asked to find a
   Fireflies recording, a Bot that held only Gmail and Slack searched them for Fireflies' emails and
   said it couldn't reach Fireflies, and showed the Fireflies card only when asked why. Any app the
