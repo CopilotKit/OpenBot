@@ -315,9 +315,11 @@ describe.skipIf(!asked)("the window through a first run", () => {
           expect(now.shell[0]).toBe("rail");
           expect(now.shell[1]).toMatch(/^sheet\b/);
           expect(now.shell.length).toBe(2);
-          expect(now.scrolling.every((name) => /^sheet\b/.test(name))).toBe(
-            true,
-          );
+          expect(
+            now.scrolling.every(
+              (name) => /^sheet\b/.test(name) || name === "setup-body",
+            ),
+          ).toBe(true);
         };
         await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
         await check();
@@ -334,7 +336,7 @@ describe.skipIf(!asked)("the window through a first run", () => {
         // Taller than the room it has at the smaller size: the page scrolls, the window does not.
         const card = await page.evaluate(() => {
           const sheet = document.querySelector(
-            "main > .rail + .sheet",
+            "main > .rail + .sheet > .setup-body",
           ) as HTMLElement;
           return { scroll: sheet.scrollHeight, client: sheet.clientHeight };
         });
@@ -1669,10 +1671,9 @@ const PROVIDERS = [
 /*
  * Seen on Windows G (the default 1000x800 window): on "Connect your AI" the last providers sat under
  * the step's pinned foot, Continue and the background row, with a sliver of one tile's edge
- * showing, and nothing said the list went on. The list has no scroll of its own: the page is the
- * one scroll area, the list plainly goes on under the foot, and each provider scrolls into view.
- * The page is the window's height now, so at 1000x800 every provider shows at once, and nothing
- * says the list goes on.
+ * showing, and nothing said the list went on. The flexible body now scrolls independently of
+ * Continue, and each provider scrolls into view. At1000x800 every provider shows at once;
+ * scrolling just the body's bottom padding is harmless.
  */
 describe.skipIf(!asked)("Connect your AI with every provider", () => {
   for (const [width, height] of [
@@ -1680,7 +1681,7 @@ describe.skipIf(!asked)("Connect your AI with every provider", () => {
     [1000, 600],
     [720, 560],
   ] as const) {
-    test(`at ${width}x${height}, the page is the one scroll area, and every provider is in view or plainly scrolls into view`, async () => {
+    test(`at ${width}x${height}, the authentication body is the one scroll area, and every provider is in view or plainly scrolls into view`, async () => {
       const page = await browser.newPage({ viewport: { width, height } });
       try {
         await toTheAiStep(page);
@@ -1701,7 +1702,7 @@ describe.skipIf(!asked)("Connect your AI with every provider", () => {
                 );
               })
               .map((element) => element.className);
-            const fade = getComputedStyle(foot, "::before");
+            const body = sheet.querySelector<HTMLElement>(".setup-body")!;
             const tiles = [
               ...sheet.querySelectorAll("fieldset.providers .tile"),
             ].map((tile) => {
@@ -1722,23 +1723,24 @@ describe.skipIf(!asked)("Connect your AI with every provider", () => {
             return {
               scrolling,
               goesOn:
-                fade.content !== "none" && Number.parseFloat(fade.height) > 0,
+                body.scrollHeight - body.scrollTop > body.clientHeight + 1,
               tiles,
             };
           });
         const first = await look();
         expect(first.tiles.map((tile) => tile.name)).toEqual(PROVIDERS);
         if (height >= 800) {
-          // Every provider shows, nothing scrolls, and nothing says the list goes on.
-          expect(first).toEqual({
-            scrolling: [],
-            goesOn: false,
-            tiles: PROVIDERS.map((name) => ({ name, shown: true })),
-          });
+          // The flexible body may scroll its bottom padding; every provider still shows whole.
+          expect(first.tiles).toEqual(
+            PROVIDERS.map((name) => ({ name, shown: true })),
+          );
+          expect(first.scrolling.every((name) => name === "setup-body")).toBe(
+            true,
+          );
           return;
         }
-        expect(first.scrolling).toEqual(["sheet"]);
-        // Some are under the foot at this size, and the screen says the list goes on.
+        expect(first.scrolling).toEqual(["setup-body"]);
+        // Some are clipped by the body at this size, with more scrollable content below.
         expect(first.tiles.some((tile) => !tile.shown)).toBe(true);
         expect(first.goesOn).toBe(true);
         // A wheel over the list scrolls the card, and brings every provider into view.
@@ -1752,10 +1754,10 @@ describe.skipIf(!asked)("Connect your AI with every provider", () => {
           await page.waitForTimeout(150);
           now = await look();
           for (const tile of now.tiles) if (tile.shown) seen.add(tile.name);
-          expect(now.scrolling).toEqual(["sheet"]);
+          expect(now.scrolling).toEqual(["setup-body"]);
         }
         expect([...seen].sort()).toEqual([...PROVIDERS].sort());
-        // At the end of the card nothing is under the foot, and the screen no longer says so.
+        // At the end of the body, the last provider is whole and no further content remains.
         expect(now.goesOn).toBe(false);
         expect(now.tiles[now.tiles.length - 1]?.shown).toBe(true);
       } finally {
@@ -1839,13 +1841,13 @@ describe.skipIf(!asked)(
 /*
  * Seen on Windows G: the background row moved about 15 px sideways when a provider was chosen, as
  * the card stopped scrolling and its scrollbar went. With the scrollbars Windows draws, which
- * take room, the row and the step's providers are where they were either way. The page is the
- * window's height now, so a window short enough for the list to scroll shows it (1000x600).
+ * take room, the row and the step's providers must stay where they were. At1000x700 the
+ * catalogue scrolls while the selected authentication panel fits, exercising scrollbar removal.
  */
 describe.skipIf(!asked)(
   "with scrollbars that take room, as Windows draws them",
   () => {
-    test("at 1000x600, the background row and the providers hold still as the page's scrollbar comes and goes", async () => {
+    test("at 1000x700, the background row and the providers hold still as the page's scrollbar comes and goes", async () => {
       // Its own browser for the scrollbars, launched once and never closed (see sharedChromium).
       const drawn = await sharedChromium(
         () =>
@@ -1856,10 +1858,17 @@ describe.skipIf(!asked)(
         "chromium-scrollbars",
       );
       const page = await drawn.newPage({
-        viewport: { width: 1000, height: 600 },
+        viewport: { width: 1000, height: 700 },
       });
       try {
         await toTheAiStep(page);
+        // Make classic scrollbars deterministic on hosts that otherwise use overlays.
+        await page.evaluate(() => {
+          const style = document.createElement("style");
+          style.textContent =
+            ".provider-layout ::-webkit-scrollbar { width: 16px; }";
+          document.head.append(style);
+        });
         const where = () =>
           page.evaluate(() => {
             const sheet = document.querySelector(
@@ -1871,9 +1880,23 @@ describe.skipIf(!asked)(
             const tile = document
               .querySelector("fieldset.providers .tile")
               ?.getBoundingClientRect();
+            const footer = sheet
+              .querySelector<HTMLElement>(".setup-footer")!
+              .getBoundingClientRect();
             return {
-              scrolls: sheet.scrollHeight > sheet.clientHeight + 1,
-              scrollbar: sheet.offsetWidth - sheet.clientWidth > 2,
+              footer: {
+                left: footer.left,
+                top: footer.top,
+                width: footer.width,
+              },
+              scrolls:
+                sheet.querySelector<HTMLElement>(".setup-body")!.scrollHeight >
+                sheet.querySelector<HTMLElement>(".setup-body")!.clientHeight +
+                  1,
+              scrollbar: (() => {
+                const body = sheet.querySelector<HTMLElement>(".setup-body")!;
+                return body.offsetWidth - body.clientWidth > 2;
+              })(),
               row: row && { left: row.left, width: row.width },
               tile: tile && { left: tile.left, width: tile.width },
             };
@@ -1892,6 +1915,8 @@ describe.skipIf(!asked)(
         expect(chosen.scrolls).toBe(false);
         expect(chosen.row).toEqual(listing.row);
         expect(chosen.tile).toEqual(listing.tile);
+        expect(chosen.footer).toEqual(listing.footer);
+        expect(chosen.tile?.left).toBe(chosen.footer.left);
       } finally {
         await page.close();
       }
@@ -4560,6 +4585,318 @@ describe.skipIf(!asked)("approved layout: agreement", () => {
           await page.close();
         }
       }, 30_000);
+    }
+  }
+});
+
+/** Authentication scrolls independently of the selected identity and Continue. */
+describe.skipIf(!asked)("approved layout: provider", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    for (const colorScheme of ["dark", "light"] as const) {
+      test(`${width}x${height} ${colorScheme}: waiting, error, key, endpoint and signed frames`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        const shot = async (state: string) => {
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/provider-${width}-${colorScheme}-${state}.png`,
+            });
+        };
+        const geometry = () =>
+          page.evaluate(() => {
+            const sheet =
+              document.querySelector<HTMLElement>(".provider-layout")!;
+            const body = sheet.querySelector<HTMLElement>(".setup-body")!;
+            const panel = body.querySelector<HTMLElement>(".chosen-provider")!;
+            const identity = sheet.querySelector<HTMLElement>(
+              ":scope > .setup-provider-identity",
+            )!;
+            const footer = sheet.querySelector<HTMLElement>(".setup-footer")!;
+            const action =
+              footer.querySelector<HTMLButtonElement>("button:last-child")!;
+            const b = body.getBoundingClientRect(),
+              p = panel.getBoundingClientRect(),
+              i = identity.getBoundingClientRect(),
+              f = footer.getBoundingClientRect(),
+              a = action.getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              a.x + a.width / 2,
+              a.y + a.height / 2,
+            );
+            return {
+              pageWidth: document.documentElement.scrollWidth,
+              pageHeight: document.documentElement.scrollHeight,
+              bodyBottom: b.bottom,
+              footerTop: f.top,
+              actionY: a.y,
+              actionWhole: a.y >= 0 && a.bottom <= innerHeight,
+              actionHit: !!hit && action.contains(hit),
+              identity: { x: i.x, y: i.y, width: i.width, height: i.height },
+              identityOutsideScroller: identity.parentElement === sheet,
+              bodyOverflow: body.scrollWidth > body.clientWidth,
+              panelWidth: p.width,
+              centerX: (p.left + p.right - b.left - b.right) / 2,
+              centerY: (p.top + p.bottom - b.top - b.bottom) / 2,
+              topOffset:
+                p.top -
+                b.top -
+                Number.parseFloat(getComputedStyle(body).paddingTop),
+            };
+          });
+        let baseline: Awaited<ReturnType<typeof geometry>> | undefined;
+        const check = async () => {
+          const now = await geometry();
+          expect(now.pageWidth).toBeLessThanOrEqual(width);
+          expect(now.pageHeight).toBeLessThanOrEqual(height);
+          expect(now.bodyBottom).toBeLessThanOrEqual(now.footerTop + 1);
+          expect(now.actionWhole).toBe(true);
+          expect(now.actionHit).toBe(true);
+          expect(now.identityOutsideScroller).toBe(true);
+          expect(now.bodyOverflow).toBe(false);
+          expect(now.panelWidth).toBeLessThanOrEqual(480);
+          expect(Math.abs(now.centerX)).toBeLessThanOrEqual(1);
+          if (baseline) {
+            expect(
+              Math.abs(now.actionY - baseline.actionY),
+            ).toBeLessThanOrEqual(1);
+            expect(now.identity).toEqual(baseline.identity);
+          }
+          return now;
+        };
+        const reach = async (selector: string) => {
+          expect(
+            await page.evaluate((selector) => {
+              const element = document.querySelector<HTMLElement>(selector)!;
+              element.focus();
+              element.scrollIntoView({ block: "nearest" });
+              const b = element.getBoundingClientRect(),
+                body = element
+                  .closest<HTMLElement>(".setup-body")!
+                  .getBoundingClientRect();
+              const hit = document.elementFromPoint(
+                b.x + b.width / 2,
+                b.y + b.height / 2,
+              );
+              return {
+                focused: document.activeElement === element,
+                whole: b.top >= body.top - 1 && b.bottom <= body.bottom + 1,
+                hit: !!hit && element.contains(hit),
+              };
+            }, selector),
+          ).toEqual({ focused: true, whole: true, hit: true });
+          await check();
+        };
+        try {
+          await open(page);
+          await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+          await page.evaluate(async () => {
+            const catalogue = (await globalThis.__workbench!.call(
+              "providers",
+            )) as { id: string; caution: unknown }[];
+            globalThis.__workbench!.setAnswer("providers", {
+              mode: "value",
+              value: catalogue.map((row) =>
+                row.id === "anthropic"
+                  ? {
+                      ...row,
+                      caution: {
+                        says: "A Claude plan carries a separate monthly pool of Agent SDK credits. When that pool is empty, Bots stop until it renews or you add API credits.",
+                        reads_more_at: "https://openbot.test/plan-credits",
+                      },
+                    }
+                  : row,
+              ),
+            });
+            globalThis.__workbench!.setAnswer("begin_claude_sign_in", {
+              mode: "value",
+              value: "https://openbot.test/approve",
+            });
+            globalThis.__workbench!.setAnswer("finish_claude_sign_in", {
+              mode: "never",
+            });
+          });
+          await page
+            .getByRole("button", { name: "Install", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Connect your AI" })
+            .waitFor();
+          await page.getByText("Anthropic", { exact: true }).click();
+          await settled(page);
+          baseline = await check();
+          await shot("long-caution");
+          await page
+            .getByRole("button", {
+              name: "Sign in with Anthropic",
+              exact: true,
+            })
+            .click();
+          await page
+            .getByText("Waiting for you to approve it…", { exact: true })
+            .waitFor();
+          await settled(page);
+          await page.evaluate(() => {
+            document.querySelector<HTMLElement>(
+              ".provider-layout .setup-body",
+            )!.scrollTop = 0;
+          });
+          const waiting = await check();
+          if (width === 1000)
+            expect(Math.abs(waiting.centerY)).toBeLessThanOrEqual(1);
+          else expect(Math.abs(waiting.topOffset)).toBeLessThanOrEqual(1);
+          await shot("waiting");
+          // The initial narrow view must say what is happening before the fallback link.
+          const waitingStatus = await page
+            .getByText("Waiting for you to approve it…", { exact: true })
+            .boundingBox();
+          expect(waitingStatus).not.toBeNull();
+          expect(waitingStatus!.y).toBeGreaterThanOrEqual(
+            waiting.identity.y + waiting.identity.height,
+          );
+          expect(waitingStatus!.y + waitingStatus!.height).toBeLessThanOrEqual(
+            waiting.bodyBottom + 1,
+          );
+          await reach(".chosen-provider .caution a");
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("finish_claude_sign_in", {
+              mode: "fail",
+              problem: {
+                said: "OpenBot could not finish signing in. Check your connection and try again.",
+                detail:
+                  "The sign-in service could not be reached. Try signing in again after the connection is restored.",
+              },
+            }),
+          );
+          await page
+            .getByText(
+              "OpenBot could not finish signing in. Check your connection and try again.",
+              { exact: true },
+            )
+            .waitFor();
+          await settled(page);
+          await check();
+          await shot("error");
+          await page
+            .getByRole("tab", { name: "Use an API key", exact: true })
+            .click();
+          await page
+            .getByLabel("Anthropic API key", { exact: true })
+            .fill("test-provider-key");
+          await settled(page);
+          await reach("#key");
+          await shot("api-key");
+          let continueFocused = false;
+          for (let n = 0; n < 12 && !continueFocused; n++) {
+            await page.keyboard.press("Tab");
+            continueFocused = await page.evaluate(
+              () =>
+                document.activeElement ===
+                document.querySelector<HTMLElement>(
+                  ".setup-footer button:last-child",
+                ),
+            );
+          }
+          expect(continueFocused).toBe(true);
+          await check();
+          await page
+            .getByRole("button", { name: "Choose a different provider" })
+            .click();
+          await page
+            .getByText("Any OpenAI-compatible endpoint", { exact: true })
+            .click();
+          await page
+            .getByLabel("Base URL", { exact: true })
+            .fill("https://models.example.test/v1");
+          await page
+            .getByText("Advanced compatible endpoint options", { exact: true })
+            .click();
+          await page
+            .getByLabel("Container Base URL, if different", { exact: true })
+            .fill("http://model:11434/v1");
+          await page
+            .getByLabel("Model name", { exact: true })
+            .fill("test-model");
+          await settled(page);
+          const endpoint = await geometry();
+          expect(
+            Math.abs(endpoint.actionY - baseline.actionY),
+          ).toBeLessThanOrEqual(1);
+          baseline = endpoint;
+          for (const selector of [
+            "#base",
+            "#container-base",
+            "#model",
+            "#ekey",
+          ])
+            await reach(selector);
+          await shot("endpoint");
+          const beforeDownload = await measure(page);
+          await page.evaluate(() => {
+            globalThis.__fake!.download = {
+              done: 400_000_000,
+              total: 1_600_000_000,
+            };
+          });
+          await page.getByText("400.0 MB of 1.6 GB").waitFor();
+          expect(await measure(page)).toEqual(beforeDownload);
+          await check();
+          await page.evaluate(() => {
+            globalThis.__fake!.download = null;
+          });
+          await page
+            .getByText("400.0 MB of 1.6 GB")
+            .waitFor({ state: "hidden" });
+          expect(await measure(page)).toEqual(beforeDownload);
+          await page.evaluate(() =>
+            (
+              globalThis.__fake as unknown as { finishSetUp(): void }
+            ).finishSetUp(),
+          );
+          await page
+            .getByText("OpenBot is installed", { exact: true })
+            .waitFor();
+          expect(await measure(page)).toEqual(beforeDownload);
+          await check();
+          await page
+            .getByRole("button", { name: "Choose a different provider" })
+            .click();
+          await page.getByText("Anthropic", { exact: true }).click();
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("finish_claude_sign_in", {
+              mode: "never",
+            }),
+          );
+          await page
+            .getByRole("button", {
+              name: "Sign in with Anthropic",
+              exact: true,
+            })
+            .click();
+          await page
+            .getByText("Waiting for you to approve it…", { exact: true })
+            .waitFor();
+          await settled(page);
+          baseline = await geometry();
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("finish_claude_sign_in", {
+              mode: "value",
+              value: "test-provider-token",
+            }),
+          );
+          await page
+            .getByText("Signed in to Anthropic.", { exact: false })
+            .waitFor();
+          await check();
+          await shot("signed");
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
     }
   }
 });
