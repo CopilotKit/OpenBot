@@ -1099,6 +1099,7 @@ export * from "./modelUsageRecentItem";
 export * from "./modelUsageSummaryItem";
 export * from "./moveCount";
 export * from "./moveKind";
+export * from "./moveNotAllowedResponse";
 export * from "./moveNote";
 export * from "./moveRecipientKey";
 export * from "./moveUnavailableResponse";

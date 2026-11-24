@@ -18,4 +18,6 @@ export interface Organization {
   role: PersonRoleAnswer;
   /** Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key. */
   active: boolean;
+  /** Whether the caller may move their Bots into this organization (createImport): true where the organization lets them use Bots. The server's verdict, by the organization's own rules. Present only where OpenBot takes moves (OpenBot Cloud). */
+  canMoveIn?: boolean;
 }
