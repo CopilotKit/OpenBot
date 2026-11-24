@@ -51,41 +51,83 @@ export const GetExportEstimateResponse = zod.object({
     .describe(
       "How much this OpenBot keeps on disk for the person (its database and files), which removing it frees. OpenBot Desktop adds what the engine itself takes.",
     ),
-  reconnect: zod.array(
-    zod
-      .object({
-        appId: zod
-          .string()
-          .min(1)
-          .describe(
-            "The app's id in the app directory, such as gmail or slack.",
-          ),
-        appName: zod
-          .string()
-          .min(1)
-          .describe("The app's name as a person reads it."),
-        accountLabel: zod
-          .string()
-          .min(1)
-          .optional()
-          .describe(
-            "Which account it was connected as, such as an email address or a workspace name, when known.",
-          ),
-        iconUrl: zod
-          .url()
-          .optional()
-          .describe("The app's icon, when the directory has one."),
-        botNames: zod
-          .array(zod.string())
-          .optional()
-          .describe(
-            "The Bots that used it, so the person knows which to check.",
-          ),
-      })
-      .describe(
-        "A connection to an app that doesn't move, because its sign-in stays on the person's computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.",
-      ),
-  ),
+  reconnect: zod
+    .array(
+      zod
+        .object({
+          appId: zod
+            .string()
+            .min(1)
+            .describe(
+              "The app's id in the app directory, such as gmail or slack.",
+            ),
+          appName: zod
+            .string()
+            .min(1)
+            .describe("The app's name as a person reads it."),
+          accountLabel: zod
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Which account it was connected as, such as an email address or a workspace name, when known.",
+            ),
+          iconUrl: zod
+            .url()
+            .optional()
+            .describe("The app's icon, when the directory has one."),
+          botNames: zod
+            .array(zod.string())
+            .optional()
+            .describe(
+              "The Bots that used it, so the person knows which to check.",
+            ),
+          reason: zod
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn't allow it. Absent for an app the person signs in to again.",
+            ),
+        })
+        .describe(
+          "A connection to an app that doesn't move, because its sign-in stays on the person's computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.",
+        ),
+    )
+    .describe(
+      "The apps the person will sign in to again on OpenBot Cloud. The apps in carried are not listed here.",
+    ),
+  carried: zod
+    .array(
+      zod
+        .object({
+          appId: zod
+            .string()
+            .min(1)
+            .describe(
+              "The app's id in the app directory, or the id it had on the person's computer.",
+            ),
+          appName: zod
+            .string()
+            .min(1)
+            .describe("The app's name as a person reads it."),
+          iconUrl: zod
+            .url()
+            .optional()
+            .describe("The app's icon, when the directory has one."),
+          botNames: zod
+            .array(zod.string())
+            .optional()
+            .describe("The Bots that use it."),
+        })
+        .describe(
+          "A connection to an app made with a key, which moves connected: the key travels sealed to the import's recipientKey, and the import connects the app with it on OpenBot Cloud and gives it back to the Bots that used it. Never carries the key itself.",
+        ),
+    )
+    .optional()
+    .describe(
+      "The apps connected with a key this OpenBot holds, which move connected when the export is given recipientKey.",
+    ),
   modelKeysAvailable: zod
     .boolean()
     .describe(
@@ -94,7 +136,7 @@ export const GetExportEstimateResponse = zod.object({
 });
 
 /**
- * Start writing a bundle of everything the caller has in this organization, to move it to OpenBot Cloud: their Bots (settings, instructions and skills), conversations with every message, memories, routines, goals and check-ins, files, standing instructions and preferences, and, when the caller is an administrator, the organization's own skills. Connections to apps travel as their app and account name only: no token or password ever leaves, and each one is listed in reconnect so the person connects it again on Cloud. A model key travels only when includeModelKeys is true, and then only sealed to recipientKey, the key the import on Cloud gave (createImport), so the bundle never holds it readable.
+ * Start writing a bundle of everything the caller has in this organization, to move it to OpenBot Cloud: their Bots (settings, instructions and skills), conversations with every message, memories, routines, goals and check-ins, files, standing instructions and preferences, and, when the caller is an administrator, the organization's own skills. A connection to an app the person signed in to travels as its app and account name only: no token or password ever leaves, and it is listed in reconnect so the person signs in again on Cloud. A connection made with a key this OpenBot holds travels connected when recipientKey is given: its key is sealed to recipientKey, the app is listed in carried, and the import connects it on Cloud with that key. Without recipientKey it is listed in reconnect like any other. A model key travels only when includeModelKeys is true, and then only sealed to recipientKey, the key the import on Cloud gave (createImport). The bundle never holds a key readable.
  *
  * The bundle is written in the background; read getExport until status is ready. It is cut into parts of at most 32 MiB, each with its size and SHA-256, so a dropped download resumes where it stopped. One export is kept for each person: starting another removes the one before. An export is removed 7 days after it was made, or with deleteExport. Served only by an OpenBot that runs on the person's own computer; elsewhere it answers 404 with the code MOVE_UNAVAILABLE.
  * @summary Start exporting what the caller has here
@@ -145,7 +187,7 @@ export const CreateExportBody = zod.object({
     })
     .optional()
     .describe(
-      "A public key as a JSON Web Key (RFC 7517): RSA, 4096 bits, for RSA-OAEP-256. A model key is sealed to it as a JWE (RFC 7516, RSA-OAEP-256 with A256GCM), so only the import that made it reads it.",
+      "The import's public key. Given, the keys of the apps connected with a key travel sealed to it and those apps move connected (carried), and the model key does too when includeModelKeys is true.",
     ),
 });
 
@@ -241,6 +283,13 @@ export const CreateExportResponse = zod.object({
             .describe(
               "The Bots that used it, so the person knows which to check.",
             ),
+          reason: zod
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn't allow it. Absent for an app the person signs in to again.",
+            ),
         })
         .describe(
           "A connection to an app that doesn't move, because its sign-in stays on the person's computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.",
@@ -248,6 +297,37 @@ export const CreateExportResponse = zod.object({
     )
     .optional()
     .describe("The apps to connect again on OpenBot Cloud."),
+  carried: zod
+    .array(
+      zod
+        .object({
+          appId: zod
+            .string()
+            .min(1)
+            .describe(
+              "The app's id in the app directory, or the id it had on the person's computer.",
+            ),
+          appName: zod
+            .string()
+            .min(1)
+            .describe("The app's name as a person reads it."),
+          iconUrl: zod
+            .url()
+            .optional()
+            .describe("The app's icon, when the directory has one."),
+          botNames: zod
+            .array(zod.string())
+            .optional()
+            .describe("The Bots that use it."),
+        })
+        .describe(
+          "A connection to an app made with a key, which moves connected: the key travels sealed to the import's recipientKey, and the import connects the app with it on OpenBot Cloud and gives it back to the Bots that used it. Never carries the key itself.",
+        ),
+    )
+    .optional()
+    .describe(
+      "The apps whose keys the bundle carries sealed, once ready, so they move connected.",
+    ),
   includesModelKeys: zod.boolean(),
   progress: zod
     .number()
@@ -378,6 +458,13 @@ export const GetExportResponse = zod.object({
             .describe(
               "The Bots that used it, so the person knows which to check.",
             ),
+          reason: zod
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn't allow it. Absent for an app the person signs in to again.",
+            ),
         })
         .describe(
           "A connection to an app that doesn't move, because its sign-in stays on the person's computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.",
@@ -385,6 +472,37 @@ export const GetExportResponse = zod.object({
     )
     .optional()
     .describe("The apps to connect again on OpenBot Cloud."),
+  carried: zod
+    .array(
+      zod
+        .object({
+          appId: zod
+            .string()
+            .min(1)
+            .describe(
+              "The app's id in the app directory, or the id it had on the person's computer.",
+            ),
+          appName: zod
+            .string()
+            .min(1)
+            .describe("The app's name as a person reads it."),
+          iconUrl: zod
+            .url()
+            .optional()
+            .describe("The app's icon, when the directory has one."),
+          botNames: zod
+            .array(zod.string())
+            .optional()
+            .describe("The Bots that use it."),
+        })
+        .describe(
+          "A connection to an app made with a key, which moves connected: the key travels sealed to the import's recipientKey, and the import connects the app with it on OpenBot Cloud and gives it back to the Bots that used it. Never carries the key itself.",
+        ),
+    )
+    .optional()
+    .describe(
+      "The apps whose keys the bundle carries sealed, once ready, so they move connected.",
+    ),
   includesModelKeys: zod.boolean(),
   progress: zod
     .number()
@@ -712,13 +830,53 @@ export const CreateImportResponse = zod.object({
             .describe(
               "The Bots that used it, so the person knows which to check.",
             ),
+          reason: zod
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn't allow it. Absent for an app the person signs in to again.",
+            ),
         })
         .describe(
           "A connection to an app that doesn't move, because its sign-in stays on the person's computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.",
         ),
     )
     .optional()
-    .describe("The apps to connect again here, once part 1 arrived."),
+    .describe(
+      "The apps to connect again here, once part 1 arrived. Once imported, an app the bundle carried that couldn't be connected here is listed too, with its reason.",
+    ),
+  carried: zod
+    .array(
+      zod
+        .object({
+          appId: zod
+            .string()
+            .min(1)
+            .describe(
+              "The app's id in the app directory, or the id it had on the person's computer.",
+            ),
+          appName: zod
+            .string()
+            .min(1)
+            .describe("The app's name as a person reads it."),
+          iconUrl: zod
+            .url()
+            .optional()
+            .describe("The app's icon, when the directory has one."),
+          botNames: zod
+            .array(zod.string())
+            .optional()
+            .describe("The Bots that use it."),
+        })
+        .describe(
+          "A connection to an app made with a key, which moves connected: the key travels sealed to the import's recipientKey, and the import connects the app with it on OpenBot Cloud and gives it back to the Bots that used it. Never carries the key itself.",
+        ),
+    )
+    .optional()
+    .describe(
+      "The apps that came across connected, with their Bots given them again, once imported. Before that, the apps the bundle carries.",
+    ),
   error: zod
     .string()
     .min(1)
@@ -947,13 +1105,53 @@ export const ListImportsResponse = zod.object({
                 .describe(
                   "The Bots that used it, so the person knows which to check.",
                 ),
+              reason: zod
+                .string()
+                .min(1)
+                .optional()
+                .describe(
+                  "Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn't allow it. Absent for an app the person signs in to again.",
+                ),
             })
             .describe(
               "A connection to an app that doesn't move, because its sign-in stays on the person's computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.",
             ),
         )
         .optional()
-        .describe("The apps to connect again here, once part 1 arrived."),
+        .describe(
+          "The apps to connect again here, once part 1 arrived. Once imported, an app the bundle carried that couldn't be connected here is listed too, with its reason.",
+        ),
+      carried: zod
+        .array(
+          zod
+            .object({
+              appId: zod
+                .string()
+                .min(1)
+                .describe(
+                  "The app's id in the app directory, or the id it had on the person's computer.",
+                ),
+              appName: zod
+                .string()
+                .min(1)
+                .describe("The app's name as a person reads it."),
+              iconUrl: zod
+                .url()
+                .optional()
+                .describe("The app's icon, when the directory has one."),
+              botNames: zod
+                .array(zod.string())
+                .optional()
+                .describe("The Bots that use it."),
+            })
+            .describe(
+              "A connection to an app made with a key, which moves connected: the key travels sealed to the import's recipientKey, and the import connects the app with it on OpenBot Cloud and gives it back to the Bots that used it. Never carries the key itself.",
+            ),
+        )
+        .optional()
+        .describe(
+          "The apps that came across connected, with their Bots given them again, once imported. Before that, the apps the bundle carries.",
+        ),
       error: zod
         .string()
         .min(1)
@@ -1156,13 +1354,53 @@ export const GetImportResponse = zod.object({
             .describe(
               "The Bots that used it, so the person knows which to check.",
             ),
+          reason: zod
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn't allow it. Absent for an app the person signs in to again.",
+            ),
         })
         .describe(
           "A connection to an app that doesn't move, because its sign-in stays on the person's computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.",
         ),
     )
     .optional()
-    .describe("The apps to connect again here, once part 1 arrived."),
+    .describe(
+      "The apps to connect again here, once part 1 arrived. Once imported, an app the bundle carried that couldn't be connected here is listed too, with its reason.",
+    ),
+  carried: zod
+    .array(
+      zod
+        .object({
+          appId: zod
+            .string()
+            .min(1)
+            .describe(
+              "The app's id in the app directory, or the id it had on the person's computer.",
+            ),
+          appName: zod
+            .string()
+            .min(1)
+            .describe("The app's name as a person reads it."),
+          iconUrl: zod
+            .url()
+            .optional()
+            .describe("The app's icon, when the directory has one."),
+          botNames: zod
+            .array(zod.string())
+            .optional()
+            .describe("The Bots that use it."),
+        })
+        .describe(
+          "A connection to an app made with a key, which moves connected: the key travels sealed to the import's recipientKey, and the import connects the app with it on OpenBot Cloud and gives it back to the Bots that used it. Never carries the key itself.",
+        ),
+    )
+    .optional()
+    .describe(
+      "The apps that came across connected, with their Bots given them again, once imported. Before that, the apps the bundle carries.",
+    ),
   error: zod
     .string()
     .min(1)
@@ -1380,13 +1618,53 @@ export const UploadImportPartResponse = zod.object({
             .describe(
               "The Bots that used it, so the person knows which to check.",
             ),
+          reason: zod
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn't allow it. Absent for an app the person signs in to again.",
+            ),
         })
         .describe(
           "A connection to an app that doesn't move, because its sign-in stays on the person's computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.",
         ),
     )
     .optional()
-    .describe("The apps to connect again here, once part 1 arrived."),
+    .describe(
+      "The apps to connect again here, once part 1 arrived. Once imported, an app the bundle carried that couldn't be connected here is listed too, with its reason.",
+    ),
+  carried: zod
+    .array(
+      zod
+        .object({
+          appId: zod
+            .string()
+            .min(1)
+            .describe(
+              "The app's id in the app directory, or the id it had on the person's computer.",
+            ),
+          appName: zod
+            .string()
+            .min(1)
+            .describe("The app's name as a person reads it."),
+          iconUrl: zod
+            .url()
+            .optional()
+            .describe("The app's icon, when the directory has one."),
+          botNames: zod
+            .array(zod.string())
+            .optional()
+            .describe("The Bots that use it."),
+        })
+        .describe(
+          "A connection to an app made with a key, which moves connected: the key travels sealed to the import's recipientKey, and the import connects the app with it on OpenBot Cloud and gives it back to the Bots that used it. Never carries the key itself.",
+        ),
+    )
+    .optional()
+    .describe(
+      "The apps that came across connected, with their Bots given them again, once imported. Before that, the apps the bundle carries.",
+    ),
   error: zod
     .string()
     .min(1)
@@ -1600,13 +1878,53 @@ export const ApplyImportResponse = zod.object({
             .describe(
               "The Bots that used it, so the person knows which to check.",
             ),
+          reason: zod
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn't allow it. Absent for an app the person signs in to again.",
+            ),
         })
         .describe(
           "A connection to an app that doesn't move, because its sign-in stays on the person's computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.",
         ),
     )
     .optional()
-    .describe("The apps to connect again here, once part 1 arrived."),
+    .describe(
+      "The apps to connect again here, once part 1 arrived. Once imported, an app the bundle carried that couldn't be connected here is listed too, with its reason.",
+    ),
+  carried: zod
+    .array(
+      zod
+        .object({
+          appId: zod
+            .string()
+            .min(1)
+            .describe(
+              "The app's id in the app directory, or the id it had on the person's computer.",
+            ),
+          appName: zod
+            .string()
+            .min(1)
+            .describe("The app's name as a person reads it."),
+          iconUrl: zod
+            .url()
+            .optional()
+            .describe("The app's icon, when the directory has one."),
+          botNames: zod
+            .array(zod.string())
+            .optional()
+            .describe("The Bots that use it."),
+        })
+        .describe(
+          "A connection to an app made with a key, which moves connected: the key travels sealed to the import's recipientKey, and the import connects the app with it on OpenBot Cloud and gives it back to the Bots that used it. Never carries the key itself.",
+        ),
+    )
+    .optional()
+    .describe(
+      "The apps that came across connected, with their Bots given them again, once imported. Before that, the apps the bundle carries.",
+    ),
   error: zod
     .string()
     .min(1)
@@ -1753,9 +2071,45 @@ export const GetImportVerificationResponse = zod.object({
           .describe(
             "The Bots that used it, so the person knows which to check.",
           ),
+        reason: zod
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn't allow it. Absent for an app the person signs in to again.",
+          ),
       })
       .describe(
         "A connection to an app that doesn't move, because its sign-in stays on the person's computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.",
       ),
   ),
+  carried: zod
+    .array(
+      zod
+        .object({
+          appId: zod
+            .string()
+            .min(1)
+            .describe(
+              "The app's id in the app directory, or the id it had on the person's computer.",
+            ),
+          appName: zod
+            .string()
+            .min(1)
+            .describe("The app's name as a person reads it."),
+          iconUrl: zod
+            .url()
+            .optional()
+            .describe("The app's icon, when the directory has one."),
+          botNames: zod
+            .array(zod.string())
+            .optional()
+            .describe("The Bots that use it."),
+        })
+        .describe(
+          "A connection to an app made with a key, which moves connected: the key travels sealed to the import's recipientKey, and the import connects the app with it on OpenBot Cloud and gives it back to the Bots that used it. Never carries the key itself.",
+        ),
+    )
+    .optional()
+    .describe("The apps that came across connected."),
 });

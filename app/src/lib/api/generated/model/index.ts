@@ -413,6 +413,7 @@ export * from "./capabilityPreviewPeopleItemCapabilitiesItemActivity";
 export * from "./capabilityRoles";
 export * from "./capabilityTeams";
 export * from "./capabilityTranslation";
+export * from "./carriedApp";
 export * from "./catalogueAppEntry";
 export * from "./catalogueAppEntryAuth";
 export * from "./catalogueAppEntrySource";
