@@ -55,7 +55,7 @@
 /*
  * OpenBot's own frame (Figma "Master screens"): the window sits 12px inside a near-black field of
  * square-pixel dither, CopilotKit's pixelation. The sidebar and the page are two pieces of one
- * window with 18px outer corners; where they meet, the field bites a small curved notch out of the
+ * window with 20px outer corners; where they meet, the field bites a small curved notch out of the
  * sidebar's top and bottom corners, and a bump of it marks the active row at the window's left edge.
  *
  * Drawn here rather than in the sidebar primitive because the primitive also frames Admin and
@@ -72,6 +72,15 @@
   /* Figma's frames: this same 800px tile at 339.55px and 30%, in Home, Setup and Onboarding alike. */
   --frame-dither-opacity: 0.3;
   --backdrop-shape: oklch(0.653 0.086 271.6 / 15%);
+  /* The app's sidebar folded to its strip (Figma "Sidebar", Option 2, "Closed"). */
+  --sidebar-width-folded: 91px;
+  /*
+   * The window's close, minimise and zoom buttons as the sidebar's title bar draws them in a browser
+   * (Figma's "Window Controls", the colours macOS gives its own).
+   */
+  --window-close: #ff736a;
+  --window-minimize: #febc2e;
+  --window-zoom: #19c332;
 }
 
 /*
@@ -268,6 +277,14 @@
     );
 }
 
+/*
+ * The lines drawn across a solid glyph (a bubble's words, a clock's hands: `solidIcon`) in the colour
+ * of the sidebar they sit on, as Figma draws the strip's open section.
+ */
+.icon-cut {
+  stroke: var(--sidebar);
+}
+
 @media (min-width: 768px) {
   :root:not([data-kit="legacy"]) [data-slot="sidebar-wrapper"] {
     position: relative;
@@ -294,7 +311,7 @@
     height: auto;
     padding: 0;
     /* Room on the right for the resize rail, which hangs past its edge. */
-    clip-path: inset(0 -48px 0 0 round 18px 0 0 18px);
+    clip-path: inset(0 -48px 0 0 round 20px 0 4px 20px);
     transition-property: left, right, width, clip-path;
   }
 
@@ -308,19 +325,120 @@
    * It moves by its width, exactly as far as the page's left edge does, so the two stay joined all
    * the way. Going further, to hide the notches, opened a strip of the dark field between them that
    * grew to 50px mid-slide. Instead the clip holds at the window's left edge while the sidebar slides
-   * under it: the inset grows by what the sidebar moves, with the window's 18px corners, and on the
+   * under it: the inset grows by what the sidebar moves, with the window's 20px corners, and on the
    * right it closes over the notches and the rail. Both use the primitive's 200ms linear easing.
    */
   :root:not([data-kit="legacy"])
     [data-slot="sidebar"][data-collapsible="offcanvas"]
     [data-slot="sidebar-container"] {
     left: calc(--spacing(3) - var(--sidebar-width));
-    clip-path: inset(0 0 0 var(--sidebar-width) round 18px 0 0 18px);
+    clip-path: inset(0 0 0 var(--sidebar-width) round 20px 0 4px 20px);
   }
 
   :root:not([data-kit="legacy"]) [data-slot="sidebar-inner"] {
     position: relative;
-    border-radius: 18px 0 0 18px;
+    border-radius: 20px 0 4px 20px;
+  }
+
+  /*
+   * The app's sidebar folded to its strip (Figma "Sidebar", Option 2, "Closed"): 91px of the window,
+   * and the strip as wide as all of it, the orb and the sections centred. The primitive would fold it
+   * to the strip and its 16px inset, the container 2px wider still; here the sidebar's container and
+   * the gap that places the page are the same width, so the sidebar's notches sit on the page's edge.
+   */
+  :root:not([data-kit="legacy"])
+    [data-app-sidebar]
+    > [data-slot="sidebar"][data-state="collapsed"]
+    > :is([data-slot="sidebar-gap"], [data-slot="sidebar-container"]),
+  :root:not([data-kit="legacy"])
+    [data-app-sidebar]
+    > [data-slot="sidebar"][data-state="collapsed"]
+    [data-slot="strip"] {
+    width: var(--sidebar-width-folded);
+  }
+
+  /*
+   * The open section's mark on the strip (Figma "Sidebar", Option 2): the window's dark edge bites
+   * into the sidebar beside it, a bell 52px tall and 11px deep while the sidebar is open, 81 by 22 once
+   * it is folded to the strip, with a short pale bar in the bite. Its glyph turns solid (`StripItem`).
+   * Drawn from the item out to the sidebar's left edge: 4px past the item open, 25.5px folded. The
+   * bite is the field itself, its dither included: the frame's colour, the dither tile over it at the
+   * frame's strength, the tile pinned to the window as the frame's own is (so not moved by a
+   * transform, which would unpin it).
+   */
+  :root:not([data-kit="legacy"])
+    [data-app-sidebar]
+    [data-slot="strip-item"][data-active]::before,
+  :root:not([data-kit="legacy"])
+    [data-app-sidebar]
+    [data-slot="strip-item"][data-active]::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    translate: 0 -50%;
+    pointer-events: none;
+  }
+
+  :root:not([data-kit="legacy"])
+    [data-app-sidebar]
+    [data-slot="strip-item"][data-active]::before {
+    top: calc(50% - 26px);
+    translate: none;
+    left: -4px;
+    width: 11px;
+    height: 52px;
+    border-radius: 0;
+    background:
+      linear-gradient(
+        color-mix(
+          in oklab,
+          var(--frame) calc((1 - var(--frame-dither-opacity)) * 100%),
+          transparent
+        )
+      ),
+      var(--frame-dither) 0 0 / 340px 340px fixed,
+      var(--frame);
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 52'%3E%3Cpath d='M0 0C0 9 11 13 11 26C11 39 0 43 0 52Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-kit="legacy"])
+    [data-app-sidebar]
+    [data-slot="strip-item"][data-active]::after {
+    left: -2px;
+    width: 3px;
+    height: 13px;
+    border-radius: 9999px;
+    background-color: var(--sidebar);
+  }
+
+  :root:not([data-kit="legacy"])
+    [data-app-sidebar]
+    [data-state="collapsed"]
+    [data-slot="strip-item"][data-active]::before {
+    top: calc(50% - 40.5px);
+    left: -25.5px;
+    width: 22px;
+    height: 81px;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 81'%3E%3Cpath d='M0 0C0 18 22 18 22 40.5C22 63 0 63 0 81Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-kit="legacy"])
+    [data-app-sidebar]
+    [data-state="collapsed"]
+    [data-slot="strip-item"][data-active]::after {
+    left: -23.5px;
+  }
+
+  /*
+   * In OpenBot Desktop on macOS the window's own buttons sit where the sidebar's title bar draws
+   * them (`SidebarTitleBar`), so the picture keeps its room and is not drawn.
+   */
+  :root[data-desktop-titlebar="overlay"] [data-sidebar-window-buttons] {
+    visibility: hidden;
   }
 
   /*
@@ -370,6 +488,25 @@
     display: flex;
   }
 
+  /*
+   * Only the sidebar itself takes a press, so past its rounded corners a press lands on the frame.
+   * The box around it and its gap (the spacer) found those presses instead, and in OpenBot Desktop
+   * on macOS that bit of the field did not move the window, as the rest of the frame does
+   * (`data-desktop-drag` on the wrapper). The container's clip takes its corners out of it too.
+   */
+  :root:not([data-kit="legacy"])
+    [data-slot="sidebar-wrapper"]
+    > [data-slot="sidebar"] {
+    pointer-events: none;
+  }
+
+  :root:not([data-kit="legacy"])
+    [data-slot="sidebar-wrapper"]
+    > [data-slot="sidebar"]
+    > [data-slot="sidebar-container"] {
+    pointer-events: auto;
+  }
+
   :root:not([data-kit="legacy"]) [data-slot="sidebar-gap"]::before,
   :root:not([data-kit="legacy"]) [data-slot="sidebar-gap"]::after {
     content: "";
@@ -416,7 +553,7 @@
     margin: 0;
     border: 0;
     border-left: 1px solid var(--sidebar-border);
-    border-radius: 0 18px 18px 0;
+    border-radius: 0 20px 20px 0;
     box-shadow: none;
     isolation: isolate;
     transition: border-radius 200ms linear;
@@ -428,7 +565,7 @@
     )
     > main {
     border-left: 0;
-    border-radius: 18px;
+    border-radius: 20px;
   }
 
   /*

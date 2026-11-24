@@ -1,7 +1,13 @@
-import { type Icon, IconLogout, IconMessages } from "@/components/icons";
+import {
+  type Icon,
+  IconLogout,
+  IconMessage,
+  IconMessages,
+} from "@/components/icons";
 import { Link, useRouterState } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
 import { BrandName } from "@/components/edition/brand-name";
+import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { Strip, StripItem } from "@/components/layout/strip";
 import { openNewOrganization } from "@/components/organizations/new-organization-dialog";
 import { OrganizationMenuItems } from "@/components/organizations/organization-menu";
@@ -30,6 +36,7 @@ import {
   sectionHasPanel,
   useOpenSection,
 } from "@/lib/sections";
+import { useKit } from "@/skins/store";
 import { BotsNavBadge } from "../bot-profile/attention";
 import { RecordingDot, useLiveRecording } from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
@@ -44,26 +51,37 @@ import { useSignOut } from "./use-sign-out";
 /** The orb's palette: periwinkle, the nearest of the eight to OpenBot's own mark. */
 const ORB_COLORS = ORB_PALETTES[2];
 
-/** OpenBot's orb at the top of the strip. It goes home, as the product's name did. */
+/**
+ * OpenBot's orb at the top of the strip. It goes home, as the product's name did.
+ *
+ * In OpenBot's own look it is Figma's "Brand / Logo Artwork" at 32px, and shows only while the
+ * sidebar is folded to the strip: open, the sidebar's title bar carries it with the name beside it
+ * (`SidebarTitleBar`). The legacy kit keeps its drawn orb at the top of the strip.
+ */
 function HomeOrb() {
+  const currentKit = useKit() === "current";
   return (
     <Link
       aria-label={appConfig.brand.productName}
-      className="flex size-9 items-center justify-center rounded-full outline-hidden ring-sidebar-ring focus-visible:ring-2"
+      className="flex size-9 items-center justify-center rounded-full outline-hidden ring-sidebar-ring focus-visible:ring-2 kit:size-10"
       to="/"
     >
-      <span
-        aria-hidden="true"
-        className="bot-orb-still inline-block size-7 rounded-full ring-1 ring-foreground/10"
-        style={
-          {
-            "--c1": ORB_COLORS.c1,
-            "--c2": ORB_COLORS.c2,
-            "--c3": ORB_COLORS.c3,
-            "--c4": ORB_COLORS.c4,
-          } as CSSProperties
-        }
-      />
+      {currentKit ? (
+        <OpenBotLogo className="size-8" />
+      ) : (
+        <span
+          aria-hidden="true"
+          className="bot-orb-still inline-block size-7 rounded-full ring-1 ring-foreground/10"
+          style={
+            {
+              "--c1": ORB_COLORS.c1,
+              "--c2": ORB_COLORS.c2,
+              "--c3": ORB_COLORS.c3,
+              "--c4": ORB_COLORS.c4,
+            } as CSSProperties
+          }
+        />
+      )}
     </Link>
   );
 }
@@ -213,9 +231,26 @@ function StripAccount() {
  */
 export function SectionStrip() {
   const navigation = useNavigationItems();
+  const currentKit = useKit() === "current";
+  const { state, isMobile } = useSidebar();
+  /*
+   * In OpenBot's own look the orb is in the sidebar's title bar while the sidebar is open, and on
+   * the strip only once it is folded (Figma "Closed"). A narrow window's sheet has no title bar.
+   * Only the header changes: the sections stay the same elements, so the one just pressed keeps
+   * the focus as the sidebar folds.
+   */
+  const orbOnStrip = !currentKit || isMobile || state === "collapsed";
   return (
-    <Strip footer={<StripAccount />} header={<HomeOrb />}>
-      <PanelItem icon={IconMessages} id={CONVERSATIONS} label="Conversations" />
+    <Strip
+      footer={<StripAccount />}
+      header={orbOnStrip ? <HomeOrb /> : undefined}
+    >
+      <PanelItem
+        // Figma's "message" glyph in OpenBot's own look; the legacy kit keeps its bubble of dots.
+        icon={currentKit ? IconMessage : IconMessages}
+        id={CONVERSATIONS}
+        label="Conversations"
+      />
       {navigation
         .filter(isNavigationLink)
         .filter((item) => item.section === "primary")

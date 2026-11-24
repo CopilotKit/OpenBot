@@ -76,9 +76,10 @@ export function ChannelItemContent({
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {avatar ? (
           <div className="shrink-0">
+            {/* Figma's 24px avatar in the current kit ("Recent Conversation item"); the legacy kit keeps 20. */}
             <ChannelAvatar
               participantIds={participantIds}
-              size={20}
+              size={currentKit ? 24 : 20}
               typing={busy}
             />
           </div>

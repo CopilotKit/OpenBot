@@ -311,7 +311,7 @@ export const IconBellRinging = defineIcon("bell-ringing", Notification03Icon);
  * Bots and Connections are Figma's own drawings rather than the set's ("Master screens" navigation):
  * Figma's 18px frames scaled onto the 24-unit grid, drawn with the set's line.
  */
-export const IconBolt = defineIcon("bolt", [
+const BOLT: IconSvgElement = [
   [
     "path",
     {
@@ -320,7 +320,8 @@ export const IconBolt = defineIcon("bolt", [
       ...GLYPH_STROKE,
     },
   ],
-]);
+];
+export const IconBolt = defineIcon("bolt", BOLT);
 export const IconBook = defineIcon("book", BookOpen01Icon);
 export const IconBox = defineIcon("box", PackageIcon);
 export const IconBrain = defineIcon("brain", AiBrain01Icon);
@@ -496,7 +497,7 @@ export const IconPlayerStop = defineIcon("player-stop", StopIcon);
 export const IconPlayerStopFilled = defineIcon("player-stop-filled", StopIcon, {
   filled: true,
 });
-export const IconPlug = defineIcon("plug", [
+const PLUG: IconSvgElement = [
   [
     "path",
     {
@@ -513,8 +514,10 @@ export const IconPlug = defineIcon("plug", [
       ...GLYPH_STROKE,
     },
   ],
-  ["path", { d: "M12 18V22.8M11 9.7H13", key: "cord", ...GLYPH_STROKE }],
-]);
+  ["path", { d: "M12 18V22.8", key: "cord", ...GLYPH_STROKE }],
+  ["path", { d: "M11 9.7H13", key: "mark", ...GLYPH_STROKE }],
+];
+export const IconPlug = defineIcon("plug", PLUG);
 export const IconPlugConnected = defineIcon("plug-connected", PlugSocketIcon);
 export const IconPlugOff = defineIcon("plug-off", Plug02Icon);
 export const IconPlus = defineIcon("plus", PlusSignIcon);
@@ -578,3 +581,59 @@ export const IconWorld = defineIcon("world", Globe02Icon);
 export const IconWorldOff = defineIcon("world-off", GlobeOffIcon);
 export const IconX = defineIcon("x", Cancel01Icon);
 export const IconZoomQuestion = defineIcon("zoom-question", SearchList02Icon);
+
+/**
+ * A glyph's solid face, for an open section on the strip (Figma "Sidebar", Option 2). The free set
+ * draws lines only, so the shapes that make up the glyph's body (`fill`, by index) are filled with its
+ * ink, and the lines drawn across them (`cut`: a bubble's words, a clock's hands) take the colour of
+ * the ground under the icon (`icon-cut`, styles.css), as Figma draws them. The rest stay lines.
+ */
+function solidGlyph(
+  glyph: IconSvgElement,
+  { fill, cut = [] }: { fill: number[]; cut?: number[] },
+): IconSvgElement {
+  return glyph.map(([tag, attributes], index) => [
+    tag,
+    fill.includes(index)
+      ? { ...attributes, fill: "currentColor" }
+      : cut.includes(index)
+        ? { ...attributes, className: "icon-cut" }
+        : attributes,
+  ]) as unknown as IconSvgElement;
+}
+
+/** The strip's glyphs that have a solid face. */
+const SOLID = new Map<Icon, Icon>([
+  [
+    IconMessage,
+    defineIcon(
+      "message-solid",
+      solidGlyph(Message01Icon, { fill: [0], cut: [1] }),
+    ),
+  ],
+  [IconBolt, defineIcon("bolt-solid", solidGlyph(BOLT, { fill: [0] }))],
+  [
+    IconClock,
+    defineIcon("clock-solid", solidGlyph(Clock01Icon, { fill: [0], cut: [1] })),
+  ],
+  [
+    IconBrain,
+    defineIcon(
+      "brain-solid",
+      solidGlyph(AiBrain01Icon, { fill: [0, 1], cut: [2, 3] }),
+    ),
+  ],
+  [
+    IconBook,
+    defineIcon("book-solid", solidGlyph(BookOpen01Icon, { fill: [0, 1] })),
+  ],
+  [
+    IconPlug,
+    defineIcon("plug-solid", solidGlyph(PLUG, { fill: [1], cut: [3] })),
+  ],
+]);
+
+/** `icon`'s solid face where it has one, else `icon` itself. */
+export function solidIcon(icon: Icon): Icon {
+  return SOLID.get(icon) ?? icon;
+}

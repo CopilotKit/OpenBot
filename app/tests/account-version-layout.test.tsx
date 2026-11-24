@@ -13,7 +13,7 @@ import { compile } from "tailwindcss";
  * version is now as wide as its words, and the name gives way.
  *
  * Rendered in a real Chromium, because where text is cut is the browser's layout to decide. The row
- * is the real component with the app's stylesheet, at 340px and at 220px.
+ * is the real component with the app's stylesheet, at the Figma width and at 220px.
  *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/account-version-layout.test.tsx
  *
@@ -33,7 +33,7 @@ const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";
 
 /** `SIDEBAR_WIDTH` and `SIDEBAR_MIN_WIDTH` in app/src/lib/sidebar.ts. */
-const WIDTHS = [340, 220] as const;
+const WIDTHS = [280, 220] as const;
 const LONG_NAME = "Alexandria Montgomery-Fitzwilliam";
 const BUILDS = ["main-20261113-9", "test-20261113-14", "internal-6e5f485bc71c"];
 const RELEASE = "v1.0.2";
@@ -263,7 +263,7 @@ describe.skipIf(!asked)("the organization in the account row", () => {
         try {
           expect(await organizationLine(page, ORGANIZATION)).toMatchObject({
             // At the sidebar's own width it reads whole; at its narrowest the tooltip has it.
-            ...(width === 340 ? { cut: false } : {}),
+            ...(width === 280 ? { cut: false } : {}),
             versionCut: false,
             versionText: version,
             reachesVersionEdge: true,

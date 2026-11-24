@@ -22,6 +22,7 @@ import {
   storedSidebarWidth,
 } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
+import { useKit } from "@/skins/store";
 
 /**
  * The sidebar's gutters: the header, content and footer already sit 8px in from the edge; every
@@ -48,8 +49,9 @@ export function useSidebarPanelAvailable(): boolean {
  * `defaultOpen` to true). Driving it as controlled state is a dozen lines, and three copies of a
  * dozen lines is three chances for one shell to forget the preference the other two remember.
  *
- * The three shells share one width (`SIDEBAR_WIDTH`), so the sidebar's edge stays put going between
- * them. Dragging it (`SidebarRail`) in any shell changes it for all three. Beside a strip that width
+ * The three shells share one width (`SIDEBAR_WIDTH`, the UI Kit's default until somebody drags it),
+ * so the sidebar's edge stays put going between them. Dragging it (`SidebarRail`) in any shell
+ * changes it for all three. Beside a strip that width
  * is the strip and the panel together. However wide it was left, it takes no more than
  * `SIDEBAR_MAX_SHARE` of the window, so zooming in never leaves the work a sliver beside it.
  *
@@ -70,8 +72,9 @@ export function SidebarShell({
   const [open, setOpen] = useState(() =>
     parseStoredSidebarOpen(window.localStorage.getItem(SIDEBAR_STORAGE_KEY)),
   );
+  const kit = useKit();
   const [width, setWidth] = useState(() =>
-    storedSidebarWidth((key) => window.localStorage.getItem(key)),
+    storedSidebarWidth((key) => window.localStorage.getItem(key), kit),
   );
   // While the edge is dragged, the sidebar follows the pointer instead of easing after it.
   const [resizing, setResizing] = useState(false);
@@ -104,6 +107,8 @@ export function SidebarShell({
   return (
     <SidebarProvider
       className={cn(SIDEBAR_GUTTER, className)}
+      // The app's sidebar of sections, which OpenBot's frame folds to its strip (styles.css).
+      data-app-sidebar={panel ? "" : undefined}
       /*
        * In OpenBot Desktop on a Mac, the window moves by the frame around the sidebar and the page
        * (OpenBot's own look draws one, styles.css). Bare: only a press on the wrapper itself, the

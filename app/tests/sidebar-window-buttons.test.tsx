@@ -574,22 +574,38 @@ describe.skipIf(!asked)("the sidebar and the window's buttons", () => {
     }, 120_000);
   }
 
-  test("in the macOS desktop, the orb and the panel's heading start below the window's buttons", async () => {
+  /*
+   * OpenBot's own look (Figma "Sidebar", Option 2) gives the app's sidebar a title bar for the
+   * window's buttons: OpenBot's mark and name sit on their row, to the right of them, and the strip
+   * and the panel start below it.
+   */
+  test("in the macOS desktop, OpenBot's name sits beside the window's buttons, and the panel's heading and the sections below them", async () => {
     for (const [engine, browser] of engines) {
       const page = await open(browser, CASES[0] as Case, true);
       try {
-        const { orb, heading, firstSection } = await corner(page);
-        expect({ engine, orb: (orb?.y ?? 0) > WINDOW_BUTTONS.bottom }).toEqual({
-          engine,
-          orb: true,
+        const { heading, firstSection } = await corner(page);
+        const mark = await page.evaluate(() => {
+          const box = document
+            .querySelector('[data-slot="sidebar-title-bar"] a')
+            ?.getBoundingClientRect();
+          return box
+            ? { left: box.left, middle: box.top + box.height / 2 }
+            : null;
         });
+        const buttonsMiddle = (WINDOW_BUTTONS.top + WINDOW_BUTTONS.bottom) / 2;
         expect({
           engine,
+          beside: (mark?.left ?? 0) > WINDOW_BUTTONS.right,
+          level: Math.abs((mark?.middle ?? 0) - buttonsMiddle) < 8,
           heading: (heading?.y ?? 0) > WINDOW_BUTTONS.bottom,
-        }).toEqual({ engine, heading: true });
-        // The strip and the panel move down together, so the orb stays level with the heading.
-        expect(Math.abs((orb?.y ?? 0) - (heading?.y ?? 0))).toBeLessThan(12);
-        expect(firstSection?.y ?? 0).toBeGreaterThan(orb?.y ?? 0);
+          sections: (firstSection?.y ?? 0) > WINDOW_BUTTONS.bottom,
+        }).toEqual({
+          engine,
+          beside: true,
+          level: true,
+          heading: true,
+          sections: true,
+        });
       } finally {
         await page.close();
       }

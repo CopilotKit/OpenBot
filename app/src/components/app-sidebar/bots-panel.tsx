@@ -222,7 +222,7 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
       hidden={hidden}
       title="Bots"
     >
-      <SidebarContent className="scroll-fade-b px-2 pb-2">
+      <SidebarContent className="scroll-fade-b px-2 pb-2 kit:px-0 kit:pt-2 kit:pb-0">
         {/* The UI Kit's small search, with its round clear button. */}
         <SearchField
           aria-label="Search Bots"
@@ -233,7 +233,7 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
           size="sm"
           value={search}
         />
-        <div className="h-2 shrink-0" />
+        <div className="h-2 shrink-0 kit:h-3" />
         {bots.isPending ? (
           <p
             role="status"
@@ -262,7 +262,7 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
               : "No Bots yet. Make one with New Bot."}
           </p>
         ) : (
-          <ul className="flex flex-col gap-px">
+          <ul className="flex flex-col gap-px kit:gap-1">
             {shown.map((bot) => (
               <BotRow
                 bot={bot}
