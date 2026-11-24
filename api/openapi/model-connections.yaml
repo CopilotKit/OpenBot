@@ -479,7 +479,12 @@ paths:
         is kept for them. Bots across the organization then run on that
         sign-in for everyone with no AI of their own, and sharedSignIn names
         whose it is. It stops working if that person removes their own
-        sign-in; another administrator can switch it at any time.
+        sign-in; another administrator can switch it at any time. With
+        several connections (listAiConnections) this changes the default: the
+        connection saved becomes the default, in place of the provider's own
+        connection where it already had one (its id stays the provider), and
+        a default of another provider stays connected as one of the others,
+        no longer the default.
       security:
         - webSession: []
         - appOAuth: [ai-connection:write]
@@ -564,11 +569,16 @@ paths:
         Stop the organization's Bots using the AI connection in use, with no
         restart, and revoke the key it used. Runs already going finish on it.
         Keys still kept for other connections stay kept (saved), so a switch
-        to one of them needs no key pasted. Afterwards the organization has
-        no AI: on OpenBot Cloud a person's runs use their own AI where they
-        connected one, and nobody else's run until an administrator connects
-        another (replaceAiConnection). Disconnecting a connection that isn't
-        there changes nothing. Recorded on the audit trail, never with a key.
+        to one of them needs no key pasted. With several connections
+        (listAiConnections) this disconnects the default only, and the others
+        stay connected: where exactly one is left it becomes the default;
+        where more are left none is, and a run with no model picked is
+        refused until an administrator makes one the default
+        (makeAiConnectionDefault). With no other connection the organization
+        has no AI afterwards: on OpenBot Cloud a person's runs use their own
+        AI where they connected one, and nobody else's run until an
+        administrator connects another (replaceAiConnection). Disconnecting a
+        connection that isn't there changes nothing. Recorded on the audit trail, never with a key.
         Only an administrator of the organization may disconnect it, and not
         where whoever runs OpenBot sets the provider.
       security:
@@ -679,6 +689,11 @@ paths:
         sign-in was approved: the server keeps that sign-in for them alone
         and renews it itself. Without one it is refused, since the server
         runs the person's Bots and can't use a sign-in held on a computer.
+        With several connections of their own (listPersonalAiConnections)
+        this changes their default: the connection saved becomes the default,
+        in place of the provider's own connection where they already had one
+        (its id stays the provider), and a default of another provider stays
+        connected as one of the others, no longer the default.
         Recorded on the audit trail, never with a key. Only the person
         themselves may set it, and only where available is true.
       security:
@@ -752,7 +767,10 @@ paths:
       summary: Remove a person's own AI connection
       description: >-
         Stop a person's runs using their own AI, and revoke every key kept
-        for them. Their next run uses the organization's AI where it has one;
+        for them. With several connections of their own
+        (listPersonalAiConnections) it removes all of them, not only the
+        default; removePersonalAiConnection removes one. Their next run uses
+        the organization's AI where it has one;
         where it has none and an AI is required, they connect one again before
         Bots run for them. Removing a connection that isn't there changes
         nothing. Recorded on the audit trail. Only the person themselves may

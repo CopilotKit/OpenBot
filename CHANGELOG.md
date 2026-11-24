@@ -381,7 +381,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   refuses one that can't run; a run with no pick then gets a `stopped` choice with `no-default`). `startAiSignIn`,
   `getAiSignIn` and `finishAiSignIn` under `ai-connection-sign-ins` sign the organization in to a
   provider the way a person's sign-in does, on OpenBot Cloud and a self-hosted OpenBot. The single-connection operations keep their meaning
-  and describe the default connection. `ModelCatalogue` gains `connections` (each connection's own
+  and describe the default connection: replacing it makes the connection saved the default and
+  keeps the old default beside it, the organization's disconnect leaves the others connected, and
+  a person's removes all of theirs. A turn refused because its connection can't run, or there is
+  no default, is kept as a refused turn with `AI_CONNECTION_STOPPED`. `ModelCatalogue` gains `connections` (each connection's own
   models, `owner`, `source`, `ready` and `problem`), `ModelChoice` gains `connection` and
   `stopped`, `ModelChoiceInput` gains `connection`, and a Bot's `defaultModel` input gains
   `source`. All optional: an older client sends and reads what it did.
