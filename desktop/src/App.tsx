@@ -10,7 +10,7 @@ import {
   earlyDownloadsMeasured,
   useEarlyDownloads,
 } from "./EarlyDownloads";
-import { handover } from "./handover";
+import { handover, leaveFor } from "./handover";
 import { currentChoice, DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
@@ -1227,6 +1227,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * The window to the OpenBot running here (`show_openbot`), unless the move to OpenBot Cloud is
    * offered first: then its screens show instead, and this answers false. The shell is told whether
    * this build offers OpenBot Cloud, and says the move is due only where it does.
+   *
+   * Setup fades out to the window's ground first, and OpenBot's page fades up from it
+   * (`leaveFor`); a `show_openbot` that fails brings setup back at once, with the failure.
    */
   async function handOver(): Promise<boolean> {
     moveAsked.current ??= askMoveOffer(cloudEnabled());
@@ -1237,7 +1240,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       setMoveShown(offer);
       return false;
     }
-    await invoke("show_openbot");
+    await leaveFor(() => invoke("show_openbot"));
     return true;
   }
 

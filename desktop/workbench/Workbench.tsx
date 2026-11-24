@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/toast";
+import { FROM_SETUP_HASH } from "@/lib/desktop/from-setup";
 import { cn } from "@/lib/utils";
 import type { Answer, Call, NativeControl } from "../src/fakeNative/control";
 import {
@@ -649,6 +650,11 @@ export function WorkbenchLoaded({
   const [frameSockets, setFrameSockets] = useState<SocketControl | null>(null);
   /** The route the Requests panel picked, for the API answers panel. */
   const [pickedRoute, setPickedRoute] = useState<ApiRoute | null>(null);
+  /**
+   * The app scene was opened from the handover card: its frame loads at the address setup sends
+   * the window to (`FROM_SETUP_HASH`), so the app fades up as after setup. Any other pick clears it.
+   */
+  const [openedBySetup, setOpenedBySetup] = useState(false);
   /** The API answers section: a route picked in the Requests panel opens it. */
   const [answersOpen, setAnswersOpen] = useState(false);
   /** The Import a log section: open when the tab has imported scenes. */
@@ -1522,6 +1528,7 @@ export function WorkbenchLoaded({
     const scene = scenesRef.current.find((s) => s.id === id);
     clearHighlight();
     setPickedRoute(null);
+    setOpenedBySetup(false);
     update((prev) => ({
       ...prev,
       scene: id,
@@ -1814,7 +1821,11 @@ export function WorkbenchLoaded({
         >
           <div className="relative inline-block align-top" ref={wrapRef}>
             <WindowFrame
-              src={config ? frameUrl(config) : (appScene?.start.route ?? "/")}
+              src={
+                config
+                  ? frameUrl(config)
+                  : `${appScene?.start.route ?? "/"}${openedBySetup && host === "desktop" ? FROM_SETUP_HASH : ""}`
+              }
               frameKey={frameKey}
               host={host}
               address={liveRoute ?? appScene?.start.route}
@@ -1876,7 +1887,13 @@ export function WorkbenchLoaded({
               actions={
                 <>
                   {openbotScene !== null && (
-                    <Button size="sm" onClick={() => pickScene(openbotScene)}>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        pickScene(openbotScene);
+                        setOpenedBySetup(true);
+                      }}
+                    >
                       Open OpenBot
                     </Button>
                   )}

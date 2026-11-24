@@ -112,6 +112,9 @@ const { App } = await import("./App");
 const { handover } = await import("./handover");
 const HANDOVER_HOLD_MS = handover.holdMs;
 handover.holdMs = 0;
+// Setup's fade before `show_openbot` (`leaveFor`): off here but in the test of the fade itself.
+const HANDOVER_FADE_MS = handover.fadeMs;
+handover.fadeMs = 0;
 const { ShuttingDownWindow, isShuttingDownPage } = await import(
   "./ShuttingDown"
 );
@@ -4528,6 +4531,67 @@ test("the running screen opens on its heading, with Updates under the buttons, w
   expect(view.getByRole("alert").textContent).toContain(
     "OpenBot is not answering on port 3010 yet",
   );
+});
+
+/*
+ * Asked by Dusty: the switch from setup to OpenBot was a hard cut. Setup now fades out to the
+ * window's ground and only then asks the shell to show OpenBot; a show that fails brings setup back
+ * at once, with the failure on it, as before.
+ */
+test("Show OpenBot fades setup out first, and a failed show brings it back at once with the failure", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-handover-fade",
+    localStatus("ready", "valid"),
+  );
+  let showFails = false;
+  const asked: Array<{ mark: string | undefined; after: number }> = [];
+  let clicked = 0;
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "show_openbot" && clicked > 0) {
+      asked.push({
+        mark: document.documentElement.dataset.handover,
+        after: performance.now() - clicked,
+      });
+      if (showFails)
+        throw "OpenBot is not answering on port 3010 yet, so there is nothing to show.";
+      return null;
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() => expect(localSequence()).toContain("start_stack"));
+  await emitProgress({ step: "env", ok: true, detail: "Saved." });
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  handover.fadeMs = HANDOVER_FADE_MS;
+  try {
+    clicked = performance.now();
+    await userEvent.click(view.getByRole("button", { name: "Show OpenBot" }));
+    // Fading, and the shell not asked yet.
+    expect(document.documentElement.dataset.handover).toBe("leaving");
+    expect(asked).toEqual([]);
+    await waitFor(() => expect(asked).toHaveLength(1));
+    expect(asked[0].mark).toBe("leaving");
+    expect(asked[0].after).toBeGreaterThanOrEqual(HANDOVER_FADE_MS - 10);
+    // Sent: setup stays faded for OpenBot's page to replace it.
+    expect(document.documentElement.dataset.handover).toBe("leaving");
+
+    showFails = true;
+    clicked = performance.now();
+    await userEvent.click(view.getByRole("button", { name: "Show OpenBot" }));
+    await view.findByRole("heading", { name: "OpenBot stopped" });
+    expect(asked).toHaveLength(2);
+    expect(asked[1].mark).toBe("leaving");
+    expect(asked[1].after).toBeGreaterThanOrEqual(HANDOVER_FADE_MS - 10);
+    // Back at once, the failure said on it.
+    expect(document.documentElement.dataset.handover).toBeUndefined();
+    expect(view.getByRole("alert").textContent).toContain(
+      "OpenBot is not answering on port 3010 yet",
+    );
+  } finally {
+    handover.fadeMs = 0;
+    delete document.documentElement.dataset.handover;
+  }
 });
 
 /*
