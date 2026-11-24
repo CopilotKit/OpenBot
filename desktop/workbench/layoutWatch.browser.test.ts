@@ -41,7 +41,10 @@ type Page = {
     run: ((arg: A) => T) | string,
     arg?: A,
   ): Promise<T>;
-  waitForSelector(selector: string): Promise<unknown>;
+  waitForSelector(
+    selector: string,
+    options?: { timeout?: number },
+  ): Promise<unknown>;
   frames(): Frame[];
   mainFrame(): Frame;
   close(): Promise<void>;
@@ -322,28 +325,27 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
         () => globalThis.__workbenchRunInfo?.end ?? 0,
       );
       await page.evaluate((ms) => window.__workbenchPage?.seek(ms), end);
-      const warning = (await warningsOf(page)).find(
-        (w) =>
-          w.kind === "moved" &&
-          w.label.includes("Installing OpenBot in the background"),
-      );
-      if (warning?.kind !== "moved")
-        throw new Error("No move of the background row.");
+      // Any move does. The background row's name used to move here; it holds still now that the
+      // sidebar's foot holds its height, so the move is whichever the run still has.
+      const warning = (await warningsOf(page)).find((w) => w.kind === "moved");
+      if (warning?.kind !== "moved") throw new Error("No move in install-mac.");
       // The warning has where the row was and where it went.
       expect(warning.to.y - warning.from.y).toBe(warning.dy);
 
-      // The row's moves come after an input: expected, so behind the toggle.
+      // A move after an input is expected, so behind the toggle: show them all.
       await page
         .mainFrame()
         .getByRole("checkbox", { name: "Show expected moves" })
         .click();
-      // The first move of the row is earlier than the end: the hover seeks back.
+      // The move is earlier than the end: the hover seeks back.
       await page
         .mainFrame()
         .getByRole("button", { name: warningText(warning) })
         .hover();
+      // A move late in the run is replayed from the start: about 45 s to 3:52 on a busy machine.
       await page.waitForSelector(
         "[data-workbench-highlight='moved'] [data-highlight-label]",
+        { timeout: 150_000 },
       );
       expect(await page.evaluate(() => window.__workbenchPage?.now())).toBe(
         warning.at,
@@ -367,5 +369,5 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
     } finally {
       await page.close();
     }
-  }, 180_000);
+  }, 300_000);
 });
