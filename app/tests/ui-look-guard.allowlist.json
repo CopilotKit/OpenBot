@@ -155,7 +155,6 @@
     "text": 1
   },
   "components/layout/page-parts.tsx": {
-    "darkColor": 2,
     "card": 2
   },
   "components/layout/section-panel.tsx": {
