@@ -30,7 +30,12 @@ const THEMES = ["light", "dark"] as const;
 const ADD_CARD =
   "/api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe";
 
-type State = { name: string; plan: string; admin: boolean };
+type State = {
+  name: string;
+  plan: string;
+  admin: boolean;
+  employee?: boolean;
+};
 const STATES: State[] = [
   { name: "free", plan: "free", admin: true },
   { name: "none-admin", plan: "none", admin: true },
@@ -39,6 +44,15 @@ const STATES: State[] = [
   { name: "active", plan: "active", admin: true },
   { name: "not-required", plan: "not_required", admin: true },
 ];
+/** A CopilotKit employee past the free allowance: still free, never a card, never blocked. */
+const EMPLOYEE: State = {
+  name: "employee",
+  plan: "free",
+  admin: true,
+  employee: true,
+};
+const EMPLOYEE_LINE =
+  "Free because you're a CopilotKit employee. Thanks, Uncle Atai!";
 const SCENES = ["shell", "settings", "chat"] as const;
 type Scene = (typeof SCENES)[number] | "dialog" | "signin";
 
@@ -145,7 +159,7 @@ async function open(
     return route.fulfill({ status: 404 });
   });
   await page.goto(
-    `${ORIGIN}/?scene=${scene}&plan=${state.plan}&admin=${state.admin ? 1 : 0}&width=${width}&theme=${theme}`,
+    `${ORIGIN}/?scene=${scene}&plan=${state.plan}&admin=${state.admin ? 1 : 0}&employee=${state.employee ? 1 : 0}&width=${width}&theme=${theme}`,
   );
   await page.waitForFunction(
     () => (document.getElementById("root")?.textContent?.length ?? 0) > 0,
@@ -359,6 +373,53 @@ describe.skipIf(!asked)(
               await page.close();
             }
           }, 60_000);
+
+        test(`a CopilotKit employee's trial-used-up dialog, ${theme}, ${width}px`, async () => {
+          const page = await open("dialog", EMPLOYEE, {
+            width,
+            theme,
+            ready: "[role=dialog]",
+          });
+          try {
+            await shot(page, `dialog-employee-${theme}-${width}`);
+            const dialog = page.getByRole("dialog");
+            const said = (await dialog.textContent()) ?? "";
+            expect(said).toContain("Your free trial was 500 Bot runs");
+            expect(said).toContain(EMPLOYEE_LINE);
+            expect(said).not.toContain("Ask an admin");
+            // Only a way to close, and nothing over the page.
+            await expect(dialog.getByRole("link").count()).resolves.toBe(0);
+            await expect(
+              page.getByRole("complementary", { name: "Plan" }).count(),
+            ).resolves.toBe(0);
+            expect(await sideways(page)).toBe(false);
+          } finally {
+            await page.close();
+          }
+        }, 60_000);
+
+        test(`a CopilotKit employee's Plan row, ${theme}, ${width}px`, async () => {
+          const page = await open("settings", EMPLOYEE, {
+            width,
+            theme,
+            ready: "[role=progressbar]",
+          });
+          try {
+            await shot(page, `settings-employee-${theme}-${width}`);
+            await expect(
+              page.getByRole("progressbar").getAttribute("aria-valuenow"),
+            ).resolves.toBe("100");
+            await expect(page.getByText(EMPLOYEE_LINE).count()).resolves.toBe(
+              1,
+            );
+            await expect(
+              page.getByRole("link", { name: "Add a card" }).count(),
+            ).resolves.toBe(0);
+            expect(await sideways(page)).toBe(false);
+          } finally {
+            await page.close();
+          }
+        }, 60_000);
 
         // One of the app's own dialogs, from the same page, to hold the new one beside.
         test(`the app's Remove member dialog, for comparison, ${theme}, ${width}px`, async () => {

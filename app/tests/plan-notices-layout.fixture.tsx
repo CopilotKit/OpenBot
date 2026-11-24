@@ -31,12 +31,15 @@ import { queryClient } from "@/query-client";
  * is used up. Every answer the screens read is put in the cache first, as the server would answer
  * it, and nothing is fetched.
  *
- * `?scene=shell|settings|chat|dialog|signin`, `?plan=<status>`, `?admin=1` for an owner, `?theme=dark`.
+ * `?scene=shell|settings|chat|dialog|signin`, `?plan=<status>`, `?admin=1` for an owner, `?theme=dark`,
+ * `?employee=1` for a CopilotKit employee past the free allowance (with `plan=free`).
  */
 const query = new URLSearchParams(location.search);
 const scene = query.get("scene") ?? "shell";
 const status = query.get("plan") ?? "trialing";
 const admin = query.get("admin") === "1";
+/** A CopilotKit employee past the free allowance: still `free`, the allowance sent, never a card. */
+const employee = query.get("employee") === "1";
 if (query.get("theme") === "dark")
   document.documentElement.classList.add("dark");
 
@@ -49,9 +52,10 @@ const plan: PlanStatus = {
   status,
   // As the server sends it: the share used while runs are left, and the allowance once they're gone.
   ...(status === "free" ? { freeRunsUsedPercent: 42 } : {}),
-  ...(status === "none"
+  ...(status === "none" || employee
     ? { freeRunsUsedPercent: 100, freeRunsAllowance: 500 }
     : {}),
+  ...(employee ? { copilotKitEmployee: true } : {}),
   trialEndsAt: null,
   renewsAt:
     status === "active" ? new Date(Date.now() + 12 * DAY).toISOString() : null,
