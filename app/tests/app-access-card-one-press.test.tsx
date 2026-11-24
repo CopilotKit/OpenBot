@@ -518,6 +518,103 @@ test("an admin's Turn on and give it goes on to the key form for an app that tak
   ]);
 });
 
+/**
+ * NOTION AND GMAIL, FOR THE ADMIN OF THEIR OWN ORGANIZATION ON OPENBOT CLOUD. A Bot asked for Notion.
+ * The card told the admin "Only an admin can give it", and its press answered "Notion has no tools to
+ * give yet": the app had listed nothing, and the press stopped before the admin's sign-in, after
+ * which it is asked again as them. One press now turns the app on, opens the admin's sign-in, and
+ * gives it to the Bot once they're in.
+ */
+test.each([
+  ["Notion", "composio-notion", "NOTION_SEARCH"],
+  ["Gmail", "composio-gmail", "GMAIL_FETCH_EMAILS"],
+] as const)(
+  "an admin's one press on %s turns it on, signs them in, and gives it to the Bot",
+  async (title, key, read) => {
+    const browser = aBrowser();
+    const app = (overrides: Partial<AppAccess>): AppAccess =>
+      appAccess({
+        key,
+        displayName: title,
+        source: "directory",
+        connect: "consent",
+        granted: false,
+        requestKind: "grant",
+        ...overrides,
+      });
+    const SIGNED_IN = "2026-11-23T23:10:00.000Z";
+    let live = app({
+      state: "disabled",
+      unavailable: "absent",
+      requestKind: "enable",
+    });
+    const writes: string[] = [];
+    global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method !== "GET") writes.push(`${method} ${url}`);
+      if (url === DEPLOYMENT_PATH) return Response.json({ edition: "team" });
+      if (url === ME_PATH)
+        return meResponse({
+          user: { id: "usr_me", role: "admin", name: "Me" },
+        });
+      if (url === botPath("assistant"))
+        return Response.json({
+          bot: { id: "assistant", name: "General Assistant" },
+        });
+      if (url === botAppPath("assistant", key)) return botAppResponse(live);
+      if (url === `${botAppPath("assistant", key)}/approve`) {
+        // As the server answers: on with nothing given until the admin has signed in, then given.
+        const given = live.connectedAt !== null;
+        live = given
+          ? app({ state: "ready", granted: true, connectedAt: SIGNED_IN })
+          : app({ state: "not_granted" });
+        return appAccessApprovalResponse({
+          request: appAccessRequest({
+            kind: given ? "grant" : "enable",
+            status: "approved",
+            agentId: "assistant",
+          }),
+          enabled: !given,
+          granted: given ? [`${key}/${read}`] : [],
+        });
+      }
+      if (url === myConnectionPath(key, "connect"))
+        return startResponse({ authorizationUrl: CONSENT });
+      if (url.startsWith(MY_CONNECTIONS_PATH)) return connectionPage([]);
+      return Response.json({});
+    }) as unknown as typeof fetch;
+    const view = drawFirefliesCard(key, title);
+
+    // Said to the admin as what is missing: the button beside it is theirs to press.
+    await view.findByText(`${title} isn't turned on yet.`);
+    expect(view.queryByText(/Only an admin/)).toBeNull();
+    browser.click(
+      await view.findByRole("button", {
+        name: `Turn on ${title} and give it to General Assistant`,
+      }),
+    );
+    await waitFor(() => expect(browser.tabs[0]?.to).toHaveLength(1), {
+      timeout: 3_000,
+    });
+    expect(browser.tabs[0].duringClick).toBe(true);
+    await view.findByText("Finish in the tab that opened.");
+    expect(view.queryByRole("alert")).toBeNull();
+
+    // The admin finished the app's sign-in in the other tab.
+    live = app({ state: "not_granted", connectedAt: SIGNED_IN });
+    // Drawn outside a conversation, so there is nothing to carry on: the card says it's ready.
+    await view.findByText("Ready to use.", {}, { timeout: 6_000 });
+    expect(writes).toEqual([
+      `POST ${botAppPath("assistant", key)}/approve`,
+      `POST ${myConnectionPath(key, "connect")}`,
+      `POST ${botAppPath("assistant", key)}/approve`,
+    ]);
+    expect(view.queryByRole("alert")).toBeNull();
+  },
+  15_000,
+);
+
 test("an admin's Turn on and give it goes on to the sign-in for an app that signs in", async () => {
   const browser = aBrowser();
   servingApp(
