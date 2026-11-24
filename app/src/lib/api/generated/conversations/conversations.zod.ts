@@ -1316,7 +1316,7 @@ export const ListRefusedTurnsResponse = zod.object({
           initiator: zod
             .string()
             .describe(
-              "Who started the turn: the person in a conversation (person), a routine, check-in or goal (routine), a task (task), or another Bot handing it work (bot).",
+              "Who started the turn: the person (person), a routine, check-in or goal (routine), or a task a Bot handed the work to (task).",
             ),
           code: zod
             .string()

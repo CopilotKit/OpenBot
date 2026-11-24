@@ -26579,8 +26579,7 @@ components:
             - person
             - routine
             - task
-            - bot
-          description: 'Who started the turn: the person in a conversation (person), a routine, check-in or goal (routine), a task (task), or another Bot handing it work (bot).'
+          description: 'Who started the turn: the person (person), a routine, check-in or goal (routine), or a task a Bot handed the work to (task).'
         code:
           type: string
           x-extensible-enum:

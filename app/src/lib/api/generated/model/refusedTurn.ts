@@ -20,7 +20,7 @@ export interface RefusedTurn {
   afterMessageId: string | null;
   /** What the turn was for: the person's message, or what a routine or a task asked. Null when nothing was said. */
   message: RefusedTurnMessage | null;
-  /** Who started the turn: the person in a conversation (person), a routine, check-in or goal (routine), a task (task), or another Bot handing it work (bot). */
+  /** Who started the turn: the person (person), a routine, check-in or goal (routine), or a task a Bot handed the work to (task). */
   initiator: string;
   /** Why it was refused, as the refusal's problem code. */
   code: string;

@@ -2666,11 +2666,10 @@ components:
             task asked. Null when nothing was said.
         initiator:
           type: string
-          x-extensible-enum: [person, routine, task, bot]
+          x-extensible-enum: [person, routine, task]
           description: >-
-            Who started the turn: the person in a conversation (person), a
-            routine, check-in or goal (routine), a task (task), or another Bot
-            handing it work (bot).
+            Who started the turn: the person (person), a routine, check-in or
+            goal (routine), or a task a Bot handed the work to (task).
         code:
           type: string
           x-extensible-enum: [MODEL_NOT_ALLOWED, CAPABILITY_REQUIRED, PLAN_REQUIRED]
