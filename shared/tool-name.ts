@@ -584,6 +584,14 @@ const OWN_TOOLS: Record<string, OwnTool> = {
 
   // Skills: the ones it learned, and the ones a person writes with it.
   copilotkit_load_skill: { running: "Using a skill", done: "Used a skill" },
+  // A skill the person saved, loaded by the Bot when the request matched it (the skill library).
+  load_skill: { running: "Using a skill", done: "Used a skill" },
+  // Code Mode: a short program over the Bot's actions that read, run in a sandbox.
+  execute_typescript: { running: "Running code", done: "Ran code" },
+  discover_tools: {
+    running: "Looking up actions",
+    done: "Looked up actions",
+  },
   copilotkit_read_skill_file: {
     running: "Reading a file from a skill",
     done: "Read a file from a skill",
