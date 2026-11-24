@@ -31,4 +31,29 @@ describe("the look's theme values", () => {
       },
     ]);
   });
+
+  /*
+   * A hairline is the text color, at 20% in light and 16% in dark (Guido, 2026-11-24): about 1.6:1
+   * against a card in both themes, where the scheme's old border was 1.37 in light and 1.20 in dark
+   * and all but vanished. One value for lines between things, a field's edge and the sidebar's
+   * lines, so no line in the app is fainter than another.
+   */
+  test.each([
+    [":root", "20%"],
+    [".dark", "16%"],
+  ])("%s draws every line in the text color at %s", (selector, strength) => {
+    const block =
+      new RegExp(
+        `(?:^|[};])\\s*${selector.replace(".", "\\.")}\\s*\\{([^}]*)\\}`,
+      ).exec(withoutComments)?.[1] ?? "";
+    const value = (name: string) =>
+      new RegExp(`--${name}:\\s*([^;]+);`).exec(block)?.[1].trim();
+    const foreground = value("foreground")?.replace(/\)$/, "");
+    expect(foreground).toBeDefined();
+    for (const name of ["border", "input", "sidebar-border"])
+      expect({ name, value: value(name) }).toEqual({
+        name,
+        value: `${foreground} / ${strength})`,
+      });
+  });
 });

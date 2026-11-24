@@ -733,7 +733,7 @@ const END_PAGE_STYLE: &str = r#"
   --foreground: oklch(0.108 0.015 220.9);
   --card: oklch(1 0 0);
   --muted-foreground: oklch(0.506 0.013 285.9);
-  --border: oklch(0.894 0.014 286.1);
+  --border: oklch(0.108 0.015 220.9 / 20%);
   --sidebar: oklch(0.948 0.011 286.2);
   /* end of tokens/src/scheme.ts */
   --radius: 0.625rem;
@@ -747,7 +747,7 @@ const END_PAGE_STYLE: &str = r#"
     --foreground: oklch(0.956 0.005 286.3);
     --card: oklch(0.212 0.028 297.1);
     --muted-foreground: oklch(0.69 0.017 285.9);
-    --border: oklch(0.28 0.035 298.6);
+    --border: oklch(0.956 0.005 286.3 / 16%);
     --sidebar: oklch(0.156 0.017 295.8);
     /* end of tokens/src/scheme.ts */
     --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);

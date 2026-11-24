@@ -215,7 +215,9 @@ things are drawn, not how big they are.
    `rounded-lg`, menus, dialogs and the message box `rounded-xl`, round things `rounded-full`.
    `rounded-none` squares a part off. No other step and no corner of its own (`rounded-[20px]`).
 4. **Surfaces.** The frame (`sidebar`), the panel the page sits in (`background`), cards on it
-   (`card`). A card has a hairline border in light and in dark.
+   (`card`). A card has a hairline border in light and in dark. Every line (`border`, a field's
+   `input`, the sidebar's `sidebar-border`) is the text color at 20% in light and 16% in dark,
+   about 1.6:1 against a card in both, so no line in the app is fainter than another.
 5. **Shadows.** A shadow says how far something floats, as Linear draws it, and Tailwind's own
    steps only:
    - none for everything in the page: the panel, cards, rows, fields, the sidebar;
