@@ -115,7 +115,8 @@ export function KeyVersionOffer({
   return (
     <>
       <KeyVersionLine
-        className="mt-3"
+        // Inset as the notes under the rows are, so it lines up with their text.
+        className="mt-3 px-3"
         keyVersion={entry.keyVersion}
         link={null}
         mode={mode}

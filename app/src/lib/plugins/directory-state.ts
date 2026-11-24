@@ -56,6 +56,21 @@ export function keyVersionOffer(
   );
 }
 
+/**
+ * Whether an added app could be the sign-in a directory app is listed as in place of its key: the
+ * directory's own sign-in app, or a server added by its address that signs each person in (the
+ * vendor's own server). Only these can have a key version to offer; which of them do is the
+ * directory's answer (`keyVersionOffer`).
+ */
+export function signsInForDirectory(
+  server: Pick<PluginServer, "connectsWith" | "source" | "signIn">,
+): boolean {
+  return (
+    server.connectsWith === "sign-in" ||
+    (server.source === "address" && server.signIn === true)
+  );
+}
+
 export function directoryAppState(
   app: Pick<DirectoryApp, "appId" | "connectsWith">,
   input: {
