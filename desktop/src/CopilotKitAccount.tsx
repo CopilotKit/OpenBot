@@ -18,12 +18,7 @@ import { engineTooSmallSaid } from "./localReadiness";
 import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import { InlineFailure, type Problem } from "./Problem";
 import { Sections, SetupRail } from "./Sections";
-import {
-  type Progress,
-  SetupProgress,
-  StatusLine,
-  StepFooter,
-} from "./SetupProgress";
+import { type Progress, SetupProgress, StatusLine } from "./SetupProgress";
 import { Command } from "./WindowsBlocker";
 
 type Seen =
@@ -438,19 +433,15 @@ export function CopilotKitAccount({
                     ? "Your OpenBot account"
                     : "Get your free license key"}
       </h1>
-      {!checkingAccount && (
+      {!checkingAccount && !agreement && (
         <p className="lede">
-          {agreement
-            ? // The organization and the agreement's version are the log's: on Windows F the
-              // lede ended "for CopilotKit🪁." and the link read "(developer-edition-2026-10-01-web)".
-              "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement."
-            : connecting || appsFailed
-              ? "OpenBot uses your account to set up apps like Gmail and Slack."
-              : refused
-                ? refused.said
-                : waitingForEngine
-                  ? SETTING_UP_ENGINE
-                  : LICENSE_KEY}
+          {connecting || appsFailed
+            ? "OpenBot uses your account to set up apps like Gmail and Slack."
+            : refused
+              ? refused.said
+              : waitingForEngine
+                ? SETTING_UP_ENGINE
+                : LICENSE_KEY}
         </p>
       )}
     </>
@@ -473,6 +464,13 @@ export function CopilotKitAccount({
   );
   const interaction = (
     <>
+      {agreement && (
+        // The organization and agreement version belong in the log, not the explanation or link.
+        <p>
+          To run OpenBot on this computer, accept the OpenBot by CopilotKit
+          license agreement.
+        </p>
+      )}
       {refused?.switchEngine && (
         <ol className="blocker-steps">
           <li>
@@ -607,29 +605,21 @@ export function CopilotKitAccount({
       >
         <Sections at="Account" />
       </SetupRail>
-      <div
-        className={agreement ? "sheet" : "sheet setup-layout account-layout"}
-      >
-        {agreement ? (
-          <>
-            {header}
-            {interaction}
-            <StepFooter>{actions}</StepFooter>
-          </>
-        ) : (
-          <>
-            <header className="setup-header-block">{header}</header>
-            <div className="setup-body">
-              <div className="setup-content">
-                {explanation}
-                <div className="setup-panel">
-                  {interaction}
-                  {actions}
-                </div>
-              </div>
+      <div className="sheet setup-layout account-layout">
+        <header className="setup-header-block">{header}</header>
+        <div className="setup-body">
+          <div className="setup-content">
+            {explanation}
+            <div
+              className={
+                agreement ? "setup-panel agreement-panel" : "setup-panel"
+              }
+            >
+              {interaction}
+              {actions}
             </div>
-          </>
-        )}
+          </div>
+        </div>
       </div>
     </>
   );

@@ -518,6 +518,52 @@ test("the sign-in leads with OpenBot, while it waits and once stopped", async ()
   expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
 });
 
+test("the agreement groups its explanation, legal link and explicit Accept in the centered panel", async () => {
+  const terms = {
+    status: "required",
+    accepted: false,
+    version: "developer-edition-2026-10-01-web",
+    url: "https://copilotkit.ai/legal/developer-edition",
+    organizationName: "Acme",
+  };
+  invokeHandler = alreadySignedIn(async ({ command }) => {
+    if (command === "local_eval_terms") return terms;
+    if (command === "plugin:opener|open_url") return null;
+    throw new Error(`unexpected ${command}`);
+  });
+  const screen = await startSigningIn();
+  const accept = await screen.findByRole("button", { name: "Accept" });
+  const heading = screen.getByRole("heading", {
+    name: "Accept the license agreement",
+  });
+  const sheet = heading.closest<HTMLElement>(".sheet");
+  expect(sheet?.classList.contains("setup-layout")).toBe(true);
+  expect(sheet?.classList.contains("account-layout")).toBe(true);
+  expect(heading.closest(".setup-header-block")?.parentElement).toBe(sheet);
+  const panel = accept.closest<HTMLElement>(".setup-panel");
+  expect(panel).not.toBeNull();
+  expect(panel?.closest(".setup-body")?.parentElement).toBe(sheet);
+  expect(panel?.parentElement?.classList.contains("setup-content")).toBe(true);
+  const explanation = screen.getByText(
+    "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement.",
+  );
+  expect(explanation.closest<HTMLElement>(".setup-panel")).toBe(panel);
+  expect(explanation.closest(".setup-header-block")).toBeNull();
+  const link = screen.getByRole("link", { name: "Read the license agreement" });
+  expect(link.closest<HTMLElement>(".setup-panel")).toBe(panel);
+  expect(link.getAttribute("href")).toBe(terms.url);
+  expect(accept.closest(".step-footer")).toBeNull();
+  expect(
+    Array.from(panel?.querySelectorAll("a, button") ?? []).map(
+      (element) => element.textContent,
+    ),
+  ).toEqual(["Read the license agreement", "Accept"]);
+  await userEvent.click(link);
+  expect(
+    invokeCalls.some((call) => call.command === "connect_copilotkit_apps"),
+  ).toBe(false);
+});
+
 test("after Accept, the step says it is setting up your apps, not to sign in", async () => {
   // Seen on Windows: Accept was followed for two seconds by the sign-in heading and its
   // sign-in lede, over "Connecting your apps…", for a person already signed in and agreed.
