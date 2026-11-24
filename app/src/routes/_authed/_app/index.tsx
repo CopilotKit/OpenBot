@@ -19,6 +19,7 @@ import { heldFileOf } from "@/components/channels/composer/attachments";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { WorkingNow } from "@/components/channels/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
+import { HomeField, useHomeIntro } from "@/components/home/home-field";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -61,6 +62,7 @@ import { useDraftModel } from "@/lib/models/run-model";
 import { newId } from "@/lib/new-id";
 import { takeInvitationLink } from "@/lib/organizations/invitation-link";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
@@ -138,6 +140,9 @@ function RouteComponent() {
    * are writing something else does not overwrite it: it stays stashed, for the next home page.
    */
   const typed = useRef(false);
+  /* The message box's area, which the orb's field behind the page follows. */
+  const area = useRef<HTMLDivElement>(null);
+  const intro = useHomeIntro();
   useEffect(
     () =>
       onFailedStart(() => {
@@ -266,10 +271,18 @@ function RouteComponent() {
       <SidebarToggleBar>
         <BusinessLink />
       </SidebarToggleBar>
-      <div className="flex-1 flex flex-col items-center justify-center w-full p-4 mt-8">
+      <div
+        className={cn(
+          "relative isolate flex-1 flex flex-col items-center justify-center w-full p-4 mt-8",
+          intro && "home-intro",
+        )}
+      >
+        {/* OpenBot's orb, spread out behind the message box. On the first Home of a visit it
+            draws itself in while the heading, the box and Explore Bots rise in (styles.css). */}
+        <HomeField area={area} intro={intro} />
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
-        <div className="flex flex-col items-center">
+        <div className="flex flex-col items-center" data-intro="heading">
           <h1 className="text-2xl font-semibold tracking-tight text-center">
             {firstConversationGreeting(
               user,
@@ -279,6 +292,8 @@ function RouteComponent() {
         </div>
         <div
           className="mt-8 w-full flex flex-col items-center"
+          data-intro="box"
+          ref={area}
           onKeyDownCapture={() => {
             typed.current = true;
           }}
@@ -377,7 +392,7 @@ function RouteComponent() {
          * somebody shared another Bot, so the rest are one "All Bots" away. Every state below
          * reserves the same two rows, so the composer above it does not move when the list settles.
          */}
-        <div className="mt-10 w-full max-w-2xl">
+        <div className="mt-10 w-full max-w-2xl" data-intro="explore">
           {loading || capabilities.isPending ? (
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
