@@ -183,6 +183,7 @@ paths:
   /api/v2/organizations/{organizationId}/deployment: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1deployment' }
   /api/v2/organizations/{organizationId}/settings: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings' }
   /api/v2/organizations/{organizationId}/settings/stop-inactive-computers: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1stop-inactive-computers' }
+  /api/v2/organizations/{organizationId}/settings/apps: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1apps' }
   /api/v2/organizations/{organizationId}/capabilities: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities' }
   /api/v2/organizations/{organizationId}/capabilities/{capabilityId}: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities~1{capabilityId}' }
   /api/v2/organizations/{organizationId}/capabilities/batch-update: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities~1batch-update' }
@@ -980,6 +981,8 @@ components:
     OrganizationSettings: { $ref: './admin-settings.yaml#/components/schemas/OrganizationSettings' }
     OrganizationSettingsContext: { $ref: './admin-settings.yaml#/components/schemas/OrganizationSettingsContext' }
     UpdateOrganizationSettingsRequest: { $ref: './admin-settings.yaml#/components/schemas/UpdateOrganizationSettingsRequest' }
+    AppsSetting: { $ref: './admin-settings.yaml#/components/schemas/AppsSetting' }
+    UpdateAppsSettingRequest: { $ref: './admin-settings.yaml#/components/schemas/UpdateAppsSettingRequest' }
     InactiveComputersStopped: { $ref: './admin-settings.yaml#/components/schemas/InactiveComputersStopped' }
     PersonComputersStopped: { $ref: './admin-settings.yaml#/components/schemas/PersonComputersStopped' }
     CapabilityId: { $ref: './admin-settings.yaml#/components/schemas/CapabilityId' }

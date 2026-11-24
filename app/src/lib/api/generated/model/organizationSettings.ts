@@ -16,7 +16,6 @@ export type OrganizationSettings = OrganizationSettingValues &
       | "skillSharing"
       | "proactiveDailyRuns"
       | "modelSelection"
-      | "lockedDown"
       | "context"
     >
   >;

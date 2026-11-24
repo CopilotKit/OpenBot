@@ -488,8 +488,7 @@ paths:
       summary: Give your own app to a Bot you own
       description: >-
         Give a Bot you own one of your apps: every action it has, or where the
-        organization's apps are locked down (lockedDown in
-        getOrganizationSettings), the actions that only read, or every action
+        organization's apps are locked down (getAppsSetting), the actions that only read, or every action
         of Routines. Actions that change something still ask first wherever
         the approval rules say so. They run on the account of whoever asks the Bot. The app must
         be turned on and open to owners, which it is unless an administrator

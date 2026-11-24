@@ -1144,7 +1144,7 @@ export const UpdateAppBody = zod
       .boolean()
       .optional()
       .describe(
-        "True gives the app to every Bot in the organization, and to every Bot made later. False takes back what giving it to every Bot gave. What a Bot was given any other way stays.",
+        "True gives the app to every Bot in the organization, and to every Bot made later. False takes back what giving it to every Bot gave. What a Bot was given any other way stays. Routines and OpenBot settings are every Bot's already: true changes nothing, and false is refused.",
       ),
   })
   .describe("The changes to make. At least one.");

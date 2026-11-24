@@ -9,6 +9,6 @@ import type { AppOwnerGrants } from "./appOwnerGrants";
 export interface UpdateAppRequest {
   /** Who may give the app to a Bot, or null for the default (AppOwnerGrants). */
   ownerGrants?: AppOwnerGrants | null;
-  /** True gives the app to every Bot in the organization, and to every Bot made later. False takes back what giving it to every Bot gave. What a Bot was given any other way stays. */
+  /** True gives the app to every Bot in the organization, and to every Bot made later. False takes back what giving it to every Bot gave. What a Bot was given any other way stays. Routines and OpenBot settings are every Bot's already: true changes nothing, and false is refused. */
   everyBot?: boolean;
 }

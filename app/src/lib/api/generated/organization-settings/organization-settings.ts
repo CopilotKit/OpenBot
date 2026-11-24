@@ -19,6 +19,7 @@ import type {
 
 import type {
   AdminOnlyResponse,
+  AppsSetting,
   CheckSetupHeaders,
   ComputerActionPage,
   Deployment,
@@ -38,6 +39,8 @@ import type {
   StopInactiveComputersHeaders,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
+  UpdateAppsSettingHeaders,
+  UpdateAppsSettingRequest,
   UpdateOrganizationSettingsHeaders,
   UpdateOrganizationSettingsRequest,
 } from "../model";
@@ -269,7 +272,7 @@ export const getGetOrganizationSettingsUrl = (organizationId: string) => {
 };
 
 /**
- * Return the settings the organization's administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day, choosing a model, and whether apps are open or locked down. Each organization has its own, and a new one starts with OpenBot's defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization's members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.
+ * Return the settings the organization's administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Each organization has its own, and a new one starts with OpenBot's defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization's members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.
  * @summary Read the organization's settings
  */
 export const getOrganizationSettings = async (
@@ -775,6 +778,325 @@ export const useStopInactiveComputers = <
     getStopInactiveComputersMutationOptions(options),
     queryClient,
   );
+};
+export const getGetAppsSettingUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/settings/apps`;
+};
+
+/**
+ * Return whether the organization's apps are open, the default, or locked down (AppsSetting). Every member may read it, so the app can say what giving an app to a Bot will do. In the personal edition apps are always open, and it can't be changed.
+ * @summary Read whether the organization's apps are open
+ */
+export const getAppsSetting = async (
+  organizationId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AppsSetting> => {
+  return apiRequest<AppsSetting>(getGetAppsSettingUrl(organizationId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAppsSettingQueryKey = (organizationId: string) => {
+  return [`/api/v2/organizations/${organizationId}/settings/apps`] as const;
+};
+
+export const getGetAppsSettingQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAppsSetting>>,
+  TError =
+    | UnauthenticatedResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAppsSetting>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAppsSettingQueryKey(organizationId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAppsSetting>>> = ({
+    signal,
+  }) => getAppsSetting(organizationId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: organizationId !== null && organizationId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAppsSetting>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetAppsSettingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAppsSetting>>
+>;
+export type GetAppsSettingQueryError =
+  | UnauthenticatedResponse
+  | OrganizationNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetAppsSetting<
+  TData = Awaited<ReturnType<typeof getAppsSetting>>,
+  TError =
+    | UnauthenticatedResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAppsSetting>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAppsSetting>>,
+          TError,
+          Awaited<ReturnType<typeof getAppsSetting>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetAppsSetting<
+  TData = Awaited<ReturnType<typeof getAppsSetting>>,
+  TError =
+    | UnauthenticatedResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAppsSetting>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAppsSetting>>,
+          TError,
+          Awaited<ReturnType<typeof getAppsSetting>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetAppsSetting<
+  TData = Awaited<ReturnType<typeof getAppsSetting>>,
+  TError =
+    | UnauthenticatedResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAppsSetting>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read whether the organization's apps are open
+ */
+
+export function useGetAppsSetting<
+  TData = Awaited<ReturnType<typeof getAppsSetting>>,
+  TError =
+    | UnauthenticatedResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAppsSetting>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetAppsSettingQueryOptions(organizationId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getUpdateAppsSettingUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/settings/apps`;
+};
+
+/**
+ * Open the organization's apps or lock them down (AppsSetting). Locking down takes nothing back unless takeBackWhatOpenGave is sent too. The change, and anything taken back, is recorded on the audit trail. Only an administrator of the organization may change it.
+ * @summary Open the organization's apps, or lock them down
+ */
+export const updateAppsSetting = async (
+  organizationId: string,
+  updateAppsSettingRequest: UpdateAppsSettingRequest,
+  headers: UpdateAppsSettingHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AppsSetting> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AppsSetting>(getUpdateAppsSettingUrl(organizationId), {
+    ...options,
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(updateAppsSettingRequest),
+  });
+};
+
+export const getUpdateAppsSettingMutationKey = () =>
+  ["updateAppsSetting"] as const;
+
+export const getUpdateAppsSettingMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAppsSetting>>,
+    TError,
+    UpdateAppsSettingMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateAppsSetting>>,
+  TError,
+  UpdateAppsSettingMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUpdateAppsSettingMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateAppsSetting>>,
+    UpdateAppsSettingMutationVariables
+  > = (props) => {
+    const { organizationId, data, headers } = props ?? {};
+
+    return updateAppsSetting(organizationId, data, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateAppsSettingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateAppsSetting>>
+>;
+export type UpdateAppsSettingMutationBody = UpdateAppsSettingRequest;
+export type UpdateAppsSettingMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type UpdateAppsSettingMutationVariables = {
+  organizationId: string;
+  data: UpdateAppsSettingRequest;
+  headers: UpdateAppsSettingHeaders;
+};
+
+/**
+ * @summary Open the organization's apps, or lock them down
+ */
+export const useUpdateAppsSetting = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof updateAppsSetting>>,
+      TError,
+      UpdateAppsSettingMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof updateAppsSetting>>,
+  TError,
+  UpdateAppsSettingMutationVariables,
+  TContext
+> => {
+  return useMutation(getUpdateAppsSettingMutationOptions(options), queryClient);
 };
 export const getGetModelUsageUrl = (
   organizationId: string,
