@@ -10,6 +10,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import { BotBuddy } from "@/components/agents/bot-buddy";
+import { ConversationBuddy } from "@/components/channels/conversation-buddy";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   automaticBuddy,
@@ -118,6 +119,33 @@ describe("a Bot drawn as its buddy", () => {
     expect(view.container.querySelector("img")?.getAttribute("src")).toBe(
       pictureOnly.avatarUrl,
     );
+  });
+});
+
+describe("the buddy in a conversation", () => {
+  const bot = {
+    id: "knowledge",
+    name: "Knowledge",
+    avatarSeed: "knowledge",
+    buddy: null,
+  };
+  const corner = (activity: "idle" | "working") =>
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ConversationBuddy activity={activity} bot={bot} />
+      </QueryClientProvider>,
+    );
+
+  test("is not drawn while the conversation is idle", () => {
+    expect(corner("idle").container.innerHTML).toBe("");
+  });
+
+  test("is drawn while the Bot works, as a button that chooses another", () => {
+    const view = corner("working");
+    expect(
+      view.getByRole("button", { name: "Choose a buddy for Knowledge" }),
+    ).toBeTruthy();
+    expect(view.getByRole("img", { name: "Knowledge" })).toBeTruthy();
   });
 });
 

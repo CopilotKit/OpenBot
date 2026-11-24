@@ -40,9 +40,9 @@ export function useConversationBuddyActivity(input: {
 }
 
 /**
- * The conversation's Bot as its buddy, in the conversation's top right corner: the one place a Bot is
- * drawn as its buddy, everywhere else it is its orb. It plays what the Bot is doing (thinking,
- * working, talking, waiting on the person, done) and idles in between. Clicking it chooses another.
+ * The conversation's Bot as its buddy, over the conversation's top right corner while the Bot does
+ * something: thinking, working, talking, waiting on the person, and a moment after it is done. At
+ * rest it is not drawn, so it never sits over the conversation for long. Clicking it chooses another.
  */
 export function ConversationBuddy({
   bot,
@@ -51,15 +51,18 @@ export function ConversationBuddy({
   bot: Pick<AgentProfile, "id" | "name" | "avatarSeed" | "buddy">;
   activity: BuddyActivity;
 }) {
+  if (activity === "idle") return null;
   return (
-    <ChooseBuddyButton agent={bot}>
-      <BotBuddy
-        activity={activity}
-        bare
-        name={bot.name}
-        seed={bot.avatarSeed}
-        size={SIZE}
-      />
-    </ChooseBuddyButton>
+    <div className="fade-in-0 zoom-in-90 animate-in duration-300">
+      <ChooseBuddyButton agent={bot}>
+        <BotBuddy
+          activity={activity}
+          bare
+          name={bot.name}
+          seed={bot.avatarSeed}
+          size={SIZE}
+        />
+      </ChooseBuddyButton>
+    </div>
   );
 }
