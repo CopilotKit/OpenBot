@@ -392,7 +392,7 @@ export const getGetOrganizationPlanUrl = (organizationId: string) => {
 };
 
 /**
- * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
+ * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands for the caller: on the free allowance with runs left, on the plan, behind on a payment, or needing a card. The free allowance is a number of runs each person gets, across every organization they are in, so freeRunsUsedPercent is the caller's own. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
  * @summary Read an organization's plan
  */
 export const getOrganizationPlan = async (
