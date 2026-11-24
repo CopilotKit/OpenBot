@@ -41,7 +41,7 @@ export const STATE_NAMES: readonly {
     hash: "",
     search: "?throws",
     title: "First run, a screen fails to draw",
-    step: "welcome",
+    step: null,
   },
   {
     hash: "#start",
@@ -169,7 +169,7 @@ export const STATE_NAMES: readonly {
     hash: "#image-list-gone",
     search: "",
     title: "Start: image list gone, offline",
-    step: "welcome",
+    step: "install",
   },
   { hash: "#move-choice", search: "", title: "Move: choice", step: null },
   { hash: "#move-confirm", search: "", title: "Move: confirm", step: null },
