@@ -23,6 +23,12 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
+import {
+  type AdminName,
+  sentTo,
+  withAdmins,
+} from "@/lib/organizations/admin-names";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -48,15 +54,36 @@ import { queryClient } from "@/query-client";
  */
 
 /**
+ * Whether the sentence for this app tells the person looking that only an admin can take the step:
+ * a member of the team edition, for the states an admin fixes. Where it does, the screen reads the
+ * organization's admins (`useOrganizationAdmins`) and the sentence names them.
+ */
+export function namesAnAdmin(
+  access: AppAccess,
+  edition: "team" | "personal",
+  admin: boolean,
+): boolean {
+  if (admin || edition !== "team") return false;
+  return (
+    access.state === "not_granted" ||
+    access.state === "disabled" ||
+    access.state === "shared_not_connected" ||
+    access.state === "shared_not_approved"
+  );
+}
+
+/**
  * What the person is told about one app, in words that say whose move it is. `bot` is the Bot's name,
  * for the one state that asks the person a question about it. `admin` is whether the person looking
  * is an admin, who is offered the step itself (`AdminAction`) and so is never told to ask one.
+ * `admins` are who a member is told to go to where only an admin can take the step (`withAdmins`).
  */
 export function appAccessSentence(
   access: AppAccess,
   bot?: string,
   edition: "team" | "personal" = "team",
   admin = false,
+  admins: readonly AdminName[] = [],
 ): string {
   const name = access.displayName;
   const owners = access.accountHolder === "owner";
@@ -93,13 +120,22 @@ export function appAccessSentence(
         ? `This Bot uses its owner's ${name} account, which needs reconnecting. Only the Bot's owner can reconnect it.`
         : `Your ${name} connection needs reconnecting.`;
     case "shared_not_connected":
-      return `Your organisation's ${name} account isn't connected yet. Only an admin can connect it.`;
+      return withAdmins(
+        `Your organisation's ${name} account isn't connected yet. Only an admin can connect it.`,
+        admins,
+      );
     case "shared_not_approved":
-      return `This Bot reaches more people than an admin approved for your organisation's ${name} account. Only an admin can approve it.`;
+      return withAdmins(
+        `This Bot reaches more people than an admin approved for your organisation's ${name} account. Only an admin can approve it.`,
+        admins,
+      );
     case "disabled":
-      return disabledSentence(access, edition);
+      return disabledSentence(access, edition, admins);
     case "not_granted":
-      return `This Bot hasn't been given ${name}. Only an admin can give it.`;
+      return withAdmins(
+        `This Bot hasn't been given ${name}. Only an admin can give it.`,
+        admins,
+      );
     case "owner_grantable": {
       const yours = access.account === "personal" ? `your ${name}` : name;
       const ask = `Let ${bot ?? "this Bot"} use ${yours}?`;
@@ -144,6 +180,7 @@ function adminSentence(access: AppAccess): string | null {
 function disabledSentence(
   access: AppAccess,
   edition: "team" | "personal",
+  admins: readonly AdminName[],
 ): string {
   const name = access.displayName;
   // Nobody else to ask in the personal edition: the person is told what is missing, and Set it up
@@ -154,13 +191,22 @@ function disabledSentence(
       : `${name} isn't fully set up yet. Set it up to finish.`;
   switch (access.unavailable) {
     case "directory_unavailable":
-      return `${name} isn't set up yet. An admin has to turn it on.`;
+      return withAdmins(
+        `${name} isn't set up yet. An admin has to turn it on.`,
+        admins,
+      );
     case "scheme_unreadable":
     case "oauth_client_missing":
     case "token_missing":
-      return `${name} isn't fully set up yet. Only an admin can finish setting it up.`;
+      return withAdmins(
+        `${name} isn't fully set up yet. Only an admin can finish setting it up.`,
+        admins,
+      );
     default:
-      return `${name} isn't turned on yet. Only an admin can turn it on.`;
+      return withAdmins(
+        `${name} isn't turned on yet. Only an admin can turn it on.`,
+        admins,
+      );
   }
 }
 
@@ -959,6 +1005,11 @@ function RequestAction({
     cancelAppAccessRequestMutationOptions(queryClient),
   );
   const error = request.error ?? cancel.error;
+  /*
+   * WHO IT WENT TO, beside Requested: the organization's admins, any of whom can answer it, so the
+   * person knows who to follow up with. Nothing more while they are read, or if they can't be.
+   */
+  const sent = sentTo(useOrganizationAdmins(access.request !== null));
 
   /*
    * FOCUS FOLLOWS THE PRESS. Request access and Withdraw replace each other, so the button somebody
@@ -999,9 +1050,23 @@ function RequestAction({
       ) : null}
       {access.request ? (
         <>
-          <span className="text-muted-foreground text-xs" role="status">
-            Requested
-          </span>
+          {sent ? (
+            /*
+             * Requested, and under it who it went to, in a narrow column: on a Bot's Apps row the
+             * names wrap beside Withdraw and the app's own sentence keeps the width it had.
+             */
+            <span
+              className="flex max-w-56 flex-col items-end text-right text-muted-foreground text-xs"
+              role="status"
+            >
+              <span>Requested</span>
+              <span>{sent}</span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground text-xs" role="status">
+              Requested
+            </span>
+          )}
           <Button
             aria-label={
               cancel.isPending

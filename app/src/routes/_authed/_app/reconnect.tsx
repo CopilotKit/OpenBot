@@ -17,6 +17,8 @@ import { Separator } from "@/components/ui/separator";
 import { appsQueryOptions } from "@/lib/apps/queries";
 import { botList, type MovedApp } from "@/lib/moves/moved-apps";
 import { clearReconnectReturn, useMovedApps } from "@/lib/moves/use-moved-apps";
+import { type AdminName, withAdmins } from "@/lib/organizations/admin-names";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { searchTextEntry } from "@/lib/search-text";
 
 /**
@@ -62,6 +64,12 @@ function ReconnectPage() {
   });
   const logos = new Map(
     (apps.data ?? []).map((app) => [app.id, app.logo] as const),
+  );
+  // Who a member goes to for an app only an admin can turn on, read only when one is listed.
+  const admins = useOrganizationAdmins(
+    moved.ready &&
+      !moved.mayAdd &&
+      moved.apps.some((app) => app.cloudId === null && !app.reconnected),
   );
 
   if (moved.error) {
@@ -113,6 +121,7 @@ function ReconnectPage() {
         {moved.apps.map((app, index) => (
           <React.Fragment key={app.appId}>
             <MovedAppRow
+              admins={admins}
               app={app}
               dismissing={moved.dismissing === app.noticeId}
               logo={
@@ -150,22 +159,28 @@ export function movedAppSummary(app: MovedApp): string {
 
 /**
  * Why a moved app can't be connected from here yet, or null when it can: the organization hasn't
- * added it, and either only an admin may (the person isn't one), or adding it was just refused.
+ * added it, and either only an admin may (the person isn't one, and is told who they are), or adding
+ * it was just refused.
  */
 function blockedBecause(
   app: MovedApp,
   mayAdd: boolean,
   notAdded: boolean,
+  admins: readonly AdminName[],
 ): string | null {
   if (app.cloudId !== null) return null;
   if (!mayAdd)
-    return `An admin has to turn ${app.appName} on before you can connect it.`;
+    return withAdmins(
+      `An admin has to turn ${app.appName} on before you can connect it.`,
+      admins,
+    );
   if (notAdded)
     return `Couldn't turn ${app.appName} on here. Try again in a moment.`;
   return null;
 }
 
 function MovedAppRow({
+  admins,
   app,
   logo,
   mayAdd,
@@ -173,6 +188,7 @@ function MovedAppRow({
   dismissing,
   onDismiss,
 }: {
+  admins: readonly AdminName[];
   app: MovedApp;
   logo: string | null;
   mayAdd: boolean;
@@ -181,7 +197,7 @@ function MovedAppRow({
   onDismiss: () => void;
 }) {
   const summary = movedAppSummary(app);
-  const blocked = blockedBecause(app, mayAdd, notAdded);
+  const blocked = blockedBecause(app, mayAdd, notAdded, admins);
   return (
     <Item data-moved-app={app.appId} size="sm">
       <RowMark>

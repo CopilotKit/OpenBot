@@ -16,6 +16,7 @@ import {
 import {
   AppAccessAction,
   appAccessSentence,
+  namesAnAdmin,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
   agentPluginsQueryOptions,
@@ -371,6 +373,17 @@ function Granted({
     enabled: kind === "apps",
   });
   /*
+   * Who a member is told to go to, read only once one of the rows says only an admin can take the
+   * step, and only once it is known the person is not an admin themselves.
+   */
+  const admins = useOrganizationAdmins(
+    me !== undefined &&
+      kind === "apps" &&
+      (apps.data ?? []).some((app) =>
+        namesAnAdmin(app, edition, isOrganizationAdmin(me?.role)),
+      ),
+  );
+  /*
    * Both on the Apps page, so no row is drawn without its state and then redrawn with one a moment
    * later; and the edition, so the personal edition never shows the team edition's empty state first.
    */
@@ -462,7 +475,13 @@ function Granted({
                         ? [appAccessSentence(app, undefined, edition, admin)]
                             .concat(labels.length > 0 ? [toolList(labels)] : [])
                             .join(" ")
-                        : appAccessSentence(app, undefined, edition, admin)}
+                        : appAccessSentence(
+                            app,
+                            undefined,
+                            edition,
+                            admin,
+                            admins,
+                          )}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>

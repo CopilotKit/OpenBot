@@ -19,6 +19,7 @@ import {
   listOrganizations,
 } from "@/lib/api/generated/organizations/organizations";
 import { renewalRequired } from "@/lib/auth/renewal";
+import { knownRole } from "@/lib/auth/roles";
 import { ClientError, client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
@@ -70,6 +71,9 @@ export const organizationKeys = {
   /** One search of the members, a page at a time: under `members`, so what refreshes them refreshes it. */
   memberPages: (organizationId: string, search = "") =>
     ["organizations", "members", organizationId, { search }] as const,
+  /** Its owners and admins, who a member is told to go to: under `members`, so a role change refreshes it. */
+  admins: (organizationId: string) =>
+    ["organizations", "members", organizationId, "admins"] as const,
   sentInvitations: (organizationId: string) =>
     ["organizations", "sent-invitations", organizationId] as const,
   /** One search of the sent invitations, a page at a time, under `sentInvitations`. */
@@ -357,6 +361,50 @@ export function organizationMembersQueryOptions(organizationId: string) {
         return { items: page.members, nextCursor: page.nextCursor };
       }),
   });
+}
+
+/**
+ * An organization's owners, then its admins, each in the order they joined: who a member is told to
+ * go to when only an admin can take a step. Any member can read the members. A role the app doesn't
+ * know is read as a member's (`knownRole`), so it is never named as an admin.
+ */
+export function organizationAdminsQueryOptions(organizationId: string) {
+  return queryOptions({
+    queryKey: organizationKeys.admins(organizationId),
+    queryFn: async ({ signal }): Promise<OrganizationMemberSummary[]> => {
+      const members = await everyPage(async (cursor) => {
+        const page = await listOrganizationMembers(
+          organizationId,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { signal, fallback: MEMBERS_FALLBACK },
+        );
+        return { items: page.members, nextCursor: page.nextCursor };
+      });
+      const withRole = (role: string) =>
+        members.filter((one) => knownRole(one.role) === role);
+      return [...withRole("owner"), ...withRole("admin")];
+    },
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * The organization's owners and admins, for a member told that only an admin can take a step. Read
+ * only while `enabled` (the screen is showing a member such a sentence), and only in the team edition,
+ * which is the one with admins. Empty while they are read and if they can't be: the sentence then
+ * stands on its own.
+ */
+export function useOrganizationAdmins(
+  enabled: boolean,
+): OrganizationMemberSummary[] {
+  const team =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "team";
+  const current = useCurrentOrganizationId();
+  const admins = useQuery({
+    ...organizationAdminsQueryOptions(current ?? ""),
+    enabled: enabled && team && current !== undefined,
+  });
+  return enabled && team ? (admins.data ?? []) : [];
 }
 
 /**
