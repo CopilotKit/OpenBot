@@ -12094,6 +12094,8 @@ paths:
                   $ref: '#/components/examples/OrganizationPlanFree'
                 freeRunsUsedUp:
                   $ref: '#/components/examples/OrganizationPlanFreeRunsUsedUp'
+                copilotKitEmployee:
+                  $ref: '#/components/examples/OrganizationPlanCopilotKitEmployee'
                 active:
                   $ref: '#/components/examples/OrganizationPlanActive'
                 notRequired:
@@ -33307,7 +33309,7 @@ components:
             - past_due
             - none
             - unknown
-          description: 'not_required when this OpenBot needs no plan. free when the organization isn''t on the plan and the person reading has free runs left. active on the plan. past_due when a payment failed and the card needs updating. none when a card is needed: the person''s free runs are used up, or there are none, or the plan ended. trialing during a free trial that ends on a date (trialEndsAt); OpenBot Cloud''s free allowance is counted in runs and doesn''t use it. unknown when the plan couldn''t be read just now; Bots keep running meanwhile.'
+          description: 'not_required when this OpenBot needs no plan. free when the organization isn''t on the plan and the person reading has free runs left, or is a CopilotKit employee (copilotKitEmployee), whose runs go ahead even once the allowance is used. active on the plan. past_due when a payment failed and the card needs updating. none when a card is needed: the person''s free runs are used up, or there are none, or the plan ended. trialing during a free trial that ends on a date (trialEndsAt); OpenBot Cloud''s free allowance is counted in runs and doesn''t use it. unknown when the plan couldn''t be read just now; Bots keep running meanwhile.'
         freeRunsUsedPercent:
           type: integer
           minimum: 0
@@ -33316,7 +33318,10 @@ components:
         freeRunsAllowance:
           type: integer
           minimum: 1
-          description: How many free runs each person gets. Present only once the reading person has used them all (freeRunsUsedPercent is 100 and status is none), so the number is never shown while runs are left; absent otherwise.
+          description: How many free runs each person gets. Present only once the reading person has used them all (freeRunsUsedPercent is 100, and status is none, or free for a CopilotKit employee), so the number is never shown while runs are left; absent otherwise.
+        copilotKitEmployee:
+          type: boolean
+          description: 'True when the reading person is a CopilotKit employee: their verified email address is on the copilotkit.ai domain. An employee''s own runs are never refused for want of a plan, in any organization, so once their free allowance is used status stays free, freeRunsUsedPercent reads 100, freeRunsAllowance is present and addCardUrl is null. Present only while required is true and the reader is an employee; absent otherwise. It is about the reader alone: other members of the same organization are unaffected, and the organization''s plan is unchanged.'
         trialEndsAt:
           type:
             - string
@@ -50571,6 +50576,17 @@ components:
         trialEndsAt: null
         renewsAt: null
         addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+    OrganizationPlanCopilotKitEmployee:
+      summary: A CopilotKit employee past the free allowance, whose runs still go ahead.
+      value:
+        required: true
+        status: free
+        freeRunsUsedPercent: 100
+        freeRunsAllowance: 500
+        copilotKitEmployee: true
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: null
     OrganizationPlanActive:
       summary: An organization on the plan.
       value:

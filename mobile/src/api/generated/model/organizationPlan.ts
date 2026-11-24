@@ -8,7 +8,7 @@
 export interface OrganizationPlan {
   /** True when this OpenBot runs an organization's Bots only while it is on a plan, or while the person the run counts against has free runs left. */
   required: boolean;
-  /** not_required when this OpenBot needs no plan. free when the organization isn't on the plan and the person reading has free runs left. active on the plan. past_due when a payment failed and the card needs updating. none when a card is needed: the person's free runs are used up, or there are none, or the plan ended. trialing during a free trial that ends on a date (trialEndsAt); OpenBot Cloud's free allowance is counted in runs and doesn't use it. unknown when the plan couldn't be read just now; Bots keep running meanwhile. */
+  /** not_required when this OpenBot needs no plan. free when the organization isn't on the plan and the person reading has free runs left, or is a CopilotKit employee (copilotKitEmployee), whose runs go ahead even once the allowance is used. active on the plan. past_due when a payment failed and the card needs updating. none when a card is needed: the person's free runs are used up, or there are none, or the plan ended. trialing during a free trial that ends on a date (trialEndsAt); OpenBot Cloud's free allowance is counted in runs and doesn't use it. unknown when the plan couldn't be read just now; Bots keep running meanwhile. */
   status: string;
   /**
    * How much of the reading person's free allowance is used, from 0 to 100. The allowance is the person's own, across every organization they are in. Rounded down, so it reads 100 only once every free run is used. Present only while required is true and status is neither active nor trialing; absent otherwise. The count of runs is never sent.
@@ -17,10 +17,12 @@ export interface OrganizationPlan {
    */
   freeRunsUsedPercent?: number;
   /**
-   * How many free runs each person gets. Present only once the reading person has used them all (freeRunsUsedPercent is 100 and status is none), so the number is never shown while runs are left; absent otherwise.
+   * How many free runs each person gets. Present only once the reading person has used them all (freeRunsUsedPercent is 100, and status is none, or free for a CopilotKit employee), so the number is never shown while runs are left; absent otherwise.
    * @minimum 1
    */
   freeRunsAllowance?: number;
+  /** True when the reading person is a CopilotKit employee: their verified email address is on the copilotkit.ai domain. An employee's own runs are never refused for want of a plan, in any organization, so once their free allowance is used status stays free, freeRunsUsedPercent reads 100, freeRunsAllowance is present and addCardUrl is null. Present only while required is true and the reader is an employee; absent otherwise. It is about the reader alone: other members of the same organization are unaffected, and the organization's plan is unchanged. */
+  copilotKitEmployee?: boolean;
   /**
    * When a free trial that ends on a date ends, while status is trialing. Null otherwise. OpenBot Cloud's free allowance is counted in runs and doesn't use it.
    * @nullable
