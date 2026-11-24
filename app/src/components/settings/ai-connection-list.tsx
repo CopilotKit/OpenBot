@@ -31,6 +31,13 @@ export const SEVERAL =
   "Your Bots can use any of these. Pick a model from any of them in a conversation.";
 
 /**
+ * The same, for the organization's on OpenBot Cloud: they are for whoever has none of their own,
+ * and the reader's own Bots may run on theirs instead.
+ */
+export const SEVERAL_FOR_THE_ORGANIZATION =
+  "Anyone who hasn't connected their own can pick a model from any of these in a conversation.";
+
+/**
  * Several AI connections at once, as one row each in Settings → Providers and Admin → Providers:
  * the organization's (`organization`) or a person's own on OpenBot Cloud (`personal`). One per
  * provider. A run with no pick uses the default; a person picks a model from any of them in a

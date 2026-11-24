@@ -400,16 +400,22 @@ function ProviderDetails({
                 <Button
                   disabled={busy}
                   onClick={() =>
-                    remove.mutate(
-                      {
+                    /*
+                     * Awaited rather than mutate's own onSuccess: the list read again after the
+                     * removal no longer has this connection, so this page goes before the removal
+                     * settles, and a callback passed to mutate never runs once it has.
+                     */
+                    remove
+                      .mutateAsync({
                         id: entry.id,
                         nextDefault: choosing
                           ? others.find((other) => other.id === nextDefault)
                           : undefined,
                         desktop,
-                      },
-                      { onSuccess: afterRemoving },
-                    )
+                      })
+                      .then(afterRemoving)
+                      // Said under the button from remove.error.
+                      .catch(() => {})
                   }
                   size="sm"
                   variant="destructive"
@@ -430,6 +436,7 @@ function ProviderDetails({
                       >
                         <input
                           checked={nextDefault === other.id}
+                          className="size-4 shrink-0 accent-foreground"
                           name="next-default"
                           onChange={() => setNextDefault(other.id)}
                           type="radio"
@@ -608,6 +615,7 @@ export function ChangeProviderPage({
                   signIns: list.signIns,
                   connected: list.connections.map((other) => other.provider),
                   provider: entry.provider,
+                  login: entry.login,
                   reconnecting: name,
                 }
           }

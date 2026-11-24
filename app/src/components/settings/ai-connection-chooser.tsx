@@ -166,6 +166,8 @@ export type ChooserMode =
       connected: readonly AiConnectionProviderAnswer[];
       /** Open on this provider, to fix its connection: `reconnecting` names it in the title. */
       provider?: AiConnectionProviderAnswer;
+      /** And on the connection's own way in, where the provider offers it: a key asks for the key. */
+      login?: AiConnectionLogin | null;
       reconnecting?: string;
     };
 
@@ -471,9 +473,14 @@ export function ChooseConnection({
     connect.reset();
     setProviderId(next?.id ?? null);
     const nextLogins = next ? loginsFor(next, mode) : [];
-    setLogin(nextLogins[0] ?? null);
+    // Fixing one connection opens on its own way in; anything else on the provider's first.
+    const own =
+      adding?.provider && adding.provider === next?.id ? adding.login : null;
+    const nextLogin =
+      own && nextLogins.includes(own) ? own : (nextLogins[0] ?? null);
+    setLogin(nextLogin);
     const nextPreset = next ? ENDPOINT_PRESETS[next.id] : undefined;
-    const nextKept = keptSignIn(mode, next ?? undefined, nextLogins[0] ?? null);
+    const nextKept = keptSignIn(mode, next ?? undefined, nextLogin);
     setApiKey("");
     setBaseUrl(nextPreset?.baseUrl ?? "");
     setModel(nextKept?.model ?? nextPreset?.model ?? "");
@@ -902,11 +909,19 @@ export function ChooseConnection({
             <Item
               key={row.id}
               render={
-                <button
-                  disabled={busy}
-                  onClick={() => choose(provider ? null : row)}
-                  type="button"
-                />
+                /*
+                 * Changing one connection keeps to its provider: picking another here would connect
+                 * that one beside it instead of changing this one.
+                 */
+                provider && adding?.provider ? (
+                  <div />
+                ) : (
+                  <button
+                    disabled={busy}
+                    onClick={() => choose(provider ? null : row)}
+                    type="button"
+                  />
+                )
               }
               // A button centres its text; a row reads from the left like every other.
               className="text-left"
@@ -919,7 +934,7 @@ export function ChooseConnection({
                 <ItemDescription>{providerSummary(row, mode)}</ItemDescription>
               </ItemContent>
               <ItemActions>
-                {provider ? (
+                {provider && adding?.provider ? null : provider ? (
                   <span className="text-muted-foreground text-xs">Change</span>
                 ) : adding?.connected.includes(row.id) ? (
                   <span className="text-muted-foreground text-xs">

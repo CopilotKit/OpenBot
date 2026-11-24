@@ -49,7 +49,11 @@ import {
   ProviderTile,
 } from "./ai-connection-chooser";
 import { failureSaid } from "@/lib/load-failure";
-import { AiConnectionRows, SEVERAL } from "./ai-connection-list";
+import {
+  AiConnectionRows,
+  SEVERAL,
+  SEVERAL_FOR_THE_ORGANIZATION,
+} from "./ai-connection-list";
 
 /**
  * Settings → Providers: the AI providers OpenBot's Bots run on and how OpenBot signs in to each, one
@@ -97,7 +101,7 @@ export function AiModelSection({
               organizationWide
                 ? "Choose an AI for everyone in your organization. Bots use it for anyone who hasn't connected their own."
                 : "Choose the AI provider your Bots use and how OpenBot signs in to it."
-            }${several ? ` ${SEVERAL}` : ""}`,
+            }${several ? ` ${organizationWide ? SEVERAL_FOR_THE_ORGANIZATION : SEVERAL}` : ""}`,
             title: organizationWide ? "Organization's AI" : "AI providers",
           })}
     >

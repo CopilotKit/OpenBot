@@ -2322,6 +2322,10 @@ export function ChannelChat({
                 <StoppedConnectionNotice
                   channelId={channel.id}
                   onChooseModel={() => openComposerModelPicker()}
+                  said={[
+                    ...(runError !== null ? [runError] : []),
+                    ...refused.refusals.values(),
+                  ]}
                 />
               ) : undefined
             }

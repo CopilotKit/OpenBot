@@ -118,6 +118,8 @@ let personalList: AiConnectionEntry[] | null;
 let personal: PersonalAiConnection | null;
 /** Set: make-default is refused (409) because the connection stopped since the list was read. */
 let stopsBeforeMakeDefault: AiConnectionEntry["problem"];
+/** How long the person's AI takes to answer: a real server's reads after a change aren't all as quick. */
+let personalDelay: number;
 
 function json(status: number, body: unknown) {
   return new NativeResponse(JSON.stringify(body), {
@@ -151,10 +153,13 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit) {
   calls.push({ method, path, body });
   if (path === `${ORG}/ai-connection` && method === "GET")
     return json(200, GetAiConnectionResponse.parse(ORG_CONNECTION));
-  if (path === `${ORG}/people/me/ai-connection` && method === "GET")
+  if (path === `${ORG}/people/me/ai-connection` && method === "GET") {
+    if (personalDelay > 0)
+      await new Promise((done) => setTimeout(done, personalDelay));
     return personal
       ? json(200, GetPersonalAiConnectionResponse.parse(personal))
       : notFound();
+  }
   const listOf = (scope: "org" | "personal") =>
     scope === "org" ? orgList : personalList;
   for (const [scope, base] of [
@@ -252,6 +257,7 @@ beforeEach(() => {
   personalList = null;
   personal = null;
   stopsBeforeMakeDefault = null;
+  personalDelay = 0;
   global.fetch = Object.assign(fakeFetch, {
     preconnect: originalFetch.preconnect,
   }) as typeof fetch;
@@ -433,7 +439,10 @@ test("disconnecting the default asks on its page which takes over, and sends mak
   await view.findByText(
     "It's the default AI. Choose which one Bots use when nobody picked a model.",
   );
-  await user.click(view.getByRole("radio", { name: /Google Gemini API key/ }));
+  const google = view.getByRole("radio", { name: /Google Gemini API key/ });
+  // In the app's colours, as the Bot's default-model choice draws its radios, not the browser's blue.
+  expect(google.className).toContain("accent-foreground");
+  await user.click(google);
   await user.click(view.getByRole("button", { name: "Disconnect" }));
   await waitFor(() =>
     expect(writes().map((call) => `${call.method} ${call.path}`)).toEqual([
@@ -617,6 +626,42 @@ test("a stopped key leads with Replace key, a page that opens its provider's key
   expect(view.getByLabelText(/API key/)).toBeDefined();
 });
 
+test("on OpenBot Cloud the organization's several connections are for whoever has none of their own", async () => {
+  personal = PERSONAL;
+  orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
+  const { view } = renderAt("/settings/providers");
+  await view.findByRole("heading", { name: "Organization's AI" });
+  // The reader may run on their own connections, never these: not "your Bots".
+  expect(
+    await view.findByText(
+      /Anyone who hasn't connected their own can pick a model from any of these in a conversation\./,
+    ),
+  ).toBeDefined();
+  expect(view.queryByText(/Your Bots can use any of these/)).toBeNull();
+});
+
+test("Replace key opens on the key even where the server also signs in to that provider", async () => {
+  orgSignIns = ["anthropic", "openai"];
+  orgList = [
+    entry("anthropic", { isDefault: true }),
+    entry("openai", {
+      ready: false,
+      problem: { code: "key-refused", detail: "OpenAI refused the key." },
+    }),
+  ];
+  const user = userEvent.setup({ document });
+  const { view } = renderAt("/settings/providers/openai");
+  await user.click(await view.findByRole("link", { name: /Replace key/ }));
+  await view.findByRole("heading", { name: "Reconnect OpenAI API key" });
+  // Its way in, not the first one offered: a key connection asks for the key.
+  expect(
+    view
+      .getByRole("tab", { name: "Use an API key" })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(view.getByLabelText(/API key/)).toBeDefined();
+});
+
 test("removing a person's last own connection says what happens next, and sends them to connect one when it is required", async () => {
   personal = PERSONAL;
   personalList = [entry("anthropic", { isDefault: true })];
@@ -681,6 +726,18 @@ test("disconnecting the default with exactly one other left removes it alone, an
   );
 });
 
+test("after a disconnect the page goes back to Providers, not to the provider it just disconnected", async () => {
+  orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
+  const user = userEvent.setup({ document });
+  const { view, router } = renderAt("/settings/providers/openai");
+  const disconnect = await view.findByRole("button", { name: "Disconnect" });
+  // The list is read again before everything the removal changed is: the page loses its entry first.
+  personalDelay = 300;
+  await user.click(disconnect);
+  await waitFor(() => expect(at(router)).toBe("/settings/providers"));
+  expect(view.queryByText("OpenAI isn't connected.")).toBeNull();
+});
+
 test("disconnecting the default when none of the others can run says they stay, with no default", async () => {
   const stopped = {
     ready: false,
@@ -725,6 +782,19 @@ test("Change on a connection that isn't the default changes that one: its provid
       },
     ]),
   );
+});
+
+test("Change on a connection that isn't the default keeps to its provider: its tile is not a way to another", async () => {
+  orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
+  const user = userEvent.setup({ document });
+  const { view } = renderAt("/settings/providers/openai/change");
+  await view.findAllByRole("heading", { name: "Change OpenAI API key" });
+  const providers = view.getByRole("group", { name: "AI provider" });
+  expect(within(providers).queryByText("Change")).toBeNull();
+  await user.click(within(providers).getByText("OpenAI"));
+  // Still on OpenAI: no grid of others to pick, which would add one instead of changing this one.
+  expect(view.queryByRole("button", { name: /Google Gemini/ })).toBeNull();
+  expect(view.getByLabelText(/API key/)).toBeDefined();
 });
 
 async function connectWithKey(provider: RegExp) {

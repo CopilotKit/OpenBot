@@ -163,6 +163,23 @@ test("a refused run with stopped set draws the sentence, Reconnect and Choose an
   expect(chose).toBe(1);
 });
 
+test("under a refusal that already says the sentence, it isn't said twice: only the ways on", async () => {
+  serve({ owner: "personal", role: "member", stopped: true });
+  const view = render(
+    <StoppedConnectionNotice
+      channelId={CHANNEL}
+      onChooseModel={() => {}}
+      said={[SENTENCE]}
+    />,
+    { wrapper },
+  );
+  await view.findByRole("link", { name: "Reconnect" });
+  expect(view.queryByText(SENTENCE)).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Choose another model" }),
+  ).toBeTruthy();
+});
+
 test("a member on the organization's connection gets no Reconnect", async () => {
   serve({ owner: "organization", role: "member", stopped: true });
   const view = render(

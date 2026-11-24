@@ -25,6 +25,7 @@ import { ProviderTile } from "@/components/settings/ai-connection-chooser";
 import {
   AiConnectionRows,
   SEVERAL,
+  SEVERAL_FOR_THE_ORGANIZATION,
 } from "@/components/settings/ai-connection-list";
 import { teamPaths } from "@/components/teams/team-paths";
 import { Button } from "@/components/ui/button";
@@ -142,7 +143,7 @@ export function ProviderSection() {
           cloud
             ? "Bots use it for everyone in your organization who hasn't connected their own AI."
             : "Built-in Bots and the framework picked at setup run on this provider."
-        }${listed && listed.connections.length > 1 ? ` ${SEVERAL}` : ""}`}
+        }${listed && listed.connections.length > 1 ? ` ${cloud ? SEVERAL_FOR_THE_ORGANIZATION : SEVERAL}` : ""}`}
         title={cloud ? "Organization's AI" : "AI provider"}
       >
         {connection.error ? (

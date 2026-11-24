@@ -49,10 +49,17 @@ export function chooseDefaultPath(): string {
 export function StoppedConnectionNotice({
   channelId,
   onChooseModel,
+  said = [],
 }: {
   channelId: string;
   /** Open the composer's model picker. */
   onChooseModel: () => void;
+  /**
+   * What the conversation already says above the notice (the refusals and the stopped turn): a
+   * sentence said there isn't said again here, only the ways on. The server refuses a run on a
+   * stopped connection in the same words as its problem.
+   */
+  said?: readonly string[];
 }) {
   const choice = useQuery(
     { ...conversationModelQueryOptions(channelId), refetchOnMount: "always" },
@@ -79,9 +86,11 @@ export function StoppedConnectionNotice({
     (owner === "organization" && isOrganizationAdmin(me?.role));
   return (
     <div className="flex flex-col items-start gap-2">
-      <p className="text-destructive text-sm" role="alert">
-        {stopped.problem.detail}
-      </p>
+      {said.includes(stopped.problem.detail) ? null : (
+        <p className="text-destructive text-sm" role="alert">
+          {stopped.problem.detail}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         {canFix ? (
           <a
