@@ -127,7 +127,9 @@ if (root) {
               messages={messages}
               refusals={shown.refusals}
               restoring={false}
-              {...(refusedInARow > 0 || reloaded ? {} : { stopped: REFUSED })}
+              {...(refusedInARow > 0 || reloaded
+                ? {}
+                : { stopped: { message: REFUSED } })}
             />
           </div>
         </TooltipProvider>
