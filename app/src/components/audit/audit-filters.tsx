@@ -17,6 +17,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -40,6 +41,7 @@ import {
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
 import type { AuditVocabulary } from "@/lib/audit/queries";
+import { loadFailure } from "@/lib/load-failure";
 
 /**
  * Admin's filters on the trail, as chips: the one place a filter is set, beside the search.
@@ -191,6 +193,8 @@ function localInput(iso: string | undefined): string {
 type Names = {
   labels: AuditFilterLabels;
   vocabulary: AuditVocabulary | undefined;
+  /** Why the vocabulary isn't here, once its read has answered: a hold, or a failure. */
+  vocabularyFailed?: unknown;
   nameFor: (botId: string) => string;
 };
 
@@ -329,10 +333,31 @@ function FilterOptions({
       ))}
     </DropdownMenuRadioGroup>
   );
+  /*
+   * A read that failed said "Loading…" for good. It says why instead: the server's sentence, calmly,
+   * while OpenBot holds off (a move, a brief outage), and the failure in red otherwise.
+   *
+   * In a group: a menu's label is a group's (Base UI's GroupLabel), and drawn outside one it threw,
+   * taking the whole page down to "Something went wrong" whenever the choices were still loading.
+   */
   const loading = (
-    <DropdownMenuLabel className="font-normal text-muted-foreground">
-      {vocabulary ? "Nothing to choose yet" : "Loading…"}
-    </DropdownMenuLabel>
+    <DropdownMenuGroup>
+      {!vocabulary && names.vocabularyFailed ? (
+        <DropdownMenuLabel
+          className="font-normal text-destructive"
+          role="alert"
+        >
+          {loadFailure(
+            names.vocabularyFailed,
+            "Couldn't load the choices. Try again in a moment.",
+          )}
+        </DropdownMenuLabel>
+      ) : (
+        <DropdownMenuLabel className="font-normal text-muted-foreground">
+          {vocabulary ? "Nothing to choose yet" : "Loading…"}
+        </DropdownMenuLabel>
+      )}
+    </DropdownMenuGroup>
   );
 
   switch (filterKey) {
@@ -577,6 +602,7 @@ export function AuditFilterChips({
   onOpen,
   labels,
   vocabulary,
+  vocabularyFailed,
   nameFor,
 }: {
   filters: ChipFilters;
@@ -584,9 +610,11 @@ export function AuditFilterChips({
   onOpen: () => void;
   labels: AuditFilterLabels;
   vocabulary: AuditVocabulary | undefined;
+  /** Why `vocabulary` isn't here, once its read has answered; nothing while it is asked. */
+  vocabularyFailed?: unknown;
   nameFor: (botId: string) => string;
 }) {
-  const names: Names = { labels, vocabulary, nameFor };
+  const names: Names = { labels, vocabulary, vocabularyFailed, nameFor };
   const present = (Object.keys(FILTER_TITLES) as ChipKey[]).filter((key) => {
     const value = filters[key];
     return Array.isArray(value) ? value.length > 0 : Boolean(value);

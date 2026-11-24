@@ -13,7 +13,7 @@ import type {
 } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
-import { type Failure, failureOf } from "@/lib/load-failure";
+import { type Failure, failureOf, isHeld } from "@/lib/load-failure";
 
 export type AgentVisibility = BotVisibility;
 
@@ -127,12 +127,16 @@ export function agentQueryOptions(agentId: string) {
  * A verdict about this moment, asked when a message to the Bot was refused, so it is not cached and
  * it fails closed: only the API's own 404 says the Bot is gone. A read that could not be made, or a
  * server that broke, says nothing about the Bot, and answers false.
+ *
+ * Except OpenBot holding off (a move, or the organization's database briefly out of reach): that
+ * refusal is thrown as it came, so the caller can say the server's sentence calmly (`failedRunReason`).
  */
 export async function botNoLongerUsable(agentId: string): Promise<boolean> {
   try {
     await getBot(organizationId(), agentId);
     return false;
   } catch (error) {
+    if (isHeld(error)) throw error;
     return error instanceof ClientError && error.status === 404;
   }
 }

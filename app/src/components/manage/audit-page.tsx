@@ -243,10 +243,16 @@ export function AuditPage({
   >(null);
   // This deployment's Bots, apps and rules, asked for the first time a chip menu opens.
   const [vocabularyWanted, setVocabularyWanted] = useState(false);
-  const vocabulary = useQuery({
+  const vocabularyRead = useQuery({
     ...auditVocabularyQueryOptions(),
     enabled: ask && vocabularyWanted,
-  }).data;
+  });
+  const vocabulary = vocabularyRead.data;
+  // Why the menus have nothing to offer, once the read has answered: a hold or a failure, not "Loading…".
+  const vocabularyFailed =
+    vocabularyRead.isError && !vocabularyRead.isFetching
+      ? vocabularyRead.error
+      : null;
   // The stored event names and OpenBot's own working are Admin's to read; the personal edition's
   // Activity is anybody's page. Its route has the edition loaded before this draws.
   const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
@@ -480,8 +486,14 @@ export function AuditPage({
                         labels={answer?.labels ?? NO_LABELS}
                         nameFor={nameFor}
                         onChange={setChips}
-                        onOpen={() => setVocabularyWanted(true)}
+                        onOpen={() => {
+                          setVocabularyWanted(true);
+                          // A read that failed is asked again as a menu opens.
+                          if (vocabularyRead.isError)
+                            void vocabularyRead.refetch();
+                        }}
                         vocabulary={vocabulary}
+                        vocabularyFailed={vocabularyFailed}
                       />
                     ) : (
                       filters

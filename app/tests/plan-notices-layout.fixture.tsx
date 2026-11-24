@@ -172,7 +172,11 @@ function Scene() {
   if (scene === "chat")
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <ChatTranscript messages={ASKED} restoring={false} stopped={REFUSED} />
+        <ChatTranscript
+          messages={ASKED}
+          restoring={false}
+          stopped={{ message: REFUSED }}
+        />
       </div>
     );
   return (
