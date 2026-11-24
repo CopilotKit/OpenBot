@@ -1723,6 +1723,7 @@ export function Composer({
         <form
           aria-busy={isBusy}
           data-slot="composer"
+          data-typing={draft.isEmpty ? undefined : ""}
           className={cn(
             /*
              * The padding goes on the form rather than on the editor because the editor scrolls
@@ -1829,6 +1830,7 @@ export function Composer({
         aria-busy={isBusy}
         className={cn("overflow-hidden", MESSAGE_BOX_FRAME)}
         data-slot="composer"
+        data-typing={draft.isEmpty ? undefined : ""}
         onSubmit={handleFormSubmit}
       >
         <DictationSurface

@@ -23,16 +23,23 @@ describe("the message box's frame", () => {
     expect(atRest.filter((name) => /^(shadow|ring)-/.test(name))).toEqual([]);
   });
 
-  test("it glows only while it has focus", () => {
+  test("it glows only while someone is typing in it: focus and text", () => {
     expect(classes).toEqual(
       expect.arrayContaining([
-        "focus-within:border-ring/60",
-        "focus-within:ring-4",
-        "focus-within:ring-ring/15",
-        "focus-within:shadow-lg",
-        "focus-within:shadow-ring/20",
+        "focus-within:data-typing:border-ring/60",
+        "focus-within:data-typing:ring-4",
+        "focus-within:data-typing:ring-ring/15",
+        "focus-within:data-typing:shadow-lg",
+        "focus-within:data-typing:shadow-ring/20",
       ]),
     );
+    // Focus alone does not glow: a conversation keeps the box focused from the moment it opens.
+    const focusOnly = classes.filter(
+      (name) =>
+        name.startsWith("focus-within:") &&
+        !name.startsWith("focus-within:data-typing:"),
+    );
+    expect(focusOnly).toEqual([]);
   });
 
   test("the glow eases in, and not at all with reduced motion", () => {
@@ -57,5 +64,7 @@ describe("the message box's frame", () => {
       composer.match(/MESSAGE_BOX_FRAME/g)?.length ?? 0,
     ).toBeGreaterThanOrEqual(3);
     expect(composer).not.toContain("rounded-2xl");
+    // Each frame says when there is text in it.
+    expect(composer.match(/data-typing=\{/g)?.length ?? 0).toBe(2);
   });
 });
