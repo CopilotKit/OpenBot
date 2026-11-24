@@ -444,13 +444,80 @@ test("an app's card is drawn once a turn, even when the Bot also asks to show it
     { kind: "text", id: "q2", role: "user", text: "Try again" },
     call("show2", "show_app_access", { app: "airtable" }, shown),
   ];
-  // The refused call keeps its card; the second card for the same app in that turn is dropped, and
-  // a new turn may draw it again.
+  // The refused call keeps its card in its turn and the second card there is dropped. A later turn
+  // that draws Airtable's card again keeps that one, and the earlier one goes.
   expect(dropRepeatedAppCards(items).map((item) => item.id)).toEqual([
     "q1",
-    "list",
     "a1",
     "q2",
     "show2",
+  ]);
+  expect(
+    dropRepeatedAppCards(items.slice(0, 4)).map((item) => item.id),
+  ).toEqual(["q1", "list", "a1"]);
+});
+
+/** A call to `app` refused for a person who hasn't connected it, as the server words it. */
+function refusedCall(
+  id: string,
+  app: string,
+  title: string,
+  agentId = "scout",
+) {
+  return call(
+    id,
+    `mcp__${app}__ACTION_${id}`,
+    {},
+    JSON.stringify(
+      `Refused. [connect-app]{"serverId":"${app}","title":"${title}","agentId":"${agentId}"} You have not connected your ${title} account. Connect it and ask again.`,
+    ),
+  );
+}
+
+test("two refused calls to the same app in one reply draw its card once, whatever app it is", () => {
+  // A Composio app, an Arcade app and a server added by its address: the rule reads the card, not
+  // where the app came from.
+  for (const app of ["composio-googleads", "arcade-gmail", "srv_figma"]) {
+    const items: VisibleChatItem[] = [
+      { kind: "text", id: "q1", role: "user", text: "Find her email" },
+      refusedCall("one", app, "The app"),
+      refusedCall("two", app, "The app"),
+      refusedCall("other", "composio-posthog", "PostHog"),
+      text("a1"),
+    ];
+    expect(dropRepeatedAppCards(items).map((item) => item.id)).toEqual([
+      "q1",
+      "one",
+      "other",
+      "a1",
+    ]);
+  }
+});
+
+test("show_app_access before a refused call to the same app keeps only the first card", () => {
+  const shown = JSON.stringify(
+    '[connect-app]{"serverId":"composio-googleads","title":"Google Ads","agentId":"scout"} Google Ads is granted to you.',
+  );
+  const items: VisibleChatItem[] = [
+    { kind: "text", id: "q1", role: "user", text: "Find her email" },
+    call("show", "show_app_access", { app: "Google Ads" }, shown),
+    refusedCall("one", "composio-googleads", "Google Ads"),
+  ];
+  expect(dropRepeatedAppCards(items).map((item) => item.id)).toEqual([
+    "q1",
+    "show",
+  ]);
+});
+
+test("the same app's card for two different Bots in one conversation is two cards", () => {
+  const items: VisibleChatItem[] = [
+    { kind: "text", id: "q1", role: "user", text: "Both of you, check Gmail" },
+    refusedCall("scout", "composio-gmail", "Gmail", "scout"),
+    refusedCall("writer", "composio-gmail", "Gmail", "writer"),
+  ];
+  expect(dropRepeatedAppCards(items).map((item) => item.id)).toEqual([
+    "q1",
+    "scout",
+    "writer",
   ]);
 });

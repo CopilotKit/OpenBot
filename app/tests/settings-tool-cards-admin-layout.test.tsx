@@ -11,6 +11,7 @@ import type {
 import { personBody } from "./accounts-api";
 import { deploymentBody, overviewResponse } from "./admin-settings-api";
 import { approvalInboxResponse } from "./approvals-api";
+import { screenLinkLooks } from "./screen-link-style";
 import { CALLS, waitingRequests } from "./settings-tool-cards-admin.calls";
 
 /**
@@ -20,7 +21,9 @@ import { CALLS, waitingRequests } from "./settings-tool-cards-admin.calls";
  * Drawn in a real browser in the app's real frame (settings-tool-cards-admin.fixture.tsx): a change
  * to the organization's settings, a person made an admin, invited and removed, and a team moved and
  * given a maintainer, each waiting for approval and once answered. Beside them, the screens the
- * changes show on: People, Permissions, a team's page and Organization settings.
+ * changes show on: People, Permissions, a team's page and Organization settings. Each approval is
+ * titled with what it does in plain words, and each card opens its screens with the link every
+ * settings card uses.
  *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/settings-tool-cards-admin-layout.test.tsx
  *
@@ -311,6 +314,13 @@ type Screen = {
   cards?: boolean;
 };
 
+/** Each scene's waiting approvals, by title: what the change does, as a person would say it. */
+const APPROVAL_TITLES: Record<string, string[]> = {
+  settings: ["Change your organization's settings"],
+  people: ["Change someone's role in your organization"],
+  teams: ["Move a team"],
+};
+
 const SCREENS: Screen[] = [
   {
     name: "cards-settings",
@@ -547,6 +557,27 @@ describe.skipIf(!asked)(
                     expect(
                       await waiting.getByTestId("before-after").count(),
                     ).toBeGreaterThan(0);
+                    // Titled in plain words, never the tool's name on "OpenBot settings".
+                    expect(
+                      await waiting
+                        .locator(
+                          "[data-slot=decision-card] figcaption > div > p:first-child",
+                        )
+                        .allTextContents(),
+                    ).toEqual(APPROVAL_TITLES[scene ?? ""] ?? []);
+                    // Each card opens its screens with the link every settings card uses.
+                    const links = await screenLinkLooks(
+                      page,
+                      "[data-slot=admin-change-card]",
+                    );
+                    expect(links.length).toBeGreaterThan(0);
+                    for (const link of links)
+                      expect(link).toMatchObject({
+                        underlined: false,
+                        chevron: true,
+                        primary: true,
+                        weight: "500",
+                      });
                     // A refusal says why, in the server's words.
                     for (const call of calls.filter(
                       (one) => one.state === "refused",

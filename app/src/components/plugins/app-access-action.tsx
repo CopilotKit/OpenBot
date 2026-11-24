@@ -49,12 +49,14 @@ import { queryClient } from "@/query-client";
 
 /**
  * What the person is told about one app, in words that say whose move it is. `bot` is the Bot's name,
- * for the one state that asks the person a question about it.
+ * for the one state that asks the person a question about it. `admin` is whether the person looking
+ * is an admin, who is offered the step itself (`AdminAction`) and so is never told to ask one.
  */
 export function appAccessSentence(
   access: AppAccess,
   bot?: string,
   edition: "team" | "personal" = "team",
+  admin = false,
 ): string {
   const name = access.displayName;
   const owners = access.accountHolder === "owner";
@@ -69,6 +71,14 @@ export function appAccessSentence(
         (access.unavailable === null || access.unavailable === "absent")))
   )
     return `${name} isn't connected yet.`;
+  /*
+   * An admin's own step: the button beside this takes it (`AdminAction`), so the sentence says what
+   * is missing. "Only an admin can give it" told the admin of their own organization to ask an admin.
+   */
+  if (admin && edition === "team") {
+    const missing = adminSentence(access);
+    if (missing) return missing;
+  }
   switch (access.state) {
     case "ready":
       if (owners)
@@ -95,6 +105,33 @@ export function appAccessSentence(
       const ask = `Let ${bot ?? "this Bot"} use ${yours}?`;
       return access.needsConnect ? `${ask} Connect it first.` : ask;
     }
+  }
+}
+
+/**
+ * What is missing, said to the admin whose button beside it fixes it, for the states `AdminAction`
+ * offers the step for. Null for every other state, which reads the same for everybody.
+ */
+function adminSentence(access: AppAccess): string | null {
+  const name = access.displayName;
+  switch (access.state) {
+    case "not_granted":
+      return `This Bot hasn't been given ${name} yet.`;
+    case "shared_not_connected":
+      return `Your organization's ${name} account isn't connected yet.`;
+    case "disabled":
+      switch (access.unavailable) {
+        case "directory_unavailable":
+          return `${name} isn't set up yet.`;
+        case "scheme_unreadable":
+        case "oauth_client_missing":
+        case "token_missing":
+          return `${name} isn't fully set up yet.`;
+        default:
+          return `${name} isn't turned on yet.`;
+      }
+    default:
+      return null;
   }
 }
 
@@ -224,6 +261,9 @@ function useConnectOnceOn(agentId: string, tab: ConnectInNewTab) {
       ...botAppQueryOptions(agentId, app),
       staleTime: 0,
     });
+    // On, and nothing given yet because its tools come with the sign-in: Notion's case.
+    if (now.state === "not_granted" && signsInFirst(now))
+      return { signIn: now.key };
     if (now.state !== "not_connected")
       return { next: () => queryClient.invalidateQueries() };
     if (now.connect === "key")
@@ -270,6 +310,20 @@ function useConnectOnceOn(agentId: string, tab: ConnectInNewTab) {
         .catch(() => queryClient.invalidateQueries());
     },
   };
+}
+
+/**
+ * Whether the app runs on the person's own account, signs in, and they haven't signed in. Notion
+ * lists its tools only once somebody has, so a Bot can't be given it before then: an admin's press
+ * signs them in first and gives it after (`AdminAction`).
+ */
+function signsInFirst(access: AppAccess): boolean {
+  return (
+    access.account === "personal" &&
+    access.accountHolder !== "owner" &&
+    (access.connect === "oauth" || access.connect === "consent") &&
+    access.connectedAt === null
+  );
 }
 
 /** Which of the buttons below an app's state calls for, or nothing where it is ready. */
@@ -321,6 +375,11 @@ function appAccessButton({
  * still has to connect goes straight on to its key form or its sign-in (`useConnectOnceOn`). The
  * card asked because the admin's own task needed the app, so connecting it is the next step.
  *
+ * SIGNED IN FIRST WHERE THE TOOLS COME WITH THE SIGN-IN. Notion lists its tools only for somebody
+ * who has signed in, so there is nothing to give a Bot before the admin has. The press turns it on
+ * with nothing given, opens the admin's sign-in, and once their account is connected gives it on
+ * the same press, the way `OwnerGiveAction` connects first and gives after.
+ *
  * A LINK WHERE IT CANNOT. A broker with no key, a set-up somebody left unfinished and a team account
  * nobody connected all need something only typed or consented to on the app's admin page. That page
  * opens in a new tab so the conversation stays where it is, and the card reads the app again when
@@ -341,6 +400,31 @@ function AdminAction({
   const setup = useQuery(appSetupQueryOptions()).data;
   const connectOnceOn = useConnectOnceOn(agentId, tab);
   const name = access.displayName;
+  const { waiting, stopWaiting } = tab;
+  /** Pressed before the admin had signed in: give it as soon as they have. */
+  const pending = useRef(false);
+
+  // Watched as `ConnectAction` watches: the card reads the app again until the account is there.
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: appAccessKeys.all });
+    }, 2_000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+
+  const signedIn = access.connectedAt !== null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the admin's account appears, once per press.
+  useEffect(() => {
+    if (!pending.current || !signedIn || access.state !== "not_granted") return;
+    pending.current = false;
+    stopWaiting();
+    // Its tools are listed now, so this press gives them. A refusal is drawn from `approve.error`.
+    approve
+      .mutateAsync({ agentId, app: access.key })
+      .then(() => queryClient.invalidateQueries())
+      .catch(() => queryClient.invalidateQueries());
+  }, [signedIn, access.state]);
 
   const oneClick =
     access.state === "not_granted" ||
@@ -355,18 +439,40 @@ function AdminAction({
     const spoken = disabled
       ? `Turn on ${name} and give it to ${bot}`
       : `Give ${name} to ${bot}`;
+    const error = approve.error?.message ?? tab.error;
     return (
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {approve.error ? (
+        {error ? (
           <p className="text-destructive text-xs" role="alert">
-            {approve.error.message}
+            {error}
+          </p>
+        ) : null}
+        {tab.blockedUrl ? (
+          <p className="text-xs" role="status">
+            This browser blocked the tab.{" "}
+            <a
+              className="underline underline-offset-2"
+              href={tab.blockedUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Open {name}'s sign-in
+            </a>
+            .
+          </p>
+        ) : waiting ? (
+          <p className="text-muted-foreground text-xs" role="status">
+            Finish in the tab that opened.
           </p>
         ) : null}
         <Button
-          aria-label={approve.isPending ? undefined : spoken}
-          disabled={approve.isPending}
+          aria-label={
+            approve.isPending || waiting || tab.pending ? undefined : spoken
+          }
+          disabled={approve.isPending || tab.pending}
           onClick={() => {
             approve.reset();
+            pending.current = signsInFirst(access);
             /*
              * Awaited, not given callbacks: turning it on refetches this app and can swap this
              * button for another, and TanStack Query drops a `mutate()` callback once nothing is
@@ -380,7 +486,15 @@ function AdminAction({
           }}
           size="sm"
         >
-          {approve.isPending ? (disabled ? "Turning on…" : "Giving…") : label}
+          {waiting
+            ? `Waiting for ${name}…`
+            : approve.isPending
+              ? disabled
+                ? "Turning on…"
+                : "Giving…"
+              : tab.pending
+                ? "Opening sign-in…"
+                : label}
         </Button>
       </div>
     );

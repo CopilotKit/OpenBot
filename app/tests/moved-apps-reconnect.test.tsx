@@ -8,7 +8,12 @@ import {
   CreateAppBody,
   CreateAppResponse,
 } from "@/lib/api/generated/apps/apps.zod";
-import { ListConnectionsResponse } from "@/lib/api/generated/connections/connections.zod";
+import {
+  ConfirmConnectionResponse,
+  ConnectAppBody,
+  ConnectAppResponse,
+  ListConnectionsResponse,
+} from "@/lib/api/generated/connections/connections.zod";
 import type {
   Import,
   PersonalAiConnection,
@@ -108,6 +113,66 @@ const SLACK: ReconnectApp = {
 };
 /** Not added here, and the directory refuses to add it. */
 const LINEAR: ReconnectApp = { appId: "linear", appName: "Linear" };
+
+/** Where every sign-in starts in this test: a vendor's page, drawn empty. */
+const SIGN_IN = "https://sign-in.vendor.test";
+
+/** From the directory, connected with a key. */
+const FIREFLIES: ReconnectApp = {
+  appId: "fireflies",
+  appName: "Fireflies",
+  accountLabel: "sam@example.com",
+  botNames: ["Scheduler"],
+};
+/** From the directory, whose list entry can't say how it connects; it takes a key. */
+const POSTHOG: ReconnectApp = { appId: "posthog", appName: "PostHog" };
+/** Added by its address, and each person signs in to it. */
+const DOCS: ReconnectApp = {
+  appId: "docs-search",
+  appName: "Docs Search",
+  botNames: ["Research"],
+};
+/** Built in, and each person signs in to it. */
+const DRIVE: ReconnectApp = { appId: "gdrive", appName: "Google Drive" };
+
+/** The apps those connect to here, added beside the organization's others for the tests that ask. */
+const KEY_APPS = [
+  {
+    id: "composio-fireflies",
+    title: "Fireflies",
+    provenance: "composio",
+    url: "composio://fireflies",
+    authScheme: "API_KEY",
+    accountMode: "personal" as const,
+    summary: "Read meeting notes.",
+  },
+  {
+    id: "composio-posthog",
+    title: "PostHog",
+    provenance: "composio",
+    url: "composio://posthog",
+    authScheme: null,
+    accountMode: "personal" as const,
+    summary: "Read product analytics.",
+  },
+];
+const SIGN_IN_APPS = [
+  {
+    id: "docs-search",
+    title: "Docs Search",
+    provenance: "custom",
+    url: "https://mcp.docs.test/mcp",
+    signIn: true,
+  },
+  { id: "gdrive", title: "Google Drive", provenance: "first-party" },
+];
+const DRIVE_ENTRY = {
+  key: "gdrive",
+  title: "Google Drive",
+  vendor: "Google",
+  summary: "Read and search your files.",
+  auth: "user-oauth" as const,
+};
 
 /** An app from the directory, as OpenBot Cloud adds it: its own id, from the entry it came from. */
 function directoryApp(slug: string, title: string, summary: string) {
@@ -236,6 +301,10 @@ class FakeServer {
   importAsks = 0;
   /** Every API request answered 400 or more, as the browser's network panel would list it. */
   failed: string[] = [];
+  /** Every connect started, by app, and whether it carried a typed key. */
+  connects: { appId: string; key: boolean }[] = [];
+  /** The apps that take a key, whatever the app list says about how they connect. */
+  keyApps = new Set<string>();
 
   constructor(
     imports: Import[] | null,
@@ -396,10 +465,64 @@ class FakeServer {
       this.apps.servers = [...(this.apps.servers ?? []), slack];
       return { status: 201, json: CreateAppResponse.parse(appBody(slack)) };
     }
+    const connection =
+      /^\/api\/v2\/organizations\/default\/people\/me\/connections\/([^/]+)\/(connect|confirm)$/.exec(
+        path,
+      );
+    if (connection && method === "POST") {
+      expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
+        0,
+      );
+      const appId = decodeURIComponent(connection[1] ?? "");
+      if (connection[2] === "confirm")
+        return {
+          status: 200,
+          json: ConfirmConnectionResponse.parse({
+            connected: this.connected.has(appId),
+          }),
+        };
+      const body = ConnectAppBody.parse(request.postDataJSON());
+      this.connects.push({ appId, key: body.values !== undefined });
+      return {
+        status: 200,
+        json: ConnectAppResponse.parse(this.start(appId, body.values)),
+      };
+    }
     const apps = answerAppsApi(url.toString(), { method }, this.apps);
     if (apps) return { status: apps.status, json: await apps.json() };
     this.unanswered.push(`${method} ${path}`);
     return { status: 404, json: NOT_FOUND };
+  }
+
+  /**
+   * What starting a connect answers: a key app's form, then connected once the key is sent; the
+   * sign-in page for everything else (a vendor's page, which this test's browser draws empty).
+   */
+  start(appId: string, values: Record<string, string> | undefined) {
+    if (values) {
+      expect(values).toEqual({ api_key: GOOD_KEY });
+      this.connected.add(appId);
+      return { next: "connected", verified: true, checkedAction: null };
+    }
+    if (this.keyApps.has(appId))
+      return {
+        next: "form",
+        fields: [
+          {
+            name: "api_key",
+            label: "API key",
+            help: "The key from the app's settings.",
+            required: true,
+            secret: true,
+            default: null,
+          },
+        ],
+        guide: null,
+      };
+    return {
+      next: "consent",
+      authorizationUrl: `${SIGN_IN}/${encodeURIComponent(appId)}`,
+    };
   }
 
   preferences() {
@@ -685,16 +808,27 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         expect(await bar.count()).toBe(0);
         expect(await measured(page)).toEqual(FINE);
 
-        // Gmail: its page, with the way back to the list.
+        // Gmail: its page, with the way back to the list, and its sign-in started by the same press.
         await row(page, "gmail")
           .getByRole("button", { name: "Reconnect" })
           .click();
         // The move named it `gmail`; here it is the app added from `directory:gmail`.
         await page.waitForURL(`${ORIGIN}/connections/composio-gmail`);
+        await page.getByRole("dialog", { name: "Connecting Gmail" }).waitFor();
+        // Behind the step, which hides the page from the accessibility tree while it is up.
         await page
-          .getByRole("button", { name: "Your apps to reconnect" })
+          .getByRole("button", {
+            name: "Your apps to reconnect",
+            includeHidden: true,
+          })
           .waitFor();
-        await page.getByRole("heading", { level: 1, name: "Gmail" }).waitFor();
+        await page
+          .getByRole("heading", {
+            level: 1,
+            name: "Gmail",
+            includeHidden: true,
+          })
+          .waitFor();
         // Off to Google's sign-in, which connects it; the browser's sign-in comes back to Connections.
         await page.goto("https://accounts.google.test/signin");
         server.connected.add("composio-gmail");
@@ -801,7 +935,18 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         await heading(page, "Connect your AI");
         await connectAi(page);
         await page.waitForURL(`${ORIGIN}/connections/composio-gmail`);
-        await page.getByRole("heading", { level: 1, name: "Gmail" }).waitFor();
+        await page
+          .getByRole("heading", {
+            level: 1,
+            name: "Gmail",
+            includeHidden: true,
+          })
+          .waitFor();
+        // Desktop's one press of Reconnect starts Gmail's sign-in too, once the AI is connected.
+        await page.getByRole("dialog", { name: "Connecting Gmail" }).waitFor();
+        expect(server.connects).toEqual([
+          { appId: "composio-gmail", key: false },
+        ]);
         // And connecting it comes back to the list, with the other still to do.
         server.connected.add("composio-gmail");
         await page.goto(`${ORIGIN}/connections?connected=composio-gmail`);
@@ -878,9 +1023,25 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         await row(page, "slack")
           .getByRole("button", { name: "Reconnect" })
           .click();
-        // Added from its directory entry, then its own page, with the way back.
+        // Added from its directory entry, then its own page, with the way back, and the same press
+        // starts its sign-in.
         await page.waitForURL(`${ORIGIN}/connections/composio-slack`);
-        await page.getByRole("heading", { level: 1, name: "Slack" }).waitFor();
+        await page
+          .getByRole("heading", {
+            level: 1,
+            name: "Slack",
+            includeHidden: true,
+          })
+          .waitFor();
+        const step = page.getByRole("dialog", { name: "Connecting Slack" });
+        await step.waitFor();
+        expect(server.connects).toEqual([
+          { appId: "composio-slack", key: false },
+        ]);
+        // Not now: the step is cancelled, and the way back is there.
+        // Escape, which is Cancel: unstyled until `style`, the step's backdrop covers its buttons.
+        await page.keyboard.press("Escape");
+        await step.waitFor({ state: "detached" });
         await page
           .getByRole("button", { name: "Your apps to reconnect" })
           .click();
@@ -905,6 +1066,142 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         await page.close();
       }
     }, 90_000);
+
+  /*
+   * Reported on 1.2.0-rc.3, on OpenBot Cloud after a move: Reconnect opened the app's page, where
+   * Connect had to be pressed again. One press of Reconnect is the whole connect now, for every kind
+   * of app: the sign-in, or the key form, with no Connect pressed in between.
+   */
+  for (const engine of engines)
+    test(`one Reconnect on a sign-in app goes straight to its sign-in, and back to the list once connected, in ${engine}`, async () => {
+      const server = new FakeServer([finishedMove([GMAIL, CALENDAR])]);
+      const page = await open("/reconnect", server, engine);
+      try {
+        await row(page, "gmail")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        // OpenBot's step before a sign-in through Composio, which goes on by itself.
+        const step = page.getByRole("dialog", { name: "Connecting Gmail" });
+        await step.waitFor();
+        expect(server.connects).toEqual([
+          { appId: "composio-gmail", key: false },
+        ]);
+        await shoot(page, "press-sign-in", engine, "light", WIDE);
+        await page.waitForURL(`${SIGN_IN}/composio-gmail`, {
+          timeout: 15_000,
+        });
+        // Google's sign-in connects it and comes back to Gmail's page, which goes back to the list.
+        server.connected.add("composio-gmail");
+        await page.goto(
+          `${ORIGIN}/connections/composio-gmail?status=success&connected_account_id=ca_1`,
+        );
+        await page.waitForURL(`${ORIGIN}/reconnect`);
+        await row(page, "gmail").getByText("Reconnected").waitFor();
+        // Coming back started nothing again.
+        expect(server.connects).toEqual([
+          { appId: "composio-gmail", key: false },
+        ]);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const engine of engines)
+    test(`one Reconnect on a key app opens its key form, and saving the key comes back to the list, in ${engine}`, async () => {
+      const server = new FakeServer([
+        finishedMove([FIREFLIES, POSTHOG, GMAIL]),
+      ]);
+      server.apps.servers = [...(server.apps.servers ?? []), ...KEY_APPS];
+      server.keyApps = new Set(["composio-fireflies", "composio-posthog"]);
+      const page = await open("/reconnect", server, engine);
+      try {
+        await row(page, "fireflies")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        const form = page.getByRole("dialog", { name: "Connect your account" });
+        await form.getByLabel("API key").waitFor();
+        expect(path(page)).toBe("/connections/composio-fireflies");
+        await shoot(page, "press-key", engine, "light", WIDE);
+        await form.getByLabel("API key").fill(GOOD_KEY);
+        // Enter sends the form: unstyled until `style`, the dialog's backdrop covers its buttons.
+        await form.getByLabel("API key").press("Enter");
+        await page.waitForURL(`${ORIGIN}/reconnect`);
+        await row(page, "fireflies").getByText("Reconnected").waitFor();
+
+        // PostHog's listing can't say how it connects. It takes a key, so the press opens the form.
+        await row(page, "posthog")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await form.getByLabel("API key").waitFor();
+        expect(path(page)).toBe("/connections/composio-posthog");
+        expect(await page.getByRole("alert").count()).toBe(0);
+        await form.getByLabel("API key").fill(GOOD_KEY);
+        await form.getByLabel("API key").press("Enter");
+        await page.waitForURL(`${ORIGIN}/reconnect`);
+        await row(page, "posthog").getByText("Reconnected").waitFor();
+        expect(server.connects).toEqual([
+          { appId: "composio-fireflies", key: false },
+          { appId: "composio-fireflies", key: true },
+          { appId: "composio-posthog", key: false },
+          { appId: "composio-posthog", key: false },
+          { appId: "composio-posthog", key: true },
+        ]);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const engine of engines)
+    test(`one Reconnect on an app added by its address, or a built-in one, goes straight to its sign-in, in ${engine}`, async () => {
+      const server = new FakeServer([finishedMove([DOCS, DRIVE, GMAIL])]);
+      server.apps.servers = [...(server.apps.servers ?? []), ...SIGN_IN_APPS];
+      server.apps.catalogue = [DRIVE_ENTRY];
+      const page = await open("/reconnect", server, engine);
+      try {
+        await row(page, "docs-search")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        // OpenBot signs in to it itself: no step, straight to the sign-in.
+        await page.waitForURL(`${SIGN_IN}/docs-search`);
+        expect(server.connects).toEqual([{ appId: "docs-search", key: false }]);
+        server.connected.add("docs-search");
+        await page.goto(`${ORIGIN}/connections?connected=docs-search`);
+        await page.waitForURL(`${ORIGIN}/reconnect`);
+        await row(page, "docs-search").getByText("Reconnected").waitFor();
+
+        await row(page, "gdrive")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL(`${SIGN_IN}/gdrive`);
+        expect(server.connects).toEqual([
+          { appId: "docs-search", key: false },
+          { appId: "gdrive", key: false },
+        ]);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const engine of engines)
+    test(`an admin's one Reconnect turns on an app the organization hasn't, then starts its sign-in, in ${engine}`, async () => {
+      const server = new FakeServer([finishedMove([SLACK, GMAIL])], "admin");
+      const page = await open("/reconnect", server, engine);
+      try {
+        await row(page, "slack")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.getByRole("dialog", { name: "Connecting Slack" }).waitFor();
+        expect(server.added).toEqual(["directory:slack"]);
+        await page.waitForURL(`${SIGN_IN}/composio-slack`, {
+          timeout: 15_000,
+        });
+        expect(server.connects).toEqual([
+          { appId: "composio-slack", key: false },
+        ]);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
 
   for (const engine of engines)
     test(`an OpenBot that takes no moves shows none of it, in ${engine}`, async () => {

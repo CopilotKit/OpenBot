@@ -176,9 +176,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   says that too. Any failure before that removes nothing. A moved person skips first-run setup in
   OpenBot Cloud; the terms and their own AI still ask. When OpenBot Cloud still needs your AI, the
   result asks you to connect it first and names the apps as the next step. OpenBot Cloud then keeps
-  a Reconnect list of the apps that moved, and Connections points to it while any is left. Each
-  app's Reconnect opens that app, and connecting it brings you back to the list with the app marked
-  reconnected. An app you don't want can be dismissed, on every device. Onboarding and Connect your
+  a Reconnect list of the apps that moved, and Connections points to it while any is left. One
+  press of an app's Reconnect connects it: an app you sign in to goes straight to its sign-in, and
+  an app that takes a key opens with its key form, with no second Connect to press. Connecting it
+  brings you back to the list with the app marked reconnected. An app you don't want can be dismissed, on every device. Onboarding and Connect your
   AI now keep where you were headed, and take you there once they're done. On Windows, the Podman
   that OpenBot installed is removed too when nothing else uses it; a Podman you installed or use
   stays. Keep OpenBot on this computer is remembered and never asked again at launch.
@@ -222,6 +223,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   own release still shows the uninstall command.
 - People, Remove says the person keeps their account and any other organization they're in. It no
   longer promises an organization of their own (Before upgrading).
+- **An admin gives a Bot an app from its card in one press.** Asked for Notion, a Bot drew a card
+  that told its admin "Only an admin can give it", and Give it answered "Notion has no tools to give
+  yet". An app that has listed none of its tools yet is asked again once you've signed in, and the
+  press stopped before your sign-in. It now turns the app on, opens your sign-in, and gives the app
+  to the Bot once you're in. On OpenBot Cloud that is the admin of their own organization. A card or
+  a Bot's Apps row shown to an admin says what is missing, never to ask an admin. Where the press
+  still can't go on, the card says "Couldn't get Notion ready for this Bot. Try again in a moment."
 
 ### API
 
@@ -332,6 +340,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **An app's Connect card shows once.** A reply that called two tools of an app you haven't
+  connected showed the same card twice. It now shows one card per app. When a later reply asks for
+  the same app again, its card moves down to that reply.
 - The composer's model picker names every model whole. On a phone, OpenBot's own model beside its
   Default tag was cut to "GPT-6…"; a long name now takes a second line.
 - **After a move to OpenBot Cloud you can tell where everything went.** OpenBot Desktop stays on the
@@ -349,6 +360,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - After connecting an app from a Bot's card or a Bot's page, you're back where you pressed Connect.
   The sign-in's tab closes once the app is connected, or, where the browser won't close it, goes back
   to the conversation or the Bot's page. It used to stay on the app's page under Connections.
+- **About OpenBot in OpenBot Desktop says where OpenBot runs.** Beside the version, it says OpenBot
+  (Self-Contained) or OpenBot Cloud, and on OpenBot Cloud the email you're signed in with. Connected
+  to another OpenBot, it names that OpenBot's address and your email there.
 - **A Bot on a harness takes its orders from OpenBot only, not from extra fields on a run.** A run's
   sender could add fields the harness's framework obeyed. On the Claude Agent SDK harness: loading
   another saved conversation (`resume`), a model the organization never allowed (`model`,

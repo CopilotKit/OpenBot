@@ -639,8 +639,11 @@ fn local_api<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<moving::Api
     })
 }
 
-/// The OpenBot Cloud sign-in, as the move's requests carry it.
-struct SessionCredentials(std::sync::Arc<openbot_desktop_lib::connected::sign_in::Session>);
+/// The OpenBot Cloud sign-in, as the move's requests carry it, and the question About asks of the
+/// OpenBot the app is connected to (`desktop_connected::learn_account`).
+pub(crate) struct SessionCredentials(
+    pub(crate) std::sync::Arc<openbot_desktop_lib::connected::sign_in::Session>,
+);
 
 impl moving::Credentials for SessionCredentials {
     fn header(&self) -> Result<(&'static str, String), String> {
