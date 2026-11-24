@@ -20783,10 +20783,10 @@ mod tests {
     fn the_windows_title_bar_is_dark_from_its_first_show_and_redrawn_on_every_change() {
         let dark = title_bar_attributes(Some(true));
         assert_eq!(dark[0], (IMMERSIVE_DARK_MODE, 1), "{dark:?}");
-        assert!(dark.contains(&(CAPTION_COLOR, 0x0013_0b0d)), "{dark:?}");
+        assert!(dark.contains(&(CAPTION_COLOR, 0x0014_0d07)), "{dark:?}");
         let light = title_bar_attributes(Some(false));
         assert_eq!(light[0], (IMMERSIVE_DARK_MODE, 0), "{light:?}");
-        assert!(light.contains(&(CAPTION_COLOR, 0x00f5_eded)), "{light:?}");
+        assert!(light.contains(&(CAPTION_COLOR, 0x00f4_eee9)), "{light:?}");
         // Windows's own colours, and the window's theme left to decide its dark or light.
         let own = title_bar_attributes(None);
         assert!(own
