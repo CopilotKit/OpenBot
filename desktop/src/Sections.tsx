@@ -1,4 +1,12 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import {
+  AGENT_ORB_AT_REST,
+  AGENT_ORB_COLORS,
+  AGENT_ORB_CSS,
+  AGENT_ORB_LOOP_SECONDS,
+  agentOrbDriftSeconds,
+  agentOrbSizing,
+} from "../../shared/agent-orb";
 
 /** One part of setup, named for what it is about rather than counted. */
 export type Section = "Account" | "Install" | "AI" | "Start";
@@ -11,14 +19,64 @@ export type Section = "Account" | "Install" | "AI" | "Start";
 const SECTIONS: Section[] = ["Account", "Install", "AI", "Start"];
 
 /**
+ * OpenBot's mark: the app's own orb (`AgentOrb`), drawn from the same stylesheet, palette and
+ * size values in `shared/agent-orb`, at rest as the app draws it beside its name. Its mesh turns
+ * and its sheen drifts with CSS alone, so this window needs no motion library; both hold still
+ * under reduced motion. The stylesheet goes to the document's head once (React's `<style href>`),
+ * so it is not text inside the lockup.
+ */
+function Orb({ size }: { size: number }) {
+  const sizing = agentOrbSizing(size);
+  const style = {
+    "--animation-duration": `${AGENT_ORB_LOOP_SECONDS / AGENT_ORB_AT_REST.speed}s`,
+    "--bg": AGENT_ORB_COLORS.bg,
+    "--blur-amount": `${sizing.blur}px`,
+    "--c1": AGENT_ORB_COLORS.c1,
+    "--c2": AGENT_ORB_COLORS.c2,
+    "--c3": AGENT_ORB_COLORS.c3,
+    "--c4": AGENT_ORB_COLORS.c4,
+    "--contrast-amount": sizing.contrast,
+    "--dot-size": `${sizing.dotSize}px`,
+    "--drift-duration": `${agentOrbDriftSeconds(AGENT_ORB_AT_REST.speed)}s`,
+    "--mask-radius": sizing.maskRadius,
+    "--rim": `${sizing.rim}px`,
+    "--shadow-spread": `${sizing.shadowSpread}px`,
+    filter: `saturate(${AGENT_ORB_AT_REST.saturation})`,
+    width: "100%",
+    height: "100%",
+  } as CSSProperties;
+  return (
+    <div className="orb" style={{ width: size, height: size }}>
+      <div className="agent-orb" style={style}>
+        <span className="agent-orb-layer agent-orb-sheen" />
+        <span className="agent-orb-layer agent-orb-rim" />
+      </div>
+      <style href="openbot-agent-orb" precedence="default">
+        {AGENT_ORB_CSS}
+      </style>
+    </div>
+  );
+}
+
+/**
  * OpenBot's mark and name, with "by CopilotKit" beside it where the company is named: it reads
  * OpenBot by CopilotKit, never CopilotKit alone. Decoration: the window's title already says the
  * name, so it is hidden from assistive technology rather than read on every screen.
+ *
+ * The mark is 32px at the top of the setup sidebar, and 22px in the smaller lockup a stopped setup
+ * shows over its sign-in, as the app's sidebar header sets it.
  */
-export function Lockup({ byCopilotKit = false }: { byCopilotKit?: boolean }) {
+export function Lockup({
+  byCopilotKit = false,
+  size = 32,
+}: {
+  byCopilotKit?: boolean;
+  /** The mark's size in px: 32, or the smaller lockup's 22. */
+  size?: 32 | 22;
+}) {
   return (
     <div className="lockup" aria-hidden="true">
-      <div className="orb" />
+      <Orb size={size} />
       <span>
         OpenBot
         <sup className="trademark" aria-hidden="true">
