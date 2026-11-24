@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import sentry from "@/assets/sentry.webp";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,12 +27,19 @@ import {
   trialUsedUpAnnounced,
 } from "@/lib/plan/card-needed";
 import {
+  employeeTrialUsedUp,
   needsCard,
   planKeys,
   planQueryOptions,
   trialUsedUp,
 } from "@/lib/plan/queries";
-import { cardAction, stoppedWords, trialUsed } from "@/lib/plan/words";
+import {
+  cardAction,
+  SENTRY_ALT,
+  SENTRY_LINE,
+  stoppedWords,
+  trialUsed,
+} from "@/lib/plan/words";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -54,6 +62,12 @@ import { queryClient } from "@/query-client";
  * refusal while the plan as last read still says runs are left, who it is talking to comes from the
  * refusal, which carries the payment page only for an owner or an admin: an admin never reads the
  * member's line while the plan is read again.
+ *
+ * A CopilotKit employee's runs are never refused for want of a plan. Once their trial is used up it
+ * opens by itself once with the same words, plus a thank-you in place of the way to pay, and a
+ * photo of Sentry, loaded only then. Nothing
+ * stops their AI actions (`needsCard` is false for them, whatever the organization's status, a
+ * failed payment included), so it never opens on one.
  */
 export function CardNeededDialog() {
   const open = useSyncExternalStore(
@@ -93,9 +107,14 @@ export function CardNeededDialog() {
     if (runs) hideCardNeeded();
   }, [open, plan, read.dataUpdatedAt]);
 
-  // The plan once it says a card is needed; until then, what the refusal that opened it said.
-  const addCardUrl =
-    plan && needsCard(plan) ? plan.addCardUrl : refusalAddCardUrl();
+  // The plan once it says a card is needed; until then, what the refusal that opened it said. A
+  // CopilotKit employee never pays, so they get no way to pay, only a way to close.
+  const employee = employeeTrialUsedUp(plan);
+  const addCardUrl = employee
+    ? null
+    : plan && needsCard(plan)
+      ? plan.addCardUrl
+      : refusalAddCardUrl();
   const words = stoppedWords(plan, addCardUrl);
   return (
     <Dialog
@@ -116,6 +135,23 @@ export function CardNeededDialog() {
             </Progress>
           ) : null}
           <p className="text-foreground text-sm text-pretty">{words.next}</p>
+          {employee ? (
+            <>
+              {/* Drawn only here, and lazily, so nobody else ever downloads it. */}
+              <img
+                alt={SENTRY_ALT}
+                className="h-auto w-full shrink-0 rounded-lg object-cover"
+                decoding="async"
+                height={600}
+                loading="lazy"
+                src={sentry}
+                width={800}
+              />
+              <p className="text-foreground text-sm text-pretty">
+                {SENTRY_LINE}
+              </p>
+            </>
+          ) : null}
         </DialogBody>
         {addCardUrl ? (
           <DialogFooter className="mt-1">
