@@ -7,6 +7,8 @@ import {
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { uploadHeldFiles } from "@/components/channels/composer/attachments";
 import { stashFirstMessage } from "@/components/channels/transcript-messages";
+import { defaultAgentProfile } from "@/lib/agents/default-agent";
+import type { AgentProfile } from "@/lib/agents/queries";
 import {
   createGroupMutationOptions,
   sendGroupMessageMutationOptions,
@@ -20,7 +22,7 @@ import {
 } from "./mutations";
 import { pendingStartPath, settlePendingStart } from "./pending-start";
 import { channelKeys } from "./queries";
-import { routeMessage } from "./route";
+import { CoworkerRoutingRefusedError, routeMessage } from "./route";
 
 /**
  * Start a channel with a coworker the person chose themselves, and say so first.
@@ -46,6 +48,50 @@ export async function startWithChosen(input: {
 }): Promise<void> {
   void input.record(input.text, input.agentId).catch(() => undefined);
   await input.start(input.agentId, input.text);
+}
+
+/**
+ * The Bot a message goes to when OpenBot picks: the default Bot, which a public one stands in for, or
+ * the first on the roster. Undefined only when the person has no Bot at all. Shared by every
+ * composer that lets OpenBot pick (home, and a new conversation with nobody in To:).
+ */
+export function fallbackBot(
+  roster: readonly AgentProfile[] | undefined,
+): AgentProfile | undefined {
+  return defaultAgentProfile(
+    roster,
+    roster?.find((agent) => agent.visibility === "public"),
+  );
+}
+
+/**
+ * Which Bot a message nobody was named for goes to.
+ *
+ * Routed to the Bot it is for. If routing cannot run, it falls back to the default Bot, unless the
+ * message runs a skill (only a Bot that has it may take it) or the routing refused (two Bots share
+ * the name the message used, and the person must choose). Pure so the rule can be tested.
+ */
+export async function pickBotFor(input: {
+  text: string;
+  /** The `/` skills the message runs. */
+  skills: readonly string[];
+  roster: readonly AgentProfile[] | undefined;
+  route: (
+    text: string,
+    skills: readonly string[],
+  ) => Promise<{ agentId: string }>;
+}): Promise<string> {
+  let agentId: string | undefined;
+  try {
+    agentId = (await input.route(input.text, input.skills)).agentId;
+  } catch (caught) {
+    if (input.skills.length || caught instanceof CoworkerRoutingRefusedError)
+      throw caught;
+    agentId = fallbackBot(input.roster)?.id;
+  }
+  if (!agentId)
+    throw new Error("There's no Bot to send this to. Try again in a moment.");
+  return agentId;
 }
 
 /**
@@ -230,5 +276,34 @@ export function useStartChannel() {
         record: routeMessage,
         start: (id, message) => start(id, message, pick, pendingId, files),
       }),
+    /**
+     * `start`, for a message nobody was named for: OpenBot picks the Bot (`pickBotFor`), then the
+     * model pick for that Bot is settled (`pickFor`, when the composer offered one), then it starts.
+     * Home and a new conversation with nobody in To: both start this way.
+     */
+    startPicked: async (input: {
+      text: string;
+      skills: readonly string[];
+      roster: readonly AgentProfile[] | undefined;
+      files?: readonly Attachment[];
+      pendingId?: string;
+      /** The model pick to save for the Bot picked, and what to say once it started when it takes none. */
+      pickFor?: (agentId: string) => Promise<{
+        pick: ConversationModelInput | null;
+        notUsed?: () => void;
+      }>;
+    }) => {
+      const agentId = await pickBotFor({
+        text: input.text,
+        skills: input.skills,
+        roster: input.roster,
+        route: (text, skills) => routeMessage(text, undefined, skills),
+      });
+      const { pick, notUsed } = input.pickFor
+        ? await input.pickFor(agentId)
+        : { pick: null, notUsed: undefined };
+      await start(agentId, input.text, pick, input.pendingId, input.files);
+      notUsed?.();
+    },
   };
 }
