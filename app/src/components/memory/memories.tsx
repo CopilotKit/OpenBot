@@ -1,5 +1,6 @@
 import { IconBrain, IconPlus, IconRobot, IconUser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useId, useState } from "react";
 import {
   PageEmpty,
@@ -34,7 +35,9 @@ import {
   createMemoryMutationOptions,
   deleteMemoryMutationOptions,
   type MemoryRecord,
+  type MemorySource,
   memoriesQueryOptions,
+  memorySourcesQueryOptions,
   updateMemoryMutationOptions,
 } from "@/lib/memory";
 import { queryClient } from "@/query-client";
@@ -138,6 +141,8 @@ export function MemoryList({
 } = {}) {
   const memories = useQuery(memoriesQueryOptions());
   const agents = useQuery(agentListQueryOptions());
+  // Which Bot's source read in each imported memory, and so where that source is turned off.
+  const sources = useQuery(memorySourcesQueryOptions());
   const botName = (id: string | null) =>
     agents.data?.find((agent) => agent.id === id)?.name ?? "your Bot";
   return (
@@ -152,15 +157,21 @@ export function MemoryList({
         </p>
       ) : memories.data.length ? (
         <PageRows>
-          {memories.data.map((memory, index) => (
-            <Fragment key={memory.id}>
-              {index > 0 ? <Separator /> : null}
-              <MemoryRow
-                botName={botName(memory.formedByBotId)}
-                memory={memory}
-              />
-            </Fragment>
-          ))}
+          {memories.data.map((memory, index) => {
+            const source = memory.sourceId
+              ? sources.data?.find((entry) => entry.id === memory.sourceId)
+              : undefined;
+            return (
+              <Fragment key={memory.id}>
+                {index > 0 ? <Separator /> : null}
+                <MemoryRow
+                  botName={botName(source?.botId ?? memory.formedByBotId)}
+                  memory={memory}
+                  source={source}
+                />
+              </Fragment>
+            );
+          })}
         </PageRows>
       ) : (
         <PageEmpty icon={IconBrain} title="No memories yet">
@@ -178,9 +189,12 @@ export function MemoryList({
 function MemoryRow({
   memory,
   botName,
+  source,
 }: {
   memory: MemoryRecord;
   botName: string;
+  /** The memory source that read it in, for an imported memory whose source is listed. */
+  source?: MemorySource;
 }) {
   const [editing, setEditing] = useState(false);
   const save = useMutation(updateMemoryMutationOptions(queryClient));
@@ -202,6 +216,13 @@ function MemoryRow({
         : memory.reviewState === "unreviewed"
           ? "Imported · needs review"
           : "Reviewed";
+  const imported = memory.formedBy === "import";
+  // The record an imported memory came from. The source it was read in by is said on the line below.
+  const sourceName = source?.title ?? memory.sourceApp;
+  const provenance =
+    imported && sourceName && memory.provenance.startsWith(`${sourceName}: `)
+      ? memory.provenance.slice(sourceName.length + 2)
+      : memory.provenance;
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -212,8 +233,34 @@ function MemoryRow({
           {memory.content}
         </ItemTitle>
         <ItemDescription className="line-clamp-none">
-          {memory.provenance} · {status}
+          {provenance} · {status}
         </ItemDescription>
+        {imported && (
+          <ItemDescription className="line-clamp-none">
+            {source
+              ? `Read in by ${botName} from ${source.title}`
+              : `Read in from ${memory.sourceApp ?? "an app"}`}
+            {memory.sourceLink && (
+              <>
+                {" · "}
+                <a href={memory.sourceLink} target="_blank" rel="noreferrer">
+                  Open record
+                </a>
+              </>
+            )}
+            {source && (
+              <>
+                {" · "}
+                <Link
+                  params={{ agentId: source.botId }}
+                  to="/bots/$agentId/memory"
+                >
+                  Turn off or remove this source
+                </Link>
+              </>
+            )}
+          </ItemDescription>
+        )}
         {memory.formedBy === "bot" && (
           <ItemDescription className="line-clamp-none">
             From {memory.sourceApp ?? "a conversation"}
