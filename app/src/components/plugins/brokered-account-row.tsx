@@ -21,6 +21,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import {
@@ -949,7 +950,7 @@ function accountSentence(input: {
        * is worth a second press rather than a second connection.
        */
       if (account.probe && !account.verified) {
-        return `Your key didn't pass a check with ${title}. That may be the key, or ${title} itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
+        return `Your key didn't pass a check with ${vendorNameOf(title)}. That may be the key, or ${vendorNameOf(title)} itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
       }
       /*
        * NOTHING WAS SPENT ON IT, WHICH IS A FACT ABOUT THE CHECK AND ABOUT THE APP AT THE TIME. The
@@ -970,7 +971,7 @@ function accountSentence(input: {
        * today.
        */
       if (account.probe === null) {
-        return `Connected with your key. It hasn't been checked with ${title}. At the time, ${title} had no safe way to check a key. That's about the app, not your key.`;
+        return `Connected with your key. It hasn't been checked with ${vendorNameOf(title)}. At the time, ${vendorNameOf(title)} had no safe way to check a key. That's about the app, not your key.`;
       }
       /*
        * AND NOTHING HAS SAID WHICH, which is no longer the page load: the connections read carries
@@ -980,7 +981,7 @@ function accountSentence(input: {
        * two things a record can say; this is what stands where there is no record, and it must not
        * borrow either.
        */
-      return `Connected with your key. It hasn't been checked with ${title}.`;
+      return `Connected with your key. It hasn't been checked with ${vendorNameOf(title)}.`;
     }
     /*
      * WHAT DISCONNECTING DID NOT DO. The account ends at Composio and the key does not end
@@ -989,7 +990,7 @@ function accountSentence(input: {
      * have live, so the row names the step this deployment cannot take for them.
      */
     if (account.disconnected) {
-      return `Disconnected. Your key still works at ${title}. Change it there to stop all access.`;
+      return `Disconnected. Your key still works at ${vendorNameOf(title)}. Change it there to stop all access.`;
     }
     /*
      * NOT THE SCREEN'S OWN SENTENCE, which is written for the kind that leaves: one of the two says
@@ -1002,7 +1003,7 @@ function accountSentence(input: {
      * way this app is connected, and a row that replaced the whole line took it away with the trip
      * it was right to drop.
      */
-    const asked = `Needs a key from ${title}. Connect shows where to get one.`;
+    const asked = `Needs a key from ${vendorNameOf(title)}. Connect shows where to get one.`;
     return disconnectedReassurance
       ? `${asked} ${disconnectedReassurance}`
       : asked;
@@ -1038,11 +1039,12 @@ function KeyGuideNote({
   guide: KeyGuide | null;
   title: string;
 }) {
+  const vendor = vendorNameOf(title);
   return (
     <div className="mb-3 flex flex-col gap-1.5 text-sm" data-testid="key-guide">
       <p>
-        OpenBot connects to {title} with a key from your {title} account, not a
-        sign-in.
+        OpenBot connects to {vendor} with a key from your {vendor} account, not
+        a sign-in.
       </p>
       {guide ? <p className="text-muted-foreground">{guide.steps}</p> : null}
       {guide?.url ? (
@@ -1052,7 +1054,7 @@ function KeyGuideNote({
           rel="noopener noreferrer"
           target="_blank"
         >
-          Get a key from {title}
+          Get a key from {vendor}
           <IconArrowUpRight aria-hidden="true" className="size-3.5" />
         </a>
       ) : null}
@@ -1282,7 +1284,7 @@ export function BrokeredAccountRow({
               ends, which was cut off mid-word beside the buttons. */}
           <ItemDescription className="line-clamp-none">
             {several
-              ? `You connected ${accounts.length} ${title} accounts. Bots use your default account unless you ask for another.`
+              ? `You connected ${accounts.length} ${vendorNameOf(title)} accounts. Bots use your default account unless you ask for another.`
               : accountSentence({
                   account,
                   connectedDescription,

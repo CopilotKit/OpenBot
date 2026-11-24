@@ -3,7 +3,10 @@ import { useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
 import { requestAppMutationOptions } from "@/lib/app-access/mutations";
-import { addDirectoryAppMutationOptions } from "@/lib/apps/mutations";
+import {
+  addDirectoryAppMutationOptions,
+  type DirectoryAppInput,
+} from "@/lib/apps/mutations";
 import { type DirectoryApp, directorySlug } from "@/lib/apps/queries";
 import { directoryConnect } from "@/lib/plugins/directory-state";
 import { invalidatePlugins } from "@/lib/plugins/mutations";
@@ -63,6 +66,25 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
     // added row into its connection state.
     onSettled: (_data, _error, input) => {
       setAdding((set) => released(set, input.directoryEntryId));
+      return invalidatePlugins(queryClient);
+    },
+  });
+  /*
+   * THE KEY VERSION'S OWN ADD, for an entry listed as a sign-in in place of its key. A mutation of its
+   * own and a set of its own, so the row's primary button never reads "Adding…" for it.
+   */
+  const [addingKey, setAddingKey] = React.useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const enableKey = useMutation({
+    ...addDirectoryAppMutationOptions(queryClient),
+    onMutate: (input: DirectoryAppInput) => {
+      setError(null);
+      setAddingKey((set) => held(set, input.directoryEntryId));
+    },
+    onError: (thrown: Error) => setError(thrown.message),
+    onSettled: (_data, _error, input) => {
+      setAddingKey((set) => released(set, input.directoryEntryId));
       return invalidatePlugins(queryClient);
     },
   });
@@ -160,13 +182,37 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
     enable.mutate({ directoryEntryId: entry.id });
   };
 
+  /**
+   * One press of "with a key instead": add the entry's key version as its own app. In `connect` it
+   * goes on to that app's key form, as a key app's Add does; in `add` it only adds. A member asks
+   * for apps and adds none, so `request` does nothing.
+   */
+  const pressKey = (entry: DirectoryApp) => {
+    if (mode === "request") return;
+    const added = enableKey.mutateAsync({
+      directoryEntryId: entry.id,
+      connectsWith: "key",
+    });
+    if (mode === "connect")
+      added.then(openKeyForm, () => {
+        // Said by the mutation's own `onError`.
+      });
+    else
+      added.catch(() => {
+        // Said by the mutation's own `onError`.
+      });
+  };
+
   return {
     mode,
     press,
+    pressKey,
     connect,
     signedIn,
     /** Entry ids being added. */
     adding,
+    /** Entry ids whose key version is being added. */
+    addingKey,
     /** Slugs being asked for. */
     requesting,
     signingIn,

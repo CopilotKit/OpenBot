@@ -1,4 +1,5 @@
 import { directorySlug } from "@/lib/apps/queries";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
 import type { IdentityProviders, LinkedAccount } from "@/lib/identity/queries";
 import { appNeedsKey } from "@/lib/plugins/enablement-notes";
 import type { CatalogueItem, PluginServer } from "@/lib/plugins/queries";
@@ -157,7 +158,7 @@ export function connectionRows(input: {
           // expected a sign-in is surprised when the page asks for one.
           summary:
             !input.connected.has(server.id) && appNeedsKey(server)
-              ? `Needs a key from ${server.title}`
+              ? `Needs a key from ${vendorNameOf(server.title)}`
               : server.summary,
           state: input.connected.has(server.id) ? "connected" : "available",
           notConnected: !input.connected.has(server.id),
