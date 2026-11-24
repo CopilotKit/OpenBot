@@ -655,7 +655,17 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
     );
     expect(answer).toEqual({ ok: true });
     expect(asked).toEqual([event]);
-    expect(recorded).toEqual([event]);
+    // The handler names the frame that sent it: the top frame here.
+    expect(recorded).toEqual([
+      {
+        ...event,
+        value: {
+          ...(event.value as { [key: string]: unknown }),
+          frameOrigin: "https://crm.example.test",
+          frameId: 0,
+        },
+      },
+    ]);
     expect(
       (document.messages as { type: string }[]).filter(
         (message) => message.type === "offscreen.event",

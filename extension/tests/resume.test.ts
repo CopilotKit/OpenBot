@@ -762,6 +762,8 @@ test("a service-worker restart restores followed tabs, digests and network captu
     capturedEvent("network", {
       url: "https://crm.example.test/api/cards",
       requestBody: '{"card":"[redacted]"}',
+      frameOrigin: "https://crm.example.test",
+      frameId: 0,
     }),
   ]);
 

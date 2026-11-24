@@ -4073,11 +4073,67 @@ test("a page-network event is accepted only from a recorded tab while page captu
   const masked = contentEvent({ request: "[redacted]" });
   acceptAnswer = masked;
   expect(await fromTab(7)).toEqual({ ok: true });
-  expect(network.recorded).toEqual([masked]);
+  expect(network.recorded).toEqual([
+    {
+      ...masked,
+      value: {
+        request: "[redacted]",
+        frameOrigin: "https://crm.example.test",
+        frameId: 0,
+      },
+    },
+  ]);
   expect(sentToDocument("offscreen.event")).toEqual([]); // the capture emits it, not this module
   expect((await state()).actions).toBe(0); // network calls are not actions
   expect(await fromTab(99)).toEqual({ ok: false, error: "not-recording" });
   expect(network.recorded).toHaveLength(1);
+});
+
+test("a page-network event carries the frame that sent it, and a child frame of another origin is dropped", async () => {
+  await record();
+  network.deps?.status("page");
+  const masked = contentEvent({ request: "[redacted]" });
+  acceptAnswer = masked;
+  const fromFrame = (frameId: number, url: string, origin?: string) =>
+    fake.sendExternal(
+      { type: "recorder.page-network", event: contentEvent({ request: "x" }) },
+      { tab: { id: 7 } as chrome.tabs.Tab, frameId, url, origin },
+    );
+  // A child frame of another origin (an ad, an embed) in the recorded tab: not recorded.
+  expect(
+    await fromFrame(
+      3,
+      "https://ads.example.net/frame",
+      "https://ads.example.net",
+    ),
+  ).toEqual({ ok: false, error: "not-recording" });
+  expect(network.recorded).toEqual([]);
+  // The top frame and a child frame of the top frame's origin are, each marked with its frame.
+  expect(await fromFrame(0, DEAL, "https://crm.example.test")).toEqual({
+    ok: true,
+  });
+  // Without sender.origin the origin is the sender URL's.
+  expect(await fromFrame(5, "https://crm.example.test/widget")).toEqual({
+    ok: true,
+  });
+  expect(network.recorded).toEqual([
+    {
+      ...masked,
+      value: {
+        request: "[redacted]",
+        frameOrigin: "https://crm.example.test",
+        frameId: 0,
+      },
+    },
+    {
+      ...masked,
+      value: {
+        request: "[redacted]",
+        frameOrigin: "https://crm.example.test",
+        frameId: 5,
+      },
+    },
+  ]);
 });
 
 test("the state machine's transitions need no timers", () => {

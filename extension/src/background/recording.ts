@@ -16,6 +16,7 @@ import {
 } from "@openbot/shared/recorder-api";
 import {
   type CapturedEvent,
+  type JsonValue,
   scrubText,
   scrubTranscript,
   scrubUrl,
@@ -60,6 +61,7 @@ import {
   readPolicy,
 } from "../shared/policy";
 import { isExcludedSite, siteOf } from "../shared/sites";
+
 import { narrationLanguage } from "../shared/speech-language";
 import {
   type ConnectionRecord,
@@ -114,6 +116,16 @@ import {
   type StepAssembler,
   type StepSnapshot,
 } from "./steps";
+
+/** The origin of an address or of a sender.origin; undefined when there is none to read. */
+function originOf(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return undefined;
+  }
+}
 
 type Timers = {
   set(fn: () => void, ms: number): unknown;
@@ -3261,12 +3273,26 @@ export function installRecording(
         network.recordPageAgent(tabId, observation);
         return { ok: true };
       }
+      // Any frame in the tab can send these. A child frame of another origin than the tab's top page (an ad, an embed)
+      // is not recorded; a top-frame page change has not yet committed when the top page is unknown, so a child frame
+      // then is not either. Each event names the frame that sent it.
+      const frameId = sender.frameId ?? 0;
+      const frameOrigin = originOf(sender.origin) ?? originOf(sender.url);
+      if (
+        frameOrigin === undefined ||
+        (frameId !== 0 && frameOrigin !== originOf(state.topUrls[tabId]))
+      )
+        return { ok: false, error: "not-recording" };
       const event = deps.acceptPageNetworkEvent(
         message.event as CapturedEvent,
         digests,
       );
       if (!event) return { ok: false, error: "invalid" };
-      await network.recordPageEvent(tabId, event);
+      const value = event.value as { [key: string]: JsonValue };
+      await network.recordPageEvent(tabId, {
+        ...event,
+        value: { ...value, frameOrigin, frameId },
+      });
       return { ok: true };
     },
 
