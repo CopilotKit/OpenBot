@@ -31,15 +31,28 @@ export function useBotBuddy(seed: string): DrawnBuddy {
   return useMemo(() => buddyFor(seed, choice, own), [seed, choice, own]);
 }
 
-/** The disc behind a buddy: a soft wash of the Bot's own colour, so it stays its colour everywhere. */
-function discStyle(seed: string, size: number): CSSProperties {
+/**
+ * The disc behind a buddy: a soft wash of the Bot's own colour, so it stays its colour everywhere. No
+ * outline: on the dark page a light ring read as a white border around the character. A bare buddy
+ * has no disc at all, and stands on the page.
+ */
+function discStyle(seed: string, size: number, bare: boolean): CSSProperties {
   const { c1 } = orbPalette(seed);
   return {
-    "--buddy-bg": `color-mix(in oklab, ${c1} 22%, var(--background))`,
-    "--buddy-border": "color-mix(in oklab, var(--foreground) 10%, transparent)",
+    "--buddy-bg": bare
+      ? "transparent"
+      : `color-mix(in oklab, ${c1} 22%, var(--background))`,
+    "--buddy-border": "transparent",
     height: size,
     width: size,
   } as CSSProperties;
+}
+
+/** The box a buddy's picture or clip fills: its disc, or nothing where it stands bare. */
+function frameClass(bare: boolean): string {
+  return bare
+    ? "relative block"
+    : "relative block overflow-hidden rounded-full bg-(--buddy-bg)";
 }
 
 /**
@@ -54,6 +67,7 @@ export function BotBuddy({
   activity = "idle",
   buddy: given,
   still: keepStill = false,
+  bare = false,
 }: {
   seed: string;
   name: string;
@@ -63,6 +77,8 @@ export function BotBuddy({
   buddy?: DrawnBuddy;
   /** Its still picture whatever the Bot is doing, as where something covers it. */
   still?: boolean;
+  /** No disc: the character alone, standing on the page. */
+  bare?: boolean;
 }) {
   const own = useBotBuddy(seed);
   const buddy = given ?? own;
@@ -80,25 +96,35 @@ export function BotBuddy({
       aria-label={name}
       className="inline-flex shrink-0"
       data-buddy={buddy.key}
-      style={discStyle(seed, size)}
+      style={discStyle(seed, size, bare)}
     >
       <span aria-hidden="true" className="contents">
         {still ? (
-          <BuddyStill buddy={buddy} size={size} />
+          <BuddyStill bare={bare} buddy={buddy} size={size} />
         ) : (
-          <BuddyLive activity={activity} buddy={buddy} size={size} />
+          <BuddyLive
+            activity={activity}
+            bare={bare}
+            buddy={buddy}
+            size={size}
+          />
         )}
       </span>
     </span>
   );
 }
 
-function BuddyStill({ buddy, size }: { buddy: DrawnBuddy; size: number }) {
+function BuddyStill({
+  buddy,
+  size,
+  bare,
+}: {
+  buddy: DrawnBuddy;
+  size: number;
+  bare: boolean;
+}) {
   return (
-    <span
-      className="block size-full overflow-hidden rounded-full bg-(--buddy-bg) ring-1 ring-foreground/10"
-      style={{ height: size, width: size }}
-    >
+    <span className={frameClass(bare)} style={{ height: size, width: size }}>
       <img
         alt=""
         className="size-full object-cover"
@@ -130,13 +156,17 @@ function BuddyLive({
   buddy,
   size,
   activity,
+  bare,
 }: {
   buddy: DrawnBuddy;
   size: number;
   activity: BuddyActivity;
+  bare: boolean;
 }) {
   if (WEBKIT)
-    return <BuddyWebKit activity={activity} buddy={buddy} size={size} />;
+    return (
+      <BuddyWebKit activity={activity} bare={bare} buddy={buddy} size={size} />
+    );
   return <BuddyRenderer activity={activity} buddy={buddy} size={size} />;
 }
 
@@ -149,20 +179,19 @@ function BuddyWebKit({
   buddy,
   size,
   activity,
+  bare,
 }: {
   buddy: DrawnBuddy;
   size: number;
   activity: BuddyActivity;
+  bare: boolean;
 }) {
   const pose = poseFor(buddy, activity);
   const clip = pose
     ? (buddy.webkitClips?.[pose] ?? buddy.clips[pose])
     : undefined;
   return (
-    <span
-      className="relative block overflow-hidden rounded-full bg-(--buddy-bg) ring-1 ring-foreground/10"
-      style={{ height: size, width: size }}
-    >
+    <span className={frameClass(bare)} style={{ height: size, width: size }}>
       {clip ? (
         <video
           autoPlay

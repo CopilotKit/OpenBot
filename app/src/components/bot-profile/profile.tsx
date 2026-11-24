@@ -47,7 +47,7 @@ import {
 } from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
 import { BotActivityGlance, BotActivityRow } from "./activity";
-import { BotBuddyRow } from "./buddy";
+import { BotBuddyRow, ChooseBuddyButton } from "./buddy";
 import { BotPausedBanner } from "./pause-banner";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
@@ -56,18 +56,34 @@ const NOTIFY_LABEL: Record<BotNotify, string> = {
   none: "Nothing (badges only)",
 };
 
-/** The top of a Bot's page: its orb, what it is for and what it does. */
+/**
+ * The top of a Bot's page: its orb, what it is for and what it does. Where Bots are buddies and the
+ * page knows which Bot, the buddy is a button that chooses another.
+ */
 export function BotProfileHeader({
   agent,
 }: {
   agent: Pick<
     AgentProfile,
     "name" | "title" | "roleDescription" | "avatarSeed"
-  >;
+  > &
+    Partial<Pick<AgentProfile, "id" | "buddy">>;
 }) {
+  const buddies = useBotLook() === "buddy";
+  const avatar = (
+    <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
+  );
   return (
     <div className="mt-6 flex items-center gap-3">
-      <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
+      {buddies && agent.id ? (
+        <ChooseBuddyButton
+          agent={{ ...agent, id: agent.id, buddy: agent.buddy ?? null }}
+        >
+          {avatar}
+        </ChooseBuddyButton>
+      ) : (
+        avatar
+      )}
       <div className="min-w-0">
         {/* Up to three lines, so a phone shows the whole of a subtitle like the starter's. */}
         {agent.title && (

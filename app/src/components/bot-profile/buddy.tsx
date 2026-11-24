@@ -91,6 +91,41 @@ export function BotBuddyRow({
   );
 }
 
+/**
+ * The Bot's buddy as a button that opens the picker, where it is drawn large enough to click: the top
+ * of its conversation and of its page, and the buddy beside the composer.
+ */
+export function ChooseBuddyButton({
+  agent,
+  children,
+  className,
+}: {
+  agent: Pick<AgentProfile, "id" | "name" | "avatarSeed" | "buddy">;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        aria-label={`Choose a buddy for ${agent.name}`}
+        className={cn(
+          "rounded-full outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring",
+          className,
+        )}
+        onClick={() => setOpen(true)}
+        title="Choose a buddy"
+        type="button"
+      >
+        {children}
+      </button>
+      {open ? (
+        <BuddyPicker agent={agent} onClose={() => setOpen(false)} />
+      ) : null}
+    </>
+  );
+}
+
 function BuddyPicker({
   agent,
   onClose,

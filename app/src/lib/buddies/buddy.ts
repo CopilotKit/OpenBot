@@ -19,6 +19,7 @@ export type DrawnBuddy = {
 /** What a Bot is doing, as the pose its buddy plays. */
 export type BuddyActivity =
   | "idle"
+  | "thinking"
   | "working"
   | "waiting"
   | "done"
@@ -31,6 +32,7 @@ export type BuddyActivity =
  */
 const POSE_FOR: Record<BuddyActivity, readonly string[]> = {
   idle: ["idle"],
+  thinking: ["thinking", "working", "idle"],
   working: ["working", "thinking", "idle"],
   waiting: ["asking", "listening", "idle"],
   done: ["done", "talking", "idle"],

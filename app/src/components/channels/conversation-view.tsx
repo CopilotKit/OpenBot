@@ -59,6 +59,7 @@ export function ConversationView({
   queueWhileBusy = false,
   restoring = false,
   intro,
+  corner,
   starterSuggestions,
   onSubmit,
   onStop,
@@ -141,6 +142,12 @@ export function ConversationView({
    * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
    */
   intro?: ReactNode;
+  /**
+   * Drawn standing on the composer's top edge at its right end, over the end of the transcript: the
+   * Bot's buddy while it works (`ConversationBuddy`). Only clicks on the thing itself land; the rest
+   * of its box lets them through to the transcript.
+   */
+  corner?: ReactNode;
   /**
    * One-time starter tasks, separate from the Bot introduction and its attribution. Directly above
    * the composer, and not drawn while `attached` is out.
@@ -567,9 +574,14 @@ export function ConversationView({
        * menu, which is `position: fixed` at the caret (see `DictationSurface`).
        */}
       <div
-        className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
+        className="relative mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
         data-slot="composer-column"
       >
+        {corner ? (
+          <div className="pointer-events-none absolute right-8 bottom-full z-10 [&_button]:pointer-events-auto">
+            {corner}
+          </div>
+        ) : null}
         {notice}
         {/*
          * Notifications are offered once this person has started a task: a Bot is working for them,

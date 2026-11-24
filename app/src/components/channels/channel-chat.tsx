@@ -29,6 +29,10 @@ import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { StillWorkingError } from "@/components/channels/composer/queue";
+import {
+  ConversationBuddy,
+  useConversationBuddyActivity,
+} from "@/components/channels/conversation-buddy";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { ProgressRow } from "@/components/channels/progress-row";
@@ -1906,6 +1910,15 @@ export function ChannelChat({
       .slice(answeredAt + 1)
       .some((message) => message.role === "assistant");
   const botName = botProfile?.name ?? channel.name;
+  /*
+   * What the Bot's buddy plays beside the composer: the turn as `busy` below has it, and the question
+   * it waits on.
+   */
+  const buddyActivity = useConversationBuddyActivity({
+    busy: agent.isRunning || turnsInFlight > 0 || turnsAway > 0 || carryingOn,
+    waiting: Boolean(question),
+    messages: agent.messages,
+  });
   const botSeed = botProfile?.avatarSeed || runtimeAgentId;
 
   const sayRef = useRef(say);
@@ -2044,6 +2057,11 @@ export function ChannelChat({
             intro={
               /* From the roster this screen already reads; nothing while it loads. */
               botProfile ? <ConversationIntro agent={botProfile} /> : undefined
+            }
+            corner={
+              botProfile ? (
+                <ConversationBuddy activity={buddyActivity} bot={botProfile} />
+              ) : undefined
             }
             /*
              * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
