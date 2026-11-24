@@ -118,6 +118,7 @@ import {
   CloudIcon,
   CloudOffIcon,
   CloudUploadIcon,
+  CompassIcon,
   ComputerIcon,
   ComputerPhoneSyncIcon,
   ComputerRemoveIcon,
@@ -263,10 +264,12 @@ import {
   ToggleOnIcon,
   UnavailableIcon,
   UnfoldMoreIcon,
+  UserAdd01Icon,
   UserCheck01Icon,
   UserCircleIcon,
   UserGroupIcon,
   UserIcon,
+  UserMinus01Icon,
   UserMultipleIcon,
   UserSettings01Icon,
   UserShield01Icon,
@@ -280,6 +283,10 @@ import {
 } from "@hugeicons/core-free-icons";
 
 export const IconAdjustments = defineIcon("adjustments", SlidersHorizontalIcon);
+export const IconAdjustmentsHorizontal = defineIcon(
+  "adjustments-horizontal",
+  SlidersHorizontalIcon,
+);
 export const IconAlertOctagon = defineIcon("alert-octagon", AlertDiamondIcon);
 export const IconAlertTriangle = defineIcon("alert-triangle", Alert02Icon);
 export const IconApps = defineIcon("apps", DashboardSquare01Icon);
@@ -374,6 +381,7 @@ export const IconCloudCog = defineIcon("cloud-cog", CloudCogIcon);
 export const IconCloudOff = defineIcon("cloud-off", CloudOffIcon);
 export const IconCloudUpload = defineIcon("cloud-upload", CloudUploadIcon);
 export const IconCode = defineIcon("code", SourceCodeIcon);
+export const IconCompass = defineIcon("compass", CompassIcon);
 export const IconCopy = defineIcon("copy", Copy01Icon);
 export const IconCornerDownLeft = defineIcon(
   "corner-down-left",
@@ -428,6 +436,7 @@ export const IconFolderSearch = defineIcon("folder-search", FolderSearchIcon);
 export const IconGauge = defineIcon("gauge", DashboardSpeed01Icon);
 export const IconHandStop = defineIcon("hand-stop", HandIcon);
 export const IconHeartbeat = defineIcon("heartbeat", Pulse01Icon);
+export const IconHierarchy2 = defineIcon("hierarchy-2", HierarchyIcon);
 export const IconHelpCircle = defineIcon("help-circle", HelpCircleIcon);
 export const IconHistory = defineIcon("history", HistoryIcon);
 export const IconHome = defineIcon("home", Home01Icon);
@@ -570,6 +579,8 @@ export const IconTriangleSquareCircle = defineIcon(
 );
 export const IconUser = defineIcon("user", UserIcon);
 export const IconUserCheck = defineIcon("user-check", UserCheck01Icon);
+export const IconUserMinus = defineIcon("user-minus", UserMinus01Icon);
+export const IconUserPlus = defineIcon("user-plus", UserAdd01Icon);
 export const IconUserCircle = defineIcon("user-circle", UserCircleIcon);
 export const IconUserCog = defineIcon("user-cog", UserSettings01Icon);
 export const IconUserShield = defineIcon("user-shield", UserShield01Icon);

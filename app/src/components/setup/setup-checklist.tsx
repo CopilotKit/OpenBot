@@ -62,7 +62,7 @@ const PRODUCT = appConfig.brand.productName;
  * out of the app would not set it either.
  *
  * NO ALARM FOR WHAT A MEMBER CAN'T FIX. A member is told, in one neutral line, that their admin sets
- * a thing up: no amber or red pill, no "Required", and a summary that counts nothing. The pills and
+ * a thing up: no warning or destructive pill, no "Required", and a summary that counts nothing. The pills and
  * the counts are for the admin, who can act on them.
  */
 export function SetupChecklist({
@@ -208,7 +208,7 @@ export function memberSummaryOf(rows: SetupRow[]): string {
     : "Your admin sets up anything that isn't ready yet.";
 }
 
-/** The pill's words and colours: done green, a gap that blocks red, everything else amber. */
+/** The pill's words and colours: done in success, a gap that blocks in destructive, everything else in warning. */
 function pillFor(row: SetupRow) {
   if (row.status === "ready")
     return {

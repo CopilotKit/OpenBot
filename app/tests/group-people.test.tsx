@@ -33,9 +33,29 @@ afterEach(() => {
 
 let people: GroupFixture["people"] = [];
 const requests: string[] = [];
+/** What was searched for among the organization's members, in order. */
+const searched: string[] = [];
+const MEMBERS_PATH = "/api/v2/organizations/default/members";
+const member = (id: string, email: string, name: string | null) => ({
+  id,
+  email,
+  name,
+  image: null,
+  role: "member" as const,
+  joinedAt: "2026-11-01T09:00:00.000Z",
+  removable: true,
+  assignableRoles: [],
+});
+/** The organization's members: who can be added to a group. */
+const ORGANIZATION = [
+  member("me", "me@example.test", null),
+  member("u2", "alex@example.test", "Alex"),
+  member("u3", "sam@example.test", "Sam"),
+];
 function serving(initial: GroupFixture["people"]) {
   people = initial;
   requests.length = 0;
+  searched.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -66,6 +86,20 @@ function serving(initial: GroupFixture["people"]) {
         return noContent();
       }
       return problem(404, "Not found.");
+    }
+    // The organization's members, searched as a name or address is typed to add somebody.
+    const asked = new URL(url, "http://openbot.invalid");
+    if (asked.pathname === MEMBERS_PATH) {
+      searched.push(asked.searchParams.get("search") ?? "");
+      const typed = (asked.searchParams.get("search") ?? "").toLowerCase();
+      return Response.json({
+        members: ORGANIZATION.filter(
+          (one) =>
+            one.email.includes(typed) ||
+            one.name?.toLowerCase().includes(typed),
+        ),
+        nextCursor: null,
+      });
     }
     if (url === ME_PATH) {
       return meResponse({
@@ -128,20 +162,26 @@ test("the creator sees everyone and can take another person out", async () => {
   );
 });
 
-test("adding someone by email lists them without reopening the dialog", async () => {
-  serving([ME]);
+test("adding someone finds them among the organization's members as they type, and lists them without reopening the dialog", async () => {
+  serving([ME, ALEX]);
   const view = draw();
-  fireEvent.click(await view.findByRole("button", { name: "1 person" }));
+  fireEvent.click(await view.findByRole("button", { name: "2 people" }));
   const user = userEvent.setup({ document });
   await user.type(
-    await view.findByRole("textbox", { name: "Their email" }),
-    "sam@example.test",
+    await view.findByRole("combobox", { name: "Name or email" }),
+    "a",
   );
-  fireEvent.click(view.getByRole("button", { name: "Add" }));
+  // Alex is in the group already, and says so; Sam is offered.
+  const alex = await view.findByRole("option", { name: /^Alex,/ });
+  expect(alex.getAttribute("aria-disabled")).toBe("true");
+  expect(alex.textContent).toContain("In this group");
+  await user.click(await view.findByRole("option", { name: /^Sam,/ }));
   await waitFor(() =>
     expect(requests).toContain(
       'POST /api/v2/organizations/default/conversations/group-1/members {"email":"sam@example.test"}',
     ),
   );
   expect(await view.findByText("Sam")).toBeTruthy();
+  // Only the organization's own members were searched.
+  expect(searched).toContain("a");
 });

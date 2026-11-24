@@ -119,8 +119,12 @@ const moveFirst = move === "first";
 let finishUpdate;
 const updated = new Promise((resolve) => (finishUpdate = resolve));
 fake.finishUpdate = () => finishUpdate({ from: "1.1.3", to: "1.2.0", moved: true });
+// A relaunch whose image list something outside OpenBot deleted: Start refuses it as an unfinished
+// install, as start_stack does, and the window installs before it starts again. Offline here, so
+// that install fails and the window says so.
+const imageListGone = location.hash === "#image-list-gone";
 // Found running by the launch is a relaunch too: an installation set up and started before.
-const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead || Boolean(move);
+const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead || imageListGone || Boolean(move);
 const MOVE_APPS = [
   { appId: "gmail", appName: "Gmail", accountLabel: "sam@example.com", botNames: ["Inbox helper", "Standup"] },
   { appId: "slack", appName: "Slack", accountLabel: "Northwind" },
@@ -142,12 +146,13 @@ const MOVE_PREVIEW = {
     { kind: "settings", count: 1 },
   ],
   apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
-  footprintBytes: 20_200_000_000,
+  // \`#move-first\` is measured again once its update has added the new release's files.
+  footprintBytes: moveFirst ? 26_600_000_000 : 20_200_000_000,
   modelKeysAvailable: true,
 };
 function moveAnswer(command) {
   if (command === "move_offer")
-    return { due: true, fromSettings: move !== "choice" && !moveFirst, footprintBytes: 20_200_000_000 };
+    return { due: true, fromSettings: move !== "choice" && !moveFirst, footprintBytes: moveFirst ? 23_100_000_000 : 20_200_000_000 };
   if (command === "move_preview")
     return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
   if (command !== "move_to_cloud") return undefined;
@@ -184,6 +189,7 @@ function moveAnswer(command) {
     apps: MOVE_APPS,
     notes: move === "done" || move === "done-held" ? ["Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers."] : [],
     leftBehind: move === "done-left" ? ["Some of OpenBot's software is still on this computer. Restart your computer to finish removing it."] : [],
+    account: { email: "sam.longname-for-wrapping@example.com", organization: "Sam's organization" },
   };
 }
 const signingIn = location.hash === "#signin";
@@ -220,6 +226,10 @@ fake.calls = [];
 fake.opened = [];
 export async function invoke(command, args) {
   fake.calls.push(command);
+  // \`?throws\`: the update offer is handed an answer it can't draw, this app's version as an
+  // object, so a screen fails to draw as any might.
+  if (location.search === "?throws" && command === "app_update_offer")
+    return { version: "1.3.0", current: { broken: true }, installing: null, updatesItself: true, ready: null };
   if (command === "plugin:opener|open_url") fake.opened.push(args.url);
   if (connectedProblem && command === "connection")
     return { mode: "connected", address: "https://openbot.example.com", signedIn: true };
@@ -262,7 +272,7 @@ export async function invoke(command, args) {
           }
         : { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
     case "upgrade_due":
-      return relaunch && !localTooOld && !runningTooOld && !launcherAhead ? { from: "1.0.0", to: "1.0.1" } : null;
+      return relaunch && !localTooOld && !runningTooOld && !launcherAhead && !imageListGone ? { from: "1.0.0", to: "1.0.1" } : null;
     case "upgrade_and_start":
       if (updateShort)
         throw {
@@ -292,6 +302,14 @@ export async function invoke(command, args) {
         return new Promise(() => {});
       }
       emit("setup:progress", { step: "engine", ok: true, running: false, detail: "The software OpenBot runs on is ready." });
+      // Offline, so the install Start asked for cannot download the list again.
+      if (imageListGone) {
+        emit("setup:progress", { step: "deployment", ok: false, running: false, detail: "could not fetch the image list for v1.1.2: error sending request" });
+        throw {
+          said: "OpenBot could not download what it needs to run. Check the internet connection and try again.",
+          detail: "could not fetch the image list for v1.1.2: error sending request",
+        };
+      }
       return installing ? installed : new Promise((resolve) => setTimeout(() => resolve(null), 50));
     case "sign_in_to_copilotkit":
       if (slowCheck) return new Promise((resolve) => setTimeout(() => resolve({ signedIn: true }), 1500));
@@ -327,6 +345,12 @@ export async function invoke(command, args) {
     // when the window is about to find it needs a newer app. Refused, when the release laid out
     // needs a newer launcher contract than this app speaks.
     case "start_stack":
+      if (imageListGone)
+        throw {
+          said: "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.",
+          detail: "The image list /Users/you/OpenBot/container-images.json is missing. Install downloads it again.",
+          connection: "installation",
+        };
       if (launcherAhead)
         throw {
           said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
@@ -2163,6 +2187,68 @@ describe.skipIf(!asked)("an update this computer has no room for", () => {
       }, 40_000);
 });
 
+/*
+ * An image list something outside OpenBot deleted. Start used to say "This version of OpenBot does
+ * not include the Bot you picked. Go back and choose another, or update OpenBot.", and every Retry
+ * failed the same way. Start says it is an unfinished install now, so the window runs Install by
+ * itself (which downloads only the list again) before it starts. Offline here, so that install
+ * fails: the window is on Installing OpenBot with the download row failed and Retry installation,
+ * and says nothing about the Bot. `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot, light and dark.
+ */
+describe.skipIf(!asked)("a Start whose image list is gone", () => {
+  for (const colorScheme of ["light", "dark"] as const)
+    test(`installs again by itself, and offline says the download failed, not the Bot (${colorScheme})`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 800 },
+        colorScheme,
+      });
+      try {
+        await open(page, "#image-list-gone");
+        await page
+          .getByRole("button", { name: "Retry installation", exact: true })
+          .waitFor();
+        await page.waitForTimeout(600);
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/image-list-gone-${colorScheme}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}.png`,
+          });
+        const seen = await page.evaluate(() => {
+          const calls = (
+            globalThis as unknown as { __fake: { calls: string[] } }
+          ).__fake.calls;
+          const text = document.querySelector("main")?.textContent ?? "";
+          const failed = [...document.querySelectorAll("main li")].filter(
+            (row) => row.textContent?.includes("Failed"),
+          );
+          return {
+            heading: document.querySelector("main h1")?.textContent,
+            failedRows: failed.length,
+            failedDownload: failed.some((row) =>
+              row.textContent?.includes("Downloading OpenBot"),
+            ),
+            blamesTheBot: text.includes("does not include"),
+            saysDidNotStart: text.includes("did not start"),
+            starts: calls.filter((call) => call === "start_stack").length,
+            installs: calls.filter((call) => call === "prepare_installation")
+              .length,
+          };
+        });
+        expect(seen).toEqual({
+          heading: "Installing OpenBot",
+          failedRows: 1,
+          failedDownload: true,
+          blamesTheBot: false,
+          saysDidNotStart: false,
+          starts: 1,
+          installs: 1,
+        });
+      } finally {
+        await page.close();
+      }
+    }, 40_000);
+});
+
 /** Opens a relaunch whose Start updates OpenBot, at its last step, OpenBot opening. */
 async function toStart(page: Page) {
   await open(page, "#start");
@@ -3700,6 +3786,61 @@ describe.skipIf(!asked)(
       }
     }, 40_000);
 
+    /*
+     * FOUND IN A MAC UPGRADE CHECK of 1.2: the choice said the move removes about 23.1 GB and the
+     * next screen 26.6 GB, measured after the update added the new release's files. The choice says
+     * no figure while the update is still to come, and the next screen says the updated one only.
+     */
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`one size for what the move removes, from the updated OpenBot (${colorScheme})`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 1000, height: 760 },
+          colorScheme,
+        });
+        const sized = async (name: string) => {
+          await page.mouse.move(0, 0);
+          await page.waitForTimeout(500);
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/move-first-size-${name}-${colorScheme}-${engine}.png`,
+            });
+          return page.evaluate(() => document.body.innerText);
+        };
+        try {
+          await open(page, "#move-first", cloudBuilt);
+          await page
+            .getByRole("heading", {
+              name: "Move to OpenBot Cloud?",
+              exact: true,
+            })
+            .waitFor();
+          const choice = await sized("choice");
+          await page.getByRole("button", { name: "Continue" }).click();
+          await page
+            .getByText(
+              "Getting your Bots ready to move. This can take a few minutes.",
+            )
+            .waitFor();
+          const ready = await sized("getting-ready");
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as {
+                __fake: { finishUpdate: () => void };
+              }
+            ).__fake.finishUpdate(),
+          );
+          await page.getByRole("list", { name: "What moves" }).waitFor();
+          const confirm = await sized("confirm");
+          expect(choice).toContain("move to your OpenBot Cloud account.");
+          expect(choice).not.toContain("GB");
+          expect(ready).not.toContain("GB");
+          expect(confirm).toContain("Removes about 26.6 GB of OpenBot files.");
+          expect(confirm).not.toContain("23.1 GB");
+        } finally {
+          await page.close();
+        }
+      }, 40_000);
+
     test("Keep: asked before any update, then the update runs as before and OpenBot opens", async () => {
       const page = await browser.newPage({
         viewport: { width: 1000, height: 760 },
@@ -3749,3 +3890,70 @@ describe.skipIf(!asked)(
     }, 40_000);
   },
 );
+
+/*
+ * FOUND ON 1.2.0-rc.3, a Mac, after an update: the setup window stayed a plain ground with nothing
+ * on it, across two launches, while its page's code still ran. A screen that failed to draw took
+ * every screen with it, leaving only the ground behind them. Now it shows "OpenBot hit a problem"
+ * on the setup window's own failure box, with Reload and the logs, readable in light and dark.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each.
+ */
+describe.skipIf(!asked)("a screen that fails to draw", () => {
+  for (const colorScheme of ["light", "dark"] as const)
+    test(`shows OpenBot hit a problem, never the bare ground (${colorScheme})`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 800 },
+        colorScheme,
+      });
+      try {
+        await open(page, "?throws");
+        await page
+          .getByRole("heading", { name: "OpenBot hit a problem" })
+          .waitFor();
+        await page.waitForTimeout(300);
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/page-problem-${colorScheme}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}.png`,
+          });
+        const seen = await page.evaluate(() => {
+          const shown = (selector: string) => {
+            const element = document.querySelector(selector);
+            const rect = element?.getBoundingClientRect();
+            const style = element ? getComputedStyle(element) : null;
+            return Boolean(
+              rect &&
+                rect.width > 0 &&
+                rect.height > 0 &&
+                rect.bottom <= window.innerHeight &&
+                style?.visibility !== "hidden" &&
+                style?.color !== style?.backgroundColor,
+            );
+          };
+          const buttons = [...document.querySelectorAll("main button")].map(
+            (button) => button.textContent,
+          );
+          return {
+            // What a person reads, as the browser lays it out: not the bare ground.
+            text: (document.getElementById("root") as HTMLElement).innerText,
+            sheet: shown("main .sheet"),
+            heading: shown("main h1"),
+            box: shown("main .blocker"),
+            buttons,
+          };
+        });
+        expect(seen.text).toContain("OpenBot hit a problem");
+        expect(seen.text).toContain(
+          "This window stopped working. Reload it to carry on.",
+        );
+        expect(seen.sheet).toBe(true);
+        expect(seen.heading).toBe(true);
+        expect(seen.box).toBe(true);
+        expect(seen.buttons).toEqual(["Reload", "Copy logs", "Save to a file"]);
+        // The error reached the shell, for the Desktop log.
+        expect(await calls(page)).toContain("page_error");
+      } finally {
+        await page.close();
+      }
+    });
+});

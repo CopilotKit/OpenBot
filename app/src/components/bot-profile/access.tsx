@@ -459,10 +459,10 @@ function Granted({
                      */}
                     <ItemDescription className="line-clamp-none">
                       {app.state === "ready"
-                        ? [appAccessSentence(app, undefined, edition)]
+                        ? [appAccessSentence(app, undefined, edition, admin)]
                             .concat(labels.length > 0 ? [toolList(labels)] : [])
                             .join(" ")
-                        : appAccessSentence(app, undefined, edition)}
+                        : appAccessSentence(app, undefined, edition, admin)}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>

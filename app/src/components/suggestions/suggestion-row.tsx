@@ -22,6 +22,7 @@ import {
   resolveSuggestionMutationOptions,
   sourceSite,
 } from "@/lib/proactive";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
 
@@ -74,7 +75,11 @@ export function SuggestionRow({
         <>
           <Button
             disabled={act.isPending}
-            onClick={() => act.mutate({ id: suggestion.id, action: "start" })}
+            onClick={() => {
+              // Bots can't run until a card is added: the dialog says why, in place of a run.
+              if (stopIfNeedsCard()) return;
+              act.mutate({ id: suggestion.id, action: "start" });
+            }}
             size="sm"
             variant="outline"
           >

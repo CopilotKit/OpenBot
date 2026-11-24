@@ -97,8 +97,10 @@ paths:
       operationId: updateOrganizationSettings
       summary: Change the organization's settings
       description: >-
-        Change the settings sent and keep the rest. Each change is recorded on
-        the audit trail with what it was before. Requiring single sign-on needs
+        Change the settings sent and keep the rest. The settings sent are saved
+        all or none: if any one is refused, none is saved. context is
+        read-only, and sending it answers 400 with nothing saved. Each change
+        is recorded on the audit trail with what it was before. Requiring single sign-on needs
         an identity provider registered first, and signs out everybody who
         signed in another way, apart from the administrators the deployment's
         configuration names and the caller. Where this OpenBot may keep more

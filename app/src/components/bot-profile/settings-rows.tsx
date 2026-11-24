@@ -188,7 +188,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       icon: SETUP.icon,
       summary: setupSummary(agent, personal ? "personal" : "team"),
     },
-    // No Agents row: Agents are hidden for now (routes/_authed/_app/bots.$agentId.agents.tsx).
+    // No Agents row: a person has Bots, and nothing called an agent.
     ...(canShare
       ? [
           {

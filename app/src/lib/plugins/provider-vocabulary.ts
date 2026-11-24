@@ -1,4 +1,5 @@
 import type { AppSetup } from "@/lib/api/generated/model";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
 
 /**
  * The words an admin Plugins screen uses for the directory's ACTIVE service, and nothing of the
@@ -101,22 +102,40 @@ export function directoryReadFailure(_provider: PluginsProvider): string {
 /**
  * The directory screen's own two sentences: its description and its search section's.
  *
- * Adding an app there connects nobody, in either edition. In the team edition each person connects
- * their own account afterwards; in the personal one, the one person does, on the app's page.
+ * `reader` is the edition, or, in the team edition opened from Connections, what a press does there:
+ * an admin adds the app for everyone and connects their own account (`connect`), and a member asks an
+ * admin for it (`request`). Opened from Admin (`team`), adding connects nobody: each person connects
+ * their own account afterwards.
  */
-export function directoryDescriptions(edition: Edition = "team"): {
+export function directoryDescriptions(
+  reader: Edition | "connect" | "request" = "team",
+): {
   page: string;
   search: string;
 } {
-  return edition === "personal"
-    ? {
+  const search = "Search by name. Nobody here has reviewed these apps.";
+  switch (reader) {
+    case "personal":
+      return {
         page: "Add an app and connect your account so your Bots can use it.",
         search: "Search by name. OpenBot hasn't reviewed these apps.",
-      }
-    : {
-        page: "Add an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
-        search: "Search by name. Nobody here has reviewed these apps.",
       };
+    case "connect":
+      return {
+        page: "Add an app for everyone in your organization and connect your own account.",
+        search,
+      };
+    case "request":
+      return {
+        page: "Find an app and ask an admin to add it. Once it's added, connect your own account.",
+        search,
+      };
+    default:
+      return {
+        page: "Add an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
+        search,
+      };
+  }
 }
 
 /**
@@ -190,7 +209,7 @@ export function brokeredConnectionDescription(
     return "Each person connects their own account through OpenBot.";
   if (personal.kind === "no-auth")
     return `${capitalised(personal.title)} works through OpenBot without an account.`;
-  return `Connect your ${personal.title} account through OpenBot.`;
+  return `Connect your ${vendorNameOf(personal.title)} account through OpenBot.`;
 }
 
 /**
@@ -229,7 +248,7 @@ export function brokeredReach(
       kind === "consent"
         ? `You sign in to ${title} in your browser. OpenBot never sees your password.`
         : kind === "fields"
-          ? `You connect with a key from your ${title} account. Your Bots use it as you.`
+          ? `You connect with a key from your ${vendorNameOf(title)} account. Your Bots use it as you.`
           : "There's nothing to sign in to.",
     badge,
   };

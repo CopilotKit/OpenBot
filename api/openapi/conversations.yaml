@@ -788,6 +788,65 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/refused-turns:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/ConversationId'
+    get:
+      tags: [Conversations]
+      operationId: listRefusedTurns
+      summary: List the caller's turns in a conversation that were refused
+      description: >-
+        Return one page of the caller's own turns in the conversation that
+        were refused before they ran, newest first: a model they may not run
+        (MODEL_NOT_ALLOWED), a permission they don't have
+        (CAPABILITY_REQUIRED), no OpenBot plan (PLAN_REQUIRED). Each says what
+        the turn was for (the person's message, or what a routine or a task
+        asked) and why it was refused, in the words the refusal said. Nothing
+        of a refused turn reaches the conversation's thread, so a client
+        draws these into the transcript itself: each after the message named
+        by afterMessageId, or after the thread's messages where that is null.
+        botId narrows the list to one Bot's. A missing cursor starts at the
+        newest page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [conversations:read]
+        - apiKey: []
+      parameters:
+        - name: botId
+          in: query
+          description: Only the turns of this Bot. Leave it out for every Bot's.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of refused turns.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefusedTurnPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/RefusedTurnPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/ConversationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/attachments:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
@@ -891,6 +950,8 @@ paths:
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
+        '402':
+          $ref: './common.yaml#/components/responses/PlanRequired'
         '403':
           $ref: './common.yaml#/components/responses/Forbidden'
         '404':
@@ -1499,6 +1560,8 @@ paths:
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
+        '402':
+          $ref: './common.yaml#/components/responses/PlanRequired'
         '403':
           $ref: './common.yaml#/components/responses/Forbidden'
         '404':
@@ -2565,6 +2628,97 @@ components:
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written
             in URL-safe base64, the only form the cursor parameter accepts.
+    RefusedTurn:
+      type: object
+      description: >-
+        One of the caller's turns that was refused before it ran, so nothing of
+        it is in the conversation's thread: what it was for, and why.
+      required:
+        - id
+        - botId
+        - threadId
+        - afterMessageId
+        - message
+        - initiator
+        - code
+        - detail
+        - model
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The refused turn's id. Opaque.
+        botId:
+          type: string
+          description: The Bot the turn was for.
+        threadId:
+          type: string
+          description: The thread the turn would have run in.
+        afterMessageId:
+          type: [string, 'null']
+          description: >-
+            The id of the thread's message the turn came after, as the app that
+            sent it held the thread. Null where nothing says (a routine's or a
+            task's turn, or the first turn of a thread): draw it after the
+            thread's messages.
+        message:
+          oneOf:
+            - $ref: '#/components/schemas/RefusedTurnMessage'
+            - type: 'null'
+          description: >-
+            What the turn was for: the person's message, or what a routine or a
+            task asked. Null when nothing was said.
+        initiator:
+          type: string
+          x-extensible-enum: [person, routine, task]
+          description: >-
+            Who started the turn: the person (person), a routine, check-in or
+            goal (routine), or a task a Bot handed the work to (task).
+        code:
+          type: string
+          x-extensible-enum: [MODEL_NOT_ALLOWED, CAPABILITY_REQUIRED, PLAN_REQUIRED]
+          description: Why it was refused, as the refusal's problem code.
+        detail:
+          type: string
+          description: The refusal, in the words the person was told.
+        model:
+          type: [string, 'null']
+          description: >-
+            The model it was refused on, as provider/model, for
+            MODEL_NOT_ALLOWED. Null otherwise.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was refused.
+    RefusedTurnMessage:
+      type: object
+      description: The message a refused turn was for.
+      required: [id, text]
+      properties:
+        id:
+          type: [string, 'null']
+          description: >-
+            The message's id, as the app that sent it named it. Null for what a
+            routine or a task asked.
+        text:
+          type: string
+          description: What it said.
+    RefusedTurnPage:
+      type: object
+      required: [refusedTurns, nextCursor]
+      properties:
+        refusedTurns:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/RefusedTurn'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
     SendConversationMessageRequest:
       type: object
       required:
@@ -3430,6 +3584,23 @@ components:
                 requestId: req_example
                 traceId: trace_example
   examples:
+    RefusedTurnPageLast:
+      summary: A message refused on a model the person's team doesn't allow.
+      value:
+        refusedTurns:
+          - id: 6f1c2b7e-3a4d-4e9b-8c21-5d0a9e7f4b13
+            botId: research-assistant
+            threadId: thread_9k2m
+            afterMessageId: msg_7d1e
+            message:
+              id: msg_8a2f
+              text: Summarize the Q3 pipeline.
+            initiator: person
+            code: MODEL_NOT_ALLOWED
+            detail: This Bot uses GPT-4.1, which your team's models don't include. Ask an admin to change your team's models.
+            model: openai/gpt-4.1
+            createdAt: '2026-11-23T16:20:05.000Z'
+        nextCursor: null
     ReactionPageLast:
       summary: Every reaction in a conversation, on one page.
       value:

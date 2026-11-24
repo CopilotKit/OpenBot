@@ -1,20 +1,4 @@
-import type { PlanStatus } from "./queries";
-
-const DAY = 24 * 60 * 60 * 1000;
-
-/** Whole days left before `end`, counting a part day as one; never below zero. */
-export function daysLeft(end: string, now: Date = new Date()): number {
-  const left = new Date(end).getTime() - now.getTime();
-  if (!Number.isFinite(left) || left <= 0) return 0;
-  return Math.ceil(left / DAY);
-}
-
-/** "Free trial, 23 days left", "Free trial, 1 day left", "Free trial ends today". */
-export function trialLeft(end: string, now: Date = new Date()): string {
-  const days = daysLeft(end, now);
-  if (days === 0) return "Free trial ends today";
-  return `Free trial, ${days} ${days === 1 ? "day" : "days"} left`;
-}
+import { type PlanStatus, trialUsedUp } from "./queries";
 
 /** The date in the person's own words: "20 Dec 2026". */
 function onDate(at: string): string {
@@ -24,6 +8,9 @@ function onDate(at: string): string {
     year: "numeric",
   });
 }
+
+/** What OpenBot costs once the free trial is used up, as every screen says it. */
+export const PRICE = "$5 a month for each member of this organization";
 
 /** The button that takes an admin to add or update the card. */
 export function cardAction(plan: PlanStatus): string {
@@ -40,16 +27,27 @@ export function blockedNotice(plan: PlanStatus): string {
     return admin
       ? "Your last payment didn't go through, so Bots can't run. Update your card to carry on."
       : "Bots can't run until an admin updates this organization's card.";
+  /*
+   * As the server begins its refusal of a run, so the bar, the refused turn and the dialog say the
+   * same thing. The price is the dialog's to say (`PRICE`): here it would take the bar onto a
+   * second line over every page.
+   */
   return admin
-    ? "Add a card to start your 30-day free trial. Bots can't run until you do."
-    : "Bots can't run until an admin adds a card to this organization.";
+    ? "You've used your free trial. Add a card to keep your Bots running."
+    : "You've used your free trial. Ask an admin to add a card to keep your Bots running.";
+}
+
+/** "42% used": how much of the free trial is gone, never the count or the cap. */
+export function trialUsed(percent: number): string {
+  return `${Math.min(100, Math.max(0, Math.round(percent)))}% used`;
 }
 
 /** What the Plan row on the organization's settings says about where it stands. */
-export function planSummary(plan: PlanStatus, now: Date = new Date()): string {
+export function planSummary(plan: PlanStatus): string {
   switch (plan.status) {
+    case "free":
     case "trialing":
-      return plan.trialEndsAt ? trialLeft(plan.trialEndsAt, now) : "Free trial";
+      return "Free trial";
     case "active":
       return plan.renewsAt
         ? `Active, renews ${onDate(plan.renewsAt)}`
@@ -57,8 +55,51 @@ export function planSummary(plan: PlanStatus, now: Date = new Date()): string {
     case "past_due":
       return "Last payment failed";
     case "none":
-      return "No plan yet";
+      return trialUsedUp(plan) ? "Free trial used up" : "No plan yet";
     default:
       return "Couldn't check the plan just now";
   }
+}
+
+/** What the dialog that stops an AI action says, for the plan that stopped it. */
+export type StoppedWords = {
+  title: string;
+  /** What happened, and what it costs from here. */
+  said: string;
+  /** What the reader does next: add the card, or ask who can. */
+  next: string;
+};
+
+/**
+ * The dialog's words. Once the free trial is used up it names the allowance the server sent
+ * (`freeRunsAllowance`, never sent before then), says what OpenBot costs from here, and tells an
+ * admin to add a card and a member who to ask. A failed payment says so instead.
+ */
+export function stoppedWords(
+  plan: PlanStatus | undefined,
+  /** Where the reader adds a card: only an owner or an admin is sent one. */
+  addCardUrl: string | null | undefined = plan?.addCardUrl,
+): StoppedWords {
+  const admin = Boolean(addCardUrl);
+  if (plan?.status === "past_due")
+    return {
+      title: "Your last payment didn't go through",
+      said: "Bots can't run until this organization's card is updated.",
+      next: admin
+        ? "Update the card to keep your Bots running."
+        : "Ask an admin of this organization to update the card.",
+    };
+  const allowance = plan?.freeRunsAllowance;
+  // The title as the bar and the server's refusal begin, so the three read as one.
+  return {
+    title: "You've used your free trial",
+    said: `${
+      typeof allowance === "number"
+        ? `Your free trial was ${allowance.toLocaleString()} Bot runs, and they're all used.`
+        : "All the Bot runs in your free trial are used."
+    } From now on, OpenBot is ${PRICE}.`,
+    next: admin
+      ? "Add a card to keep your Bots running."
+      : "Ask an admin of this organization to add a card.",
+  };
 }

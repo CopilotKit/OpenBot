@@ -50,6 +50,10 @@ import {
   TurnInFlightContext,
 } from "@/components/gallery/streaming";
 import { AddCardButton } from "@/components/plan/add-card-button";
+import {
+  SettingsToolCall,
+  settingsToolCardFor,
+} from "@/components/settings-tools/settings-tool-card";
 import { reportsUnderTheirCards } from "@/components/tasks/report-under-card";
 import { SteerLanded } from "@/components/tasks/task-steer";
 import {
@@ -70,12 +74,20 @@ import {
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+} from "@/components/ui/item";
+import {
   MessageContent,
   MessageFooter,
   MessageHeader,
   Message as MessageRow,
 } from "@/components/ui/message";
 import {
+  conversationFitsInView,
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
@@ -215,6 +227,13 @@ type ChatTranscriptProps = {
    */
   stopped?: string;
   /**
+   * The turns the server refused for the person, by the id of the person's message each answered:
+   * the sentence it said. Each is drawn under its own message, as `stopped` is under the last, and
+   * stays there when a later turn is sent. A refusal is not the last turn's state but a fact about
+   * that message, so a second refusal must not take the first one's notice away.
+   */
+  refusals?: ReadonlyMap<string, string>;
+  /**
    * Carry on with a turn that was cut off part way, drawn as a button beside `stopped`. Absent for
    * a turn that ended for a reason carrying on would not fix (a refusal, a Bot no longer shared).
    */
@@ -229,6 +248,14 @@ type ChatTranscriptProps = {
 
 /** One shared empty array, so a screen without a queue does not hand down a new one per render. */
 const EMPTY_QUEUE: readonly QueuedMessage[] = [];
+const NO_REFUSALS: ReadonlyMap<string, string> = new Map();
+
+/** The person's message a row is part of: a message's attachments row is `<id>:attachments`. */
+function personMessageOf(rowId: string): string {
+  return rowId.endsWith(":attachments")
+    ? rowId.slice(0, -":attachments".length)
+    : rowId;
+}
 
 /**
  * The `/` commands handed to the transcript, from each command to the skill's name.
@@ -341,6 +368,53 @@ function Thinking() {
 }
 
 /**
+ * Whether the whole conversation is in view (`conversationFitsInView`), measured again whenever the
+ * view's size changes or a row is drawn, grows or goes, at most once a frame. A streamed reply
+ * changes its text many times a second; the frame keeps that to one measure per paint.
+ */
+function useAllInView(
+  viewportRef: React.RefObject<HTMLDivElement | null>,
+  /** While history loads there is no view yet; it is looked for again once there is. */
+  restoring: boolean,
+): boolean {
+  const [allInView, setAllInView] = useState(false);
+  useEffect(() => {
+    if (restoring) return;
+    const viewport = viewportRef.current;
+    const content = viewport?.querySelector<HTMLElement>(
+      "[data-slot=message-scroller-content]",
+    );
+    if (!viewport || !content) return;
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() =>
+        setAllInView(conversationFitsInView(content)),
+      );
+    };
+    measure();
+    const resized =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    resized?.observe(viewport);
+    resized?.observe(content);
+    const changed = new MutationObserver(measure);
+    changed.observe(content, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      resized?.disconnect();
+      changed.disconnect();
+    };
+  }, [viewportRef, restoring]);
+  return allInView;
+}
+
+/**
  * The turn ended and no answer came.
  *
  * In the same slot as `Thinking`, and for the same reason it is there: the person is looking at the
@@ -361,27 +435,51 @@ function Stopped({
   /** A turn cut off part way can be carried on from here. See `onCarryOn` on the transcript. */
   onCarryOn?: () => void;
 }) {
+  /*
+   * The app's notice: one outlined row, its icon in the media tile, the sentence in the foreground
+   * where it reads as words rather than as an error code in red, and the one way on beside it (on a
+   * phone, under it). Drawn as plain red text it read as a fault in the screen, not as something the
+   * person could act on.
+   */
   return (
-    <div
-      className="flex flex-col items-start gap-2"
+    <Item
+      /*
+       * Card-filled, and framed in both themes as every card in a conversation is (the help-request
+       * card, `dark:border-border`): an outlined row drops its border in dark, and there the notice
+       * read as a filled block with no edge.
+       */
+      className="w-full bg-card dark:border-border"
       data-testid="transcript-stopped"
+      size="sm"
+      variant="outline"
     >
-      <p className="text-destructive text-sm" role="alert">
-        {reason}
-      </p>
-      {onCarryOn ? (
-        <Button onClick={onCarryOn} size="sm" variant="outline">
-          Carry on
-        </Button>
-      ) : (
-        <>
-          {/* A run refused because the organization needs a card is answered where it was refused. */}
-          <AddCardButton />
-          {/* And one with no model key, for an admin who can add it. */}
-          <AddModelKeyLink reason={reason} />
-        </>
-      )}
-    </div>
+      <ItemMedia variant="icon">
+        <IconAlertTriangle className="text-destructive" />
+      </ItemMedia>
+      <ItemContent className="min-w-0">
+        <ItemDescription
+          className="line-clamp-none text-foreground text-sm"
+          role="alert"
+        >
+          {reason}
+        </ItemDescription>
+      </ItemContent>
+      {/* Nothing drawn when there is no way on: the actions below render nothing then. */}
+      <ItemActions className="empty:hidden max-sm:basis-full">
+        {onCarryOn ? (
+          <Button onClick={onCarryOn} size="sm" variant="outline">
+            Carry on
+          </Button>
+        ) : (
+          <>
+            {/* A run refused because the organization needs a card is answered where it was refused. */}
+            <AddCardButton />
+            {/* And one with no model key, for an admin who can add it. */}
+            <AddModelKeyLink reason={reason} />
+          </>
+        )}
+      </ItemActions>
+    </Item>
   );
 }
 
@@ -793,7 +891,14 @@ function Arriving({
  * what a routine already is everywhere else in the app; and the instruction ALONE, because that is
  * the part a person wrote and the only part addressed to them.
  */
-function RoutineFiring({ instruction }: { instruction: string }) {
+function RoutineFiring({
+  instruction,
+  refused = false,
+}: {
+  instruction: string;
+  /** Refused before it ran (its notice is under it): it didn't run, so it doesn't say it did. */
+  refused?: boolean;
+}) {
   const responsibility = readResponsibilityTurn(instruction);
   if (responsibility) {
     return <ResponsibilityFiring raw={instruction} turn={responsibility} />;
@@ -802,7 +907,9 @@ function RoutineFiring({ instruction }: { instruction: string }) {
     <div className="flex min-w-0 items-baseline gap-2 text-muted-foreground text-sm">
       <IconClock aria-hidden className="size-4 shrink-0 translate-y-0.5" />
       <span className="min-w-0">
-        <span className="font-medium">Routine ran.</span>{" "}
+        <span className="font-medium">
+          {refused ? "Routine didn't run." : "Routine ran."}
+        </span>{" "}
         <span className="whitespace-pre-wrap">{instruction}</span>
       </span>
     </div>
@@ -879,9 +986,12 @@ const TranscriptMessage = memo(function TranscriptMessage({
   threadId,
   messageId,
   underItsCard = false,
+  refused = false,
 }: {
   commandLabels?: string;
   role: "user" | "assistant";
+  /** The turn this message asked for was refused before it ran: a routine's says it didn't run. */
+  refused?: boolean;
   /** A task's result drawn directly under that task's card. See `reportsUnderTheirCards`. */
   underItsCard?: boolean;
   /** The people and channels this conversation's Slack steps named, for mentions in the reply. */
@@ -932,7 +1042,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
       <MessageRow align="start">
         <MessageContent>
           <Arriving>
-            <RoutineFiring instruction={firing} />
+            <RoutineFiring instruction={firing} refused={refused} />
           </Arriving>
         </MessageContent>
       </MessageRow>
@@ -1583,12 +1693,17 @@ const ToolCallBody = memo(function ToolCallBody({
           <InlineApproval
             toolCallId={toolCallId}
             fallback={
-              <ServerToolLine
-                args={args}
-                name={name}
-                place={{ toolCallId, latest }}
-                result={result}
-              />
+              // OpenBot settings' tools draw their own cards (components/settings-tools).
+              settingsToolCardFor(name) ? (
+                <SettingsToolCall args={args} name={name} result={result} />
+              ) : (
+                <ServerToolLine
+                  args={args}
+                  name={name}
+                  place={{ toolCallId, latest }}
+                  result={result}
+                />
+              )
             }
           />
         )}
@@ -2062,6 +2177,7 @@ export function ChatTranscript({
   queued = EMPTY_QUEUE,
   restoring = false,
   stopped,
+  refusals = NO_REFUSALS,
   onCarryOn,
   working,
 }: ChatTranscriptProps) {
@@ -2191,6 +2307,8 @@ export function ChatTranscript({
          */
         item.kind === "attachments",
     )?.id ?? null;
+  /* Whether every turn is already in view, when the rail of turns has nowhere to take anybody. */
+  const allInView = useAllInView(viewportRef, restoring);
   /* Whether the view follows a streaming reply; see `follow-intent`. */
   const follow = useFollowIntent(viewportRef, restoring);
   const { dispatch: dispatchFollow } = follow;
@@ -2465,6 +2583,22 @@ export function ChatTranscript({
    * What one row draws, without the scroller's wrapper: drawn on its own below, and inside a task
    * turn's "Worked for" row when it folds there (`foldTurnWork`).
    */
+  /*
+   * Each refused message's notice goes under its last row (its words, or its attachments when it
+   * has no words), by row id. A refusal whose message isn't drawn here draws nothing.
+   */
+  const refusedUnder = new Map<string, string>();
+  if (refusals.size > 0) {
+    const lastRow = new Map<string, string>();
+    for (const item of items)
+      if (item.kind === "text" || item.kind === "attachments")
+        lastRow.set(personMessageOf(item.id), item.id);
+    for (const [messageId, sentence] of refusals) {
+      const row = lastRow.get(messageId);
+      if (row !== undefined) refusedUnder.set(row, sentence);
+    }
+  }
+
   const rowContent = (item: TranscriptItem, index: number) =>
     item.kind === "tools" || item.kind === "tool" ? (
       <ToolRow
@@ -2486,6 +2620,7 @@ export function ChatTranscript({
         role={item.role}
         slackNames={slackNames}
         underItsCard={underTheirCards.has(item.id)}
+        refused={refusedUnder.has(item.id)}
         streaming={
           busy && item.role === "assistant" && index === items.length - 1
         }
@@ -2529,6 +2664,8 @@ export function ChatTranscript({
         </MessageScrollerItem>
       );
     if (taskWork.folds.inside.has(item.id)) return null;
+    // A refused turn's notice, under the last row of the person's message it answered.
+    const refusal = refusedUnder.get(item.id);
     return (
       <MessageScrollerItem
         key={item.id}
@@ -2541,6 +2678,16 @@ export function ChatTranscript({
         {...openingProps(item.id)}
       >
         {rowContent(item, index)}
+        {/*
+         * Inside the message's own row, not a row of its own: the scroller counts its rows by
+         * position, and a row added beside a message would read as a new one arriving. The gap is
+         * the column's own (`gap-6`), so it sits as the live notice does.
+         */}
+        {refusal !== undefined ? (
+          <div className="mt-6">
+            <Stopped reason={refusal} />
+          </div>
+        ) : null}
       </MessageScrollerItem>
     );
   };
@@ -2696,7 +2843,17 @@ export function ChatTranscript({
                 onQueued={followOnQueued}
               />
               <FollowScroll request={follow.request} />
-              <TranscriptRail active={activeTurn} onJump={jump} turns={turns} />
+              {/*
+               * Not while every turn is in view: beside two short turns its marks read as a stray
+               * dash in the margin, and choosing one moved nothing.
+               */}
+              {allInView ? null : (
+                <TranscriptRail
+                  active={activeTurn}
+                  onJump={jump}
+                  turns={turns}
+                />
+              )}
             </MessageScroller>
           </MessageScrollerProvider>
         </LateRenderersContext.Provider>

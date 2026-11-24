@@ -10,15 +10,10 @@
 :root {
   color-scheme: light;
   /*
-   * OpenBot's own look, the November 2026 redesign (Figma "Master screens"), in shadcn's tokens only
-   * so a stock shadcn theme still drops in. Three surfaces, darkest to lightest: the frame (the
-   * sidebar's cool gray, Figma's `--sidebar/bg`, which also backs a row's icon tile), the pale page
-   * (`--bg-secondary`), and the white cards on it. Text and the primary button are Figma's near-black
-   * ink (`--text-primary`); secondary text and borders are that ink at 60% and 8%, so they read the
-   * same on the page, a card and a tile. The pale fills are the secondary button (`#f1f2f7`) and the
-   * chips (`#eff2f6`); `--input` is the pale blue-gray Figma gives a switch that is off. The ring
-   * stays CopilotKit's periwinkle.
+   * The colors are OpenBot's one scheme, written here from tokens/src/scheme.ts, where each one's
+   * light and dark value and what it means live. Change a color there, never here.
    */
+  /* tokens/src/scheme.ts, light: all (bun run tokens:generate) */
   --background: oklch(0.985 0 0);
   --foreground: oklch(0.172 0.007 258.4);
   --card: oklch(1 0 0);
@@ -35,6 +30,7 @@
   --accent-foreground: oklch(0.172 0.007 258.4);
   --destructive: oklch(0.585 0.223 24);
   --success: oklch(0.741 0.145 169.4);
+  --warning: oklch(0.68 0.19 46.5);
   --border: oklch(0.172 0.007 258.4 / 8%);
   --input: oklch(0.878 0.022 263.2);
   --ring: oklch(0.644 0.167 276.1);
@@ -43,16 +39,7 @@
   --chart-3: oklch(0.446 0.043 257.281);
   --chart-4: oklch(0.372 0.044 257.287);
   --chart-5: oklch(0.279 0.041 260.031);
-  --radius: 0.625rem;
-  /*
-   * The pattern behind empty states, in three parts so a customer can change each without touching
-   * a component: the tile (an SVG used as a mask, so only its shapes' opacity matters), its colour,
-   * and how strongly it shows. Turn it off with `--empty-pattern-opacity: 0`. Skins turn it off in
-   * skins.css, since it is drawn for this palette.
-   */
-  --empty-pattern: url("./assets/patterns/dot-matrix.svg");
   --empty-pattern-color: oklch(0.746 0.117 279.9);
-  --empty-pattern-opacity: 0.25;
   --sidebar: oklch(0.936 0.009 264.5);
   --sidebar-foreground: oklch(0.172 0.007 258.4);
   --sidebar-primary: oklch(0.172 0.007 258.4);
@@ -61,16 +48,21 @@
   --sidebar-accent-foreground: oklch(0.172 0.007 258.4);
   --sidebar-border: oklch(0.172 0.007 258.4 / 8%);
   --sidebar-ring: oklch(0.644 0.167 276.1);
+  /* end of tokens/src/scheme.ts */
+  --radius: 0.625rem;
+  /*
+   * The pattern behind empty states, in three parts so a customer can change each without touching
+   * a component: the tile (an SVG used as a mask, so only its shapes' opacity matters), its colour
+   * (`--empty-pattern-color`, in the scheme), and how strongly it shows. Turn it off with
+   * `--empty-pattern-opacity: 0`. Skins turn it off in skins.css, since it is drawn for this palette.
+   */
+  --empty-pattern: url("./assets/patterns/dot-matrix.svg");
+  --empty-pattern-opacity: 0.25;
 }
 
 .dark {
   color-scheme: dark;
-  --empty-pattern-color: oklch(0.832 0.085 281.4);
-  --empty-pattern-opacity: 0.15;
-  /*
-   * The same three surfaces on a near-black plum ground: the frame darkest, the cards lightest. Not yet
-   * redrawn for the redesign, whose dark theme is still to come.
-   */
+  /* tokens/src/scheme.ts, dark: all (bun run tokens:generate) */
   --background: oklch(0.182 0.023 296.6);
   --foreground: oklch(0.956 0.005 286.3);
   --card: oklch(0.212 0.028 297.1);
@@ -79,7 +71,6 @@
   --popover-foreground: oklch(0.956 0.005 286.3);
   --primary: oklch(0.956 0.005 286.3);
   --primary-foreground: oklch(0.108 0.015 220.9);
-  /* Lighter than the cards, as shadcn's dark fills are, so a button or badge never reads as a hole. */
   --secondary: oklch(0.253 0.032 297.6);
   --secondary-foreground: oklch(0.956 0.005 286.3);
   --muted: oklch(0.253 0.032 297.6);
@@ -88,6 +79,7 @@
   --accent-foreground: oklch(0.956 0.005 286.3);
   --destructive: oklch(0.792 0.121 16.4);
   --success: oklch(0.832 0.13 170.1);
+  --warning: oklch(0.828 0.189 84.4);
   --border: oklch(0.28 0.035 298.6);
   --input: oklch(0.28 0.035 298.6);
   --ring: oklch(0.713 0.151 277.7);
@@ -96,6 +88,7 @@
   --chart-3: oklch(0.446 0.043 257.281);
   --chart-4: oklch(0.372 0.044 257.287);
   --chart-5: oklch(0.279 0.041 260.031);
+  --empty-pattern-color: oklch(0.832 0.085 281.4);
   --sidebar: oklch(0.156 0.017 295.8);
   --sidebar-foreground: oklch(0.956 0.005 286.3);
   --sidebar-primary: oklch(0.956 0.005 286.3);
@@ -104,6 +97,8 @@
   --sidebar-accent-foreground: oklch(0.956 0.005 286.3);
   --sidebar-border: oklch(0.28 0.035 298.6);
   --sidebar-ring: oklch(0.713 0.151 277.7);
+  /* end of tokens/src/scheme.ts */
+  --empty-pattern-opacity: 0.15;
 }
 
 * {
@@ -446,9 +441,9 @@ body {
   /*
    * The status colours (Figma "OpenBot" variables, group "colors"): success #12c89c, warning
    * #f26900, error #e21f32 and additional #0f62fe, each with a subtle fill at the kit's strength.
-   * Success and error are shadcn's `--success` and `--destructive` (above), which the skins set to
-   * their own; warning and additional are OpenBot's alone, the same in both themes until the dark
-   * theme is drawn.
+   * Success, warning and error are the scheme's `--success`, `--warning` and `--destructive`
+   * (above), which the skins set to their own; additional is OpenBot's alone, the same in both themes
+   * until the dark theme is drawn.
    *
    * A screen draws a status with these and never with Tailwind's palette: `bg-success` or
    * `bg-warning` for a dot, `bg-*-subtle` for a tint, and `text-*-ink` for words and an icon on the
@@ -456,7 +451,8 @@ body {
    * text (#12c89c is 2.2:1 on white), so their ink is the same colour pulled toward the text colour:
    * 35% and 25%, 4.6:1 and 4.9:1 on the page in light and lighter still in dark. Error's own red
    * reads at 4.7:1, so its words are `text-destructive`. The legacy kit puts back the Tailwind shades
-   * its screens were drawn with (skins/legacy-base.css), so `--color-success` is not `inline` either.
+   * its screens were drawn with (skins/legacy-base.css), so `--color-success` and `--color-warning`
+   * are not `inline`.
    */
   --color-success: var(--success);
   --color-success-ink: color-mix(
@@ -469,7 +465,7 @@ body {
     var(--color-warning),
     var(--foreground) 25%
   );
-  --color-warning: oklch(0.68 0.19 46.5);
+  --color-warning: var(--warning);
   --color-additional: oklch(0.557 0.243 262);
   --color-success-subtle: color-mix(in oklab, var(--success) 20%, transparent);
   --color-warning-subtle: color-mix(

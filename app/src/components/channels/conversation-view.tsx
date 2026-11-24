@@ -53,6 +53,7 @@ export function ConversationView({
   pending = false,
   autoFocus = false,
   stopped,
+  refusals,
   onCarryOn,
   working,
   stoppable,
@@ -111,6 +112,8 @@ export function ConversationView({
   autoFocus?: boolean;
   /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
   stopped?: string;
+  /** Turns the server refused, each under its own message; see the transcript's `refusals`. */
+  refusals?: ReadonlyMap<string, string>;
   /** Carry on with a turn that was cut off part way; a button beside `stopped`. */
   onCarryOn?: () => void;
   /** Work the conversation waits on that is not this tab's run. Drawn at the end of the transcript. */
@@ -548,6 +551,7 @@ export function ConversationView({
           queued={queued}
           restoring={restoring}
           {...(stopped ? { stopped } : {})}
+          {...(refusals ? { refusals } : {})}
           {...(stopped && onCarryOn && !disabled ? { onCarryOn } : {})}
           working={working}
         />
@@ -593,6 +597,8 @@ export function ConversationView({
          */}
         {disabled ||
         stopped ||
+        // A turn refused here is said under its message, and counts as an error the same way.
+        (refusals?.size ?? 0) > 0 ||
         notificationPermission === "checking" ||
         (notificationPermission === "default" &&
           !notifyPromptAnswered()) ? null : (

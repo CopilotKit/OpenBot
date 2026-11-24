@@ -207,8 +207,9 @@ test("the Details pane says who ran it and on which model, and lists what it mad
   );
   const ranBy = view.getByRole("region", { name: "Ran by" });
   await waitFor(() => expect(ranBy.textContent).toContain("General Assistant"));
-  expect(ranBy.textContent).toContain("Built in");
   await waitFor(() => expect(ranBy.textContent).toContain("gpt-5.1"));
+  // A Bot that runs inside OpenBot says nothing about what runs it.
+  expect(ranBy.textContent).not.toContain("Built in");
   // How long it worked, as listTaskTurns adds it up: a subagent it started worked inside that turn.
   expect(ranBy.textContent).toContain("Worked for 52s");
 

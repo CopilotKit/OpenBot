@@ -1323,7 +1323,8 @@ test.each(["mount", "refresh"])(
     ];
     const durable = [
       prefix,
-      { ...initial, content: "Stale opening content" },
+      // A store behind holds an older version of the reply: its start. It never cuts the reply short.
+      { ...initial, content: "Stored open" },
       interior,
       { ...secondAnchor, content: "Stale anchor content" },
       fresh,

@@ -141,8 +141,13 @@ function ItemTitle({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="item-title"
       className={cn(
-        // Figma's H3: 16px semibold, tightened. A dropdown's row keeps the 14px label it had.
-        "line-clamp-1 flex w-fit items-center gap-2 text-base leading-heading font-semibold tracking-heading underline-offset-4 group-data-[size=xs]/item:text-sm group-data-[size=xs]/item:leading-snug group-data-[size=xs]/item:font-medium group-data-[size=xs]/item:tracking-normal",
+        /*
+         * Figma's H3: 16px semibold, tightened. A dropdown's row keeps the 14px label it had.
+         * `w-fit` alone sizes the title to its words, so a `truncate` name inside it never truncated:
+         * it pushed the title past its column and under the row's controls. `max-w-full` holds it to
+         * the column, where the name gives way.
+         */
+        "line-clamp-1 flex w-fit max-w-full items-center gap-2 text-base leading-heading font-semibold tracking-heading underline-offset-4 group-data-[size=xs]/item:text-sm group-data-[size=xs]/item:leading-snug group-data-[size=xs]/item:font-medium group-data-[size=xs]/item:tracking-normal",
         className,
       )}
       {...props}

@@ -1,7 +1,5 @@
-import { OPENBOT_HARNESS_NAME } from "@openbot/shared/harnesses";
 import {
   IconChevronRight,
-  IconCpu,
   IconDeviceDesktop,
   IconEye,
   IconId,
@@ -563,13 +561,12 @@ function EditTextDialog({
 }
 
 /**
- * Where it runs. A built-in Bot runs on the deployment's own Bot, whose process already holds the
- * deployment's tool credential, so there is nothing to connect. When it runs on an engine other
- * than OpenBot's own agent (a Bot made from New Bot runs on LangGraph (TypeScript)), the Bot API
- * names it as the Bot's framework, and a row under Built in says so.
+ * The address a Bot connected from outside OpenBot answers at, for the developer who connected it.
+ * A Bot that runs inside OpenBot has no such section: what runs it is not the person's concern, and
+ * there is nothing to connect.
  *
- * A Bot that runs at an address of its own can be moved to another by whoever manages it: the row
- * opens a dialog, like the Identity rows above it.
+ * Whoever manages the Bot can move it to another address: the row opens a dialog, like the Identity
+ * rows above it.
  */
 function ConnectionSection({
   agent,
@@ -578,12 +575,8 @@ function ConnectionSection({
   agent: AgentProfile;
   onEditEndpoint: () => void;
 }) {
-  const builtIn = !agent.endpoint || agent.builtIn;
-  const editable = agent.canManage && !builtIn;
-  const engine =
-    builtIn && agent.framework && agent.framework !== OPENBOT_HARNESS_NAME
-      ? agent.framework
-      : undefined;
+  if (!agent.endpoint || agent.builtIn) return null;
+  const editable = agent.canManage;
   return (
     <PageSection title="Connection">
       <PageRows>
@@ -599,15 +592,9 @@ function ConnectionSection({
             <IconPlugConnected />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle>{builtIn ? "Built in" : "Agent URL"}</ItemTitle>
-            <ItemDescription
-              className={
-                builtIn ? undefined : "line-clamp-none break-all font-mono"
-              }
-            >
-              {builtIn
-                ? "Runs inside OpenBot. There's nothing to connect."
-                : agent.endpoint}
+            <ItemTitle>Agent URL</ItemTitle>
+            <ItemDescription className="line-clamp-none break-all font-mono">
+              {agent.endpoint}
             </ItemDescription>
           </ItemContent>
           {editable ? (
@@ -616,22 +603,8 @@ function ConnectionSection({
             </ItemActions>
           ) : null}
         </Item>
-        {engine ? (
-          <>
-            <Separator />
-            <Item size="sm">
-              <ItemMedia variant="icon">
-                <IconCpu />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>Runs on</ItemTitle>
-                <ItemDescription>{engine}</ItemDescription>
-              </ItemContent>
-            </Item>
-          </>
-        ) : null}
       </PageRows>
-      {!builtIn && agent.canManage ? (
+      {agent.canManage ? (
         <CallbackTokenPanel
           agentId={agent.id}
           hasToken={agent.hasCallbackToken}

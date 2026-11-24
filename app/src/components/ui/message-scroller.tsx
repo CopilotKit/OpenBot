@@ -129,8 +129,22 @@ function lastAnchor(content: HTMLElement): Element | null {
   return anchors[anchors.length - 1] ?? null;
 }
 
+/**
+ * Whether the whole conversation, without the room the scroller makes for a turn, is in view: for
+ * something drawn beside it that only helps once it runs past the view. False while the view has
+ * no height to measure by (not laid out yet), so nothing is taken away on a guess.
+ */
+export function conversationFitsInView(content: HTMLElement): boolean {
+  const viewport = content.parentElement;
+  if (!viewport || viewport.clientHeight === 0) return false;
+  const spacer = content.querySelector<HTMLElement>(
+    ":scope > [data-message-scroller-spacer]",
+  );
+  return fitsInView(content, spacer);
+}
+
 /** Whether everything in the conversation, without any room, is within the height of the view. */
-function fitsInView(content: HTMLElement, spacer: HTMLElement): boolean {
+function fitsInView(content: HTMLElement, spacer: HTMLElement | null): boolean {
   const viewport = content.parentElement;
   if (!viewport) return false;
   const top = content.getBoundingClientRect().top;

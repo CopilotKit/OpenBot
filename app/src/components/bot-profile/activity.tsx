@@ -108,7 +108,7 @@ export function ActivityRow({
 }: {
   agentId: string;
   item: ActivityItem;
-  /** Under way now: a pulsing dot on its icon, amber when it is waiting on the person. */
+  /** Under way now: a pulsing dot on its icon, the warning colour when it is waiting on the person. */
   live?: boolean;
 }) {
   const stop = useMutation(stopHandoffMutationOptions(queryClient));

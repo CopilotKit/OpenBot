@@ -522,11 +522,14 @@ pub fn settle(engine: &Address, root: &Path, change: &Change) -> Result<Settleme
         .or_else(|| crate::preparation::installation(root))
         .and_then(|launch| launch.harness);
     let effective = harness_for(plan, requested);
-    let picked = crate::harness::picked(effective.as_ref(), root).map_err(|error| {
-        Problem::with(
+    // An image list that is missing or unreadable is an unfinished install, not a release without
+    // the Bot: Install downloads the list again (`deployment::ReferenceError`).
+    let picked = crate::harness::pick(effective.as_ref(), root).map_err(|error| match error {
+        crate::harness::PickError::ImageList(detail) => crate::preparation::required(detail),
+        crate::harness::PickError::Refused(detail) => Problem::with(
             "This version of OpenBot does not include the Bot that connection needs.",
-            error,
-        )
+            detail,
+        ),
     })?;
     let ports = crate::env::Ports::read(root).map_err(|error| {
         Problem::with("OpenBot could not read its local ports.", error.to_string())
@@ -736,6 +739,58 @@ mod tests {
         assert_eq!(
             said,
             r#"{"kind":"compatible-endpoint","model":"grok-4.7","endpointHost":"api.x.ai"}"#
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Changing the connection reads the picked Bot's image from the release's list. A list that
+    /// is gone is an unfinished install, not a release without the Bot; a list without the Bot
+    /// still says that.
+    #[test]
+    fn a_change_with_the_image_list_gone_is_an_install_problem_not_a_missing_bot() {
+        let root = root("image-list-gone", "", "");
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
+        let list = serde_json::json!({
+            "version": "v0.0.8",
+            "images": { "server": { "reference": "ghcr.io/copilotkit/openbot-server@sha256:00" } },
+        })
+        .to_string();
+        std::fs::write(crate::deployment::images_path(&root), &list).unwrap();
+        crate::deployment::record(&root, "v0.0.8", false).unwrap();
+        let bot = crate::harness::HarnessChoice {
+            id: crate::harness::DEFAULT_HARNESS.into(),
+            agent_url: None,
+        };
+        crate::preparation::record(&root, Some(&bot), vec!["synthetic-image".into()]).unwrap();
+        let engine = Address::new(crate::engine::Engine::Docker, None);
+        let change = Change {
+            provider: "openai".into(),
+            login: "api-key".into(),
+            model: None,
+            endpoint_host: None,
+        };
+
+        // The list is there and names no such Bot: the release's answer.
+        let refused = settle(&engine, &root, &change).unwrap_err();
+        assert_eq!(
+            refused.said,
+            "This version of OpenBot does not include the Bot that connection needs."
+        );
+
+        std::fs::remove_file(crate::deployment::images_path(&root)).unwrap();
+        let refused = settle(&engine, &root, &change).unwrap_err();
+        assert!(!refused.said.contains("does not include"), "{refused:?}");
+        assert_eq!(refused.said, crate::preparation::REQUIRED, "{refused:?}");
+        assert_eq!(
+            refused.connection,
+            Some(crate::problem::Connection::Installation)
+        );
+        assert!(
+            refused
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("container-images.json")),
+            "{refused:?}"
         );
         std::fs::remove_dir_all(root).unwrap();
     }
