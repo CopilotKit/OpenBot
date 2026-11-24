@@ -157,7 +157,7 @@ function AppFields(props: {
   const { app } = props;
   return (
     <>
-      <h3>App</h3>
+      <h3 className="pt-2 text-sm font-medium">App</h3>
       <SelectRow
         label="Host"
         value={app.host}
@@ -259,8 +259,8 @@ export function WindowSettingsPanel(props: WindowSettingsPanelProps) {
   const shownZoom =
     fitOn && fit ? Math.round(fit.zoom * 100) / 100 : value.zoom;
   return (
-    <section>
-      <h2>Window</h2>
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-medium">Window</h2>
       <div className="flex flex-wrap gap-2 px-1">
         <Button
           variant="outline"
@@ -301,13 +301,14 @@ export function WindowSettingsPanel(props: WindowSettingsPanelProps) {
         <FieldLabel htmlFor={zoomId} className={ROW_LABEL}>
           Zoom
         </FieldLabel>
-        <div className="flex min-w-0 items-center gap-2">
+        {/* In a narrow column Fit goes under the field, so the field still shows a zoom like 0.95. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <SizeInput
             // A new fit value shows at once; a typed value stays while the field has the focus.
             key={fitOn ? `fit-${shownZoom}` : "zoom"}
             label="Zoom"
             id={zoomId}
-            className="h-7 w-24 px-2"
+            className="h-7 max-w-24 min-w-16 grow basis-16 px-2"
             min={0.5}
             max={2}
             step={0.1}

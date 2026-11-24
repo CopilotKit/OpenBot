@@ -273,6 +273,7 @@ export function WarningHighlight({
         </svg>
       )}
       <span
+        data-highlight-label
         className={`wb-highlight-label rounded-sm px-1.5 py-0.5 text-xs leading-4 font-semibold whitespace-nowrap text-background shadow-[0_0_0_1px_var(--background)] ${tone.label}${shapes.labelBelow ? " wb-highlight-label-below" : ""}`}
         style={{
           left: shapes.labelAt.x,

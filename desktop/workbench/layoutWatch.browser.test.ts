@@ -343,7 +343,7 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
         .getByRole("button", { name: warningText(warning) })
         .hover();
       await page.waitForSelector(
-        "[data-workbench-highlight='moved'] .wb-highlight-label",
+        "[data-workbench-highlight='moved'] [data-highlight-label]",
       );
       expect(await page.evaluate(() => window.__workbenchPage?.now())).toBe(
         warning.at,
@@ -351,7 +351,7 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
       const shown = await page.evaluate(() => {
         const root = document.querySelector("[data-workbench-highlight]");
         return {
-          label: root?.querySelector(".wb-highlight-label")?.textContent,
+          label: root?.querySelector("[data-highlight-label]")?.textContent,
           boxes: [
             ...(root?.querySelectorAll("[data-highlight-box]") ?? []),
           ].map((el) => el.getAttribute("data-highlight-box")),

@@ -14,7 +14,6 @@ import {
   ItemMedia,
 } from "@/components/ui/item";
 import { toast } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
 
 /*
  * The parts of the workbench page around the panels (Workbench.tsx): the sections that fold open,
@@ -28,7 +27,6 @@ export type FoldProps = {
   open?: boolean;
   onOpenChange?(open: boolean): void;
   defaultOpen?: boolean;
-  className?: string;
   children: ReactNode;
 };
 
@@ -42,7 +40,7 @@ export function Fold(props: FoldProps) {
       open={props.open}
       onOpenChange={props.onOpenChange}
       defaultOpen={props.defaultOpen}
-      className={cn("border-t border-border pt-2", props.className)}
+      className="border-t border-border pt-2"
     >
       <CollapsibleTrigger
         render={

@@ -4,7 +4,6 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { followPageTheme } from "./pageTheme";
 import { Workbench } from "./Workbench";
-import "./workbench.css";
 
 followPageTheme();
 

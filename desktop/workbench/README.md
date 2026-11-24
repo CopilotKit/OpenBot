@@ -18,7 +18,9 @@ So when the app changes, the workbench changes with it, or it fails to build. No
 - **What the window shows.** A scene loads the real app. It never draws a screen of its own.
 - **Where the app is.** A scene gets to a state through the app's own state. Each desktop state names the setup step it shows with App's own type, `SetupStep`, and `stateSteps.browser.test.ts` checks that the window really shows that step.
 - **Types and values.** Scene data uses `satisfies` with the app's own types. A list, a key or a route that the app has comes in by import, never typed out again. If the workbench cannot import it, move it to `shared/` and import it from there in both places. `noCopies.test.ts` fails when the workbench spells out one of these values.
-- **The workbench's own panels.** These use the app's UI components (`app/src/components/ui`) and do not draw their own. This part is not done yet: the panels still have their own components and CSS.
+- **The workbench's own panels.** These use the app's UI components (`app/src/components/ui`) and do not draw their own. `appUi.test.ts` fails when a workbench file draws its own control or sets its own color.
+
+A new panel uses the app's components. If the app has no component for a need, add it to `app/src/components/ui` first.
 
 ## Start the workbench
 
@@ -67,7 +69,7 @@ The page has three columns:
 - In the center: the window, the notices and the layout warnings.
 - On the right: **Run** (the run controls and the **?** keys help), **Window**, **Review** (Comment mode and Critique this screen) and the panels that fold open.
 
-The page uses the CopilotKit colors on a plain, quiet ground, with glass panels. The text uses the sans-serif font of your computer, at 13 px. Panel titles are 16 px. Times, routes, JSON and code use its monospace font. The page loads no fonts from the web. When your computer uses a dark theme, the page is dark too. The look changes only the page around the window. The window and its contents show as the real app shows them.
+The page uses the app's components and the app's theme. It follows the light or dark setting of your computer, also when the setting changes while the page is open. The window and its contents show as the real app shows them.
 
 ### Panel sizes
 
@@ -641,7 +643,6 @@ OPENBOT_APP_BROWSER=1 bun test workbench/popups.browser.test.ts
 - `appShot.browser.test.ts` runs the CLI on an app scene and on an unknown scene.
 - `critique.browser.test.ts` runs `workbench:critique` and checks the folder it writes: `frame.png`, `frame.json` and `prompt.md`.
 - `motion.browser.test.ts` checks that the paused "Next:" marker stays on its element after Fit and a splitter drag, that the Install marker (or its ghost) shows for at least 400 ms after the click, and that a warning hover that seeks back keeps a still of the window over the replay that looks like the window did (less than 2% of its pixels differ).
-
 - `appUi.browser.test.ts` checks that the workbench page loads with the app's light and dark theme and with one copy of React.
 - `popups.browser.test.ts` checks that a popup of the page (a list, a box) over the window shows above the window. The inspector does not measure it, and in Comment mode a click in it does not start a comment.
 - `stateSteps.browser.test.ts` opens each state scene and checks that the window shows the setup step that the state names.

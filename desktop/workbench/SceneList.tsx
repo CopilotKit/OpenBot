@@ -198,11 +198,10 @@ export function SceneList({
   return (
     <nav aria-label="Scenes" className="flex flex-col gap-1">
       <div className="flex items-center justify-between gap-2 px-1 pb-1">
-        <h2 className="m-0 p-0 text-sm font-medium">Scenes</h2>
+        <h2 className="text-sm font-medium">Scenes</h2>
         <Button
           variant="ghost"
           size="sm"
-          className="bg-transparent shadow-none"
           onClick={() =>
             store(allFolded ? new Set() : new Set(sections.map((s) => s.group)))
           }
@@ -243,7 +242,6 @@ export function SceneList({
           <InputGroupAddon align="inline-end">
             <InputGroupButton
               size="icon-xs"
-              className="bg-transparent"
               aria-label="Clear the filter"
               onClick={() => {
                 setFilter("");
@@ -270,9 +268,9 @@ export function SceneList({
               }}
               render={<section />}
             >
-              <h3 className="m-0 block p-0 after:hidden">
+              <h3>
                 <CollapsibleTrigger
-                  className="group/trigger flex w-full items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-left text-xs font-medium text-muted-foreground shadow-none outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 aria-disabled:cursor-default after:ml-auto after:font-mono after:tabular-nums after:content-[attr(data-count)]"
+                  className="group/trigger flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-xs font-medium text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 aria-disabled:cursor-default after:ml-auto after:font-mono after:tabular-nums after:content-[attr(data-count)]"
                   aria-disabled={pinned || filtering ? true : undefined}
                   data-count={filtering ? `${items.length}/${total}` : total}
                   title={
@@ -305,7 +303,7 @@ export function SceneList({
                         scene.id === cursor && !isCurrent ? "" : undefined
                       }
                       className={cn(
-                        "block h-7 truncate bg-transparent py-1 text-left font-normal shadow-none data-cursor:inset-ring data-cursor:inset-ring-ring",
+                        "block h-7 truncate py-1 text-left font-normal data-cursor:inset-ring data-cursor:inset-ring-ring",
                         isCurrent && "bg-muted font-medium",
                       )}
                       render={<Button variant="ghost" size="sm" />}

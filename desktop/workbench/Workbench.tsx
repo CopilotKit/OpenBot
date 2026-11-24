@@ -552,7 +552,7 @@ export function Workbench() {
           catalogNotices={catalog.notices}
         />
       ) : (
-        <div className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">
+        <div className="flex h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
           <p role="status">Loading scenes…</p>
         </div>
       )}
@@ -1716,7 +1716,7 @@ export function WorkbenchLoaded({
   return (
     <div
       className={cn(
-        "grid h-full bg-background text-foreground",
+        "grid h-dvh bg-background text-foreground",
         extras.embed
           ? "grid-cols-1"
           : "grid-cols-[var(--wb-left)_auto_minmax(0,1fr)_auto_var(--wb-right)]",
@@ -1724,10 +1724,9 @@ export function WorkbenchLoaded({
       style={pageStyle}
       data-embed={extras.embed ? "" : undefined}
     >
-      {/* wb-side: the panels not moved yet still style their controls under it (workbench.css). */}
       <aside
         className={cn(
-          "wb-side wb-side-left flex min-w-0 flex-col gap-3 overflow-y-auto rounded-none border-0 bg-sidebar px-3 py-4 text-sidebar-foreground [scrollbar-width:thin]",
+          "flex min-w-0 flex-col gap-3 overflow-y-auto bg-sidebar px-3 py-4 text-sidebar-foreground [scrollbar-width:thin]",
           embedHidden,
         )}
       >
@@ -1760,7 +1759,6 @@ export function WorkbenchLoaded({
         />
         <Fold
           title="Import a log"
-          className="wb-fold"
           open={importOpen}
           onOpenChange={setImportOpen}
         >
@@ -1944,11 +1942,11 @@ export function WorkbenchLoaded({
          * Below the window. The warnings scroll on their own; a drag on the handle sets the height.
          * The height does not follow the number of warnings: a stage that changed height would
          * change Fit's zoom during a walk, and a zoom change moves the window's elements by a pixel
-         * or two. wb-under: the warnings list still styles its rows under it (workbench.css).
+         * or two.
          */}
         <div
           className={cn(
-            "wb-under flex-none overflow-y-auto px-3 pb-3",
+            "flex-none overflow-y-auto px-3 pb-3",
             extras.embed ? "h-[18vh] max-h-[30vh]" : "h-[25vh] max-h-[30vh]",
           )}
           ref={underRef}
@@ -1995,16 +1993,15 @@ export function WorkbenchLoaded({
         }}
         className={embedHidden}
       />
-      {/* wb-side: the panels not moved yet still style their controls under it (workbench.css). */}
       <aside
         className={cn(
-          "wb-side wb-side-right flex min-w-0 flex-col gap-6 overflow-y-auto rounded-none border-0 bg-sidebar px-3 py-4 text-sidebar-foreground [scrollbar-width:thin]",
+          "flex min-w-0 flex-col gap-6 overflow-y-auto bg-sidebar px-3 py-4 text-sidebar-foreground [scrollbar-width:thin]",
           embedHidden,
         )}
       >
         <section className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="m-0 text-sm font-medium">Run</h2>
+            <h2 className="text-sm font-medium">Run</h2>
             <KeysHelp />
           </div>
           {steps.length > 0 ? (
@@ -2072,7 +2069,7 @@ export function WorkbenchLoaded({
           }}
         />
         <section className="flex flex-col gap-2">
-          <h2 className="m-0 text-sm font-medium">Review</h2>
+          <h2 className="text-sm font-medium">Review</h2>
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
@@ -2128,7 +2125,6 @@ export function WorkbenchLoaded({
           {appConfig ? (
             <>
               <Fold
-                className="wb-fold"
                 title={`Desktop commands (${Object.keys(state.answers).join(", ") || "none set"})`}
               >
                 <CommandsPanel
@@ -2137,10 +2133,10 @@ export function WorkbenchLoaded({
                   commands={PAGE_COMMANDS}
                 />
               </Fold>
-              <Fold className="wb-fold" title="Calls">
+              <Fold title="Calls">
                 <CallLog control={frameControl} />
               </Fold>
-              <Fold className="wb-fold wb-app-fold" title="Requests">
+              <Fold title="Requests">
                 <RequestLog
                   api={frameApi}
                   onPick={(route) => {
@@ -2150,7 +2146,6 @@ export function WorkbenchLoaded({
                 />
               </Fold>
               <Fold
-                className="wb-fold wb-app-fold"
                 title="API answers"
                 open={answersOpen}
                 onOpenChange={setAnswersOpen}
@@ -2161,22 +2156,21 @@ export function WorkbenchLoaded({
                   onAnswer={keepApi}
                 />
               </Fold>
-              <Fold className="wb-fold wb-app-fold" title="Stream and sockets">
+              <Fold title="Stream and sockets">
                 <StreamPanel streams={frameStreams} sockets={frameSockets} />
               </Fold>
             </>
           ) : (
             <>
               <Fold
-                className="wb-fold"
                 title={`Commands (${Object.keys(state.answers).join(", ") || "none set"})`}
               >
                 <CommandsPanel control={frameControl} onAnswer={keepAnswer} />
               </Fold>
-              <Fold className="wb-fold" title="Calls">
+              <Fold title="Calls">
                 <CallLog control={frameControl} />
               </Fold>
-              <Fold className="wb-fold" title="Events">
+              <Fold title="Events">
                 <EventsPanel control={frameControl} />
               </Fold>
             </>
