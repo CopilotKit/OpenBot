@@ -77,12 +77,12 @@ export function CopilotKitSignInWait({
   }, [attempt]);
 
   return (
-    <>
+    <div className="sign-in-wait">
       <StatusLine>{page ? waiting : before}</StatusLine>
       {page && (
         <>
-          <p className="footnote">
-            Check that the page shows this code:{" "}
+          <p className="footnote sign-in-code-row">
+            <span>Check that the page shows this code:</span>
             <strong className="sign-in-code">{page.userCode}</strong>
           </p>
           <p className="fallback">
@@ -100,6 +100,6 @@ export function CopilotKitSignInWait({
           Cancel
         </button>
       </div>
-    </>
+    </div>
   );
 }
