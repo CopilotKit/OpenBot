@@ -1046,6 +1046,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **A call booked inside OpenBot says which screen it came from.** The OpenBot for Business
+  calendar, in the app and in OpenBot Desktop, now adds `utm_content` to the `utm_source` and
+  `utm_medium` it already carried: the account menu, the home page, an Admin page, a Bot's computer
+  line, the self-hosting bar, OpenBot Cloud's sign-in screen, onboarding, or Desktop's first screen
+  or Move to Cloud. Calendly keeps it on the booking. Desktop's setup window didn't listen for a
+  booking before; it now counts its booker opened and a call booked in it, by place and nothing
+  else, while you share usage data ([desktop/TELEMETRY.md](desktop/TELEMETRY.md)).
 - **A sharper look, at the same sizes.** Corners come from one 8px radius, cards are flat with a
   hairline border you can see in both themes, and shadows show only on what floats: menus and
   popovers, then dialogs and sheets over the app. The grays are slate, a quiet blue-gray in dark,
