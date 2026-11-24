@@ -47,6 +47,7 @@ import {
 } from "@/lib/audit/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { organizationMembersQueryOptions } from "@/lib/organizations/queries";
@@ -367,7 +368,10 @@ export function AuditPage({
           {events.isPending ? null : events.isError &&
             !events.isFetchNextPageError ? (
             <p className="px-4 text-destructive text-sm" role="alert">
-              Couldn't load these events. Try again in a moment.
+              {loadFailure(
+                events.error,
+                "Couldn't load these events. Try again in a moment.",
+              )}
             </p>
           ) : (
             <AuditTable
@@ -378,7 +382,10 @@ export function AuditPage({
                   <div className="flex flex-col items-center gap-2 py-3">
                     {events.isFetchNextPageError ? (
                       <p className="text-destructive text-sm" role="alert">
-                        Couldn't load older events. Try again.
+                        {loadFailure(
+                          events.error,
+                          "Couldn't load older events. Try again.",
+                        )}
                       </p>
                     ) : null}
                     <Button

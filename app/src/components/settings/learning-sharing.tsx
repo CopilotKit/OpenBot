@@ -38,6 +38,7 @@ import {
   personalLearningQueryOptions,
 } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** The three choices, each with the one plain line that says who sees what. */
 export const SHARING_CHOICES: {
@@ -171,7 +172,7 @@ export function LearningSharing({
       <PageSection action={action} title="Your skills">
         {sharing.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {sharing.error.message}
+            {failureSaid(sharing.error)}
           </p>
         ) : null}
         {written.length > 0 ? <PageRows>{writtenRows}</PageRows> : null}

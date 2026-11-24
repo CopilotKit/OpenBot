@@ -33,6 +33,7 @@ import {
   signInRequestQueryOptions,
 } from "@/lib/passwords/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The private sign-in form.
@@ -87,7 +88,7 @@ export function SignInForm({
   if (request.error)
     return (
       <p className="text-destructive text-sm" role="alert">
-        {request.error.message}
+        {failureSaid(request.error)}
       </p>
     );
   const data = request.data;

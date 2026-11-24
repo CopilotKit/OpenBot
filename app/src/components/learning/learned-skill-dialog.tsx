@@ -27,6 +27,7 @@ import {
   type LearnedSkillSource,
   learnedSkillQueryOptions,
 } from "@/lib/learning/queries";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The person's own recordings a skill was learned from. Each opens Your recordings on Teach a Bot, which lists them
@@ -124,7 +125,7 @@ export function LearnedSkillDialog({
         <DialogBody className="mt-4 gap-5 overflow-y-auto">
           {detail.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {detail.error.message}
+              {failureSaid(detail.error)}
             </p>
           ) : skill ? (
             <>

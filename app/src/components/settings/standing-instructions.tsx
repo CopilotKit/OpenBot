@@ -19,6 +19,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Textarea } from "@/components/ui/textarea";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { saveInstructionsMutationOptions } from "@/lib/settings/mutations";
 import {
   INSTRUCTIONS_LIMIT,
@@ -59,7 +60,7 @@ export function StandingInstructionsRow() {
           <ItemTitle>Standing instructions</ItemTitle>
           <ItemDescription>
             {stored.error
-              ? "Couldn't load your instructions."
+              ? loadFailure(stored.error, "Couldn't load your instructions.")
               : written || "None yet. Tell every Bot how you want things done."}
           </ItemDescription>
         </ItemContent>
@@ -123,7 +124,7 @@ function StandingInstructionsEditor() {
     <>
       {stored.isPending ? null : stored.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {stored.error.message}
+          {failureSaid(stored.error)}
         </p>
       ) : (
         <div className="flex flex-col gap-2">

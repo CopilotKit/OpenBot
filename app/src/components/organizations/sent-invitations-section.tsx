@@ -61,6 +61,7 @@ import {
 } from "@/lib/organizations/words";
 import { SEARCH_MAX } from "@/lib/people/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** The API's cap on an address, so the field stops where the server does. */
 const MAX_EMAIL_LENGTH = 320;
@@ -164,7 +165,7 @@ export function SentInvitationsSection({
       ) : null}
       {invitations.isPending ? null : invitations.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {invitations.error.message}
+          {failureSaid(invitations.error)}
         </p>
       ) : rows.length === 0 && query ? (
         <PageEmpty icon={IconSearch} title="No matches">
@@ -268,7 +269,7 @@ function SentInvitationRow({
       ) : null}
       {cancel.error ? (
         <p className="px-4 pb-3 text-destructive text-sm" role="alert">
-          {cancel.error.message}
+          {failureSaid(cancel.error)}
         </p>
       ) : null}
     </>
@@ -395,7 +396,7 @@ function InviteDialog({
               </form>
               {invite.error ? (
                 <p className="mt-4 text-destructive text-sm" role="alert">
-                  {invite.error.message}
+                  {failureSaid(invite.error)}
                 </p>
               ) : null}
             </DialogBody>

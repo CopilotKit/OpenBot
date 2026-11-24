@@ -19,10 +19,11 @@ import { Switch } from "@/components/ui/switch";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { appSetupQueryOptions, appsQueryOptions } from "@/lib/apps/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
-import { appSetupQueryOptions, appsQueryOptions } from "@/lib/apps/queries";
 
 /**
  * One tool, and which Bots hold it.
@@ -98,7 +99,10 @@ export function PluginToolPage({
     return (
       <PageShell backButton={back} title={toolName}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load plugins. Try again in a moment.
+          {loadFailure(
+            plugins.error,
+            "Couldn't load plugins. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );

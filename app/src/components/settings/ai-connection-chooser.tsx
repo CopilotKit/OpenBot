@@ -109,6 +109,7 @@ import { ClientError } from "@/lib/client";
 import { desktopShell } from "@/lib/desktop/shell";
 import { markFor } from "@/lib/marks";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Choosing an AI connection: the provider list, the way in (a key, an address, or a sign-in), and
@@ -1037,7 +1038,7 @@ export function ChooseConnection({
 
         {connect.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {connect.error.message}
+            {failureSaid(connect.error)}
           </p>
         ) : null}
       </ChooserBody>

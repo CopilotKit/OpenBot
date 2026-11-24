@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { appsQueryOptions } from "@/lib/apps/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { undeclaredElsewhere } from "@/lib/skills/form";
 
 /**
@@ -117,7 +118,10 @@ export function SkillTools({
   if (!plugins.data) {
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load the tools. Try again in a moment.
+        {loadFailure(
+          plugins.error,
+          "Couldn't load the tools. Try again in a moment.",
+        )}
       </p>
     );
   }

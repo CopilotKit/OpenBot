@@ -25,6 +25,7 @@ import {
 import { receivedInvitationLine } from "@/lib/organizations/words";
 import { queryClient } from "@/query-client";
 import { useSwitchOrganization } from "./use-switch-organization";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * One invitation as the person it was sent to sees it, in whatever state it is in.
@@ -152,7 +153,7 @@ export function InvitationsPage() {
     >
       {invitations.isPending ? null : invitations.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {invitations.error.message}
+          {failureSaid(invitations.error)}
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty icon={IconMail} title="No invitations">
@@ -194,7 +195,7 @@ export function InvitationPage({ invitationId }: { invitationId: string }) {
     >
       {invitation.isPending ? null : invitation.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {invitation.error.message}
+          {failureSaid(invitation.error)}
         </p>
       ) : invitation.data === null ? (
         <PageEmpty icon={IconMailOff} title="Invitation not found">

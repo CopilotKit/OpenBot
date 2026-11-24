@@ -33,6 +33,7 @@ import {
   useCurrentOrganizationId,
 } from "./current";
 import { InNoOrganization } from "./in-no-organization";
+import { noteLeftOrganization } from "./left";
 
 /** One of the person's organizations, with the server's verdicts: their role in it, and `active`. */
 export type OrganizationSummary = Organization;
@@ -284,6 +285,34 @@ export function ownOrganizationsQueryOptions() {
      * session decides answered from the other.
      */
     refetchOnWindowFocus: "always",
+  });
+}
+
+/**
+ * After a refusal that may mean the person was removed from the organization they work in
+ * (`refusedInOrganization`, ./left.ts): their organizations are read again. When the one they work
+ * in is gone from the list, reading it has already moved the session to one they are still in, and
+ * the app follows from home (`follow`); the notice says why. Anything else changes nothing: the
+ * refusal was about something else, and the screen says so in its own words.
+ */
+export async function askWhetherStillMember(
+  queryClient: QueryClient,
+): Promise<void> {
+  const known = currentOrganizationId();
+  const before = queryClient.getQueryData<OwnOrganizations | null>(
+    organizationKeys.mine(),
+  );
+  // An OpenBot that keeps one organization lists none, and there is nowhere else to go.
+  if (known === undefined || !before || before.organizations.length === 0)
+    return;
+  const mine = await queryClient
+    .fetchQuery({ ...ownOrganizationsQueryOptions(), staleTime: 0 })
+    .catch(() => undefined);
+  if (!mine || mine.organizations.some((one) => one.id === known)) return;
+  noteLeftOrganization({
+    leftName: before.organizations.find((one) => one.id === known)?.name,
+    nowId: mine.currentId,
+    nowName: mine.organizations.find((one) => one.id === mine.currentId)?.name,
   });
 }
 

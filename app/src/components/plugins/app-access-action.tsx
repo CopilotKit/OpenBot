@@ -30,6 +30,7 @@ import {
 } from "@/lib/organizations/admin-names";
 import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * One work app's state for the person looking, and the one thing they can do about it.
@@ -1045,7 +1046,7 @@ function RequestAction({
     <div className="flex flex-wrap items-center justify-end gap-2">
       {error ? (
         <p className="text-destructive text-xs" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {access.request ? (

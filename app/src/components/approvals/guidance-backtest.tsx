@@ -12,6 +12,7 @@ import type {
   GuidanceBacktestRow,
 } from "@/lib/reviewer-guidance/queries";
 import { mediaOf } from "./describe-rules";
+import { failureSaid } from "@/lib/load-failure";
 
 const plural = (count: number, one: string, many = `${one}s`) =>
   `${count} ${count === 1 ? one : many}`;
@@ -154,7 +155,7 @@ export function GuidanceBacktestField({
         )}
         {run.error && run.variables === text ? (
           <p className="text-destructive text-sm" role="alert">
-            {run.error.message}
+            {failureSaid(run.error)}
           </p>
         ) : null}
         {stale && !run.isPending ? (

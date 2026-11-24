@@ -28,6 +28,7 @@ import {
 } from "@/lib/plugins/form";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 type Refusal = Extract<AddServerByUrlOutcome, { added: false }>;
 
@@ -310,7 +311,7 @@ export function AddServerPage({
           ) : null}
           {approve.error ? (
             <p className="mt-5 text-destructive text-sm" role="alert">
-              {approve.error.message}
+              {failureSaid(approve.error)}
             </p>
           ) : null}
           {signingIn && desktopShell() ? (

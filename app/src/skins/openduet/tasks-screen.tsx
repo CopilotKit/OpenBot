@@ -14,6 +14,7 @@ import { heldByTaskOf, TASK_ORDER } from "@/lib/tasks/groups";
 import { TASK_STATUS_LABEL } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { FOCUS } from "./kit";
+import { failureSaid } from "@/lib/load-failure";
 
 /** Which list Tasks shows: what waits on you and what your Bots carry, or what to start next. */
 export type TasksView = "active" | "up_next";
@@ -199,7 +200,7 @@ function ActiveView() {
       })}
       {waiting.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {waiting.error.message}
+          {failureSaid(waiting.error)}
         </p>
       ) : null}
       <Section count={routineCount} label="Routines">
