@@ -437,7 +437,7 @@ paths:
         - Audit events
       operationId: listAuditEvents
       summary: List audit events
-      description: 'Return one page of the organization''s audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.invitation_canceled, organization.member_joined, organization.member_removed, organization.member_role_changed and organization.deleted, and its teams: team.created, team.updated, team.deleted, team.member_added, team.member_role_changed and team.member_removed. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.'
+      description: 'Return one page of the organization''s audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.invitation_canceled, organization.member_joined, organization.member_removed, organization.member_role_changed and organization.deleted, and its teams: team.created, team.updated, team.deleted, team.member_added, team.member_role_changed, team.member_removed and team.models_changed (the models before and after, each null when the team set none). A run refused on its model is model.refused: its payload names the model (provider/model), its source, and the rule that refused it (organization or team); when the rule is team, teams lists the teams whose lists applied to the person then, each with its id and its name as it was then ({ id, name }). An event written before this has no teams. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.'
       security:
         - webSession: []
         - appOAuth:
@@ -3524,6 +3524,56 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/refused-turns:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      tags:
+        - Conversations
+      operationId: listRefusedTurns
+      summary: List the caller's turns in a conversation that were refused
+      description: 'Return one page of the caller''s own turns in the conversation that were refused before they ran, newest first: a model they may not run (MODEL_NOT_ALLOWED), a permission they don''t have (CAPABILITY_REQUIRED), no OpenBot plan (PLAN_REQUIRED). Each says what the turn was for (the person''s message, or what a routine or a task asked) and why it was refused, in the words the refusal said. Nothing of a refused turn reaches the conversation''s thread, so a client draws these into the transcript itself: each after the message named by afterMessageId, or after the thread''s messages where that is null. botId narrows the list to one Bot''s. A missing cursor starts at the newest page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      parameters:
+        - name: botId
+          in: query
+          description: Only the turns of this Bot. Leave it out for every Bot's.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of refused turns.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefusedTurnPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/RefusedTurnPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/attachments:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -4512,7 +4562,7 @@ paths:
         - Models
       operationId: getModelCatalogue
       summary: Read the models Bots can run on
-      description: Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. With view=all, every model listed before that narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick.
+      description: 'Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot''s model, the provider or a gateway in front of it, read in the background. They are narrowed for the caller in two ways. The organization''s: only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. And the caller''s teams'': when any team they are in, or a team above one, lists models (getTeamModels), only the models one of those lists names, within what the organization allows. The default is then one of those when any can run, and nothing is left to pick when none can. With view=all, every model listed before either narrowing, for an administrator choosing which to allow. When the listing can''t be read, the catalogue holds the deployment''s own model and nothing to pick.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -11977,6 +12027,131 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/TeamForbidden'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/teams/{teamId}/models:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TeamId'
+    get:
+      tags:
+        - Teams
+      operationId: getTeamModels
+      summary: Read which models a team's people may run
+      description: 'Return the models a team allows its people to run, or null when the team sets none. A person in teams with lists may run any model one of those lists names (their teams'' parents'' lists included), within what the organization allows: its model allowlist when that narrows anything, otherwise every model. A team with no list sets nothing, and a person in no team with a list runs what the organization allows. Admins and owners are held to it like anyone else. Any member of the organization can read it. A team of another organization is not found.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The team's models, or that it sets none.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamModels'
+              examples:
+                limited:
+                  $ref: '#/components/examples/LimitedTeamModels'
+                none:
+                  $ref: '#/components/examples/NoTeamModels'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    put:
+      tags:
+        - Teams
+      operationId: replaceTeamModels
+      summary: Set which models a team's people may run
+      description: 'Replace the models a team allows its people to run. At least one, each one the organization''s model catalogue offers (getModelCatalogue with view=all), named as the organization''s model allowlist names models: provider/model. A model the organization''s allowlist leaves out may be listed, and runs only once the organization allows it too. From the next request, the team''s people (and the people of the teams beneath it) run only models one of their teams allows. Only an owner or an admin of the organization can, for a team made here or one from the company''s directory alike. A repeated request with the same Idempotency-Key and body returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamModelsInput'
+            examples:
+              two:
+                value:
+                  models:
+                    - openai/gpt-5.6-terra
+                    - anthropic/claude-sonnet-5
+      responses:
+        '200':
+          description: The team's models, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamModels'
+              examples:
+                limited:
+                  $ref: '#/components/examples/LimitedTeamModels'
+        '400':
+          $ref: '#/components/responses/InvalidTeamModels'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamModelsAdminOnly'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Teams
+      operationId: deleteTeamModels
+      summary: Stop limiting a team's models
+      description: Clear a team's models, so the team sets none again and its people run what their other teams and the organization allow. Only an owner or an admin of the organization can. Clearing a team that sets none changes nothing.
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The team sets no models.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamModelsAdminOnly'
         '404':
           $ref: '#/components/responses/TeamNotFound'
         '409':
@@ -26352,6 +26527,99 @@ components:
         queued:
           type: boolean
           description: True when the message is waiting for its answer. False when the same message was already accepted.
+    RefusedTurnMessage:
+      type: object
+      description: The message a refused turn was for.
+      required:
+        - id
+        - text
+      properties:
+        id:
+          type:
+            - string
+            - 'null'
+          description: The message's id, as the app that sent it named it. Null for what a routine or a task asked.
+        text:
+          type: string
+          description: What it said.
+    RefusedTurn:
+      type: object
+      description: 'One of the caller''s turns that was refused before it ran, so nothing of it is in the conversation''s thread: what it was for, and why.'
+      required:
+        - id
+        - botId
+        - threadId
+        - afterMessageId
+        - message
+        - initiator
+        - code
+        - detail
+        - model
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The refused turn's id. Opaque.
+        botId:
+          type: string
+          description: The Bot the turn was for.
+        threadId:
+          type: string
+          description: The thread the turn would have run in.
+        afterMessageId:
+          type:
+            - string
+            - 'null'
+          description: 'The id of the thread''s message the turn came after, as the app that sent it held the thread. Null where nothing says (a routine''s or a task''s turn, or the first turn of a thread): draw it after the thread''s messages.'
+        message:
+          oneOf:
+            - $ref: '#/components/schemas/RefusedTurnMessage'
+            - type: 'null'
+          description: 'What the turn was for: the person''s message, or what a routine or a task asked. Null when nothing was said.'
+        initiator:
+          type: string
+          x-extensible-enum:
+            - person
+            - routine
+            - task
+          description: 'Who started the turn: the person (person), a routine, check-in or goal (routine), or a task a Bot handed the work to (task).'
+        code:
+          type: string
+          x-extensible-enum:
+            - MODEL_NOT_ALLOWED
+            - CAPABILITY_REQUIRED
+            - PLAN_REQUIRED
+          description: Why it was refused, as the refusal's problem code.
+        detail:
+          type: string
+          description: The refusal, in the words the person was told.
+        model:
+          type:
+            - string
+            - 'null'
+          description: The model it was refused on, as provider/model, for MODEL_NOT_ALLOWED. Null otherwise.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was refused.
+    RefusedTurnPage:
+      type: object
+      required:
+        - refusedTurns
+        - nextCursor
+      properties:
+        refusedTurns:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/RefusedTurn'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
     AttachmentUpload:
       type: object
       required:
@@ -32217,6 +32485,53 @@ components:
       properties:
         member:
           $ref: '#/components/schemas/TeamMember'
+    TeamModelId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
+      description: 'A model, as provider/model: the organization''s model allowlist names models this way, from the catalogue''s provider and a model''s id (getModelCatalogue).'
+      example: openai/gpt-5.6-terra
+    TeamModels:
+      type: object
+      description: 'The models a team allows its people to run. models null: the team sets none, and its people run what their other teams and the organization allow.'
+      required:
+        - models
+        - updatedBy
+        - updatedAt
+      properties:
+        models:
+          type:
+            - array
+            - 'null'
+          description: The models, as provider/model, in the order they were saved. Null when the team sets none.
+          items:
+            $ref: '#/components/schemas/TeamModelId'
+        updatedBy:
+          type:
+            - string
+            - 'null'
+          description: The id of the person who last set them. Null when the team sets none, or that person's account is gone.
+        updatedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When they were last set. Null when the team sets none.
+    TeamModelsInput:
+      type: object
+      additionalProperties: false
+      required:
+        - models
+      properties:
+        models:
+          type: array
+          minItems: 1
+          maxItems: 200
+          uniqueItems: true
+          description: The models the team's people may run, as provider/model. Each one the organization's model catalogue offers.
+          items:
+            $ref: '#/components/schemas/TeamModelId'
     ApprovalStatus:
       type: string
       description: Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.
@@ -42943,6 +43258,64 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    InvalidTeamModels:
+      description: The models are missing, empty, repeated or malformed, one is not a model the organization's catalogue offers, or the Idempotency-Key is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unknown:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: openai/claude-x isn't a model this organization offers.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            empty:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose at least one model.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TeamModelsAdminOnly:
+      description: 'The caller is not an owner or an admin of the organization: a team''s maintainers don''t change its models. Or the organization requires signing in through the company''s identity provider and the caller hasn''t (SSO_REQUIRED).'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin of this organization can change a team's models.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ApprovalsOwnOnly:
       description: 'The caller asked about somebody else''s approvals, questions, preferences or rules, which only that person may read or change: an administrator can''t either.'
       content:
@@ -46303,6 +46676,23 @@ components:
       value:
         id: m1
         queued: true
+    RefusedTurnPageLast:
+      summary: A message refused on a model the person's team doesn't allow.
+      value:
+        refusedTurns:
+          - id: 6f1c2b7e-3a4d-4e9b-8c21-5d0a9e7f4b13
+            botId: research-assistant
+            threadId: thread_9k2m
+            afterMessageId: msg_7d1e
+            message:
+              id: msg_8a2f
+              text: Summarize the Q3 pipeline.
+            initiator: person
+            code: MODEL_NOT_ALLOWED
+            detail: This Bot uses GPT-4.1, which your team's models don't include. Ask an admin to change your team's models.
+            model: openai/gpt-4.1
+            createdAt: '2026-11-23T16:20:05.000Z'
+        nextCursor: null
     AttachmentExample:
       summary: A spreadsheet held for the next message.
       value:
@@ -48292,6 +48682,20 @@ components:
           role: member
           isCaller: false
           joinedAt: '2026-11-15T09:20:05.000Z'
+    LimitedTeamModels:
+      summary: A team whose people run two models.
+      value:
+        models:
+          - openai/gpt-5.6-terra
+          - anthropic/claude-sonnet-5
+        updatedBy: 8kq2m4x7p1rvz3a9c5d0
+        updatedAt: '2026-11-23T10:04:12.000Z'
+    NoTeamModels:
+      summary: A team that sets no models.
+      value:
+        models: null
+        updatedBy: null
+        updatedAt: null
     ApprovalPageExample:
       summary: One approval waiting, on the last page.
       value:

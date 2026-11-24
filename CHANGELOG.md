@@ -298,6 +298,25 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `Idempotency-Key`; one runs at a time per computer (409 `COMPUTER_RESTORE_RUNNING`). An admin may
   name another person's computer with `computer`. A Bot's action on a computer being restored is
   answered 503 `COMPUTER_RESTORING`, worth retrying. Both are recorded on the trail.
+- **Which models a team's people may run.** `getTeamModels`, `replaceTeamModels` and
+  `deleteTeamModels` under `teams/{teamId}/models`. Any member reads a team's list; only an owner or
+  an admin sets or clears it, as provider/model names the organization's catalogue offers (400
+  naming a model it doesn't, 403 for anyone else). A person in teams with lists, or under a parent
+  team with one, runs only a model one of those lists names, within what the organization allows; a
+  team with no list sets nothing. `getModelCatalogue` is narrowed for the caller the same way, and
+  a change is recorded on the trail as `team.models_changed`. A model a person or a Bot chose that
+  their teams don't allow is refused before the run (`MODEL_NOT_ALLOWED`, naming their team's
+  list), never swapped for another.
+- **The model catalogue offers only what can run.** With Only allowed models on, the
+  organization's default model is offered only when it is on the list; otherwise the default is
+  the newest allowed model. Before, it was offered and every run on it was refused. A model a
+  person or a Bot chose that the organization's allowlist leaves out is refused before the run
+  too, never swapped for the default.
+- **Refused turns stay in the conversation.** `listRefusedTurns`
+  (`conversations/{conversationId}/refused-turns`) lists the caller's turns refused before they
+  ran (a model they may not run, a permission they lack, no plan), with the message each was for,
+  where it came in the thread (`afterMessageId`) and the refusal's code and words, so a reopened
+  conversation still shows them. Nothing of a refused turn reaches the thread itself.
 - **Search invitations, teams and a team's people.** `listOrganizationInvitations`, `listTeams`
   and `listTeamMembers` take an optional `search`, which narrows each list to the invitations
   whose address holds it, the teams whose name holds it, or the people whose name or address holds
