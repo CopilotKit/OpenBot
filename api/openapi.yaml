@@ -47587,6 +47587,9 @@ components:
                 traceId: trace_example
     MoveNotAllowed:
       description: This organization doesn't let the caller use Bots, so nothing can move into it (MOVE_NOT_ALLOWED). Or the caller holds no role in it, or it requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
