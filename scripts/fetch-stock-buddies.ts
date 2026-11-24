@@ -38,12 +38,22 @@ const canWriteHevc = (() => {
   return probe.status === 0 && probe.stdout.includes("hevc_videotoolbox");
 })();
 
-/** Each clip's transparent HEVC copy, for WebKit. A copy already written is kept. */
+/**
+ * How the HEVC copies are written. A folder whose copies were written another way has them written
+ * again. 2: premultiplied. WebKit reads an HEVC clip's colour as premultiplied by its alpha, so a
+ * straight copy drew a light grey fringe around the character on a dark page.
+ */
+const HEVC_COPIES = "2";
+
+/** Each clip's transparent HEVC copy, for WebKit. A copy already written this way is kept. */
 function writeHevcCopies(dir: string): void {
+  const stamp = join(dir, ".hevc");
+  const current =
+    existsSync(stamp) && readFileSync(stamp, "utf8").trim() === HEVC_COPIES;
   for (const name of readdirSync(dir)) {
     if (!name.endsWith(".webm")) continue;
     const copy = join(dir, name.replace(/\.webm$/, ".hevc.mp4"));
-    if (existsSync(copy)) continue;
+    if (current && existsSync(copy)) continue;
     const run = spawnSync("ffmpeg", [
       "-v",
       "error",
@@ -54,7 +64,8 @@ function writeHevcCopies(dir: string): void {
       "-i",
       join(dir, name),
       "-vf",
-      "format=bgra",
+      // Premultiplied, as WebKit composites it.
+      "format=rgba,premultiply=inplace=1,format=bgra",
       "-c:v",
       "hevc_videotoolbox",
       "-alpha_quality",
@@ -72,6 +83,7 @@ function writeHevcCopies(dir: string): void {
     if (run.status !== 0)
       console.warn(`buddies: couldn't write ${copy}: ${run.stderr}`);
   }
+  writeFileSync(stamp, `${HEVC_COPIES}\n`);
 }
 
 async function fetchOne(id: string, file: string): Promise<void> {
