@@ -19,6 +19,13 @@ export const PRICE = "$5 a month for each member of this organization";
 export const COPILOTKIT_EMPLOYEE_LINE =
   "Free because you're a CopilotKit employee. Thanks, Uncle Atai!";
 
+/** Under the photo of Sentry that follows that line, word for word as it was asked for. */
+export const SENTRY_LINE = "Sentry loves you too.";
+
+/** What the photo shows, for a screen reader and for anyone whose browser doesn't draw it. */
+export const SENTRY_ALT =
+  "Sentry, a white golden retriever, sitting on a rock above a mountain meadow";
+
 /** The button that takes an admin to add or update the card. */
 export function cardAction(plan: PlanStatus): string {
   return plan.status === "past_due" ? "Update card" : "Add a card";

@@ -175,6 +175,8 @@ const employeeUsedUp = (): OrganizationPlan => ({
 
 const EMPLOYEE_LINE =
   "Free because you're a CopilotKit employee. Thanks, Uncle Atai!";
+const SENTRY_ALT =
+  "Sentry, a white golden retriever, sitting on a rock above a mountain meadow";
 
 const routine: RoutineRecord = {
   id: "routine-1",
@@ -344,6 +346,7 @@ test("once the trial is used up, the dialog says so once, and then opens in plac
   expect(said).toContain("Your free trial was 500 Bot runs");
   expect(said).toContain("$5 a month for each member of this organization");
   expect(said).not.toContain(EMPLOYEE_LINE);
+  expect(view.queryByAltText(SENTRY_ALT)).toBeNull();
   const pay = view.getByRole("link", { name: "Add a card" });
   expect(pay.getAttribute("href")).toBe(ADD_CARD);
   await dismiss();
@@ -397,6 +400,7 @@ test("a member is told to ask an admin, with no button", async () => {
     "Ask an admin of this organization to add a card.",
   );
   expect(dialog()?.textContent).not.toContain(EMPLOYEE_LINE);
+  expect(view.queryByAltText(SENTRY_ALT)).toBeNull();
   expect(view.queryAllByRole("link")).toHaveLength(0);
 });
 
@@ -561,6 +565,9 @@ test("a CopilotKit employee past the cap is told once, with thanks and no way to
     "From now on, OpenBot is $5 a month for each member of this organization.",
   );
   expect(said).toContain(EMPLOYEE_LINE);
+  expect(said).toContain("Sentry loves you too.");
+  const photo = view.getByAltText(SENTRY_ALT);
+  expect(photo.getAttribute("loading")).toBe("lazy");
   expect(said).not.toContain("Ask an admin");
   expect(said).not.toContain("Add a card");
   // Only a way to close.
