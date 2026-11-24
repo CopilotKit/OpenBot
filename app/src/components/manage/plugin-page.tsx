@@ -58,6 +58,7 @@ import {
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
+  setEveryBotMutationOptions,
   setOwnerGrantsMutationOptions,
 } from "@/lib/apps/mutations";
 import {
@@ -409,6 +410,10 @@ export function PluginPage({
   });
   const ownerGrants = useMutation({
     ...setOwnerGrantsMutationOptions(queryClient),
+    ...report,
+  });
+  const everyBot = useMutation({
+    ...setEveryBotMutationOptions(queryClient),
     ...report,
   });
   const navigate = useNavigate();
@@ -927,6 +932,32 @@ export function PluginPage({
                         serverId: key,
                         ownerGrants: next ? "any" : "admin",
                       });
+                    }}
+                  />
+                </ItemActions>
+              </Item>
+              {/*
+               * Every Bot in the organization, Bots made later too. Binary and immediate, so a
+               * Switch. Turning it off takes back only what this switch gave.
+               */}
+              <Separator />
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Every Bot</ItemTitle>
+                  <ItemDescription>
+                    {server.everyBot === true
+                      ? "Every Bot in this organization can use it, Bots made later too."
+                      : "Only the Bots it's given to can use it."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Switch
+                    aria-label={`Give ${title} to every Bot`}
+                    checked={server.everyBot === true}
+                    disabled={everyBot.isPending}
+                    onCheckedChange={(next) => {
+                      setError(null);
+                      everyBot.mutate({ serverId: key, everyBot: next });
                     }}
                   />
                 </ItemActions>
