@@ -17,7 +17,7 @@ import {
 import { engineTooSmallSaid } from "./localReadiness";
 import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import { InlineFailure, type Problem } from "./Problem";
-import { SetupRail, Sections } from "./Sections";
+import { Sections, SetupRail } from "./Sections";
 import {
   type Progress,
   SetupProgress,

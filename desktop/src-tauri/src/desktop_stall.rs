@@ -679,6 +679,65 @@ mod tests {
         assert_eq!(looks(500, 1000), None);
     }
 
+    /**
+    FOUND IN A MAC UPGRADE CHECK of 1.2: a setup page frozen on its screen was reloaded, stayed
+    frozen, and the alert said "it still isn't showing anything" over a window that still showed
+    that screen. Through the same calls the window and its page make: a page that drew its heading
+    and then froze is reloaded once, the reload never takes, and the person is told. What they are
+    told is true of a window still showing its last screen, as it is of a blank one.
+    */
+    #[test]
+    fn a_setup_page_frozen_on_its_screen_is_told_in_words_true_of_it() {
+        let sink = Sink::start();
+        let app = app("stall-frozen", false, &sink);
+        let app = app.handle();
+        let start = Instant::now();
+        let looks = |from: u64, to: u64| {
+            (from..=to).find_map(|second| {
+                tick(app, at(start, second), Some(true)).map(|act| (second, act))
+            })
+        };
+        tick(app, start, Some(true));
+        page_started_at(app, true, start);
+        setup_finished_at(app, at(start, 1));
+        // It draws "Move to OpenBot Cloud?" and answers, then freezes at 10 with it on screen.
+        for second in (2..=10).step_by(4) {
+            shown_at(
+                app,
+                Shown::from_page(Some("Move to OpenBot Cloud?".into()), Some(true)),
+                at(start, second),
+            );
+        }
+        assert!(matches!(
+            looks(11, 60),
+            Some((
+                31,
+                stall::PageAct::Reload {
+                    quiet: stall::Quiet::Stopped,
+                    ..
+                }
+            ))
+        ));
+        // The frozen page never starts loading again: past the time a load has, it gives up.
+        let gave_up = looks(32, 120);
+        assert!(
+            matches!(gave_up, Some((_, stall::PageAct::GiveUp { .. }))),
+            "{gave_up:?}"
+        );
+
+        let told = crate::setup_stuck_prompt();
+        assert_eq!(told.title, "OpenBot's window isn't responding");
+        assert_eq!(told.buttons, Some(("Restart", "Get logs")));
+        assert_eq!(
+            told.message,
+            "OpenBot tried reloading it, and it still isn't updating. Restart OpenBot to try again. Get logs saves what happened to a file you can share."
+        );
+        // Nothing in it says the window is empty: this one still shows "Move to OpenBot Cloud?".
+        for empty in ["showing anything", "nothing", "blank", "empty"] {
+            assert!(!told.message.contains(empty), "{}", told.message);
+        }
+    }
+
     /// Usage data turned off: the same step and the same window send nothing at all.
     #[test]
     fn opted_out_nothing_is_sent() {

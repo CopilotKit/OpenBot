@@ -529,3 +529,50 @@ test("after Accept, the step says it is setting up your apps, not to sign in", a
   connected();
   await waitFor(() => expect(done).toBe("developer-edition-2026-10-01-web"));
 });
+
+/*
+ * The install behind this step is said at the sidebar's foot, never in the step, and it never
+ * spins: beside "Finish signing in to OpenBot in your browser…" it was a second spinner, and as it
+ * came and went it moved the button the person was about to press.
+ */
+test("the install behind the step is at the sidebar's foot, quiet, and never in the page", async () => {
+  waitingSignIn();
+  const asked: string[] = [];
+  const screen = render(
+    <CopilotKitAccount
+      root="/tmp/account-behind"
+      onDone={() => {}}
+      behind={(waitingFor) => {
+        asked.push(waitingFor);
+        return {
+          step: "install",
+          ok: true,
+          running: true,
+          detail: waitingFor,
+          position: { at: 3, of: 4 },
+        };
+      }}
+    />,
+  );
+  await screen.findByText(PAGE.userCode);
+  const list = screen.getByRole("list", { name: "Background install" });
+  expect(list.closest("aside.rail > .rail-foot")).not.toBeNull();
+  expect(list.closest(".sheet")).toBeNull();
+  // The step's own wait is the one spinner on the screen; the row behind it is marked, not spun.
+  expect(list.querySelector(".step-spinner")).toBeNull();
+  expect(list.querySelector(".step-current")).not.toBeNull();
+  const page = screen
+    .getByRole("heading", { name: "Get your free license key" })
+    .closest(".sheet") as HTMLElement;
+  expect(page.previousElementSibling).toBe(list.closest("aside.rail"));
+  expect(
+    page.querySelector('[aria-label="Background install"], .rail-foot'),
+  ).toBeNull();
+  expect(list.textContent).toContain(asked.at(-1) ?? "");
+  // The sections head the sidebar, with Account the step it is on.
+  const sections = screen.getByRole("list", { name: "Setup" });
+  expect(sections.closest("aside.rail")).toBe(list.closest("aside.rail"));
+  expect(sections.querySelector('[aria-current="step"]')?.textContent).toBe(
+    "Account",
+  );
+});

@@ -237,10 +237,13 @@ export function ShuttingDown({ status }: { status: QuitStatus | null }) {
             : "OpenBot is stopping what it started on this computer, then it closes."}
         </p>
         {running && <QuitJourney steps={steps} clock={clock} />}
+        {/* While the journey runs, its spinner is the one on the screen: the row it is on is
+            marked, not spun. Two spinners read as two waits. */}
         <SetupProgress
           steps={steps}
           label="Shutdown progress"
           showElapsed={!running}
+          quiet={running}
         />
       </div>
     </main>

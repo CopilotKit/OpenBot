@@ -3,11 +3,13 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCreditCard,
+  IconSearch,
 } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, useEffect, useId, useState } from "react";
 import {
+  PageEmpty,
   PageRows,
   PageSection,
   PageShell,
@@ -38,6 +40,11 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  Progress,
+  ProgressLabel,
+  ProgressValue,
+} from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin, type KnownRole } from "@/lib/auth/roles";
@@ -51,7 +58,7 @@ import {
 import {
   type OrganizationMemberSummary,
   type OrganizationSummary,
-  organizationMembersQueryOptions,
+  organizationMemberPagesQueryOptions,
   useOrganizationChoices,
 } from "@/lib/organizations/queries";
 import {
@@ -64,8 +71,9 @@ import {
   roleInSentence,
   roleName,
 } from "@/lib/organizations/words";
+import { SEARCH_MAX } from "@/lib/people/queries";
 import { needsCard, usePlan } from "@/lib/plan/queries";
-import { cardAction, planSummary } from "@/lib/plan/words";
+import { cardAction, planSummary, trialUsed } from "@/lib/plan/words";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { PersonAvatar } from "./person-avatar";
@@ -178,10 +186,41 @@ function NameRow({
  * plan, a failed payment, or none yet. Read-only, with the way to add or update the card for an
  * owner or an admin while Bots can't run (`addCardUrl`, the server's verdict). Nothing, and no
  * divider, where no plan is needed or while it is read.
+ *
+ * On the free trial it shows how much of it is used, as a bar and a percentage
+ * (`freeRunsUsedPercent`, the person's own share). Never a count or a limit: the server sends
+ * neither while runs are left.
  */
 function PlanRow() {
   const plan = usePlan();
   if (!plan?.required) return null;
+  const used =
+    plan.status === "free" && typeof plan.freeRunsUsedPercent === "number"
+      ? plan.freeRunsUsedPercent
+      : null;
+  if (used !== null)
+    return (
+      <>
+        <Separator />
+        <Item size="sm">
+          {/* Level with the title, as beside a row's description. */}
+          <ItemMedia className="translate-y-0.5 self-start" variant="icon">
+            <IconCreditCard />
+          </ItemMedia>
+          <ItemContent className="min-w-0">
+            <ItemTitle>Plan</ItemTitle>
+            <Progress className="mt-0.5 gap-x-3 gap-y-2" value={used}>
+              <ProgressLabel className="font-normal text-muted-foreground text-xs">
+                Free trial
+              </ProgressLabel>
+              <ProgressValue className="text-xs">
+                {() => trialUsed(used)}
+              </ProgressValue>
+            </Progress>
+          </ItemContent>
+        </Item>
+      </>
+    );
   return (
     <>
       <Separator />
@@ -309,14 +348,25 @@ type RoleChange = {
 /**
  * Who is in the organization, with each person's role, and what their row offers: a Role menu
  * listing the roles the server says the person looking may give them (`assignableRoles`), and
- * Remove or Leave where the membership can end (`removable`).
+ * Remove or Leave where the membership can end (`removable`). A page at a time, with a search above
+ * them that asks the server, as Admin's People does: an organization can have any number of people.
  */
 function MembersSection({
   organization,
 }: {
   organization: OrganizationSummary;
 }) {
-  const members = useQuery(organizationMembersQueryOptions(organization.id));
+  const [search, setSearch] = useState("");
+  // Debounced, so typing a name is one request rather than one per keystroke.
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const members = useInfiniteQuery(
+    organizationMemberPagesQueryOptions(organization.id, query),
+  );
+  const rows = members.data?.pages.flatMap((page) => page.members) ?? [];
   const me = useQuery(currentUserQueryOptions()).data;
   const changeRole = useMutation(changeMemberRoleMutationOptions(queryClient));
   // Kept while its dialog closes, so the question does not lose its name on the way out.
@@ -346,13 +396,30 @@ function MembersSection({
 
   return (
     <PageSection title="Members">
+      {/*
+        Server-side search, as on Admin's People: filtering what already arrived would only search
+        the first page, which is the opposite of what somebody looking for a colleague needs.
+      */}
+      <Input
+        aria-label="Search members"
+        className="mt-4"
+        maxLength={SEARCH_MAX}
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder="Search by name or address"
+        value={search}
+      />
       {members.isPending ? null : members.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {members.error.message}
         </p>
+      ) : rows.length === 0 ? (
+        // A list with nobody in it at all can't be read by anybody, so this is a search's answer.
+        <PageEmpty icon={IconSearch} title="No matches">
+          {`Nobody matches "${query}".`}
+        </PageEmpty>
       ) : (
         <PageRows>
-          {members.data.map((member, index) => {
+          {rows.map((member, index) => {
             const control = memberControl(member, viewer);
             const name = personName(member);
             const roles = givableRoles(member);
@@ -382,8 +449,12 @@ function MembersSection({
                       {memberLine(member)}
                     </ItemDescription>
                   </ItemContent>
+                  {/*
+                   * A Role menu and a button are too much beside a name on a phone, so there they
+                   * take a line of their own under it, as on a team's people and Admin's People.
+                   */}
                   {control || roles.length > 0 ? (
-                    <ItemActions>
+                    <ItemActions className="max-sm:basis-full">
                       {roles.length > 0 ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger
@@ -438,12 +509,24 @@ function MembersSection({
                     </ItemActions>
                   ) : null}
                 </Item>
-                {index !== members.data.length - 1 && <Separator />}
+                {index !== rows.length - 1 && <Separator />}
               </Fragment>
             );
           })}
         </PageRows>
       )}
+      {/* Only when the server says there is another page, as on Admin's People. */}
+      {members.hasNextPage ? (
+        <Button
+          className="mt-4"
+          disabled={members.isFetchingNextPage}
+          onClick={() => members.fetchNextPage()}
+          size="sm"
+          variant="outline"
+        >
+          {members.isFetchingNextPage ? "Loading…" : "Show more"}
+        </Button>
+      ) : null}
       {changeRole.error ? (
         <p className="mt-3 text-destructive text-sm" role="alert">
           {changeRole.error.message}

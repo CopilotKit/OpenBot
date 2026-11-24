@@ -31,7 +31,7 @@ describe("window scenes", () => {
   test("they come after the install runs and before the state scenes", () => {
     const ids = SCENES.map((each) => each.id);
     const first = ids.indexOf("status-stop-start");
-    expect(ids[first - 1]).toBe("install-anthropic-plan");
+    expect(ids[first - 1]).toBe("install-signed-in");
     expect(ids[first + WINDOW_SCENES.length]).toBe("state-first-run");
   });
 

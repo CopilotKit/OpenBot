@@ -10,7 +10,7 @@ import {
   earlyDownloadsMeasured,
   useEarlyDownloads,
 } from "./EarlyDownloads";
-import { handover } from "./handover";
+import { handover, leaveFor } from "./handover";
 import { currentChoice, DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
@@ -46,7 +46,7 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
-import { SetupRail, Sections } from "./Sections";
+import { Sections, SetupRail } from "./Sections";
 import { SelfContainedNote, UPDATING_SELF_CONTAINED } from "./SelfContained";
 import {
   engineNow,
@@ -59,6 +59,7 @@ import {
   plainInstallSteps,
   SetupProgress,
   StatusLine,
+  spins,
   trayPlace,
 } from "./SetupProgress";
 import { ShuttingDown, useQuitStatus } from "./ShuttingDown";
@@ -1227,6 +1228,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * The window to the OpenBot running here (`show_openbot`), unless the move to OpenBot Cloud is
    * offered first: then its screens show instead, and this answers false. The shell is told whether
    * this build offers OpenBot Cloud, and says the move is due only where it does.
+   *
+   * Setup fades out to the window's ground first, and OpenBot's page fades up from it
+   * (`leaveFor`); a `show_openbot` that fails brings setup back at once, with the failure.
    */
   async function handOver(): Promise<boolean> {
     moveAsked.current ??= askMoveOffer(cloudEnabled());
@@ -1237,7 +1241,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       setMoveShown(offer);
       return false;
     }
-    await invoke("show_openbot");
+    await leaveFor(() => invoke("show_openbot"));
     return true;
   }
 
@@ -1529,6 +1533,12 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   }
 
   if (!running && step === "install") {
+    const installRows = plainInstallSteps(
+      steps,
+      busy,
+      installSince,
+      !local.stopped && local.running ? local.download : null,
+    );
     return (
       <main>
         <SetupRail>
@@ -1545,21 +1555,15 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           </p>
           {/* Intelligence sets itself up alongside, once the install has Docker answering. Its
               download is the list's third step, once the second is done. */}
-          <SetupProgress
-            steps={plainInstallSteps(
-              steps,
-              busy,
-              installSince,
-              !local.stopped && local.running ? local.download : null,
-            )}
-          />
+          <SetupProgress steps={installRows} />
           {/* The person closed macOS's password prompt: said, with Try again. */}
           {goAhead && <PodmanGoAhead asking={goAhead} />}
           {pauseCard}
           <LocalStatus sequence={local} download={false} />
           {/* The first screen's downloads, until a row of Install's own shows the one it waits on. */}
           {!steps.some((row) => row.running && row.downloads) && (
-            <EarlyDownloadsLine />
+            // Install's running row is the step's own wait: the line beside it is still.
+            <EarlyDownloadsLine quiet={installRows.some(spins)} />
           )}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {!busy && (

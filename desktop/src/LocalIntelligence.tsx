@@ -1622,7 +1622,7 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <div className="local-needs">
-      <Lockup byCopilotKit />
+      <Lockup byCopilotKit size={22} />
       <p>Sign in to finish setting up OpenBot.</p>
       {waiting ? (
         <CopilotKitSignInWait

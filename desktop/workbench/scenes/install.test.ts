@@ -12,6 +12,7 @@ const IDS = [
   "install-slow-sign-in",
   "install-relaunch-update",
   "install-anthropic-plan",
+  "install-signed-in",
 ];
 
 function scene(id: string): Scene {
@@ -29,7 +30,7 @@ function answered(steps: readonly RunStep[], command: string) {
 }
 
 describe("install scenes", () => {
-  test("the seven install runs are scenes, in the Install group", () => {
+  test("the eight install runs are scenes, in the Install group", () => {
     expect(INSTALL_SCENES.map((each) => each.id)).toEqual(IDS);
     for (const id of IDS) expect(scene(id).group).toBe("Install");
   });

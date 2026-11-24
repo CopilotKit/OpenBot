@@ -980,6 +980,34 @@ const INSTALL_ANTHROPIC_PLAN: Scene = {
   ),
 };
 
+// install-signed-in: a Mac whose CopilotKit sign-in and agreement an earlier OpenBot left in place.
+// The account step passes by itself, so Install's own screen shows from the click: its rows run
+// while the first screen's downloads are still going.
+const SIGNED_IN_CONTINUE = 25;
+const SIGNED_IN_SET_UP = 3 + 188;
+const INSTALL_SIGNED_IN: Scene = {
+  id: "install-signed-in",
+  title: "Install when signed in already",
+  group: "Install",
+  start: {
+    hash: "",
+    search: "",
+    os: "mac",
+    answers: {
+      ...FIRST_RUN_ANSWERS,
+      sign_in_to_copilotkit: { mode: "value", value: { signedIn: true } },
+      local_eval_terms: { mode: "value", value: { ...TERMS, accepted: true } },
+    },
+  },
+  run: run(
+    [{ at: 2, click: "Install" }],
+    macInstall(2, 75 * MB, 2),
+    [{ at: SIGNED_IN_CONTINUE, click: "Continue" }],
+    backEndSetup(3),
+    openBotStart(SIGNED_IN_SET_UP),
+  ),
+};
+
 export const INSTALL_SCENES: readonly Scene[] = [
   INSTALL_MAC,
   INSTALL_WINDOWS,
@@ -988,4 +1016,5 @@ export const INSTALL_SCENES: readonly Scene[] = [
   INSTALL_SLOW_SIGN_IN,
   INSTALL_RELAUNCH_UPDATE,
   INSTALL_ANTHROPIC_PLAN,
+  INSTALL_SIGNED_IN,
 ];

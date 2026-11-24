@@ -112,6 +112,9 @@ const { App } = await import("./App");
 const { handover } = await import("./handover");
 const HANDOVER_HOLD_MS = handover.holdMs;
 handover.holdMs = 0;
+// Setup's fade before `show_openbot` (`leaveFor`): off here but in the test of the fade itself.
+const HANDOVER_FADE_MS = handover.fadeMs;
+handover.fadeMs = 0;
 const { ShuttingDownWindow, isShuttingDownPage } = await import(
   "./ShuttingDown"
 );
@@ -218,14 +221,22 @@ async function emitQuit(payload: QuitEvent) {
   });
 }
 
-/** One centred column, as every setup screen: the heading, its lede and rows in one sheet. */
+/**
+ * One column, as every setup screen: the heading, its lede and rows in one sheet. Beside it at most
+ * the setup sidebar, before it (`main > .rail + .sheet`): anything else in the window's grid would
+ * get its own row or column and spread the screen apart.
+ */
 function expectStandardSheet(heading: HTMLElement) {
   const sheet = heading.closest(".sheet");
   expect(sheet).not.toBeNull();
   expect(sheet?.classList.contains("connection-sheet")).toBe(true);
   expect(sheet?.parentElement?.tagName).toBe("MAIN");
-  // Nothing beside the sheet: the grid would give each child its own row and spread them apart.
-  expect(sheet?.parentElement?.children).toHaveLength(1);
+  const beside = [...(sheet?.parentElement?.children ?? [])].filter(
+    (child) => child !== sheet,
+  );
+  expect(beside.every((child) => child.matches("aside.rail"))).toBe(true);
+  expect(beside.length).toBeLessThanOrEqual(1);
+  if (beside[0]) expect(beside[0].nextElementSibling).toBe(sheet);
   expect(sheet?.querySelector(".lede, [role=status]")).not.toBeNull();
 }
 
@@ -250,7 +261,9 @@ const failed = (step: string) => ({
 
 /**
  * The background install's row, on a screen that asks for something else meanwhile: what it says,
- * how far along it is, and whether it is working (its spinner) or waiting for the person.
+ * how far along it is, and whether it is working (marked as the one it is on) or waiting for the
+ * person. It is at the sidebar's foot, never in the step, and it never spins: the step's own wait
+ * is the one spinner on the screen.
  */
 function expectBehind(
   view: ReturnType<typeof render>,
@@ -261,11 +274,14 @@ function expectBehind(
   const row = view.getByRole("listitem", {
     name: "Installing OpenBot in the background",
   });
+  expect(row.closest("aside.rail > .rail-foot")).not.toBeNull();
+  expect(row.closest(".sheet")).toBeNull();
   expect(row.querySelector(".detail")?.textContent).toBe(said);
   expect(row.querySelector(".step-status")?.textContent).toContain(
     `Step ${at} of 4`,
   );
-  expect(row.querySelector(".step-spinner") !== null).toBe(!waiting);
+  expect(row.querySelector(".step-spinner")).toBeNull();
+  expect(row.querySelector(".step-current") !== null).toBe(!waiting);
   expect(row.textContent?.includes("Waiting for you")).toBe(waiting);
 }
 
@@ -1056,8 +1072,19 @@ test("Connect to it asks for an address in place of Install, and going back brin
     "disabled",
     true,
   );
-  // The link that led here is gone while its form shows.
-  expect(view.queryByText(/Already have OpenBot at work/)).toBeNull();
+  // The link that led here is gone from the sidebar while its form shows, and the page is named
+  // for the question it answered.
+  expect(view.queryByRole("button", { name: "Connect to it" })).toBeNull();
+  expect(
+    within(view.getByRole("complementary")).queryByText(
+      /Already have OpenBot at work/,
+    ),
+  ).toBeNull();
+  expect(
+    view
+      .getByRole("heading", { name: "Already have OpenBot at work?" })
+      .closest(".sheet"),
+  ).not.toBeNull();
   expectPlain(view);
   // Back, by the control that says so, and by the rows themselves.
   await userEvent.type(field, "openbot.example.com");
@@ -1413,15 +1440,15 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     const view = await renderApp();
     const radios = view.getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
-      "OpenBot CloudUse OpenBot here. Your Bots run in our cloud.",
+      "OpenBot CloudYour Bots run in our cloud. Free usage-based trial.",
       "OpenBot for BusinessYour own cloud or on-prem. Book a demo.",
     ]);
     expect(radios.map((radio) => [radio.value, radio.checked])).toEqual([
       ["cloud", true],
       ["business", false],
     ]);
-    // The order a keyboard and a screen reader meet them: Cloud, Business, the link, Cloud's
-    // sign-in, and last of all the way to Self-Contained.
+    // The order a keyboard and a screen reader meet them: down the sidebar, Cloud, Business, and
+    // at its foot the way to Self-Contained and the link; then the page, Cloud's sign-in.
     const order = () =>
       [...view.container.querySelectorAll("input[type=radio], button")].map(
         (control) =>
@@ -1433,16 +1460,22 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
       "cloud",
       "business",
       "Connect to it",
-      "Sign in to OpenBot Cloud",
       "Use OpenBot (Self-Contained)",
+      "Sign in to OpenBot Cloud",
     ]);
-    // Self-Contained is a line with a link, the card's last element, not a row and not picked.
+    // Self-Contained is a line with a link at the sidebar's foot, under the choices: not a row, not
+    // picked, and not on the page.
     const foot = view.getByRole("region", { name: "Run on this computer" });
     expect(foot.textContent).toBe(
       "Want everything to run on this computer? Use OpenBot (Self-Contained).",
     );
-    expect(foot.parentElement?.lastElementChild).toBe(foot);
+    expect(foot.closest("aside.rail > .rail-foot")).not.toBeNull();
+    expect(foot.closest(".sheet")).toBeNull();
     expect(foot.querySelector(".tile, .chosen")).toBeNull();
+    // The page is the picked choice, under its own name.
+    expect(
+      view.getByRole("heading", { name: "OpenBot Cloud" }).closest(".sheet"),
+    ).not.toBeNull();
     // Cloud's sign-in is what the screen opens on: nothing to type.
     expect(
       view.getByText(
@@ -1463,7 +1496,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
           []),
       ].map((mark) => mark.getAttribute("data-mark")),
     ).toEqual(["aws", "azure", "google-cloud", "kubernetes"]);
-    // OpenBot for Business books a demo, and Self-Contained's line is still last, below the booker.
+    // OpenBot for Business books a demo, and Self-Contained's line stays at the sidebar's foot.
     await userEvent.click(radios[1] as HTMLInputElement);
     expect(radios[1]?.checked).toBe(true);
     expect(view.getByTitle("Booking calendar")).toBeTruthy();
@@ -1471,7 +1504,11 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     expect(
       view.queryByRole("button", { name: "Sign in to OpenBot Cloud" }),
     ).toBeNull();
-    expect(order().at(-1)).toBe("Use OpenBot (Self-Contained)");
+    expect(
+      within(view.getByRole("region", { name: "Run on this computer" }))
+        .getByRole("button", { name: "Use OpenBot (Self-Contained)" })
+        .closest(".rail-foot"),
+    ).not.toBeNull();
     // The calendar is below the lists: Book a demo, in view from the start, takes the person there.
     await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
     expect(document.activeElement).toBe(
@@ -1511,8 +1548,9 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
   });
 
   /*
-   * OpenBot (Self-Contained), opened from its line at the foot: what this computer needs and why,
-   * the setup time and Install, there at the foot, with neither row picked. Install sets it up.
+   * OpenBot (Self-Contained), opened from its line at the sidebar's foot: the page is it, under its
+   * own name, with what this computer needs and why, the setup time and Install, and neither row
+   * picked. The foot names it as the one open. Install sets it up.
    */
   test("OpenBot (Self-Contained), opened at the foot, shows what this computer needs and Install, which sets it up", async () => {
     setupRootConfiguration("/tmp/cloud-self-contained", async () =>
@@ -1534,14 +1572,19 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
       ),
     ).toEqual([false, false]);
     const foot = view.getByRole("region", { name: "Run on this computer" });
-    expect(
-      within(foot).getByRole("heading", { name: "What this computer needs" }),
-    ).toBeTruthy();
     expect(foot.querySelector(".this-computer-aside")?.textContent).toBe(
       "OpenBot (Self-Contained) Everything runs on this computer, for trying it or personal use.",
     );
+    const page = view
+      .getByRole("heading", { name: "OpenBot (Self-Contained)" })
+      .closest(".sheet") as HTMLElement;
+    expect(page).not.toBeNull();
     expect(
-      [...foot.querySelectorAll(".needs-list li")].map(
+      within(page).getByRole("heading", { name: "What this computer needs" }),
+    ).toBeTruthy();
+    expect(within(foot).queryByRole("heading")).toBeNull();
+    expect(
+      [...page.querySelectorAll(".needs-list li")].map(
         (item) => item.textContent,
       ),
     ).toEqual([
@@ -1551,7 +1594,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
       "40 GB of free disk space",
     ]);
     expect(
-      within(foot).getByText(
+      within(page).getByText(
         "Setup takes 1 to 10 minutes, depending on your internet speed.",
       ),
     ).toBeTruthy();
@@ -3138,14 +3181,21 @@ test("a start that wakes the computer's software and updates OpenBot says it in 
   expect(said["waking the software"]).toContain(
     "Starting the software OpenBot runs onAbout a minute left · 0s so far",
   );
+  // The row the journey is on says it is in progress, and no step count beside the journey's.
   expect(said["waking the software"]).toContain(
-    "Getting OpenBot readyStep 3 of 4",
+    "Getting OpenBot readyIn progress",
   );
+  for (const beat of [
+    "waking the software",
+    "updating",
+    "downloading the update",
+  ])
+    expect(said[beat]).not.toMatch(/Step \d of \d/);
   expect(said.updating).toContain(
     "Getting the update readyAbout 2 minutes left",
   );
   expect(said.updating).toContain(
-    "Getting OpenBot readyStep 3 of 4Updating OpenBot. Your Bots and data stay as they are.",
+    "Getting OpenBot readyIn progressUpdating OpenBot. Your Bots and data stay as they are.",
   );
   // The download is the journey's: what is happening, and its measure beside the time left. The row
   // keeps what this part is, and has no measure of its own.
@@ -3154,7 +3204,7 @@ test("a start that wakes the computer's software and updates OpenBot says it in 
   );
   expect(said["downloading the update"].match(/MB of/g)).toHaveLength(1);
   expect(said["downloading the update"]).toContain(
-    "Getting OpenBot readyStep 3 of 4Updating OpenBot. Your Bots and data stay as they are.",
+    "Getting OpenBot readyIn progressUpdating OpenBot. Your Bots and data stay as they are.",
   );
   expect(said["running on the version it had"]).toContain(KEPT_RELEASE);
 });
@@ -3536,8 +3586,23 @@ test("Continue during setup shows Finishing setup, which starts and opens OpenBo
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Finishing setup" });
   expect(stepLabel(view)).toBe("Start");
+  // The journey says how far along the whole Start is, and is the one spinner on the screen. The
+  // row it is on is marked, not spun, and has no "Step 1 of 4" of its own.
   const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
-  expect(row.textContent).toContain("Step 1 of 4");
+  expect(row.querySelector(".step-status")?.textContent).toBe("In progress");
+  expect(row.textContent).not.toMatch(/Step \d of \d/);
+  expect(row.querySelector(".step-spinner")).toBeNull();
+  expect(row.querySelector(".step-current")).not.toBeNull();
+  const journey = view.getByRole("region", { name: "How far along" });
+  expect(
+    [...view.container.querySelectorAll(".step-spinner")].map((spinner) =>
+      journey.contains(spinner),
+    ),
+  ).toEqual([true]);
+  // Its sections are in the sidebar beside the page, not in it.
+  const sections = view.getByRole("list", { name: "Setup" });
+  expect(sections.closest("aside.rail")).not.toBeNull();
+  expect(sections.closest(".sheet")).toBeNull();
   expectPlain(view);
   await act(async () => setUp.resolve(localStatus("starting", "valid")));
   await expectHandover();
@@ -4286,8 +4351,10 @@ test("relaunch with Docker Desktop quit opens it, says so, and starts once it an
   await view.findByRole("heading", { name: "Starting OpenBot" });
   await emitDockerHandOff();
   expectJourney(view, DOCKER_HAND_OFF);
+  // The row it waits on is the one in progress; the journey above it says how far along.
   const row = view.getByRole("listitem", { name: "Getting OpenBot ready" });
-  expect(row.textContent).toContain("Step 3 of 4");
+  expect(row.querySelector(".step-status")?.textContent).toBe("In progress");
+  expect(row.querySelector(".step-spinner")).toBeNull();
   expect(localSequence()).toEqual([]);
   // Docker answers: the hand-off goes, and the back end and OpenBot start.
   await emitDockerSettled(true, "Docker Desktop is running.");
@@ -4528,6 +4595,67 @@ test("the running screen opens on its heading, with Updates under the buttons, w
   expect(view.getByRole("alert").textContent).toContain(
     "OpenBot is not answering on port 3010 yet",
   );
+});
+
+/*
+ * Asked by Dusty: the switch from setup to OpenBot was a hard cut. Setup now fades out to the
+ * window's ground and only then asks the shell to show OpenBot; a show that fails brings setup back
+ * at once, with the failure on it, as before.
+ */
+test("Show OpenBot fades setup out first, and a failed show brings it back at once with the failure", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-handover-fade",
+    localStatus("ready", "valid"),
+  );
+  let showFails = false;
+  const asked: Array<{ mark: string | undefined; after: number }> = [];
+  let clicked = 0;
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "show_openbot" && clicked > 0) {
+      asked.push({
+        mark: document.documentElement.dataset.handover,
+        after: performance.now() - clicked,
+      });
+      if (showFails)
+        throw "OpenBot is not answering on port 3010 yet, so there is nothing to show.";
+      return null;
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() => expect(localSequence()).toContain("start_stack"));
+  await emitProgress({ step: "env", ok: true, detail: "Saved." });
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  handover.fadeMs = HANDOVER_FADE_MS;
+  try {
+    clicked = performance.now();
+    await userEvent.click(view.getByRole("button", { name: "Show OpenBot" }));
+    // Fading, and the shell not asked yet.
+    expect(document.documentElement.dataset.handover).toBe("leaving");
+    expect(asked).toEqual([]);
+    await waitFor(() => expect(asked).toHaveLength(1));
+    expect(asked[0].mark).toBe("leaving");
+    expect(asked[0].after).toBeGreaterThanOrEqual(HANDOVER_FADE_MS - 10);
+    // Sent: setup stays faded for OpenBot's page to replace it.
+    expect(document.documentElement.dataset.handover).toBe("leaving");
+
+    showFails = true;
+    clicked = performance.now();
+    await userEvent.click(view.getByRole("button", { name: "Show OpenBot" }));
+    await view.findByRole("heading", { name: "OpenBot stopped" });
+    expect(asked).toHaveLength(2);
+    expect(asked[1].mark).toBe("leaving");
+    expect(asked[1].after).toBeGreaterThanOrEqual(HANDOVER_FADE_MS - 10);
+    // Back at once, the failure said on it.
+    expect(document.documentElement.dataset.handover).toBeUndefined();
+    expect(view.getByRole("alert").textContent).toContain(
+      "OpenBot is not answering on port 3010 yet",
+    );
+  } finally {
+    handover.fadeMs = 0;
+    delete document.documentElement.dataset.handover;
+  }
 });
 
 /*
@@ -4960,6 +5088,71 @@ describe("the move to OpenBot Cloud, due at a launch that would update OpenBot",
     expect(
       invokeCalls.some((call) => call.command === "keep_self_contained"),
     ).toBe(false);
+  });
+
+  /*
+   * FOUND IN A MAC UPGRADE CHECK of 1.2: "Move to OpenBot Cloud?" said the move removes about
+   * 23.1 GB, and the next screen 26.6 GB, measured after the update the start for the move ran had
+   * added the new release's files. One figure now: the choice says none, since the update is still
+   * to come, and the next screen says the one measured from the updated OpenBot, and no other.
+   */
+  test("offered before the update, the choice and the next screen never say two sizes", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-one-size",
+      localStatus("ready", "valid"),
+    );
+    const updating = deferred<unknown>();
+    withOlderDeployment(() => updating.promise);
+    const preview = withMoveDue();
+    const due = invokeHandler;
+    invokeHandler = async (command, args) => {
+      if (command === "move_offer")
+        return {
+          due: true,
+          fromSettings: false,
+          footprintBytes: 23_100_000_000,
+        };
+      if (command === "move_footprint") return 23_100_000_000;
+      return due(command, args);
+    };
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    const cloud = view.getByRole("radio", { name: /^OpenBot Cloud/ });
+    const choice = cloud.closest("label")?.textContent ?? "";
+    expect(choice).toContain(
+      "Your Bots, conversations, memory, skills, routines and files move to your OpenBot Cloud account.",
+    );
+    expect(choice).not.toMatch(/GB/);
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud" });
+    // While OpenBot updates and starts, no figure yet.
+    await view.findByText(
+      "Getting your Bots ready to move. This can take a few minutes.",
+    );
+    expect(document.body.textContent).not.toMatch(/GB/);
+    await act(async () =>
+      updating.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+    );
+    await waitFor(() =>
+      expect(invokeCalls.some((call) => call.command === "move_preview")).toBe(
+        true,
+      ),
+    );
+    await act(async () =>
+      preview.resolve({
+        counts: [{ kind: "bots", count: 3 }],
+        apps: [],
+        footprintBytes: 26_600_000_000,
+        modelKeysAvailable: false,
+      }),
+    );
+    await view.findByText("3 Bots");
+    expect(
+      view.getByText(
+        /Removes about 26\.6 GB of OpenBot files\. Nothing is removed/,
+      ),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("23.1 GB");
   });
 
   test("Keep: OpenBot updates and opens as it always has", async () => {
@@ -7026,7 +7219,7 @@ test("starting fresh says in plain words what it deletes and removes only that l
  * down 300 px, and the rows said "Opening OpenBot · Failed · OpenBot did not start" with Retry. It
  * is a choice for the person: the notice sits in the card under its rows, and the step waits on it.
  */
-test("leftover data is a choice the Start step waits on, in the card under its header", async () => {
+test("leftover data is a choice the Start step waits on, on its page under its rows", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
@@ -7057,16 +7250,17 @@ test("leftover data is a choice the Start step waits on, in the card under its h
         ? "notice"
         : child.getAttribute("aria-label") === "OpenBot on this computer"
           ? "rows"
-          : child.matches(".setup-header")
-            ? "header"
-            : null,
+          : null,
   );
-  expect(order.filter(Boolean)).toEqual([
-    "header",
-    "heading",
-    "rows",
-    "notice",
-  ]);
+  expect(order.filter(Boolean)).toEqual(["heading", "rows", "notice"]);
+  // The sections are in the sidebar beside the page, so nothing sits above the page's heading.
+  expect(card.previousElementSibling?.matches("aside.rail")).toBe(true);
+  expect(
+    within(card.previousElementSibling as HTMLElement).getByRole("list", {
+      name: "Setup",
+    }),
+  ).toBeTruthy();
+  expect(card.firstElementChild?.matches("h1")).toBe(true);
   const opening = within(
     view.getByRole("listitem", { name: "Opening OpenBot" }),
   );

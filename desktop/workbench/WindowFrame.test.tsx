@@ -46,6 +46,23 @@ test("host browser shows the browser bar with the address and no Mac lights", ()
   expect(iframeSize(container)).toEqual({ width: "1000px", height: "800px" });
 });
 
+test("the Windows bar says OpenBot over the app and nothing over setup", () => {
+  const titled = render(<WindowFrame {...props({ os: "windows" })} />);
+  expect(titled.container.querySelector(".wb-window-title")?.textContent).toBe(
+    "OpenBot",
+  );
+  cleanup();
+  const setup = render(
+    <WindowFrame {...props({ os: "windows", titled: false })} />,
+  );
+  expect(
+    setup.container.querySelector("[data-window-bar=windows]"),
+  ).not.toBeNull();
+  expect(setup.container.querySelector(".wb-window-title")?.textContent).toBe(
+    "",
+  );
+});
+
 test("host browser with no address shows the root path", () => {
   const { container } = render(<WindowFrame {...props({ host: "browser" })} />);
   expect(container.querySelector("[data-browser-address]")?.textContent).toBe(

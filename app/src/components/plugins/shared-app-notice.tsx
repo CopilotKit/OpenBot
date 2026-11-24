@@ -54,7 +54,7 @@ export function SharedAppNotice({
           </p>
         ) : app.covered ? null : (
           <div className="flex flex-wrap items-center gap-2" key={app.serverId}>
-            <p className="text-amber-700 dark:text-amber-400">
+            <p className="text-warning">
               This Bot can't use the shared {app.title} account until an admin
               approves who can use the Bot.
             </p>

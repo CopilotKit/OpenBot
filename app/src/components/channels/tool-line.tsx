@@ -81,7 +81,7 @@ export function ToolLine({
   const tone = refused
     ? "text-destructive"
     : failed
-      ? "text-amber-600 dark:text-amber-500"
+      ? "text-warning"
       : "text-muted-foreground";
 
   /*

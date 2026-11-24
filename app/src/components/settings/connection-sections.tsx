@@ -6,6 +6,7 @@ import {
   IconPlug,
   IconPlugConnected,
   IconShieldCheck,
+  IconUserCircle,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -33,12 +34,14 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   changeConnectionMutationOptions,
   moveToCloudMutationOptions,
   signOutOfConnectedOpenBotMutationOptions,
 } from "@/lib/desktop/mutations";
 import { desktopStatusQueryOptions } from "@/lib/desktop/queries";
+import { useCurrentOrganizationName } from "@/lib/organizations/queries";
 import { COMPUTER_SECTION } from "@/lib/settings/computer-sections";
 
 /** The address's host, which is how a person names the OpenBot they connect to. */
@@ -62,6 +65,10 @@ function hostOf(address: string): string {
  */
 export function ConnectionSections({ address }: { address: string }) {
   const status = useQuery(desktopStatusQueryOptions({ memory: false }));
+  // Which account this app is signed in as there: after a move to OpenBot Cloud, the person looks
+  // here for the account that holds their Bots, and signs in with it in a browser.
+  const { data: user } = useQuery(currentUserQueryOptions());
+  const organization = useCurrentOrganizationName();
   return (
     <>
       <PageSection id={COMPUTER_SECTION.thisComputer} title="Connection">
@@ -77,6 +84,24 @@ export function ConnectionSections({ address }: { address: string }) {
               </ItemDescription>
             </ItemContent>
           </Item>
+          {user?.email ? (
+            <>
+              <Separator />
+              <Item size="sm">
+                <RowMark>
+                  <IconUserCircle className="size-4" />
+                </RowMark>
+                <ItemContent>
+                  <ItemTitle>Signed in as</ItemTitle>
+                  <ItemDescription className="line-clamp-none break-all">
+                    {organization
+                      ? `${user.email}, in ${organization}`
+                      : user.email}
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+            </>
+          ) : null}
           <Separator />
           <SignOutRow host={hostOf(address)} />
           <Separator />

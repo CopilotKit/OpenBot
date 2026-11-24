@@ -21,6 +21,7 @@ import {
 } from "@/lib/auth/renewal";
 import { noteRefusal } from "@/lib/client-version/refusal";
 import { noteAnswer, noteNoAnswer } from "@/lib/desktop/reachability";
+import { PLAN_REQUIRED, showCardNeeded } from "@/lib/plan/card-needed";
 
 /**
  * This app as it names itself to its OpenBot: `web/<release>`, the release it was built from
@@ -223,6 +224,11 @@ async function refusal(
       ? (body as Record<string, unknown>)
       : undefined,
   );
+  /*
+   * A run refused for want of a plan, from whichever screen asked for it: the one dialog that says
+   * why opens, so an action no screen checked first still tells the person (`lib/plan/card-needed.ts`).
+   */
+  if (error.code === PLAN_REQUIRED) showCardNeeded(error.body ?? {});
   /*
    * A hosted OpenBot's sign-in needing renewal, which is never being signed out: renewed in the
    * background, and the write it interrupted is sent again once the page is back.

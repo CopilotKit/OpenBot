@@ -8,8 +8,8 @@ import { sharedChromium } from "../workbench/server";
  * Seen on Windows: on "Connect your AI", the back end's download card appeared above the endpoint
  * form while the person typed in it, and went when the download ended. Base URL and Model jumped
  * about 100px each time, a click meant for a field landed on "Advanced compatible endpoint options",
- * and the window grew taller and moved to fit. The install's row now has one slot under the form,
- * its height held (`BehindSlot`).
+ * and the window grew taller and moved to fit. The install's row is in the setup window's sidebar
+ * now (`SetupRail`), at its foot, its height held, and never in the step.
  *
  * The real window (`main.tsx` and `styles.css`), bundled as the app is, in a real Chromium, because
  * where a field lands is the browser's layout to decide. Only the native side is scripted, by the
@@ -34,6 +34,7 @@ type Locator = {
   boundingBox(): Promise<Box>;
   textContent(): Promise<string | null>;
   count(): Promise<number>;
+  getByRole(role: string, options?: { name: string; exact?: boolean }): Locator;
 };
 type Route = {
   request(): { url(): string };
@@ -47,7 +48,7 @@ type Page = {
   route(url: string, handler: (route: Route) => Promise<void>): Promise<void>;
   goto(url: string): Promise<unknown>;
   getByRole(role: string, options?: { name: string; exact?: boolean }): Locator;
-  locator(selector: string, options?: { hasText?: string }): Locator;
+  locator(selector: string, options?: { hasText?: string | RegExp }): Locator;
   getByText(text: string | RegExp, options?: { exact?: boolean }): Locator;
   getByLabel(text: string, options: { exact: boolean }): Locator;
   evaluate<T, A = undefined>(run: (arg: A) => T, arg?: A): Promise<T>;
@@ -282,7 +283,7 @@ describe.skipIf(!asked)("the window through a first run", () => {
     [1000, 800],
     [720, 560],
   ] as const) {
-    test(`at ${width}x${height}, the page never outgrows the window and a tall step scrolls in its card`, async () => {
+    test(`at ${width}x${height}, the window is the sidebar and the page, never outgrown, and a tall step scrolls in the page`, async () => {
       const page = await browser.newPage({ viewport: { width, height } });
       try {
         await open(page);
@@ -293,12 +294,31 @@ describe.skipIf(!asked)("the window through a first run", () => {
             asked: (
               globalThis as unknown as { __fake: { calls: string[] } }
             ).__fake.calls.filter((call) => call === "fit_setup_window").length,
+            // The app's own shell: the sidebar, then the step as the page beside it.
+            shell: [...(document.querySelector("main")?.children ?? [])].map(
+              (child) => child.className,
+            ),
+            // Only the page scrolls, if anything does.
+            scrolling: [...document.querySelectorAll("*")]
+              .filter(
+                (element) =>
+                  /auto|scroll/.test(getComputedStyle(element).overflowY) &&
+                  element.scrollHeight > element.clientHeight + 1,
+              )
+              .map((element) => element.className),
           }));
         const check = async () => {
           const now = await fits();
           expect(now.page).toBeLessThanOrEqual(now.window);
           expect(now.asked).toBe(0);
+          expect(now.shell[0]).toBe("rail");
+          expect(now.shell[1]).toMatch(/^sheet\b/);
+          expect(now.shell.length).toBe(2);
+          expect(now.scrolling.every((name) => /^sheet\b/.test(name))).toBe(
+            true,
+          );
         };
+        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
         await check();
         await page
           .getByRole("button", { name: "Install", exact: true })
@@ -310,9 +330,11 @@ describe.skipIf(!asked)("the window through a first run", () => {
         await page.getByLabel("Base URL", { exact: true }).waitFor();
         await page.waitForTimeout(600);
         await check();
-        // Taller than the room it has at the smaller size: its card scrolls, the page does not.
+        // Taller than the room it has at the smaller size: the page scrolls, the window does not.
         const card = await page.evaluate(() => {
-          const sheet = document.querySelector("main > .sheet") as HTMLElement;
+          const sheet = document.querySelector(
+            "main > .rail + .sheet",
+          ) as HTMLElement;
           return { scroll: sheet.scrollHeight, client: sheet.clientHeight };
         });
         if (height < 600) expect(card.scroll).toBeGreaterThan(card.client);
@@ -326,16 +348,10 @@ describe.skipIf(!asked)("the window through a first run", () => {
 
 /*
  * Seen on Windows F (a 1016x839 window): "Connect your AI" was taller than the window and scrolled
- * in its card, and the "Installing OpenBot in the background" row sat below the fold at y 822-839,
- * seen only by scrolling. It is pinned to the bottom of the card's visible area now, and Continue
- * still scrolls into view above it.
- */
-/*
- * Seen on Windows F (a 1016x839 window): "Connect your AI" was taller than the window and scrolled
  * in its card. First the "Installing OpenBot in the background" row sat below the fold; then, with
  * only that row pinned, Continue sat under it with a grey sliver showing until the person
- * scrolled. A step's foot is pinned now: its action and the background row, both in view, with the
- * step scrolling above them.
+ * scrolled. A step's foot is pinned now, its action in view with the step scrolling above it, and
+ * the background row is in view in the sidebar's foot.
  */
 describe.skipIf(!asked)("a setup step's foot", () => {
   for (const [width, height] of [
@@ -435,20 +451,49 @@ describe.skipIf(!asked)("a setup step's foot", () => {
 
 /*
  * Seen on Windows F: on "Connect your AI", Continue moved up 14 px and back down with no input. It
- * shares the pinned foot with the background row, which was 118 px as a plain line and 132 px with
- * a download's bar and bytes. The row has one height now, so the action above it never moves.
+ * shared the pinned foot with the background row, which was 118 px as a plain line and 132 px with
+ * a download's bar and bytes. The row is in the sidebar's foot now, never in the step, so nothing
+ * the step's buttons sit on changes as it does.
+ *
+ * Seen in the workbench (install-mac, 7 to 9 layout warnings a frame): the row's own name and badge
+ * moved up 20 px as its line wrapped, up 20 px more as a download's bar came, and down 60 px as the
+ * download ended. The foot sat at the sidebar's bottom and grew upward with what the row said. It
+ * holds its height now, the row hung from its top, so the row's name stays where it is.
  */
 describe.skipIf(!asked)(
-  "the foot holds still as the background row changes",
+  "the background row in the sidebar's foot as it changes",
   () => {
     for (const [width, height] of [
       [1016, 839],
       [720, 560],
     ] as const) {
-      test(`at ${width}x${height}, Accept and Continue never move through every state of the row`, async () => {
+      test(`at ${width}x${height}, Accept and Continue never move, nor the row's name, through every state of the row`, async () => {
         const top = async (page: Page, name: string) =>
           (await page.getByRole("button", { name, exact: true }).boundingBox())
             ?.y;
+        /** Where the row's name and the foot's top are, and whether its line is whole and in view. */
+        const row = (page: Page) =>
+          page.evaluate(() => {
+            const foot = document.querySelector(
+              "main > .rail > .rail-foot",
+            ) as HTMLElement | null;
+            const name = foot?.querySelector(".step-label");
+            const detail = foot?.querySelector(".step .detail") as
+              | HTMLElement
+              | null
+              | undefined;
+            const last = foot?.querySelector(".step")?.getBoundingClientRect();
+            return {
+              foot: foot?.getBoundingClientRect().top,
+              name: name?.getBoundingClientRect().top,
+              cut: detail
+                ? detail.scrollHeight > detail.clientHeight + 1
+                : null,
+              inView: !!last && last.bottom <= window.innerHeight,
+              inPage: document.querySelector("main > .sheet .step-label")
+                ?.textContent,
+            };
+          });
         const emit = (page: Page, payload: Record<string, unknown>) =>
           page.evaluate(
             (sent) =>
@@ -461,16 +506,16 @@ describe.skipIf(!asked)(
           );
         /*
          * Minutes into the install, as on F ("Step 3 of 4 · 3m 26s elapsed"): the wider badge is
-         * what pushed the row's name onto a second line there, and the row from 118 px to 132.
+         * what pushed the row's name onto a second line there.
          */
         const minutesIn = (page: Page) =>
           page.evaluate(() => {
             const real = Date.now;
             Date.now = () => real() + 10 * 60 * 1000;
             // Wider type than this browser sets: on Windows F the row's name or its line took a
-            // second line, and the row grew 14 px. A little letter spacing does the same here.
+            // second line. A little letter spacing does the same here.
             const wider = document.createElement("style");
-            wider.textContent = ".behind-slot { letter-spacing: 0.12em; }";
+            wider.textContent = ".rail-foot { letter-spacing: 0.12em; }";
             document.head.append(wider);
           });
         const licence = await browser.newPage({ viewport: { width, height } });
@@ -484,10 +529,11 @@ describe.skipIf(!asked)(
             .waitFor();
           await minutesIn(licence);
           await licence.waitForTimeout(1200);
-          const seen: (number | undefined)[] = [];
-          // The longest lines that reach this row, each read whole: an engine update with its
-          // prompt (on Windows G they were cut at "...so OpenBo…"), and Docker Desktop's own window
-          // ("...when Docker is…"). Each in full, and the step's button where it was.
+          const accept: (number | undefined)[] = [];
+          const held: Array<[string, Awaited<ReturnType<typeof row>>]> = [];
+          // The longest lines that reach this row, each read whole and in view: an engine update
+          // with its prompt (on Windows G cut at "...so OpenBo…"), and Docker Desktop's own window
+          // ("...when Docker is…"). The step's button stays where it was.
           for (const [detail, elsewhere] of LONGEST_ROW_LINES) {
             await emit(licence, {
               step: "engine",
@@ -496,20 +542,16 @@ describe.skipIf(!asked)(
               elsewhere,
               detail,
             });
-            const row = licence.locator(".behind-slot .step .detail", {
-              hasText: detail,
-            });
-            await row.waitFor();
-            expect({
+            await licence
+              .locator(".rail-foot .step .detail", { hasText: detail })
+              .waitFor();
+            const now = await row(licence);
+            expect({ detail, cut: now.cut, inView: now.inView }).toEqual({
               detail,
-              cut: await licence.evaluate(() => {
-                const shown = document.querySelector(
-                  ".behind-slot .step .detail",
-                ) as HTMLElement;
-                return shown.scrollHeight > shown.clientHeight + 1;
-              }),
-            }).toEqual({ detail, cut: false });
-            seen.push(await top(licence, "Accept"));
+              cut: false,
+              inView: true,
+            });
+            accept.push(await top(licence, "Accept"));
           }
           // A plain line.
           await emit(licence, {
@@ -521,7 +563,8 @@ describe.skipIf(!asked)(
           await licence
             .getByText("Checking what OpenBot needs to download.")
             .waitFor();
-          seen.push(await top(licence, "Accept"));
+          accept.push(await top(licence, "Accept"));
+          held.push(["plain", await row(licence)]);
           // Downloading, with its bar and bytes.
           await emit(licence, {
             step: "images",
@@ -539,7 +582,8 @@ describe.skipIf(!asked)(
           await licence
             .getByText("300.0 MB of 1.1 GB", { exact: false })
             .waitFor();
-          seen.push(await top(licence, "Accept"));
+          accept.push(await top(licence, "Accept"));
+          held.push(["downloading", await row(licence)]);
           // Unpacking.
           await emit(licence, {
             step: "images",
@@ -554,7 +598,8 @@ describe.skipIf(!asked)(
             },
           });
           await licence.getByText(/Unpacking OpenBot/).waitFor();
-          seen.push(await top(licence, "Accept"));
+          accept.push(await top(licence, "Accept"));
+          held.push(["unpacking", await row(licence)]);
           // Installed, and the rest waiting for the person.
           await licence.evaluate(() =>
             (
@@ -562,9 +607,18 @@ describe.skipIf(!asked)(
             ).__fake.finishInstall(),
           );
           await licence.getByText(/Waiting for you/).waitFor();
-          seen.push(await top(licence, "Accept"));
-          expect(seen.every((y) => y !== undefined && y === seen[0])).toBe(
+          accept.push(await top(licence, "Accept"));
+          held.push(["waiting", await row(licence)]);
+          expect(accept.every((y) => y !== undefined && y === accept[0])).toBe(
             true,
+          );
+          // Never in the step, and its name and the foot's top where they were in every usual form.
+          const first = held[0]?.[1];
+          expect(first?.name).toBeGreaterThan(0);
+          expect(
+            held.map(([state, at]) => [state, at.inPage, at.foot, at.name]),
+          ).toEqual(
+            held.map(([state]) => [state, undefined, first?.foot, first?.name]),
           );
         } finally {
           await licence.close();
@@ -581,10 +635,17 @@ describe.skipIf(!asked)(
             .waitFor();
           await minutesIn(page);
           await page.waitForTimeout(1200);
-          const seen: (number | undefined)[] = [];
+          const seen: Array<[string, number | undefined, number | undefined]> =
+            [];
+          const look = async (state: string) =>
+            seen.push([
+              state,
+              await top(page, "Continue"),
+              (await row(page)).name,
+            ]);
           // A plain line: setting up, with nothing downloading.
           await page.getByText(/Setting up OpenBot on this computer/).waitFor();
-          seen.push(await top(page, "Continue"));
+          await look("plain");
           // Downloading the rest, with its bar and bytes.
           await page.evaluate(() => {
             (
@@ -592,7 +653,7 @@ describe.skipIf(!asked)(
             ).__fake.download = { done: 400_000_000, total: 1_600_000_000 };
           });
           await page.getByText("400.0 MB of 1.6 GB").waitFor();
-          seen.push(await top(page, "Continue"));
+          await look("downloading");
           // Installed.
           await page.evaluate(() =>
             (
@@ -600,46 +661,58 @@ describe.skipIf(!asked)(
             ).__fake.finishSetUp(),
           );
           await page.getByText("OpenBot is installed").waitFor();
-          seen.push(await top(page, "Continue"));
-          expect(seen.every((y) => y !== undefined && y === seen[0])).toBe(
-            true,
+          await look("installed");
+          const [, continueAt, nameAt] = seen[0] ?? [];
+          expect(continueAt).toBeGreaterThan(0);
+          expect(nameAt).toBeGreaterThan(0);
+          expect(seen).toEqual(
+            seen.map(([state]) => [state, continueAt, nameAt]),
           );
         } finally {
           await page.close();
         }
-      }, 40_000);
+      }, 60_000);
     }
   },
 );
 
 /*
- * Seen on the Account step while the person signs in: its Cancel sits above the foot, the foot's
- * own actions row is empty, and the background row sat flush against Cancel with no gap at all. The
- * row sits the card's one gap (24px) under the step's button on every step, Cancel included.
+ * Seen on the Account step while the person signs in: the background row sat flush against Cancel
+ * with no gap at all, and on every step it was a second spinner beside the step's own. The row is
+ * in the sidebar's foot now, on every step that has it, and never in the step: the page holds the
+ * step and nothing else, and the row is in view without a scroll.
  */
-describe.skipIf(!asked)("the background row under the step's button", () => {
+describe.skipIf(!asked)("the background row on every step", () => {
   for (const [width, height] of [
     [1000, 800],
     [720, 560],
   ] as const) {
-    test(`at ${width}x${height}, is one card gap below Cancel, Accept and Continue`, async () => {
-      /** The gap from the button's bottom to the background row's top, the card scrolled to its end. */
-      const gap = async (page: Page, name: string) => {
-        await page.waitForTimeout(600);
-        return page.evaluate((label) => {
-          const sheet = document.querySelector("main > .sheet") as HTMLElement;
-          sheet.scrollTop = sheet.scrollHeight;
-          const button = [...document.querySelectorAll("button")].find(
-            (found) => found.textContent?.trim() === label,
-          );
-          const row = document.querySelector(".behind-slot > .steps");
-          if (!button || !row) return null;
-          return Math.round(
-            row.getBoundingClientRect().top -
-              button.getBoundingClientRect().bottom,
-          );
-        }, name);
-      };
+    test(`at ${width}x${height}, is in the sidebar's foot and never in the page, beside Cancel, Accept and Continue`, async () => {
+      const where = (page: Page) =>
+        page.evaluate(() => {
+          const named = (root: Element | null) =>
+            [...(root?.querySelectorAll(".step") ?? [])].filter(
+              (step) =>
+                step.getAttribute("aria-label") ===
+                "Installing OpenBot in the background",
+            );
+          const rail = document.querySelector("main > .rail");
+          const sheet = document.querySelector("main > .rail + .sheet");
+          const row = named(
+            rail?.querySelector(":scope > .rail-foot") ?? null,
+          )[0];
+          const box = row?.getBoundingClientRect();
+          return {
+            shell: !!rail && !!sheet,
+            inFoot: !!row,
+            inPage:
+              named(sheet).length +
+              (sheet?.querySelectorAll(".behind-slot").length ?? 0),
+            inView: !!box && box.top >= 0 && box.bottom <= window.innerHeight,
+            // It never spins: the step's own wait is the one that does.
+            spins: !!row?.querySelector(".step-spinner"),
+          };
+        });
       const scenes: Array<[string, string, string]> = [
         ["#signin", "Get your free license key", "Cancel"],
         ["#licence", "Accept the license agreement", "Accept"],
@@ -653,9 +726,17 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
             .getByRole("button", { name: "Install", exact: true })
             .click();
           await page.getByRole("heading", { name: heading }).waitFor();
-          expect({ button, gap: await gap(page, button) }).toEqual({
-            button,
-            gap: 24,
+          await page
+            .getByRole("button", { name: button, exact: true })
+            .waitFor();
+          await settled(page);
+          expect({ heading, ...(await where(page)) }).toEqual({
+            heading,
+            shell: true,
+            inFoot: true,
+            inPage: 0,
+            inView: true,
+            spins: false,
           });
         } finally {
           await page.close();
@@ -676,7 +757,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
   // Windows: once the first screen listed where OpenBot runs and what this computer needs, the card
   // showed a scrollbar for a few pixels at that size. Everything on it has to show without one.
   for (const theme of ["light", "dark"] as const) {
-    test(`at 1000x760 (${theme}), everything on it shows without the card scrolling, OpenBot for Business's two ways stacked`, async () => {
+    test(`at 1000x760 (${theme}), everything on it shows without a scroll, OpenBot for Business's two ways stacked`, async () => {
       const page = await browser.newPage({
         viewport: { width: 1000, height: 760 },
         colorScheme: theme,
@@ -691,7 +772,10 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         if (shots)
           await page.screenshot({ path: `${shots}/welcome-off-${theme}.png` });
         const shape = await page.evaluate(() => {
-          const card = document.querySelector("main > .sheet") as HTMLElement;
+          const card = document.querySelector(
+            "main > .rail + .sheet",
+          ) as HTMLElement;
+          const rail = document.querySelector("main > .rail") as HTMLElement;
           const group = document.querySelector(".tile-group") as HTMLElement;
           const [cloud, own] = [
             ...document.querySelectorAll(".tile-option"),
@@ -701,8 +785,13 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           );
           const box = group.getBoundingClientRect();
           return {
-            overflow: card.scrollHeight - card.clientHeight,
-            // One above the other, the same width, inside the Business card.
+            // Neither the page nor the sidebar scrolls.
+            overflow: Math.max(
+              card.scrollHeight - card.clientHeight,
+              rail.scrollHeight - rail.clientHeight,
+              document.documentElement.scrollHeight - window.innerHeight,
+            ),
+            // One above the other, the same width, inside the Business row.
             stacked:
               !!cloud &&
               !!own &&
@@ -751,11 +840,12 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
     });
 
     /*
-     * A build with OpenBot Cloud on: OpenBot Cloud and OpenBot for Business as the two rows, Cloud
-     * picked with its sign-in under them, and OpenBot (Self-Contained) a line at the card's foot.
-     * All of it fits, and so does Self-Contained opened, with Install, and the address.
+     * A build with OpenBot Cloud on: OpenBot Cloud and OpenBot for Business as the sidebar's two
+     * rows, Cloud picked with its sign-in in the page, and OpenBot (Self-Contained) a line in the
+     * sidebar's foot. All of it fits, and so does Self-Contained opened, with Install, and the
+     * address.
      */
-    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on opens on Cloud's sign-in, Self-Contained a line at the foot, without the card scrolling`, async () => {
+    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on opens on Cloud's sign-in, Cloud and Business in the sidebar and Self-Contained in its foot, without a scroll`, async () => {
       const page = await browser.newPage({
         viewport: { width: 1000, height: 760 },
         colorScheme: theme,
@@ -772,33 +862,36 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         // loaded, can wrap where Inter's doesn't, and the card's entrance moves every box.
         await settled(page);
         const shape = await page.evaluate(() => {
-          const card = document.querySelector("main > .sheet") as HTMLElement;
+          const rail = document.querySelector("main > .rail") as HTMLElement;
+          const sheet = document.querySelector(
+            "main > .rail + .sheet",
+          ) as HTMLElement;
           const rows = [
-            ...document.querySelectorAll("fieldset.picker.hosting > .tile"),
-          ].map((row) => row.getBoundingClientRect());
-          const foot = document.querySelector(
-            ".this-computer-foot",
+            ...rail.querySelectorAll("fieldset.picker.hosting > .tile"),
+          ];
+          const boxes = rows.map((row) => row.getBoundingClientRect());
+          const foot = rail.querySelector(
+            ":scope > .rail-foot > .this-computer-foot",
           ) as HTMLElement | null;
           const footBox = foot?.getBoundingClientRect();
-          const signIn = [...document.querySelectorAll("button")]
-            .find((button) => button.textContent === "Sign in to OpenBot Cloud")
-            ?.getBoundingClientRect();
           const size = (element: Element | null | undefined) =>
             element
               ? Number.parseFloat(getComputedStyle(element).fontSize)
               : Number.NaN;
-          const business = document.querySelector(
+          const business = rail.querySelector(
             ".tile.with-marks",
           ) as HTMLElement;
           const box = business.getBoundingClientRect();
-          const words = business
-            .querySelector(".tile-summary")
-            ?.getBoundingClientRect();
           const marks = [...business.querySelectorAll(".cloud-mark")].map(
             (mark) => mark.getBoundingClientRect(),
           );
           return {
-            overflow: card.scrollHeight - card.clientHeight,
+            // Neither the page nor the sidebar scrolls.
+            overflow: Math.max(
+              sheet.scrollHeight - sheet.clientHeight,
+              rail.scrollHeight - rail.clientHeight,
+              document.documentElement.scrollHeight - window.innerHeight,
+            ),
             // Each cloud's own mark, drawn: an empty tile is a mark that didn't load.
             drawn: [
               ...business.querySelectorAll<HTMLImageElement>(".cloud-mark img"),
@@ -806,48 +899,48 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
               image.dataset.mark,
               image.complete && image.naturalWidth > 0,
             ]),
-            // Two rows, one above the other, the same width.
-            rows:
-              rows.length === 2 &&
-              rows.every(
-                (row, at) =>
-                  row.width === rows[0]?.width &&
-                  (at === 0 || row.top >= (rows[at - 1]?.bottom ?? 0)),
-              ),
-            // Self-Contained at the foot: the card's last element, below Cloud's sign-in, one line
-            // in smaller type than the rows' names, inside the card.
+            // Cloud and Business, in that order, one above the other in the sidebar, the same
+            // width, Cloud picked.
+            rows: rows.map(
+              (row) => row.querySelector(".tile-name")?.textContent ?? "",
+            ),
+            stacked: boxes.every(
+              (row, at) =>
+                row.width === boxes[0]?.width &&
+                (at === 0 || row.top >= (boxes[at - 1]?.bottom ?? 0)),
+            ),
+            picked: rail.querySelector(".tile.chosen .tile-name")?.textContent,
+            // Cloud's sign-in is the page, under its own name.
+            page: sheet.querySelector(".choice-head h2")?.textContent,
+            signIn: [...sheet.querySelectorAll("button")].some(
+              (button) => button.textContent === "Sign in to OpenBot Cloud",
+            ),
+            // Self-Contained in the sidebar's foot, below the rows, its line no larger than the
+            // rows' names, in the window. Never in the page.
             foot:
               !!foot &&
               !!footBox &&
-              !!signIn &&
-              foot.parentElement?.lastElementChild === foot &&
-              footBox.top >= signIn.bottom &&
-              footBox.bottom <= card.getBoundingClientRect().bottom &&
-              size(foot.querySelector(".this-computer-aside")) <
-                size(
-                  document.querySelector("fieldset.picker.hosting .tile-name"),
-                ) &&
-              (foot
-                .querySelector(".this-computer-aside")
-                ?.getBoundingClientRect().height ?? 99) <= 21,
-            // The four clouds' marks inside OpenBot for Business's row, on one line, past its words.
+              footBox.top >= (boxes[boxes.length - 1]?.bottom ?? 1e9) &&
+              footBox.bottom <= window.innerHeight &&
+              size(foot.querySelector(".this-computer-aside")) <=
+                size(rail.querySelector("fieldset.picker.hosting .tile-name")),
+            inPage: sheet.querySelectorAll(".this-computer-foot").length,
+            // The four clouds' marks inside OpenBot for Business's row, on one line.
             marks:
               marks.length === 4 &&
-              !!words &&
               marks.every(
                 (mark) =>
                   mark.top >= box.top &&
                   mark.bottom <= box.bottom &&
                   mark.right <= box.right &&
-                  mark.left >= words.right &&
                   mark.top === marks[0]?.top,
               ),
-            // Each row's name and line on one line.
-            oneLine: [
-              ...document.querySelectorAll(
+            // No row's name or line is cut.
+            whole: [
+              ...rail.querySelectorAll(
                 "fieldset.picker.hosting .tile-name, fieldset.picker.hosting .tile-summary",
               ),
-            ].every((text) => text.getBoundingClientRect().height <= 22),
+            ].every((text) => text.scrollWidth <= text.clientWidth),
           };
         });
         const { overflow, ...laid } = shape;
@@ -859,18 +952,24 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
             ["google-cloud", true],
             ["kubernetes", true],
           ],
-          rows: true,
+          rows: ["OpenBot Cloud", "OpenBot for Business"],
+          stacked: true,
+          picked: "OpenBot Cloud",
+          page: "OpenBot Cloud",
+          signIn: true,
           foot: true,
+          inPage: 0,
           marks: true,
-          oneLine: true,
+          whole: true,
         });
         if (shots) {
           await page.screenshot({ path: `${shots}/welcome-on-${theme}.png` });
         }
         /*
          * OpenBot for Business picked: what it adds, then Book a demo and its calendar, taller than
-         * the window. The card scrolls, never the page, and scrolled to its end the calendar is
-         * whole inside the card, nothing cut at either edge.
+         * the window. The page scrolls, never the window or the sidebar, and scrolled to it the
+         * calendar is whole inside the page, nothing cut at either edge. Self-Contained's line
+         * stays in the sidebar's foot, in view, wherever the page is scrolled to.
          */
         await page.getByText("Your own cloud or on-prem. Book a demo.").click();
         await page
@@ -883,7 +982,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           await page.screenshot({
             path: `${shots}/welcome-on-business-${theme}.png`,
           });
-        // Book a demo is in view as soon as Business is picked, and takes the card to the calendar.
+        // Book a demo is in view as soon as Business is picked, and takes the page to the calendar.
         const button = page.getByRole("button", {
           name: "Book a demo",
           exact: true,
@@ -921,7 +1020,10 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
             path: `${shots}/welcome-on-business-booker-${theme}.png`,
           });
         const booker = await page.evaluate(() => {
-          const card = document.querySelector("main > .sheet") as HTMLElement;
+          const card = document.querySelector(
+            "main > .rail + .sheet",
+          ) as HTMLElement;
+          const rail = document.querySelector("main > .rail") as HTMLElement;
           const view = card.getBoundingClientRect();
           const element = document.querySelector(
             'iframe[title="Booking calendar"]',
@@ -936,30 +1038,42 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
             frame.height >= 320 &&
             frame.top >= view.top &&
             frame.bottom <= view.bottom;
-          // At the card's end, Self-Contained's line is last and in view, below the calendar.
+          // At the page's end, Self-Contained's line is where it was, in the sidebar's foot.
+          const foot = () =>
+            rail
+              .querySelector(":scope > .rail-foot > .this-computer-foot")
+              ?.getBoundingClientRect().top;
+          const before = foot();
           card.scrollTop = card.scrollHeight;
-          const foot = document
-            .querySelector(".this-computer-foot")
-            ?.getBoundingClientRect();
-          const below = element.getBoundingClientRect();
+          const after = foot();
+          // Nothing in the page runs past its right edge.
+          const edge = card.getBoundingClientRect().right;
+          const wider = [...card.querySelectorAll("*")]
+            .filter(
+              (element) => element.getBoundingClientRect().right > edge + 0.5,
+            )
+            .map((element) => element.className);
           return {
             page: document.documentElement.scrollHeight <= window.innerHeight,
             cardScrolls: card.scrollHeight > card.clientHeight + 1,
+            railScrolls: rail.scrollHeight > rail.clientHeight + 1,
             sideways: card.scrollWidth - card.clientWidth <= 0,
+            wider,
             calendar,
             // Its heading sits above it.
             heading: !!heading && heading.bottom <= frame.top,
             foot:
-              !!foot &&
-              foot.top >= below.bottom &&
-              foot.top >= view.top &&
-              foot.bottom <= view.bottom,
+              before !== undefined &&
+              before === after &&
+              before < window.innerHeight,
           };
         });
         expect(booker).toEqual({
           page: true,
           cardScrolls: true,
+          railScrolls: false,
           sideways: true,
+          wider: [],
           calendar: true,
           heading: true,
           foot: true,
@@ -968,8 +1082,8 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           await page.screenshot({
             path: `${shots}/welcome-on-business-end-${theme}.png`,
           });
-        // Self-Contained opened at the foot: what this computer needs and Install, still without a
-        // scrollbar.
+        // Self-Contained opened from the sidebar's foot: what this computer needs and Install in the
+        // page, still without a scrollbar.
         await page
           .getByRole("button", { name: "Use OpenBot (Self-Contained)" })
           .click();
@@ -1018,10 +1132,11 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
   /*
    * OpenBot for Business books a call: either of its two ways to run, picked, shows the app's
    * OpenBot for Business view, what it adds and the booking calendar, where it used to show an
-   * address field. Taller than the window, it scrolls in the card as any tall step does; the page
-   * never does, nothing runs off the card's side, and the calendar takes the height Calendly reports.
+   * address field. Taller than the window, it scrolls in the page as any tall step does; the window
+   * and the sidebar never do, nothing runs off the page's side, and the calendar takes the height
+   * Calendly reports. Both ways are the sidebar's rows, picked by name.
    */
-  test("at 1000x760, OpenBot for Business shows its booker in the card, which scrolls, and no address field", async () => {
+  test("at 1000x760, OpenBot for Business shows its booker in the page, which scrolls, and no address field", async () => {
     const page = await browser.newPage({
       viewport: { width: 1000, height: 760 },
     });
@@ -1029,14 +1144,20 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       await routeCalendar(page);
       await open(page);
       await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
-      await page.getByText("Your own cloud or on-prem.").click();
+      const way = (name: string) =>
+        page.locator("main > .rail .tile-option", {
+          hasText: new RegExp(`^${name}`),
+        });
+      await way("Self-Hosted").click();
       await page.locator(".tile-option.chosen").waitFor();
-      await page.getByText("We run it for you.").click();
+      await way("Cloud").click();
       await page
         .locator(
           '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
         )
         .waitFor();
+      // At rest: a box measured during the page's entrance came back 659.99994 px tall.
+      await settled(page);
       expect(
         await page
           .getByLabel("Your company's OpenBot address", { exact: true })
@@ -1051,7 +1172,10 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         await page.getByText("A full audit trail, with export").count(),
       ).toBe(1);
       const shape = await page.evaluate(() => {
-        const card = document.querySelector("main > .sheet") as HTMLElement;
+        const card = document.querySelector(
+          "main > .rail + .sheet",
+        ) as HTMLElement;
+        const rail = document.querySelector("main > .rail") as HTMLElement;
         const frame = document.querySelector(
           'iframe[title="Booking calendar"]',
         ) as HTMLElement;
@@ -1063,6 +1187,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         return {
           page: document.documentElement.scrollHeight,
           cardScrolls: card.scrollHeight > card.clientHeight + 1,
+          railScrolls: rail.scrollHeight > rail.clientHeight + 1,
           sideways: card.scrollWidth - card.clientWidth,
           wider: wider.map((element) => element.className),
           frame: frame.getBoundingClientRect().height,
@@ -1070,11 +1195,15 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       });
       expect(shape.page).toBeLessThanOrEqual(760);
       expect(shape.cardScrolls).toBe(true);
+      expect(shape.railScrolls).toBe(false);
       expect(shape.sideways).toBeLessThanOrEqual(0);
       expect(shape.wider).toEqual([]);
       expect(shape.frame).toBe(660);
-      // The way to connect is still under the rows, and leads to the address.
-      await page.getByRole("button", { name: "Connect to it" }).click();
+      // The way to connect is still in the sidebar's foot, and leads to the address.
+      await page
+        .locator("main > .rail > .rail-foot")
+        .getByRole("button", { name: "Connect to it" })
+        .click();
       await page
         .getByLabel("Your company's OpenBot address", { exact: true })
         .waitFor();
@@ -1084,7 +1213,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
     } finally {
       await page.close();
     }
-  });
+  }, 30_000);
 });
 
 /**
@@ -1403,15 +1532,18 @@ const PROVIDERS = [
 /*
  * Seen on Windows G (the default 1000x800 window): on "Connect your AI" the last providers sat under
  * the step's pinned foot, Continue and the background row, with a sliver of one tile's edge
- * showing, and nothing said the list went on. The list has no scroll of its own: the card is the
+ * showing, and nothing said the list went on. The list has no scroll of its own: the page is the
  * one scroll area, the list plainly goes on under the foot, and each provider scrolls into view.
+ * The page is the window's height now, so at 1000x800 every provider shows at once, and nothing
+ * says the list goes on.
  */
 describe.skipIf(!asked)("Connect your AI with every provider", () => {
   for (const [width, height] of [
     [1000, 800],
+    [1000, 600],
     [720, 560],
   ] as const) {
-    test(`at ${width}x${height}, one scroll area, the list plainly goes on under the foot, and every provider scrolls into view`, async () => {
+    test(`at ${width}x${height}, the page is the one scroll area, and every provider is in view or plainly scrolls into view`, async () => {
       const page = await browser.newPage({ viewport: { width, height } });
       try {
         await toTheAiStep(page);
@@ -1458,8 +1590,17 @@ describe.skipIf(!asked)("Connect your AI with every provider", () => {
             };
           });
         const first = await look();
-        expect(first.scrolling).toEqual(["sheet"]);
         expect(first.tiles.map((tile) => tile.name)).toEqual(PROVIDERS);
+        if (height >= 800) {
+          // Every provider shows, nothing scrolls, and nothing says the list goes on.
+          expect(first).toEqual({
+            scrolling: [],
+            goesOn: false,
+            tiles: PROVIDERS.map((name) => ({ name, shown: true })),
+          });
+          return;
+        }
+        expect(first.scrolling).toEqual(["sheet"]);
         // Some are under the foot at this size, and the screen says the list goes on.
         expect(first.tiles.some((tile) => !tile.shown)).toBe(true);
         expect(first.goesOn).toBe(true);
@@ -1490,7 +1631,7 @@ describe.skipIf(!asked)("Connect your AI with every provider", () => {
 /*
  * Seen on Windows G: the background row read "Installing OpenBot in the backgr..." beside its
  * "Step 3 of 4 · 4m 18s elapsed" badge. Its name is whole now, the badge on a line of its own, and
- * the row still fits the height its slot holds in every state.
+ * the row fits the height the sidebar's foot holds in every state, the foot where it was.
  */
 describe.skipIf(!asked)(
   "the background row's name beside minutes of install",
@@ -1500,7 +1641,7 @@ describe.skipIf(!asked)(
       [1000, 800],
       [720, 560],
     ] as const) {
-      test(`at ${width}x${height}, is read whole in Windows-wide type, and the row fits its slot`, async () => {
+      test(`at ${width}x${height}, is read whole in Windows-wide type, and the row fits the sidebar's foot`, async () => {
         const page = await browser.newPage({ viewport: { width, height } });
         try {
           await toTheAiStep(page);
@@ -1509,27 +1650,27 @@ describe.skipIf(!asked)(
             Date.now = () => real() + 258_000;
             // Wider type than this browser sets, as the foot's own test does: Windows' is.
             const wider = document.createElement("style");
-            wider.textContent = ".behind-slot { letter-spacing: 0.12em; }";
+            wider.textContent = ".rail-foot { letter-spacing: 0.12em; }";
             document.head.append(wider);
           });
           const read = () =>
             page.evaluate(() => {
-              const name = document.querySelector(
-                ".behind-slot .step-label",
+              const foot = document.querySelector(
+                "main > .rail > .rail-foot",
               ) as HTMLElement;
-              const row = document
-                .querySelector(".behind-slot > .steps")
+              const name = foot.querySelector(".step-label") as HTMLElement;
+              const row = foot
+                .querySelector(":scope > .steps")
                 ?.getBoundingClientRect();
-              const slot = document
-                .querySelector(".behind-slot")
-                ?.getBoundingClientRect();
+              const held = foot.getBoundingClientRect();
               return {
                 name: name.textContent,
                 cut: name.scrollWidth > name.clientWidth,
-                badge:
-                  document.querySelector(".behind-slot .step-status")
-                    ?.textContent ?? "",
-                fits: (row?.bottom ?? 1e9) <= (slot?.bottom ?? 0) + 0.5,
+                badge: foot.querySelector(".step-status")?.textContent ?? "",
+                fits:
+                  (row?.bottom ?? 1e9) <= held.bottom + 0.5 &&
+                  held.bottom <= window.innerHeight,
+                foot: held.top,
               };
             });
           // Setting up, then downloading the rest with its bar and bytes, then installed.
@@ -1541,6 +1682,7 @@ describe.skipIf(!asked)(
             cut: false,
             badge: expect.stringMatching(/^Step 3 of 4 · 4m \d+s elapsed$/),
             fits: true,
+            foot: expect.any(Number),
           });
           await page.evaluate(() => {
             (
@@ -1560,12 +1702,13 @@ describe.skipIf(!asked)(
 /*
  * Seen on Windows G: the background row moved about 15 px sideways when a provider was chosen, as
  * the card stopped scrolling and its scrollbar went. With the scrollbars Windows draws, which
- * take room, the row is where it was either way.
+ * take room, the row and the step's providers are where they were either way. The page is the
+ * window's height now, so a window short enough for the list to scroll shows it (1000x600).
  */
 describe.skipIf(!asked)(
   "with scrollbars that take room, as Windows draws them",
   () => {
-    test("at 1000x800, the background row holds still as the card's scrollbar comes and goes", async () => {
+    test("at 1000x600, the background row and the providers hold still as the page's scrollbar comes and goes", async () => {
       // Its own browser for the scrollbars, launched once and never closed (see sharedChromium).
       const drawn = await sharedChromium(
         () =>
@@ -1576,7 +1719,7 @@ describe.skipIf(!asked)(
         "chromium-scrollbars",
       );
       const page = await drawn.newPage({
-        viewport: { width: 1000, height: 800 },
+        viewport: { width: 1000, height: 600 },
       });
       try {
         await toTheAiStep(page);
@@ -1586,7 +1729,7 @@ describe.skipIf(!asked)(
               "main > .sheet",
             ) as HTMLElement;
             const row = document
-              .querySelector(".behind-slot > .steps")
+              .querySelector("main > .rail > .rail-foot > .steps")
               ?.getBoundingClientRect();
             const tile = document
               .querySelector("fieldset.providers .tile")
@@ -1601,6 +1744,7 @@ describe.skipIf(!asked)(
         const listing = await where();
         expect(listing.scrolls).toBe(true);
         expect(listing.scrollbar).toBe(true);
+        expect(listing.row?.width).toBeGreaterThan(0);
         // A provider chosen, the step fits, and the card has no scrollbar to draw.
         await page.getByText("Anthropic", { exact: true }).click();
         await page
@@ -3474,6 +3618,61 @@ describe.skipIf(!asked)(
         await page.close();
       }
     }, 40_000);
+
+    /*
+     * FOUND IN A MAC UPGRADE CHECK of 1.2: the choice said the move removes about 23.1 GB and the
+     * next screen 26.6 GB, measured after the update added the new release's files. The choice says
+     * no figure while the update is still to come, and the next screen says the updated one only.
+     */
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`one size for what the move removes, from the updated OpenBot (${colorScheme})`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 1000, height: 760 },
+          colorScheme,
+        });
+        const sized = async (name: string) => {
+          await page.mouse.move(0, 0);
+          await page.waitForTimeout(500);
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/move-first-size-${name}-${colorScheme}-${engine}.png`,
+            });
+          return page.evaluate(() => document.body.innerText);
+        };
+        try {
+          await open(page, "#move-first", cloudBuilt);
+          await page
+            .getByRole("heading", {
+              name: "Move to OpenBot Cloud?",
+              exact: true,
+            })
+            .waitFor();
+          const choice = await sized("choice");
+          await page.getByRole("button", { name: "Continue" }).click();
+          await page
+            .getByText(
+              "Getting your Bots ready to move. This can take a few minutes.",
+            )
+            .waitFor();
+          const ready = await sized("getting-ready");
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as {
+                __fake: { finishUpdate: () => void };
+              }
+            ).__fake.finishUpdate(),
+          );
+          await page.getByRole("list", { name: "What moves" }).waitFor();
+          const confirm = await sized("confirm");
+          expect(choice).toContain("move to your OpenBot Cloud account.");
+          expect(choice).not.toContain("GB");
+          expect(ready).not.toContain("GB");
+          expect(confirm).toContain("Removes about 26.6 GB of OpenBot files.");
+          expect(confirm).not.toContain("23.1 GB");
+        } finally {
+          await page.close();
+        }
+      }, 40_000);
 
     test("Keep: asked before any update, then the update runs as before and OpenBot opens", async () => {
       const page = await browser.newPage({

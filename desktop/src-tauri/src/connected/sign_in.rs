@@ -720,7 +720,7 @@ pub fn end_page_for(ending: Ending) -> String {
 
 /**
 The styles of the tab's page, inline: it is served by this app from 127.0.0.1 and loads nothing.
-OpenBot's own tokens (`app/src/styles.css`, as the setup window copies them in `desktop/src/styles.css`):
+OpenBot's own tokens (written here from `tokens/src/scheme.ts` by `bun run tokens:generate`):
 the frame's lavender ground with a card on it, its type, its 10px radius, and the orb, OpenBot's
 mark, as the setup window draws it. Light and dark follow the system, as the setup window does.
 Inter when the computer has it, the system's own face otherwise: a font is a file, and this page
@@ -728,24 +728,28 @@ fetches none.
 */
 const END_PAGE_STYLE: &str = r#"
 :root {
+  /* tokens/src/scheme.ts, light: background foreground card muted-foreground border sidebar (bun run tokens:generate) */
   --background: oklch(0.983 0.003 286.4);
   --foreground: oklch(0.108 0.015 220.9);
   --card: oklch(1 0 0);
   --muted-foreground: oklch(0.506 0.013 285.9);
   --border: oklch(0.894 0.014 286.1);
   --sidebar: oklch(0.948 0.011 286.2);
+  /* end of tokens/src/scheme.ts */
   --radius: 0.625rem;
   --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
+    /* tokens/src/scheme.ts, dark: background foreground card muted-foreground border sidebar (bun run tokens:generate) */
     --background: oklch(0.182 0.023 296.6);
     --foreground: oklch(0.956 0.005 286.3);
     --card: oklch(0.212 0.028 297.1);
     --muted-foreground: oklch(0.69 0.017 285.9);
     --border: oklch(0.28 0.035 298.6);
     --sidebar: oklch(0.156 0.017 295.8);
+    /* end of tokens/src/scheme.ts */
     --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
     color-scheme: dark;
   }

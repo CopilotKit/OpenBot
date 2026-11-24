@@ -8,7 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IdentityConnectionPage } from "@/components/connections/identity-connection-page";
 import {
   PageEmpty,
@@ -16,6 +16,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { OrganizationAppSwitch } from "@/components/manage/organization-app-switch";
 import { PluginPage } from "@/components/manage/plugin-page";
 import {
   BrokeredAccountRow,
@@ -23,6 +24,7 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import { GrantList } from "@/components/plugins/grant-list";
+import { KeyVersionOffer } from "@/components/plugins/key-version";
 import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,7 +53,9 @@ import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
+import { useBackAfterConnect } from "@/lib/plugins/connect-return";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
+import { signsInForDirectory } from "@/lib/plugins/directory-state";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   directoryProvider,
@@ -136,8 +140,9 @@ export const Route = createFileRoute("/_authed/_app/connections/$key")({
     ...searchTextEntry("linked", search.linked),
     ...searchTextEntry("action", search.action),
     /*
-     * `?connect=true` is Browse apps sending somebody here to finish adding an app that takes a
-     * key: the page opens with the key form. Read once and dropped, so a reload does not reopen it.
+     * `?connect=true` starts connecting on arrival: the key form for an app that takes a key (Browse
+     * apps, a Bot's card), the sign-in for one that signs in (the reconnect list's Reconnect). Read
+     * once and dropped, so a reload, or coming back from the sign-in, does not start it again.
      */
     ...(search.connect === true || search.connect === "true"
       ? { connect: true as const }
@@ -155,7 +160,15 @@ function RouteComponent() {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   // Held for this visit, keyed on the app, and dropped from the address below.
-  const [arrival] = useState(() => ({ key, connect: connect === true }));
+  const [arrival, setArrival] = useState(() => ({
+    key,
+    connect: connect === true,
+  }));
+  /*
+   * Arriving at another app's page from this one (an app's page offering its key version opens that
+   * app's key form) keeps this component, so the arrival is read again for the new app.
+   */
+  if (arrival.key !== key) setArrival({ key, connect: connect === true });
   const startConnect = arrival.key === key && arrival.connect;
   const navigate = Route.useNavigate();
   useEffect(() => {
@@ -168,6 +181,11 @@ function RouteComponent() {
    * too): back to the list once this app is connected, and a way back to it until then.
    */
   const returningTo = useReturnToReconnectList();
+  /*
+   * Opened in a new tab for this app's sign-in, by a Bot's card or a Bot's page: closed, or sent
+   * back to where Connect was pressed, once the account is connected.
+   */
+  useBackAfterConnect(key);
   if (key === "github" || key === "slack") {
     return <IdentityConnectionPage linked={linked} provider={key} />;
   }
@@ -328,6 +346,62 @@ function AppConnectionPage({
   }).data;
   const isAdmin = isOrganizationAdmin(me?.role);
   const appNames = [key, server?.title ?? key];
+  /*
+   * ADMIN'S SWITCH, HERE TOO, for an organization's owner or admin in the team edition: the same row
+   * Admin draws for the app, so somebody who runs their own organization (OpenBot Cloud's usual case)
+   * removes an app where they added it, without opening Admin. A member is never shown it.
+   */
+  const role = useQuery(currentUserQueryOptions()).data?.role;
+  const removable =
+    paths.edition === "team" &&
+    isOrganizationAdmin(role) &&
+    server !== undefined;
+  /* In the card under the row above it, where the page has one. */
+  const switchRow =
+    removable && server ? (
+      <>
+        <Separator />
+        <OrganizationAppSwitch appId={server.id} title={server.title} />
+      </>
+    ) : null;
+  /* As a card of its own, where the page says what it is without one. */
+  const switchSection =
+    removable && server ? (
+      <PageSection>
+        <PageRows className="mt-0">
+          <OrganizationAppSwitch appId={server.id} title={server.title} />
+        </PageRows>
+      </PageSection>
+    ) : null;
+
+  /*
+   * THE SIGN-IN ON ARRIVAL, for an app OpenBot signs in to itself: one added by its address that
+   * signs each person in, or a built-in one. The same press as this page's Connect below, made for
+   * the person who already pressed Reconnect on the list (`startConnect`). Once per visit, only once
+   * every read has answered, and never over an account that is already connected. A directory app's
+   * row starts its own (`BrokeredAccountRow`).
+   */
+  const signedInHere =
+    entry?.auth === "user-oauth" ||
+    (server?.source === "address" && server.signIn === true);
+  const signInOnArrival =
+    startConnect &&
+    plugins.isSuccess &&
+    catalogue.isSuccess &&
+    setup.isSuccess &&
+    connections.isSuccess &&
+    enabled &&
+    !brokered &&
+    !sharedHere &&
+    signedInHere &&
+    connection === undefined;
+  const signInStarted = useRef(false);
+  const { mutate: startSignIn } = connect;
+  useEffect(() => {
+    if (!signInOnArrival || signInStarted.current) return;
+    signInStarted.current = true;
+    startSignIn(key);
+  }, [signInOnArrival, startSignIn, key]);
 
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */
   const brokeredAccount = useBrokeredAccount({
@@ -500,6 +574,7 @@ function AppConnectionPage({
                 </ItemDescription>
               </ItemContent>
             </Item>
+            {switchRow}
           </PageRows>
         </PageSection>
 
@@ -543,6 +618,7 @@ function AppConnectionPage({
           An admin connects {server.title} once as a shared account and gives it
           to Bots.
         </PageEmpty>
+        {switchSection}
       </PageShell>
     );
   }
@@ -601,7 +677,17 @@ function AppConnectionPage({
               provider={provider}
               title={server.title}
             />
+            {switchRow}
           </PageRows>
+          {/*
+           * The same app with its key, for an app the directory lists as a sign-in in place of its
+           * key, offered to somebody who may add apps: adding it here connects it, as Browse apps
+           * does from Connections.
+           */}
+          {signsInForDirectory(server) &&
+          (paths.edition === "personal" || isOrganizationAdmin(role)) ? (
+            <KeyVersionOffer appId={key} mode="connect" title={server.title} />
+          ) : null}
         </PageSection>
 
         {perActionGrants ? (
@@ -643,6 +729,7 @@ function AppConnectionPage({
         <PageEmpty icon={IconPlug} title="No account needed">
           {`Bots use ${app.title} as it is, the same for everybody. It's at ${app.vendor}.`}
         </PageEmpty>
+        {switchSection}
       </PageShell>
     );
   }
@@ -662,6 +749,7 @@ function AppConnectionPage({
             ? "Bots use one shared account for this app, the same for everybody."
             : "OpenBot has no app by that name."}
         </PageEmpty>
+        {switchSection}
       </PageShell>
     );
   }
@@ -708,7 +796,7 @@ function AppConnectionPage({
                       <Button size="sm" type="button" variant="outline">
                         <span
                           aria-hidden="true"
-                          className="size-1.5 rounded-full bg-emerald-500"
+                          className="size-1.5 rounded-full bg-success"
                         />
                         Connected
                         <IconChevronDown />
@@ -767,6 +855,7 @@ function AppConnectionPage({
               )}
             </ItemActions>
           </Item>
+          {switchRow}
         </PageRows>
       </PageSection>
 

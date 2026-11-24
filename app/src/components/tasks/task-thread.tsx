@@ -76,20 +76,20 @@ const STATE: Record<
   working: {
     label: "Working",
     icon: IconProgress,
-    dot: "animate-pulse bg-emerald-500",
+    dot: "animate-pulse bg-success",
     text: "text-muted-foreground",
   },
   needs: {
     label: "Needs you",
     icon: IconHandStop,
-    dot: "bg-amber-500",
-    text: "text-amber-700 dark:text-amber-400",
+    dot: "bg-warning",
+    text: "text-warning",
   },
   done: {
     label: TASK_DONE_LABEL,
     icon: IconCircleCheck,
-    dot: "bg-emerald-500",
-    text: "text-emerald-700 dark:text-emerald-400",
+    dot: "bg-success",
+    text: "text-success",
   },
   failed: {
     label: TASK_FAILED_LABEL,
@@ -536,7 +536,7 @@ export function TaskReport({
                     ? STATE.failed.text
                     : stoppedSince
                       ? STATE.stopped.text
-                      : "text-emerald-600 dark:text-emerald-400",
+                      : "text-success",
               )}
             />
             <span className="truncate">{title ?? "Task"}</span>
@@ -583,7 +583,7 @@ export function TaskReport({
       className={cn(
         "w-full max-w-md rounded-xl border p-3",
         kind === "needs"
-          ? "border-amber-500/30 bg-amber-500/5"
+          ? "border-warning/30 bg-warning/5"
           : stopped
             ? "border-border bg-card dark:border-transparent"
             : "border-destructive/30 bg-destructive/5",

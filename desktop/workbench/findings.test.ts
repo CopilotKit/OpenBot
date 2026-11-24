@@ -24,6 +24,7 @@ import {
   type SceneRef,
   SPACING_RULE,
   SPACING_WHY,
+  SPINNERS_RULE,
   sortFindings,
   splitWarnings,
   userActions,
@@ -31,7 +32,7 @@ import {
 } from "./findings";
 import type { ScreenMark, Warning } from "./layoutWatch";
 import { DEFAULT_WINDOW } from "./urlState";
-import { warningKey } from "./WarningsList";
+import { warningKey, warningText } from "./WarningsList";
 
 const INSTALL: SceneRef = {
   id: "install-mac",
@@ -711,6 +712,60 @@ describe("the Spacing class", () => {
     );
     expect(matchWarning([warning], mark as NonNullable<typeof mark>)).toBe(
       warning,
+    );
+  });
+});
+
+describe("the Spinners class", () => {
+  function spinners(at: number): Occurrence {
+    const warning: Warning = {
+      kind: "spinners",
+      at,
+      label: '2 spinners: "Installing OpenBot", <p class="status-line">',
+      count: 2,
+      boxes: [
+        { x: 20, y: 100, width: 14, height: 14 },
+        { x: 20, y: 300, width: 14, height: 14 },
+      ],
+      box: { x: 20, y: 100, width: 14, height: 214 },
+    };
+    return {
+      scene: INSTALL,
+      at,
+      kind: "spinners",
+      label: warning.label,
+      elementKey: null,
+      chain: [],
+      warning,
+    };
+  }
+
+  test("two spinners at once is a layout finding that sorts with the run's problems", () => {
+    const [finding] = buildFindings([spinners(0), spinners(500)]);
+    expect(finding?.kind).toBe("spinners");
+    expect(isLayoutKind("spinners")).toBe(true);
+    expect(KIND_LABELS.spinners).toBe("Spinners");
+    expect(FINDING_KINDS).toContain("spinners");
+    expect(finding?.title).toBe(
+      '2 spinners at once: "Installing OpenBot", <p class="status-line">',
+    );
+    expect(finding?.severity).toBe(PROBLEM_SEVERITY);
+    expect(finding?.occurrences).toHaveLength(2);
+    expect(
+      filterFindings([finding as NonNullable<typeof finding>], NO_FILTER),
+    ).toHaveLength(1);
+    expect(SPINNERS_RULE).toContain("at most one spinner");
+  });
+
+  test("a Spinners mark round-trips, and the warning reads as a sentence", () => {
+    const warning = spinners(61000).warning as Warning;
+    const mark = parseMark(warningMark(warning));
+    expect(mark).toEqual({ kind: "spinners", at: 61000, label: warning.label });
+    expect(matchWarning([warning], mark as NonNullable<typeof mark>)).toBe(
+      warning,
+    );
+    expect(warningText(warning)).toBe(
+      '2 spinners at once: "Installing OpenBot", <p class="status-line"> at 1:01',
     );
   });
 });

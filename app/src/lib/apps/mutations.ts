@@ -7,7 +7,7 @@ import {
   setAppOAuthClient,
   updateApp,
 } from "@/lib/api/generated/apps/apps";
-import type { App } from "@/lib/api/generated/model";
+import type { AddAppFromDirectory, App } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { invalidatePlugins } from "@/lib/plugins/mutations";
@@ -119,19 +119,28 @@ export function addServerByUrlMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/** A directory entry to add, and, for an entry listed as a sign-in in place of its key, `key`. */
+export type DirectoryAppInput = {
+  directoryEntryId: string;
+  /** Add it with its key instead, as its own app (the entry's `keyVersion`). */
+  connectsWith?: AddAppFromDirectory["connectsWith"];
+};
+
 /**
  * Add an app of the wider directory (createApp, from a directory entry), named by its entry's id.
  * An admin's. Answers the new app's id, which is what a sign-in started on the same press is asked
- * against.
+ * against, or the key form opened for the key version.
  */
 export function addDirectoryAppMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (input: {
-      directoryEntryId: string;
-    }): Promise<string> => {
+    mutationFn: async (input: DirectoryAppInput): Promise<string> => {
       const app = await createApp(
         organizationId(),
-        { from: "directory", directoryEntryId: input.directoryEntryId },
+        {
+          from: "directory",
+          directoryEntryId: input.directoryEntryId,
+          ...(input.connectsWith ? { connectsWith: input.connectsWith } : {}),
+        },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "That app could not be added." },
       );

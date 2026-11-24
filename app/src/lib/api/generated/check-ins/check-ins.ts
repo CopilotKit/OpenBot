@@ -42,6 +42,7 @@ import type {
   ListCheckInItemsParams,
   ListCheckInsParams,
   OrganizationNotFoundResponse,
+  PlanRequiredResponse,
   RunCheckInHeaders,
   ServerErrorResponse,
   StartCheckInItemHeaders,
@@ -811,6 +812,7 @@ export const getRunCheckInMutationOptions = <
   TError =
     | InvalidCheckInResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | CheckInNotFoundResponse
     | IdempotencyConflictResponse
@@ -859,6 +861,7 @@ export type RunCheckInMutationResult = NonNullable<
 export type RunCheckInMutationError =
   | InvalidCheckInResponse
   | UnauthenticatedResponse
+  | PlanRequiredResponse
   | ForbiddenResponse
   | CheckInNotFoundResponse
   | IdempotencyConflictResponse
@@ -877,6 +880,7 @@ export const useRunCheckIn = <
   TError =
     | InvalidCheckInResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | CheckInNotFoundResponse
     | IdempotencyConflictResponse
@@ -1199,6 +1203,7 @@ export const getStartCheckInItemMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | CheckInItemNotFoundResponse
     | IdempotencyConflictResponse
@@ -1252,6 +1257,7 @@ export type StartCheckInItemMutationResult = NonNullable<
 export type StartCheckInItemMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
+  | PlanRequiredResponse
   | ForbiddenResponse
   | CheckInItemNotFoundResponse
   | IdempotencyConflictResponse
@@ -1270,6 +1276,7 @@ export const useStartCheckInItem = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | CheckInItemNotFoundResponse
     | IdempotencyConflictResponse
@@ -1350,6 +1357,7 @@ export const getWorkOnCheckInItemMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | CheckInItemNotFoundResponse
     | IdempotencyConflictResponse
@@ -1403,6 +1411,7 @@ export type WorkOnCheckInItemMutationResult = NonNullable<
 export type WorkOnCheckInItemMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
+  | PlanRequiredResponse
   | ForbiddenResponse
   | CheckInItemNotFoundResponse
   | IdempotencyConflictResponse
@@ -1421,6 +1430,7 @@ export const useWorkOnCheckInItem = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | CheckInItemNotFoundResponse
     | IdempotencyConflictResponse

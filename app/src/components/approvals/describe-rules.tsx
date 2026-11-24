@@ -316,7 +316,7 @@ function replayRowOf(change: BacktestChange): ReplayRow {
       : change.change === "removes_ask"
         ? change.person === "deny"
           ? "text-destructive"
-          : "text-amber-600 dark:text-amber-500"
+          : "text-warning"
         : "text-foreground",
     note: [fixed ? change.reason : null, answer].filter(Boolean).join(" "),
   };

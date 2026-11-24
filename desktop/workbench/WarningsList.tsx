@@ -8,6 +8,7 @@ import {
   CLASS_LABELS,
   type Movement,
   RULE_LABELS,
+  spinnersText,
   splitWarnings,
   warningMark,
 } from "./findings";
@@ -25,6 +26,8 @@ export function warningText(warning: Warning): string {
       return `${warning.label} is ${Math.round(warning.overBy)}px outside the window at ${when}`;
     case "spacing":
       return `${warning.text} at ${when}`;
+    case "spinners":
+      return `${spinnersText(warning)} at ${when}`;
   }
 }
 

@@ -9,6 +9,8 @@ import type {
   PutTeamMemberRequest,
   TeamMemberPage,
   TeamMemberResponse,
+  TeamModels,
+  TeamModelsInput,
   TeamPage,
   TeamResponse,
   UpdateTeamRequest,
@@ -129,6 +131,18 @@ export const getPutTeamMemberResponseMock = (): TeamMemberResponse => ({
     isCaller: false,
     joinedAt: "2026-11-15T09:20:05.000Z",
   },
+});
+
+export const getGetTeamModelsResponseMock = (): TeamModels => ({
+  models: ["openai/gpt-5.6-terra", "anthropic/claude-sonnet-5"],
+  updatedBy: "8kq2m4x7p1rvz3a9c5d0",
+  updatedAt: "2026-11-23T10:04:12.000Z",
+});
+
+export const getReplaceTeamModelsResponseMock = (): TeamModels => ({
+  models: ["openai/gpt-5.6-terra", "anthropic/claude-sonnet-5"],
+  updatedBy: "8kq2m4x7p1rvz3a9c5d0",
+  updatedAt: "2026-11-23T10:04:12.000Z",
 });
 
 export const getListTeamsMockHandler = (
@@ -390,6 +404,99 @@ export const getRemoveTeamMemberMockHandler = (
     options,
   );
 };
+
+export const getGetTeamModelsMockHandler = (
+  overrideResponse?:
+    | TeamModels
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; teamId: string }>
+        >[0],
+      ) => Promise<TeamModels> | TeamModels),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; teamId: string }>(
+    "*/api/v2/organizations/:organizationId/teams/:teamId/models",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; teamId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetTeamModelsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReplaceTeamModelsMockHandler = (
+  overrideResponse?:
+    | TeamModels
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; teamId: string },
+            TeamModelsInput
+          >
+        >[0],
+      ) => Promise<TeamModels> | TeamModels),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<{ organizationId: string; teamId: string }, TeamModelsInput>(
+    "*/api/v2/organizations/:organizationId/teams/:teamId/models",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; teamId: string },
+          TeamModelsInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplaceTeamModelsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getDeleteTeamModelsMockHandler = (
+  overrideResponse?:
+    | void
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; teamId: string }>
+        >[0],
+      ) => Promise<void> | void),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{ organizationId: string; teamId: string }>(
+    "*/api/v2/organizations/:organizationId/teams/:teamId/models",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; teamId: string }>
+      >[0],
+    ) => {
+      if (typeof overrideResponse === "function") {
+        await overrideResponse(info);
+      }
+
+      return new HttpResponse(null, { status: 204 });
+    },
+    options,
+  );
+};
 export const getTeamsMock = () => [
   getListTeamsMockHandler(),
   getCreateTeamMockHandler(),
@@ -399,4 +506,7 @@ export const getTeamsMock = () => [
   getListTeamMembersMockHandler(),
   getPutTeamMemberMockHandler(),
   getRemoveTeamMemberMockHandler(),
+  getGetTeamModelsMockHandler(),
+  getReplaceTeamModelsMockHandler(),
+  getDeleteTeamModelsMockHandler(),
 ];

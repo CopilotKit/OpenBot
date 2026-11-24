@@ -24,8 +24,11 @@ export const SELF_CONTAINED_SUMMARY =
 /** The way to OpenBot (Self-Contained) at the foot of the first screen, with OpenBot Cloud on. */
 export const SELF_CONTAINED_ASIDE = "Want everything to run on this computer?";
 
+/** How OpenBot Cloud starts for somebody new, said wherever it is offered. Never the number of runs. */
+export const CLOUD_TRIAL = "Free usage-based trial.";
+
 /** What the second choice is: OpenBot as we run it, signed in to from here and on the web. */
-export const CLOUD_SUMMARY = "Use OpenBot here. Your Bots run in our cloud.";
+export const CLOUD_SUMMARY = `Your Bots run in our cloud. ${CLOUD_TRIAL}`;
 
 /** OpenBot for Business: on a company's own cloud or on-prem, which books a demo. */
 export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a demo.";
@@ -99,7 +102,7 @@ export type Hosting = "this-computer" | "connect";
  * OpenBot Cloud shows only in a build that turns it on (`VITE_OPENBOT_CLOUD_ENABLED`, `cloudEnabled`).
  * There the screen steers to OpenBot Cloud and OpenBot for Business. They are the two rows, Cloud
  * first and picked to begin with, then the link to connect to a company's own OpenBot, then what the
- * choice shows. OpenBot (Self-Contained) is a line at the very foot of the card, below all of that:
+ * choice shows. OpenBot (Self-Contained) is a line at the very foot of the sidebar, below all of that:
  * never picked to begin with, never the way back from anywhere. Opened, it shows what this computer
  * needs and Install there, and neither row is picked. The one exception is a setup on this computer
  * that failed: the failure is Self-Contained's to show, so it opens there. The order on screen is
@@ -266,7 +269,10 @@ export function Welcome({
         heading
         label="Where OpenBot runs"
         foot={
+          // Main's order: the way to connect to a company's OpenBot, then OpenBot
+          // (Self-Contained) last of all, never the way back from anywhere.
           <>
+            {connectAside}
             {cloudOn && (
               <section
                 className="this-computer-foot"
@@ -295,7 +301,6 @@ export function Welcome({
                 )}
               </section>
             )}
-            {connectAside}
           </>
         }
       >
