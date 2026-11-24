@@ -330,6 +330,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - After connecting an app from a Bot's card or a Bot's page, you're back where you pressed Connect.
   The sign-in's tab closes once the app is connected, or, where the browser won't close it, goes back
   to the conversation or the Bot's page. It used to stay on the app's page under Connections.
+- **About OpenBot in OpenBot Desktop says where OpenBot runs.** Beside the version, it says OpenBot
+  (Self-Contained) or OpenBot Cloud, and on OpenBot Cloud the email you're signed in with. Connected
+  to another OpenBot, it names that OpenBot's address and your email there.
 - **A Bot on a harness takes its orders from OpenBot only, not from extra fields on a run.** A run's
   sender could add fields the harness's framework obeyed. On the Claude Agent SDK harness: loading
   another saved conversation (`resume`), a model the organization never allowed (`model`,
