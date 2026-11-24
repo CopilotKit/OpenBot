@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import { approvalPhrase, ruleTitle } from "@openbot/shared/tool-name";
 import { cleanup, render } from "@testing-library/react";
 import {
@@ -136,6 +137,12 @@ test("an answer is the tool's structured output, a refusal is its reason, and no
     output: null,
     reason:
       "Only an admin of this organization can do that, so your Bot can't do it for you.",
+  });
+  // The person said no: their own words, never the sentence the Bot is told about it.
+  expect(settingsResult(DECLINED_BY_PERSON)).toEqual({
+    state: "refused",
+    output: null,
+    reason: "You declined it.",
   });
   expect(settingsResult(undefined)).toEqual({ state: "running", output: null });
   expect(
