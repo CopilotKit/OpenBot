@@ -14728,6 +14728,7 @@ fn main() {
             desktop_move::move_footprint,
             desktop_move::keep_self_contained,
             desktop_move::move_preview,
+            desktop_move::move_destinations,
             desktop_move::move_to_cloud,
             desktop_move::cancel_move,
             desktop_move::open_moved_cloud,
@@ -28389,6 +28390,7 @@ fn main() {
             app.handle().clone(),
             "https://cloud.openbot.example".into(),
             None,
+            None,
         ));
 
         assert!(ended.is_err(), "the move ends without moving: {ended:?}");
@@ -28403,6 +28405,7 @@ fn main() {
         let ended = tauri::async_runtime::block_on(desktop_move::move_to_cloud(
             app.handle().clone(),
             "https://cloud.openbot.example".into(),
+            None,
             None,
         ));
         assert!(ended.is_err());
