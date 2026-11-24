@@ -54,6 +54,11 @@ export const ListBotsQueryParams = zod.object({
     ),
 });
 
+export const listBotsResponseBotsItemBuddyMax = 80;
+
+export const listBotsResponseBotsItemBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
 export const listBotsResponseNextCursorMax = 4096;
 
 export const listBotsResponseNextCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
@@ -71,6 +76,14 @@ export const ListBotsResponse = zod.object({
           .string()
           .describe("What it does, in its owner's words."),
         avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+        buddy: zod
+          .string()
+          .max(listBotsResponseBotsItemBuddyMax)
+          .regex(listBotsResponseBotsItemBuddyRegExp)
+          .nullish()
+          .describe(
+            "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+          ),
         visibility: zod
           .enum(["public", "private"])
           .describe(
@@ -336,6 +349,12 @@ export const CreateBotBody = zod
     "A new Bot: a Bot's fields, and the framework it is built on. One closed object, not BotFields with harness added in an allOf, because each closed part of an allOf would refuse the other's fields.",
   );
 
+export const createBotResponseBotBuddyMax = 80;
+
+export const createBotResponseBotBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
 export const CreateBotResponse = zod.object({
   bot: zod
     .object({
@@ -348,6 +367,14 @@ export const CreateBotResponse = zod.object({
         .string()
         .describe("What it does, in its owner's words."),
       avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+      buddy: zod
+        .string()
+        .max(createBotResponseBotBuddyMax)
+        .regex(createBotResponseBotBuddyRegExp)
+        .nullish()
+        .describe(
+          "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+        ),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
@@ -491,6 +518,12 @@ export const GetBotParams = zod.object({
     .describe("The Bot's id."),
 });
 
+export const getBotResponseBotBuddyMax = 80;
+
+export const getBotResponseBotBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
 export const GetBotResponse = zod.object({
   bot: zod
     .object({
@@ -503,6 +536,14 @@ export const GetBotResponse = zod.object({
         .string()
         .describe("What it does, in its owner's words."),
       avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+      buddy: zod
+        .string()
+        .max(getBotResponseBotBuddyMax)
+        .regex(getBotResponseBotBuddyRegExp)
+        .nullish()
+        .describe(
+          "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+        ),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
@@ -761,6 +802,12 @@ export const UpdateBotBody = zod
   })
   .describe("A Bot's fields after the change.");
 
+export const updateBotResponseBotBuddyMax = 80;
+
+export const updateBotResponseBotBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
 export const UpdateBotResponse = zod.object({
   bot: zod
     .object({
@@ -773,6 +820,14 @@ export const UpdateBotResponse = zod.object({
         .string()
         .describe("What it does, in its owner's words."),
       avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+      buddy: zod
+        .string()
+        .max(updateBotResponseBotBuddyMax)
+        .regex(updateBotResponseBotBuddyRegExp)
+        .nullish()
+        .describe(
+          "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+        ),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
@@ -1058,6 +1113,12 @@ export const DuplicateBotHeader = zod.object({
     ),
 });
 
+export const duplicateBotResponseBotBuddyMax = 80;
+
+export const duplicateBotResponseBotBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
 export const DuplicateBotResponse = zod.object({
   bot: zod
     .object({
@@ -1070,6 +1131,14 @@ export const DuplicateBotResponse = zod.object({
         .string()
         .describe("What it does, in its owner's words."),
       avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+      buddy: zod
+        .string()
+        .max(duplicateBotResponseBotBuddyMax)
+        .regex(duplicateBotResponseBotBuddyRegExp)
+        .nullish()
+        .describe(
+          "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+        ),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
@@ -1225,6 +1294,12 @@ export const HideBotHeader = zod.object({
     ),
 });
 
+export const hideBotResponseBotBuddyMax = 80;
+
+export const hideBotResponseBotBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
 export const HideBotResponse = zod.object({
   bot: zod
     .object({
@@ -1237,6 +1312,14 @@ export const HideBotResponse = zod.object({
         .string()
         .describe("What it does, in its owner's words."),
       avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+      buddy: zod
+        .string()
+        .max(hideBotResponseBotBuddyMax)
+        .regex(hideBotResponseBotBuddyRegExp)
+        .nullish()
+        .describe(
+          "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+        ),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
@@ -1392,6 +1475,12 @@ export const UnhideBotHeader = zod.object({
     ),
 });
 
+export const unhideBotResponseBotBuddyMax = 80;
+
+export const unhideBotResponseBotBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
 export const UnhideBotResponse = zod.object({
   bot: zod
     .object({
@@ -1404,6 +1493,14 @@ export const UnhideBotResponse = zod.object({
         .string()
         .describe("What it does, in its owner's words."),
       avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+      buddy: zod
+        .string()
+        .max(unhideBotResponseBotBuddyMax)
+        .regex(unhideBotResponseBotBuddyRegExp)
+        .nullish()
+        .describe(
+          "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+        ),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
@@ -1559,6 +1656,12 @@ export const PinBotHeader = zod.object({
     ),
 });
 
+export const pinBotResponseBotBuddyMax = 80;
+
+export const pinBotResponseBotBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
 export const PinBotResponse = zod.object({
   bot: zod
     .object({
@@ -1571,6 +1674,14 @@ export const PinBotResponse = zod.object({
         .string()
         .describe("What it does, in its owner's words."),
       avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+      buddy: zod
+        .string()
+        .max(pinBotResponseBotBuddyMax)
+        .regex(pinBotResponseBotBuddyRegExp)
+        .nullish()
+        .describe(
+          "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+        ),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
@@ -1726,6 +1837,12 @@ export const UnpinBotHeader = zod.object({
     ),
 });
 
+export const unpinBotResponseBotBuddyMax = 80;
+
+export const unpinBotResponseBotBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
 export const UnpinBotResponse = zod.object({
   bot: zod
     .object({
@@ -1738,6 +1855,212 @@ export const UnpinBotResponse = zod.object({
         .string()
         .describe("What it does, in its owner's words."),
       avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+      buddy: zod
+        .string()
+        .max(unpinBotResponseBotBuddyMax)
+        .regex(unpinBotResponseBotBuddyRegExp)
+        .nullish()
+        .describe(
+          "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+        ),
+      visibility: zod
+        .enum(["public", "private"])
+        .describe("Public Bots are shared with everybody in the organization."),
+      hidden: zod
+        .boolean()
+        .describe("Whether the caller hid it from their own list."),
+      pinned: zod
+        .boolean()
+        .describe("Whether the caller pinned it to the top of their own list."),
+      systemOwned: zod
+        .boolean()
+        .describe(
+          "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
+      endpoint: zod
+        .string()
+        .nullable()
+        .describe(
+          "The AG-UI address it runs at, as it was stored. Null for a Bot that runs inside OpenBot. Every address saved through this API is an absolute http or https address (see the request's endpoint), but one saved by an older release is returned as it is, so this field states no format.",
+        ),
+      hasAuth: zod
+        .boolean()
+        .describe("Whether a key is set for its address. Never the key."),
+      hasCallbackToken: zod
+        .boolean()
+        .describe(
+          "Whether it holds a credential for calling OpenBot's tools back. Never the credential.",
+        ),
+      isolated: zod
+        .boolean()
+        .describe(
+          "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
+        ),
+      instructions: zod
+        .string()
+        .optional()
+        .describe(
+          "What the starter Bot is told, kept apart from its role description. Only the starter Bot has instructions.",
+        ),
+      framework: zod
+        .string()
+        .optional()
+        .describe(
+          'What runs it, by the name a person reads ("LangChain", "OpenBot"). Absent when OpenBot doesn\'t know.',
+        ),
+      canManage: zod
+        .boolean()
+        .describe("Whether the caller may change and delete it."),
+      mine: zod
+        .boolean()
+        .describe(
+          "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+        ),
+      assignedToMe: zod
+        .boolean()
+        .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
+      builtIn: zod
+        .boolean()
+        .describe(
+          "Whether it runs at the deployment's own managed address, so it needs no callback credential of its own.",
+        ),
+      runsOnOpenBotModel: zod
+        .boolean()
+        .describe(
+          "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+        ),
+      defaultModel: zod
+        .object({
+          model: zod.string(),
+          effort: zod.string().nullable(),
+          source: zod
+            .string()
+            .describe(
+              "The model connection source when the default was saved.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The Bot's saved default model and thinking level. Null follows the deployment default.",
+        ),
+      keyFromOpenBot: zod
+        .boolean()
+        .describe(
+          "Whether OpenBot gives it a key for its tools on every run, because OpenBot runs it.",
+        ),
+      isolationActive: zod
+        .boolean()
+        .describe("Whether its next run gets a computer of its own."),
+      isolationOffReason: zod
+        .union([
+          zod.literal("admin"),
+          zod.literal("deployment"),
+          zod.literal(null),
+        ])
+        .nullable()
+        .describe(
+          "Why an isolated Bot runs on a shared computer instead. admin: its owner no longer holds Isolated Bots. deployment: this deployment cannot make another computer. Null otherwise.",
+        ),
+    })
+    .describe(
+      "A Bot as the caller sees it. canManage, mine, systemOwned and the isolation fields are the server's verdicts for this caller; a client renders them and never recomputes them. No secret is ever part of a Bot: hasAuth and hasCallbackToken say whether one is set.",
+    ),
+});
+
+/**
+ * Choose which buddy draws a Bot, for the caller only: a stock buddy the app ships (stock:<id>), or one of the caller's own buddies once it is ready (own:<buddy id>). Null goes back to the stock buddy picked from the Bot's avatarSeed. Any Bot the caller can see may be given one, a Bot that comes with OpenBot included, because nobody else sees the choice. The Bot's buddy field reads it back.
+ * @summary Choose the buddy the caller sees for a Bot
+ */
+
+export const replaceBotBuddyPathBotIdRegExp = new RegExp("\\S");
+
+export const ReplaceBotBuddyParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  botId: zod
+    .string()
+    .min(1)
+    .regex(replaceBotBuddyPathBotIdRegExp)
+    .describe("The Bot's id."),
+});
+
+export const replaceBotBuddyHeaderIdempotencyKeyMax = 128;
+
+export const ReplaceBotBuddyHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(replaceBotBuddyHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const replaceBotBuddyBodyBuddyMax = 80;
+
+export const replaceBotBuddyBodyBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
+export const ReplaceBotBuddyBody = zod.object({
+  buddy: zod
+    .string()
+    .max(replaceBotBuddyBodyBuddyMax)
+    .regex(replaceBotBuddyBodyBuddyRegExp)
+    .nullable()
+    .describe(
+      "A buddy: stock:<id> for a stock buddy the app ships, own:<buddy id> for one of the caller's own. Null for the stock buddy picked from the Bot's avatarSeed.",
+    ),
+});
+
+export const replaceBotBuddyResponseBotBuddyMax = 80;
+
+export const replaceBotBuddyResponseBotBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
+export const ReplaceBotBuddyResponse = zod.object({
+  bot: zod
+    .object({
+      id: zod.string().describe("The Bot's id."),
+      name: zod.string().describe("What the Bot is called."),
+      title: zod
+        .string()
+        .describe("The subtitle under its name. May be empty."),
+      roleDescription: zod
+        .string()
+        .describe("What it does, in its owner's words."),
+      avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+      buddy: zod
+        .string()
+        .max(replaceBotBuddyResponseBotBuddyMax)
+        .regex(replaceBotBuddyResponseBotBuddyRegExp)
+        .nullish()
+        .describe(
+          "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+        ),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
@@ -1935,6 +2258,12 @@ export const RevokeBotCallbackTokenHeader = zod.object({
     ),
 });
 
+export const revokeBotCallbackTokenResponseBotBuddyMax = 80;
+
+export const revokeBotCallbackTokenResponseBotBuddyRegExp = new RegExp(
+  "^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$",
+);
+
 export const RevokeBotCallbackTokenResponse = zod.object({
   bot: zod
     .object({
@@ -1947,6 +2276,14 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .string()
         .describe("What it does, in its owner's words."),
       avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+      buddy: zod
+        .string()
+        .max(revokeBotCallbackTokenResponseBotBuddyMax)
+        .regex(revokeBotCallbackTokenResponseBotBuddyRegExp)
+        .nullish()
+        .describe(
+          "The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.",
+        ),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),

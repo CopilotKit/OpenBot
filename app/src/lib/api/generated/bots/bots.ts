@@ -43,6 +43,7 @@ import type {
   HideBotHeaders,
   IdempotencyConflictResponse,
   InvalidBotResponse,
+  InvalidBuddyChoiceResponse,
   InvalidRequestResponse,
   IssueBotCallbackTokenHeaders,
   ListBotAttentionParams,
@@ -51,6 +52,8 @@ import type {
   OwnOnlyResponse,
   PauseBotHeaders,
   PinBotHeaders,
+  ReplaceBotBuddyHeaders,
+  ReplaceBotBuddyRequest,
   ReportBotDeclineHeaders,
   ResetBotHeaders,
   ResumeBotHeaders,
@@ -1768,6 +1771,161 @@ export const useUnpinBot = <
   TContext
 > => {
   return useMutation(getUnpinBotMutationOptions(options), queryClient);
+};
+export const getReplaceBotBuddyUrl = (
+  organizationId: string,
+  botId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/bots/${encodeURIComponent(String(botId))}/buddy`;
+};
+
+/**
+ * Choose which buddy draws a Bot, for the caller only: a stock buddy the app ships (stock:<id>), or one of the caller's own buddies once it is ready (own:<buddy id>). Null goes back to the stock buddy picked from the Bot's avatarSeed. Any Bot the caller can see may be given one, a Bot that comes with OpenBot included, because nobody else sees the choice. The Bot's buddy field reads it back.
+ * @summary Choose the buddy the caller sees for a Bot
+ */
+export const replaceBotBuddy = async (
+  organizationId: string,
+  botId: string,
+  replaceBotBuddyRequest: ReplaceBotBuddyRequest,
+  headers: ReplaceBotBuddyHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<BotResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<BotResponse>(getReplaceBotBuddyUrl(organizationId, botId), {
+    ...options,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(replaceBotBuddyRequest),
+  });
+};
+
+export const getReplaceBotBuddyMutationKey = () => ["replaceBotBuddy"] as const;
+
+export const getReplaceBotBuddyMutationOptions = <
+  TError =
+    | InvalidBuddyChoiceResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | BotNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replaceBotBuddy>>,
+    TError,
+    ReplaceBotBuddyMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof replaceBotBuddy>>,
+  TError,
+  ReplaceBotBuddyMutationVariables,
+  TContext
+> => {
+  const mutationKey = getReplaceBotBuddyMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof replaceBotBuddy>>,
+    ReplaceBotBuddyMutationVariables
+  > = (props) => {
+    const { organizationId, botId, data, headers } = props ?? {};
+
+    return replaceBotBuddy(
+      organizationId,
+      botId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReplaceBotBuddyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof replaceBotBuddy>>
+>;
+export type ReplaceBotBuddyMutationBody = ReplaceBotBuddyRequest;
+export type ReplaceBotBuddyMutationError =
+  | InvalidBuddyChoiceResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | BotNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type ReplaceBotBuddyMutationVariables = {
+  organizationId: string;
+  botId: string;
+  data: ReplaceBotBuddyRequest;
+  headers: ReplaceBotBuddyHeaders;
+};
+
+/**
+ * @summary Choose the buddy the caller sees for a Bot
+ */
+export const useReplaceBotBuddy = <
+  TError =
+    | InvalidBuddyChoiceResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | BotNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof replaceBotBuddy>>,
+      TError,
+      ReplaceBotBuddyMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof replaceBotBuddy>>,
+  TError,
+  ReplaceBotBuddyMutationVariables,
+  TContext
+> => {
+  return useMutation(getReplaceBotBuddyMutationOptions(options), queryClient);
 };
 export const getIssueBotCallbackTokenUrl = (
   organizationId: string,

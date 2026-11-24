@@ -92,6 +92,7 @@ servers:
     description: An OpenBot server on this machine (the default local port).
 tags:
   - { name: Bots, description: "The Bots a person can see: their own, those shared with them, the ones an administrator assigned them, and the ones that come with OpenBot." }
+  - { name: Buddies, description: "The animated characters Bots are drawn as: the ones a person made from a picture of their own. Stock buddies ship with the app, and each person chooses the buddy they see for each Bot." }
   - { name: Team Bots, description: "Bots their owners published to the team, or to named people and directory groups, and the ones an administrator assigned to a group. Each person's conversations with a Team Bot are private to them." }
   - { name: Reactions, description: "The reactions a Bot leaves on a person's message in place of a line of its own, when the message only needs an acknowledgement." }
   - { name: Audit events, description: "The audit trail: what people and Bots did in the organization, and what its policy refused, newest first. Only an administrator can read it. It is read-only: events are written by what they record, never through the API." }
@@ -388,6 +389,10 @@ paths:
   /api/v2/organizations/{organizationId}/bots/{botId}/unhide: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1unhide' }
   /api/v2/organizations/{organizationId}/bots/{botId}/pin: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1pin' }
   /api/v2/organizations/{organizationId}/bots/{botId}/unpin: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1unpin' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/buddy: { $ref: './buddies.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1buddy' }
+  /api/v2/organizations/{organizationId}/buddies: { $ref: './buddies.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1buddies' }
+  /api/v2/organizations/{organizationId}/buddies/{buddyId}: { $ref: './buddies.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1buddies~1{buddyId}' }
+  /api/v2/organizations/{organizationId}/buddies/{buddyId}/files/{buddyFile}: { $ref: './buddies.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1buddies~1{buddyId}~1files~1{buddyFile}' }
   /api/v2/organizations/{organizationId}/bots/{botId}/issue-callback-token: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1issue-callback-token' }
   /api/v2/organizations/{organizationId}/bots/{botId}/revoke-callback-token: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1revoke-callback-token' }
   /api/v2/organizations/{organizationId}/bots/{botId}/report-decline: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1report-decline' }

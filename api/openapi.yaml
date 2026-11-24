@@ -25,6 +25,8 @@ servers:
 tags:
   - name: Bots
     description: 'The Bots a person can see: their own, those shared with them, the ones an administrator assigned them, and the ones that come with OpenBot.'
+  - name: Buddies
+    description: 'The animated characters Bots are drawn as: the ones a person made from a picture of their own. Stock buddies ship with the app, and each person chooses the buddy they see for each Bot.'
   - name: Team Bots
     description: Bots their owners published to the team, or to named people and directory groups, and the ones an administrator assigned to a group. Each person's conversations with a Team Bot are private to them.
   - name: Reactions
@@ -14889,6 +14891,271 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/buddy:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    put:
+      tags:
+        - Bots
+      operationId: replaceBotBuddy
+      summary: Choose the buddy the caller sees for a Bot
+      description: 'Choose which buddy draws a Bot, for the caller only: a stock buddy the app ships (stock:<id>), or one of the caller''s own buddies once it is ready (own:<buddy id>). Null goes back to the stock buddy picked from the Bot''s avatarSeed. Any Bot the caller can see may be given one, a Bot that comes with OpenBot included, because nobody else sees the choice. The Bot''s buddy field reads it back.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - bots:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceBotBuddyRequest'
+            examples:
+              stock:
+                value:
+                  buddy: stock:meemers
+              own:
+                value:
+                  buddy: own:bud_4f1c2e7a9b3d4c5e
+              automatic:
+                value:
+                  buddy: null
+      responses:
+        '200':
+          description: The Bot, with the buddy the caller chose.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                chosen:
+                  $ref: '#/components/examples/CreatedBot'
+        '400':
+          $ref: '#/components/responses/InvalidBuddyChoice'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/buddies:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Buddies
+      operationId: listBuddies
+      summary: List the caller's own buddies
+      description: 'Every buddy the caller made, newest first: the ones still being made, the ready ones and the ones that failed. Stock buddies are not listed: they ship with the app.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - bots:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The caller's buddies, newest first.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuddyList'
+              examples:
+                two:
+                  $ref: '#/components/examples/BuddyListExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Buddies
+      operationId: createBuddy
+      summary: Make a buddy from a picture
+      description: 'Turn a picture into a buddy: a cartoon character drawn from it, then a short clip for each pose. It takes a few minutes, so the buddy is answered at once with status generating, and getBuddy reads its progress. It is made with the organization''s Google AI key when one is connected, otherwise with the keys this OpenBot was given for it; with neither, it answers 409 with the code BUDDY_KEY_MISSING.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - bots:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBuddyRequest'
+            examples:
+              photo:
+                value:
+                  name: Biscuit
+                  image: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...
+                  description: A small brown dog with a red scarf
+      responses:
+        '202':
+          description: The buddy, being made.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuddyResponse'
+              examples:
+                generating:
+                  $ref: '#/components/examples/GeneratingBuddy'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/BuddyCannotBeMade'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/buddies/{buddyId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BuddyId'
+    get:
+      tags:
+        - Buddies
+      operationId: getBuddy
+      summary: Read one of the caller's buddies
+      description: One buddy the caller made, with how far making it has got. Read it again until its status is ready or failed.
+      security:
+        - webSession: []
+        - appOAuth:
+            - bots:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The buddy.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuddyResponse'
+              examples:
+                ready:
+                  $ref: '#/components/examples/ReadyBuddy'
+                generating:
+                  $ref: '#/components/examples/GeneratingBuddy'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/BuddyNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Buddies
+      operationId: deleteBuddy
+      summary: Delete one of the caller's buddies
+      description: Delete a buddy the caller made, and stop making it if it is still being made. A Bot the caller gave it goes back to its stock buddy.
+      security:
+        - webSession: []
+        - appOAuth:
+            - bots:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The buddy was deleted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/BuddyNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/buddies/{buddyId}/files/{buddyFile}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BuddyId'
+      - $ref: '#/components/parameters/BuddyFile'
+    get:
+      tags:
+        - Buddies
+      operationId: getBuddyFile
+      summary: Download a buddy's picture or one of its clips
+      description: The still picture (avatar.png or avatar.jpg) or one pose's clip (<pose>.webm or <pose>.mp4) of a buddy the caller made, as the buddy's avatarUrl and poses name them. A file is never changed once written, so a client may keep it.
+      security:
+        - webSession: []
+        - appOAuth:
+            - bots:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The file.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateImmutable'
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            video/webm:
+              schema:
+                type: string
+                format: binary
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/BuddyNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/bots/{botId}/issue-callback-token:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -22822,6 +23089,28 @@ components:
         minLength: 1
         maxLength: 200
         pattern: \S
+    BuddyId:
+      name: buddyId
+      in: path
+      required: true
+      description: The buddy's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: ^[A-Za-z0-9_-]+$
+      example: bud_4f1c2e7a9b3d4c5e
+    BuddyFile:
+      name: buddyFile
+      in: path
+      required: true
+      description: A file of the buddy, as its avatarUrl and poses name it.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: ^[A-Za-z0-9_-]+\.(png|jpg|webm|mp4)$
+      example: idle.webm
     DirectoryGroup:
       name: group
       in: path
@@ -23023,6 +23312,11 @@ components:
       schema:
         type: string
         const: private, no-store
+    PrivateImmutable:
+      description: Kept by the caller's browser only, and never changed once written.
+      schema:
+        type: string
+        const: private, max-age=31536000, immutable
     PartETag:
       description: The part's SHA-256 in hex, quoted.
       schema:
@@ -23081,6 +23375,9 @@ components:
         avatarSeed:
           type: string
           description: The seed its avatar is drawn from.
+        buddy:
+          $ref: '#/components/schemas/BuddyChoice'
+          description: The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed.
         visibility:
           $ref: '#/components/schemas/BotVisibility'
         hidden:
@@ -26038,6 +26335,13 @@ components:
                 minLength: 1
                 maxLength: 320
                 pattern: \S
+    BuddyChoice:
+      type:
+        - string
+        - 'null'
+      maxLength: 80
+      pattern: ^(stock:[a-z0-9-]{1,64}|own:[A-Za-z0-9_-]{1,64})$
+      description: 'A buddy: stock:<id> for a stock buddy the app ships, own:<buddy id> for one of the caller''s own. Null for the stock buddy picked from the Bot''s avatarSeed.'
     BotName:
       type: string
       minLength: 1
@@ -35153,6 +35457,121 @@ components:
             - string
             - 'null'
           description: Why the test failed, in words a person can act on. Null when ok is true.
+    ReplaceBotBuddyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - buddy
+      properties:
+        buddy:
+          $ref: '#/components/schemas/BuddyChoice'
+    BuddyStatus:
+      type: string
+      x-extensible-enum:
+        - generating
+        - ready
+        - failed
+      description: 'generating: being made. ready: every clip is made. failed: making it stopped, and error says why.'
+    BuddyProgress:
+      type: object
+      required:
+        - done
+        - total
+      properties:
+        done:
+          type: integer
+          minimum: 0
+          description: How many steps are finished.
+        total:
+          type: integer
+          minimum: 1
+          description: How many steps there are, the picture and each clip.
+        step:
+          type:
+            - string
+            - 'null'
+          description: What it is making now, in words, such as "Drawing the character" or "Animating thinking".
+    Buddy:
+      type: object
+      description: A buddy the caller made.
+      required:
+        - id
+        - name
+        - status
+        - progress
+        - error
+        - avatarUrl
+        - poses
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The buddy's id.
+        name:
+          type: string
+          description: What the caller called it.
+        status:
+          $ref: '#/components/schemas/BuddyStatus'
+        progress:
+          $ref: '#/components/schemas/BuddyProgress'
+        error:
+          type:
+            - string
+            - 'null'
+          description: Why making it failed, in words. Null unless it failed.
+        avatarUrl:
+          type:
+            - string
+            - 'null'
+          description: Where its still picture is (getBuddyFile). Null until the character is drawn.
+        poses:
+          type: object
+          additionalProperties:
+            type: string
+          description: Each pose made so far, and where its clip is (getBuddyFile).
+        createdAt:
+          type: string
+          format: date-time
+          description: When the caller asked for it.
+    BuddyList:
+      type: object
+      required:
+        - buddies
+      properties:
+        buddies:
+          type: array
+          items:
+            $ref: '#/components/schemas/Buddy'
+    CreateBuddyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - image
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+          pattern: \S
+          description: What to call it.
+        image:
+          type: string
+          minLength: 1
+          maxLength: 11000000
+          pattern: ^data:image/(png|jpeg|webp);base64,
+          description: The picture to make it from, as a data URI of a PNG, JPEG or WebP image of at most 8 MB.
+        description:
+          type: string
+          maxLength: 500
+          description: Anything to add about how it should look. Optional.
+    BuddyResponse:
+      type: object
+      required:
+        - buddy
+      properties:
+        buddy:
+          $ref: '#/components/schemas/Buddy'
     BotCallbackToken:
       type: object
       required:
@@ -43999,6 +44418,60 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    InvalidBuddyChoice:
+      description: The choice isn't a buddy, or names one of the caller's own that doesn't exist or isn't ready.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notReady:
+              value:
+                type: https://open.bot/errors/invalid-request
+                title: Invalid request.
+                status: 400
+                detail: That buddy isn't ready yet. Choose it once it's made.
+                code: INVALID_REQUEST
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BuddyCannotBeMade:
+      description: Nothing here can make a buddy, because there is no key for it, or the request repeats one with a different body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noKey:
+              value:
+                type: https://open.bot/errors/buddy-key-missing
+                title: Making a buddy needs a key.
+                status: 409
+                detail: Making a buddy needs a Google AI key. Connect Google with an API key under AI providers, or ask an admin.
+                code: BUDDY_KEY_MISSING
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BuddyNotFound:
+      description: The buddy doesn't exist, was deleted, or isn't the caller's.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/buddy-not-found
+                title: Buddy not found.
+                status: 404
+                detail: Couldn't find that buddy.
+                code: BUDDY_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     HandoffNotFound:
       description: The handoff is not running or queued for the caller, the Bot is not one the caller can see, or the organization is not found.
       content:
@@ -49508,6 +49981,65 @@ components:
         ok: false
         events: []
         reason: The agent refused this request. If it needs a key, add it as a header.
+    BuddyListExample:
+      summary: Two buddies
+      value:
+        buddies:
+          - id: bud_4f1c2e7a9b3d4c5e
+            name: Biscuit
+            status: ready
+            progress:
+              done: 7
+              total: 7
+              step: null
+            error: null
+            avatarUrl: /api/v2/organizations/default/buddies/bud_4f1c2e7a9b3d4c5e/files/avatar.png
+            poses:
+              idle: /api/v2/organizations/default/buddies/bud_4f1c2e7a9b3d4c5e/files/idle.webm
+            createdAt: '2026-11-24T10:00:00Z'
+          - id: bud_9a8b7c6d5e4f3a2b
+            name: Pickle
+            status: failed
+            progress:
+              done: 1
+              total: 7
+              step: null
+            error: Couldn't animate the character. Try again.
+            avatarUrl: /api/v2/organizations/default/buddies/bud_9a8b7c6d5e4f3a2b/files/avatar.png
+            poses: {}
+            createdAt: '2026-11-24T09:00:00Z'
+    GeneratingBuddy:
+      summary: A buddy being made
+      value:
+        buddy:
+          id: bud_4f1c2e7a9b3d4c5e
+          name: Biscuit
+          status: generating
+          progress:
+            done: 1
+            total: 7
+            step: Animating idle
+          error: null
+          avatarUrl: /api/v2/organizations/default/buddies/bud_4f1c2e7a9b3d4c5e/files/avatar.png
+          poses: {}
+          createdAt: '2026-11-24T10:00:00Z'
+    ReadyBuddy:
+      summary: A ready buddy
+      value:
+        buddy:
+          id: bud_4f1c2e7a9b3d4c5e
+          name: Biscuit
+          status: ready
+          progress:
+            done: 7
+            total: 7
+            step: null
+          error: null
+          avatarUrl: /api/v2/organizations/default/buddies/bud_4f1c2e7a9b3d4c5e/files/avatar.png
+          poses:
+            idle: /api/v2/organizations/default/buddies/bud_4f1c2e7a9b3d4c5e/files/idle.webm
+            thinking: /api/v2/organizations/default/buddies/bud_4f1c2e7a9b3d4c5e/files/thinking.webm
+          createdAt: '2026-11-24T10:00:00Z'
     BotCallbackTokenExample:
       summary: A new token.
       value:

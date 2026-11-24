@@ -9,6 +9,7 @@ export * from "./bot-grants/bot-grants.zod";
 export * from "./bots/bots.zod";
 export * from "./boundaries/boundaries.zod";
 export * from "./browsers/browsers.zod";
+export * from "./buddies/buddies.zod";
 export * from "./capabilities/capabilities.zod";
 export * from "./check-ins/check-ins.zod";
 export * from "./components/components.zod";

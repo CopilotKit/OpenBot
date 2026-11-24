@@ -4,6 +4,7 @@
 import type { BotDefaultModel } from "./botDefaultModel";
 import type { BotIsolationOffReason } from "./botIsolationOffReason";
 import type { BotVisibility } from "./botVisibility";
+import type { BuddyChoice } from "./buddyChoice";
 
 /**
  * A Bot as the caller sees it. canManage, mine, systemOwned and the isolation fields are the server's verdicts for this caller; a client renders them and never recomputes them. No secret is ever part of a Bot: hasAuth and hasCallbackToken say whether one is set.
@@ -19,6 +20,8 @@ export interface Bot {
   roleDescription: string;
   /** The seed its avatar is drawn from. */
   avatarSeed: string;
+  /** The buddy the caller chose to draw this Bot as (replaceBotBuddy), for them only. Null or absent for the stock buddy picked from avatarSeed. */
+  buddy?: BuddyChoice | null;
   visibility: BotVisibility;
   /** Whether the caller hid it from their own list. */
   hidden: boolean;
