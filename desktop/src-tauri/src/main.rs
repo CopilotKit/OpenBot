@@ -7884,6 +7884,7 @@ fn show_openbot_on<R: tauri::Runtime>(
     let destination: tauri::Url = destination
         .parse()
         .map_err(|_| "OpenBot returned an invalid app destination.".to_string())?;
+    let destination = opened_by_setup(destination);
     // Through the entry address, so the window has the install's cookie (`owned_app_entry`).
     let destination = owned_app_entry(&shell, &root, &address, &destination);
     let outcome = window
@@ -10532,6 +10533,23 @@ fn owned_app_entry(
         page,
         install_token_for(shell, root, address).as_deref(),
     )
+}
+
+/**
+The mark on the address `show_openbot` opens OpenBot at: setup opened it. Setup fades out to the
+window's ground before it asks (`leaveFor` in desktop/src/handover.ts), and OpenBot's page, seeing
+the mark, fades its first paint up from the same ground and takes the mark off its address
+(app/index.html, app/src/lib/desktop/from-setup.ts). A page from before it ignores the fragment.
+Only `show_openbot` adds it: the window going back to OpenBot at launch, or to its settings, is not
+a handover from setup.
+*/
+const FROM_SETUP: &str = "from-setup";
+
+/// `page` marked as opened by setup ([`FROM_SETUP`]), in its fragment, which the entry address
+/// carries on to the page (`owned_app_entry`) and no server reads.
+fn opened_by_setup(mut page: tauri::Url) -> tauri::Url {
+    page.set_fragment(Some(FROM_SETUP));
+    page
 }
 
 /// [`owned_app_url`] without a window: the Recorder's native host is a process of its own, started
@@ -28040,7 +28058,7 @@ fn main() {
         .unwrap();
         let own = upgrade::own();
         let root = f.owned.to_string_lossy().into_owned();
-        let shown = format!("http://127.0.0.1:{}/", f.ports.app);
+        let shown = format!("http://127.0.0.1:{}/#{FROM_SETUP}", f.ports.app);
         let window_url = |app: &tauri::App<tauri::test::MockRuntime>| {
             app.get_webview_window("main")
                 .unwrap()
@@ -28096,7 +28114,7 @@ fn main() {
         )
         .unwrap();
         let root = f.owned.to_string_lossy().into_owned();
-        let shown = format!("http://127.0.0.1:{}/", f.ports.app);
+        let shown = format!("http://127.0.0.1:{}/#{FROM_SETUP}", f.ports.app);
         let version = openbot_desktop_lib::client_version::app_version();
         let window_url = |app: &tauri::App<tauri::test::MockRuntime>| {
             app.get_webview_window("main")
@@ -28498,6 +28516,21 @@ fn main() {
             "owned API must not authorize a foreign app: initial={initial_adoption}, shown={shown:?}, restore={destination}");
     }
 
+    /// The window sent to OpenBot by setup arrives with the mark, through the entry address as
+    /// without it, so the page knows to fade up from the ground setup faded out to.
+    #[test]
+    fn the_address_setup_opens_openbot_at_carries_the_mark_through_the_entry_address() {
+        let page: tauri::Url = "http://127.0.0.1:3010/".parse().unwrap();
+        let marked = opened_by_setup(page.clone());
+        assert_eq!(marked.as_str(), "http://127.0.0.1:3010/#from-setup");
+        assert_eq!(page.fragment(), None);
+        let entered = openbot_desktop_lib::install_token::entry(&marked, Some("t"));
+        assert_eq!(entered.fragment(), None);
+        assert!(entered
+            .query_pairs()
+            .any(|(key, value)| key == "to" && value == "/#from-setup"));
+    }
+
     #[test]
     fn app_adoption_and_restore_allow_the_app_its_own_server_container_publishes() {
         let f = RestoreFixture::new();
@@ -28515,7 +28548,7 @@ fn main() {
                 .url()
                 .unwrap()
                 .as_str(),
-            format!("http://127.0.0.1:{}/", f.ports.app)
+            format!("http://127.0.0.1:{}/#{FROM_SETUP}", f.ports.app)
         );
     }
 

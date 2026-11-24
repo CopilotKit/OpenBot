@@ -131,9 +131,9 @@ When a run clicks or types during a play or a step, a marker shows the element o
 
 ### Handover and handback
 
-When the setup window asks the native side to open OpenBot (`show_openbot`), the workbench shows the card "OpenBot opens here". In the real app, the setup window goes to OpenBot's own page at this point. The card has two buttons:
+When the setup window asks the native side to open OpenBot (`show_openbot`), the workbench shows the card "OpenBot opens here". In the real app, the setup window goes to OpenBot's own page at this point. Before it asks, the setup window fades out to the window's ground (`leaveFor` in `src/handover.ts`), so the card comes after the fade. If no page replaces the setup window, it fades back in after 3 s, under the card. The card has two buttons:
 
-- **Open OpenBot** opens the app scene that comes next. After an install, this is `app-onboarding`. After a scene that connects to an OpenBot somewhere else, this is `app-home-bots`. The window settings stay.
+- **Open OpenBot** opens the app scene that comes next. After an install, this is `app-onboarding`. After a scene that connects to an OpenBot somewhere else, this is `app-home-bots`. The window settings stay. With the Desktop host, the app frame opens at the address that setup sends the window to (`#from-setup`), so the app fades up from the ground as after setup. The fade shows only when **Motion** is Real.
 - **Show the setup window** closes the card.
 
 Some app buttons give control back to the setup window: `move_to_cloud`, `change_ai_connection`, `stop`, `sign_out` and `change_connection`. When such a call ends, the workbench shows the card "OpenBot Desktop shows its setup window here". The card has two buttons:

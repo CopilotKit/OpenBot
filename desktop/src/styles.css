@@ -3145,3 +3145,27 @@ main > .rail + .sheet > * {
     display: none;
   }
 }
+
+/*
+ * Setup handing the window to OpenBot (`leaveFor` in handover.ts): everything on the ground fades
+ * out to the bare ground, and OpenBot's page fades up from the same ground, so the switch reads as
+ * one dissolve and not a cut. Only opacity: nothing moves. A screen that mounts while setup is
+ * faded starts faded, since a transition only runs on a change. Back at once when the switch
+ * failed (the mark goes, and with it the transition), and faded back in when OpenBot was slow to
+ * replace the page (`back`).
+ */
+html[data-handover="leaving"] #root > :not(.backdrop) {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--handover-fade, 240ms) ease-out;
+}
+
+html[data-handover="back"] #root > :not(.backdrop) {
+  transition: opacity var(--handover-fade, 240ms) ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-handover] #root > :not(.backdrop) {
+    transition: none;
+  }
+}
