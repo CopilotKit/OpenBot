@@ -7108,12 +7108,27 @@ paths:
         - Bot grants
       operationId: getBotApp
       summary: Read one app as a Bot has it
-      description: Return one app as it stands for the person asking on this Bot, whether or not the Bot was given it, so a client can say it is turned off or not given and offer the step that fixes it. The app's name is read too, as well as its id. Anybody who can use the Bot may read it.
+      description: 'Return one app as it stands for the person asking on this Bot, whether or not the Bot was given it, so a client can say it is turned off or not given and offer the step that fixes it. The app''s name is read too, as well as its id. With actions, the app is read for those actions: a Bot that was given the app but not every one of them reads as not_granted, or owner_grantable where the person asking may give them, and requestKind is grant. Anybody who can use the Bot may read it.'
       security:
         - webSession: []
         - appOAuth:
             - bot-grants:read
         - apiKey: []
+      parameters:
+        - name: actions
+          in: query
+          description: Actions of the app the Bot needs, written <app id>/<action name>, at most 50. One the app doesn't offer is left out.
+          style: form
+          explode: false
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 50
+            items:
+              type: string
+              minLength: 1
+              maxLength: 300
+              pattern: \S
       responses:
         '200':
           description: The app, for the person asking on this Bot.
@@ -7147,7 +7162,7 @@ paths:
         - Bot grants
       operationId: giveBotApp
       summary: Give your own app to a Bot you own
-      description: 'Give a Bot you own one of your apps: the actions that only read, or every action of Routines. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. Recorded on the audit trail.'
+      description: 'Give a Bot you own one of your apps: the actions that only read, or every action of Routines. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn''t have yet are listed in given. Recorded on the audit trail.'
       security:
         - webSession: []
         - appOAuth:
@@ -7155,6 +7170,19 @@ paths:
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotAppActionsInput'
+            examples:
+              readOnly:
+                value: {}
+              oneChange:
+                value:
+                  actions:
+                    - composio-googlecalendar/GOOGLECALENDAR_PATCH_EVENT
       responses:
         '200':
           description: The actions given.
@@ -7237,7 +7265,7 @@ paths:
         - Bot grants
       operationId: approveBotApp
       summary: Turn an app on and give it to a Bot
-      description: 'Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot the actions that only read, or confirm the app''s shared account is connected. The audit trail reads as a request filed and approved by the same administrator. When it can''t be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.'
+      description: 'Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot the actions that only read, or confirm the app''s shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can''t be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.'
       security:
         - webSession: []
         - appOAuth:
@@ -7245,6 +7273,19 @@ paths:
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotAppActionsInput'
+            examples:
+              readOnly:
+                value: {}
+              oneChange:
+                value:
+                  actions:
+                    - composio-googlecalendar/GOOGLECALENDAR_PATCH_EVENT
       responses:
         '200':
           description: What changed, and the request it was recorded as.
@@ -7464,7 +7505,7 @@ paths:
         - App access requests
       operationId: createAppAccessRequest
       summary: Ask an administrator for an app
-      description: 'Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app''s state: turning it on, giving it to the Bot, or connecting its shared account. Leave botId out to ask for an app nobody has added yet, for everyone in the organization: the request is to turn it on, and its botId is null. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask, and anybody signed in may ask for an app alone.'
+      description: 'Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app''s state: turning it on, giving it to the Bot, or connecting its shared account. Leave botId out to ask for an app nobody has added yet, for everyone in the organization: the request is to turn it on, and its botId is null. With actions, the request is to give the Bot those actions of the app, including a Bot that already has some of the app, and its kind is grant. Asking again answers the same request while it is waiting, with any new actions added to it. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask, and anybody signed in may ask for an app alone.'
       security:
         - webSession: []
         - appOAuth:
@@ -7486,6 +7527,12 @@ paths:
               appAlone:
                 value:
                   appId: slack
+              oneChange:
+                value:
+                  botId: research-assistant
+                  appId: composio-googlecalendar
+                  actions:
+                    - composio-googlecalendar/GOOGLECALENDAR_PATCH_EVENT
       responses:
         '200':
           description: The request, filed now or already waiting.
@@ -7572,7 +7619,7 @@ paths:
         - App access requests
       operationId: approveAppAccessRequest
       summary: Approve a request for an app
-      description: 'Do what a request asks: turn the app on, give the Bot its actions, or confirm the app''s shared account is connected. actions names the actions to give. Without it the Bot gets only the actions that only read. The request is answered before anything changes, so a second answer loses. A change that can''t be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.'
+      description: 'Do what a request asks: turn the app on, give the Bot its actions, or confirm the app''s shared account is connected. actions names the actions to give. Without it the Bot gets the actions the request names, or, for a request that names none, only the actions that only read. The request is answered before anything changes, so a second answer loses. A change that can''t be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.'
       security:
         - webSession: []
         - appOAuth:
@@ -29229,6 +29276,20 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    BotAppActionsInput:
+      type: object
+      additionalProperties: false
+      properties:
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 50
+          description: The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets the actions that only read.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 300
+            pattern: \S
     BotAppGiven:
       type: object
       required:
@@ -29266,6 +29327,7 @@ components:
         - createdAt
         - resolvedAt
         - resolvedBy
+        - actions
       properties:
         id:
           type: string
@@ -29318,6 +29380,11 @@ components:
             - string
             - 'null'
           description: The id of the person who answered or withdrew it.
+        actions:
+          type: array
+          description: The actions asked for, written <app id>/<action name>. Empty for a request that names none, which asks for the app itself.
+          items:
+            type: string
     AppAccessApproval:
       type: object
       required:
@@ -29440,6 +29507,16 @@ components:
           maxLength: 200
           pattern: \S
           description: The app's id, or its name. For an app from the directory that nobody has added yet, the slug of its directory entry (the part of its entry id after directory:).
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 50
+          description: Actions of the app the Bot needs, written <app id>/<action name>, for a Bot that was given the app but not these. Needs botId.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 300
+            pattern: \S
     AppAccessApprovalInput:
       type: object
       additionalProperties: false
@@ -47679,6 +47756,7 @@ components:
           createdAt: '2026-11-14T09:00:00.000Z'
           resolvedAt: '2026-11-14T10:00:00.000Z'
           resolvedBy: user_9a1d
+          actions: []
         enabled: false
         granted:
           - notion/notion-fetch
@@ -47718,6 +47796,7 @@ components:
             createdAt: '2026-11-14T09:00:00.000Z'
             resolvedAt: null
             resolvedBy: null
+            actions: []
         nextCursor: null
     AppAccessRequestExample:
       summary: A request to give Notion to a Bot.
@@ -47735,6 +47814,7 @@ components:
         createdAt: '2026-11-14T09:00:00.000Z'
         resolvedAt: null
         resolvedBy: null
+        actions: []
     DismissedAppAccessRequestExample:
       summary: The same request, dismissed.
       value:
@@ -47751,6 +47831,7 @@ components:
         createdAt: '2026-11-14T09:00:00.000Z'
         resolvedAt: '2026-11-14T10:00:00.000Z'
         resolvedBy: user_9a1d
+        actions: []
     ComponentPageExample:
       summary: A chart and a Playground component, as an admin sees them.
       value:

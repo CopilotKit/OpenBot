@@ -28,6 +28,7 @@ import type {
   ApproveBotAppHeaders,
   BatchUpdateBotGrantsHeaders,
   BotApp,
+  BotAppActionsInput,
   BotAppConflictResponse,
   BotAppGiven,
   BotAppPage,
@@ -47,6 +48,7 @@ import type {
   BotNotFoundResponse,
   BotOrAppNotFoundResponse,
   DeleteBotGrantHeaders,
+  GetBotAppParams,
   GiveBotAppHeaders,
   GiveableAppPage,
   IdempotencyConflictResponse,
@@ -1361,33 +1363,52 @@ export const getGetBotAppUrl = (
   organizationId: string,
   botId: string,
   appId: string,
+  params?: GetBotAppParams,
 ) => {
-  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/bots/${encodeURIComponent(String(botId))}/apps/${encodeURIComponent(String(appId))}`;
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/bots/${encodeURIComponent(String(botId))}/apps/${encodeURIComponent(String(appId))}?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/bots/${encodeURIComponent(String(botId))}/apps/${encodeURIComponent(String(appId))}`;
 };
 
 /**
- * Return one app as it stands for the person asking on this Bot, whether or not the Bot was given it, so a client can say it is turned off or not given and offer the step that fixes it. The app's name is read too, as well as its id. Anybody who can use the Bot may read it.
+ * Return one app as it stands for the person asking on this Bot, whether or not the Bot was given it, so a client can say it is turned off or not given and offer the step that fixes it. The app's name is read too, as well as its id. With actions, the app is read for those actions: a Bot that was given the app but not every one of them reads as not_granted, or owner_grantable where the person asking may give them, and requestKind is grant. Anybody who can use the Bot may read it.
  * @summary Read one app as a Bot has it
  */
 export const getBotApp = async (
   organizationId: string,
   botId: string,
   appId: string,
+  params?: GetBotAppParams,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<BotApp> => {
-  return apiRequest<BotApp>(getGetBotAppUrl(organizationId, botId, appId), {
-    ...options,
-    method: "GET",
-  });
+  return apiRequest<BotApp>(
+    getGetBotAppUrl(organizationId, botId, appId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
 export const getGetBotAppQueryKey = (
   organizationId: string,
   botId: string,
   appId: string,
+  params?: GetBotAppParams,
 ) => {
   return [
     `/api/v2/organizations/${organizationId}/bots/${botId}/apps/${appId}`,
+    ...(params ? [params] : []),
   ] as const;
 };
 
@@ -1403,6 +1424,7 @@ export const getGetBotAppQueryOptions = <
   organizationId: string,
   botId: string,
   appId: string,
+  params?: GetBotAppParams,
   options?: {
     query?: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof getBotApp>>, TError, TData>
@@ -1414,11 +1436,15 @@ export const getGetBotAppQueryOptions = <
 
   const queryKey =
     queryOptions?.queryKey ??
-    getGetBotAppQueryKey(organizationId, botId, appId);
+    getGetBotAppQueryKey(organizationId, botId, appId, params);
 
   const queryFn: QueryFunction<Awaited<ReturnType<typeof getBotApp>>> = ({
     signal,
-  }) => getBotApp(organizationId, botId, appId, { signal, ...requestOptions });
+  }) =>
+    getBotApp(organizationId, botId, appId, params, {
+      signal,
+      ...requestOptions,
+    });
 
   return {
     queryKey,
@@ -1458,6 +1484,7 @@ export function useGetBotApp<
   organizationId: string,
   botId: string,
   appId: string,
+  params: undefined | GetBotAppParams,
   options: {
     query: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof getBotApp>>, TError, TData>
@@ -1488,6 +1515,7 @@ export function useGetBotApp<
   organizationId: string,
   botId: string,
   appId: string,
+  params?: GetBotAppParams,
   options?: {
     query?: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof getBotApp>>, TError, TData>
@@ -1518,6 +1546,7 @@ export function useGetBotApp<
   organizationId: string,
   botId: string,
   appId: string,
+  params?: GetBotAppParams,
   options?: {
     query?: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof getBotApp>>, TError, TData>
@@ -1544,6 +1573,7 @@ export function useGetBotApp<
   organizationId: string,
   botId: string,
   appId: string,
+  params?: GetBotAppParams,
   options?: {
     query?: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof getBotApp>>, TError, TData>
@@ -1558,6 +1588,7 @@ export function useGetBotApp<
     organizationId,
     botId,
     appId,
+    params,
     options,
   );
 
@@ -1578,7 +1609,7 @@ export const getGiveBotAppUrl = (
 };
 
 /**
- * Give a Bot you own one of your apps: the actions that only read, or every action of Routines. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. Recorded on the audit trail.
+ * Give a Bot you own one of your apps: the actions that only read, or every action of Routines. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn't have yet are listed in given. Recorded on the audit trail.
  * @summary Give your own app to a Bot you own
  */
 export const giveBotApp = async (
@@ -1586,6 +1617,7 @@ export const giveBotApp = async (
   botId: string,
   appId: string,
   headers: GiveBotAppHeaders,
+  botAppActionsInput?: BotAppActionsInput,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<BotAppGiven> => {
   const getHeaders = (
@@ -1614,7 +1646,12 @@ export const giveBotApp = async (
     {
       ...options,
       method: "POST",
-      headers: { ...headers, ...getHeaders(options?.headers) },
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(botAppActionsInput),
     },
   );
 };
@@ -1658,9 +1695,16 @@ export const getGiveBotAppMutationOptions = <
     Awaited<ReturnType<typeof giveBotApp>>,
     GiveBotAppMutationVariables
   > = (props) => {
-    const { organizationId, botId, appId, headers } = props ?? {};
+    const { organizationId, botId, appId, headers, data } = props ?? {};
 
-    return giveBotApp(organizationId, botId, appId, headers, requestOptions);
+    return giveBotApp(
+      organizationId,
+      botId,
+      appId,
+      headers,
+      data,
+      requestOptions,
+    );
   };
 
   return { mutationFn, ...mutationOptions };
@@ -1669,7 +1713,7 @@ export const getGiveBotAppMutationOptions = <
 export type GiveBotAppMutationResult = NonNullable<
   Awaited<ReturnType<typeof giveBotApp>>
 >;
-
+export type GiveBotAppMutationBody = BotAppActionsInput | undefined;
 export type GiveBotAppMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
@@ -1683,6 +1727,7 @@ export type GiveBotAppMutationVariables = {
   botId: string;
   appId: string;
   headers: GiveBotAppHeaders;
+  data?: BotAppActionsInput;
 };
 
 /**
@@ -1880,7 +1925,7 @@ export const getApproveBotAppUrl = (
 };
 
 /**
- * Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot the actions that only read, or confirm the app's shared account is connected. The audit trail reads as a request filed and approved by the same administrator. When it can't be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.
+ * Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot the actions that only read, or confirm the app's shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can't be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.
  * @summary Turn an app on and give it to a Bot
  */
 export const approveBotApp = async (
@@ -1888,6 +1933,7 @@ export const approveBotApp = async (
   botId: string,
   appId: string,
   headers: ApproveBotAppHeaders,
+  botAppActionsInput?: BotAppActionsInput,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<AppAccessApproval> => {
   const getHeaders = (
@@ -1916,7 +1962,12 @@ export const approveBotApp = async (
     {
       ...options,
       method: "POST",
-      headers: { ...headers, ...getHeaders(options?.headers) },
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(botAppActionsInput),
     },
   );
 };
@@ -1962,9 +2013,16 @@ export const getApproveBotAppMutationOptions = <
     Awaited<ReturnType<typeof approveBotApp>>,
     ApproveBotAppMutationVariables
   > = (props) => {
-    const { organizationId, botId, appId, headers } = props ?? {};
+    const { organizationId, botId, appId, headers, data } = props ?? {};
 
-    return approveBotApp(organizationId, botId, appId, headers, requestOptions);
+    return approveBotApp(
+      organizationId,
+      botId,
+      appId,
+      headers,
+      data,
+      requestOptions,
+    );
   };
 
   return { mutationFn, ...mutationOptions };
@@ -1973,7 +2031,7 @@ export const getApproveBotAppMutationOptions = <
 export type ApproveBotAppMutationResult = NonNullable<
   Awaited<ReturnType<typeof approveBotApp>>
 >;
-
+export type ApproveBotAppMutationBody = BotAppActionsInput | undefined;
 export type ApproveBotAppMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
@@ -1989,6 +2047,7 @@ export type ApproveBotAppMutationVariables = {
   botId: string;
   appId: string;
   headers: ApproveBotAppHeaders;
+  data?: BotAppActionsInput;
 };
 
 /**
