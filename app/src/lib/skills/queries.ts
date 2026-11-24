@@ -1,7 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { everyPage } from "@/lib/api/every-page";
-import { listSkills } from "@/lib/api/generated/skills/skills";
 import type { Skill as ApiSkill } from "@/lib/api/generated/model";
+import { listSkills } from "@/lib/api/generated/skills/skills";
 import { organizationId } from "@/lib/api/request";
 
 /**
@@ -21,6 +21,11 @@ export type Skill = {
   instructions: string;
   /** The Bots that offer it, by id. */
   grantedTo: string[];
+  /**
+   * On every Bot, Bots made later included. OpenBot Personal's: there a new skill is, and choosing
+   * its Bots, or taking it from one Bot, makes it false.
+   */
+  everyBot: boolean;
   /**
    * The tools this skill says it needs, as `<appId>/<toolName>` refs.
    *
@@ -55,6 +60,7 @@ function skillRecord(skill: ApiSkill): Skill {
     summary: skill.summary,
     instructions: skill.instructions,
     grantedTo: skill.botIds,
+    everyBot: skill.everyBot,
     tools: skill.tools,
     usableOnYourBots: skill.usableOnYourBots,
   };

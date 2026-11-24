@@ -45,6 +45,7 @@ const skill = (
   summary: "",
   instructions: "Do it.",
   grantedTo,
+  everyBot: false,
   tools: [],
   usableOnYourBots: owner === ME,
 });

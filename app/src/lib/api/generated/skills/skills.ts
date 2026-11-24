@@ -31,10 +31,12 @@ import type {
   InvalidSkillResponse,
   ListSkillsParams,
   OrganizationNotFoundResponse,
+  ReplaceSkillBotsHeaders,
   ReplaceSkillHeaders,
   ReplaceSkillTeamGrantsHeaders,
   ServerErrorResponse,
   Skill,
+  SkillBotsInput,
   SkillForbiddenResponse,
   SkillInput,
   SkillNotFoundResponse,
@@ -919,6 +921,162 @@ export const useDeleteSkill = <
   TContext
 > => {
   return useMutation(getDeleteSkillMutationOptions(options), queryClient);
+};
+export const getReplaceSkillBotsUrl = (
+  organizationId: string,
+  skillId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/skills/${encodeURIComponent(String(skillId))}/bots`;
+};
+
+/**
+ * Put the skill on every Bot, or on exactly these Bots, taking it from any Bot left out. Each Bot it is put on or taken from is checked as a Bot's own grant is: a person may put their own skill on a Bot they own, and an admin may put any skill on any Bot. Only OpenBot Personal puts a skill on every Bot, Bots made later included. Recorded on the audit trail.
+ * @summary Choose the Bots that offer a skill
+ */
+export const replaceSkillBots = async (
+  organizationId: string,
+  skillId: string,
+  skillBotsInput: SkillBotsInput,
+  headers: ReplaceSkillBotsHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<Skill> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<Skill>(getReplaceSkillBotsUrl(organizationId, skillId), {
+    ...options,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(skillBotsInput),
+  });
+};
+
+export const getReplaceSkillBotsMutationKey = () =>
+  ["replaceSkillBots"] as const;
+
+export const getReplaceSkillBotsMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | SkillForbiddenResponse
+    | SkillNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replaceSkillBots>>,
+    TError,
+    ReplaceSkillBotsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof replaceSkillBots>>,
+  TError,
+  ReplaceSkillBotsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getReplaceSkillBotsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof replaceSkillBots>>,
+    ReplaceSkillBotsMutationVariables
+  > = (props) => {
+    const { organizationId, skillId, data, headers } = props ?? {};
+
+    return replaceSkillBots(
+      organizationId,
+      skillId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReplaceSkillBotsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof replaceSkillBots>>
+>;
+export type ReplaceSkillBotsMutationBody = SkillBotsInput;
+export type ReplaceSkillBotsMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | SkillForbiddenResponse
+  | SkillNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type ReplaceSkillBotsMutationVariables = {
+  organizationId: string;
+  skillId: string;
+  data: SkillBotsInput;
+  headers: ReplaceSkillBotsHeaders;
+};
+
+/**
+ * @summary Choose the Bots that offer a skill
+ */
+export const useReplaceSkillBots = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | SkillForbiddenResponse
+    | SkillNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof replaceSkillBots>>,
+      TError,
+      ReplaceSkillBotsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof replaceSkillBots>>,
+  TError,
+  ReplaceSkillBotsMutationVariables,
+  TContext
+> => {
+  return useMutation(getReplaceSkillBotsMutationOptions(options), queryClient);
 };
 export const getGetSkillTeamGrantsUrl = (
   organizationId: string,

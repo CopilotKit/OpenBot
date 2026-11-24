@@ -2,12 +2,13 @@ import {
   IconApps,
   IconBox,
   IconChevronRight,
+  IconDots,
   IconPlug,
   IconPlus,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -18,7 +19,29 @@ import {
   appAccessSentence,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
+import {
+  skillBotsSummary,
+  useSkillBotRoster,
+} from "@/components/skills/skill-bots";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   Item,
   ItemActions,
@@ -50,7 +73,12 @@ import {
   type GrantedPlugins,
 } from "@/lib/plugins/queries";
 import { toolName } from "@/lib/plugins/tool-words";
-import { skillListQueryOptions } from "@/lib/skills/queries";
+import { putSkillsOnBot } from "@/lib/skills/import";
+import {
+  chooseSkillBotsMutationOptions,
+  type SkillBots,
+} from "@/lib/skills/mutations";
+import { type Skill, skillListQueryOptions } from "@/lib/skills/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -124,7 +152,7 @@ export function AppsSections({ agent }: { agent: AgentProfile }) {
 export function SkillsSections({ agent }: { agent: AgentProfile }) {
   return (
     <>
-      {agent.mine ? <YourSkills agentId={agent.id} /> : null}
+      {agent.mine ? <YourSkills agent={agent} /> : null}
       <Granted agentId={agent.id} kind="skills" mine={agent.mine} />
     </>
   );
@@ -259,24 +287,54 @@ function YourApps({ agent }: { agent: AgentProfile }) {
  * where the personal edition gives a Bot every skill the first time it is listed, so it is what
  * gives a Bot made a moment ago its skills. The skills page, read alongside it or earlier, still said
  * the Bot had none, and every switch was drawn off until the page was opened again.
+ *
+ * The ones on this Bot come first. Add skills brings in several of the rest at once. In OpenBot
+ * Personal each row also says which other Bots use it, and its menu makes it this Bot's alone, or
+ * puts it back on every Bot.
  */
-function YourSkills({ agentId }: { agentId: string }) {
+function YourSkills({ agent }: { agent: AgentProfile }) {
+  const agentId = agent.id;
   const page = useQuery(skillListQueryOptions());
   const held = useQuery(agentPluginsQueryOptions(agentId));
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const roster = useSkillBotRoster();
   const grant = useMutation(setPluginGrantMutationOptions(queryClient));
-  const skills = (page.data ?? []).filter((skill) => skill.usableOnYourBots);
+  const choose = useMutation(chooseSkillBotsMutationOptions(queryClient));
+  const [adding, setAdding] = useState(false);
   const carried = new Set((held.data?.skills ?? []).map((skill) => skill.slug));
+  const skills = (page.data ?? [])
+    .filter((skill) => skill.usableOnYourBots)
+    // On this Bot first, each half in the list's own order.
+    .sort((a, b) => Number(carried.has(b.slug)) - Number(carried.has(a.slug)));
+  const notHere = skills.filter((skill) => !carried.has(skill.slug));
+  const error = grant.error ?? choose.error;
+  const loaded = !page.isPending && !held.isPending;
+  const failed = Boolean(page.error || held.error);
   return (
     <PageSection
+      action={
+        loaded && !failed && notHere.length > 0 ? (
+          <Button
+            onClick={() => setAdding(true)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <IconPlus />
+            Add skills
+          </Button>
+        ) : null
+      }
       description="Turn on a skill to use it with this Bot. Type / in a conversation to run it."
       title="Your skills"
     >
-      {grant.error ? (
+      {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {grant.error.message}
+          {error.message}
         </p>
       ) : null}
-      {page.isPending || held.isPending ? null : page.error || held.error ? (
+      {!loaded ? null : failed ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           Couldn't load your skills. Try again in a moment.
         </p>
@@ -299,39 +357,285 @@ function YourSkills({ agentId }: { agentId: string }) {
         </PageEmpty>
       ) : (
         <PageRows>
-          {skills.map((skill, index) => (
-            <Fragment key={skill.slug}>
-              {index > 0 ? <Separator /> : null}
-              <Item size="sm">
-                <ItemMedia variant="icon">
-                  <IconBox />
-                </ItemMedia>
-                {/* By its title, as What it can use names it below; the section says how to run it. */}
-                <ItemContent>
-                  <ItemTitle>{skill.title}</ItemTitle>
-                  <ItemDescription>{skill.summary}</ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Switch
-                    aria-label={skill.title}
-                    checked={carried.has(skill.slug)}
-                    disabled={grant.isPending}
-                    onCheckedChange={(granted) =>
-                      grant.mutate({
-                        agentId,
-                        granted,
-                        kind: "skill",
-                        ref: skill.slug,
-                      })
-                    }
-                  />
-                </ItemActions>
-              </Item>
-            </Fragment>
-          ))}
+          {skills.map((skill, index) => {
+            const on = carried.has(skill.slug);
+            return (
+              <Fragment key={skill.slug}>
+                {index > 0 ? <Separator /> : null}
+                <Item size="sm">
+                  <ItemMedia variant="icon">
+                    <IconBox />
+                  </ItemMedia>
+                  {/* By its title, as What it can use names it below; the section says how to run it. */}
+                  <ItemContent>
+                    <ItemTitle>{skill.title}</ItemTitle>
+                    <ItemDescription>{skill.summary}</ItemDescription>
+                    {personal ? (
+                      <p className="text-muted-foreground text-xs">
+                        {whereItIs(skill, agent, roster, on)}
+                      </p>
+                    ) : null}
+                  </ItemContent>
+                  <ItemActions>
+                    {personal ? (
+                      <SkillMenu
+                        agent={agent}
+                        busy={choose.isPending}
+                        onChoose={(bots) => {
+                          grant.reset();
+                          choose.mutate({ slug: skill.slug, bots });
+                        }}
+                        on={on}
+                        skill={skill}
+                      />
+                    ) : null}
+                    <Switch
+                      aria-label={skill.title}
+                      checked={on}
+                      disabled={grant.isPending || choose.isPending}
+                      onCheckedChange={(granted) => {
+                        choose.reset();
+                        grant.mutate({
+                          agentId,
+                          granted,
+                          kind: "skill",
+                          ref: skill.slug,
+                        });
+                      }}
+                    />
+                  </ItemActions>
+                </Item>
+              </Fragment>
+            );
+          })}
         </PageRows>
       )}
+      {adding ? (
+        <AddSkills
+          agent={agent}
+          onClose={() => setAdding(false)}
+          roster={roster}
+          showWhere={personal}
+          skills={notHere}
+        />
+      ) : null}
     </PageSection>
+  );
+}
+
+type RosterBot = { id: string; name: string };
+
+/** Which Bots use a skill, said from this Bot's page: "Every Bot", "Only Coder", "Also on Writer". */
+function whereItIs(
+  skill: Skill,
+  agent: AgentProfile,
+  roster: readonly RosterBot[],
+  on: boolean,
+): string {
+  if (skill.everyBot) return "Every Bot";
+  const others = roster.filter(
+    (bot) => bot.id !== agent.id && skill.grantedTo.includes(bot.id),
+  );
+  const names = skillBotsSummary(
+    { everyBot: false, grantedTo: others.map((bot) => bot.id) },
+    others,
+  );
+  if (on)
+    return others.length === 0 ? `Only ${agent.name}` : `Also on ${names}`;
+  return others.length === 0 ? "Not on any Bot" : `On ${names}`;
+}
+
+/**
+ * A skill's menu on this Bot's page, OpenBot Personal's: make it this Bot's alone, or put it on every
+ * Bot. Only what would change something is offered.
+ */
+function SkillMenu({
+  skill,
+  agent,
+  on,
+  busy,
+  onChoose,
+}: {
+  skill: Skill;
+  agent: AgentProfile;
+  on: boolean;
+  busy: boolean;
+  onChoose: (bots: SkillBots) => void;
+}) {
+  const onlyHere =
+    on && !skill.everyBot && skill.grantedTo.every((id) => id === agent.id);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            aria-label={`More for ${skill.title}`}
+            disabled={busy}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <IconDots />
+          </Button>
+        }
+      />
+      <DropdownMenuContent>
+        <DropdownMenuGroup>
+          {onlyHere ? null : (
+            <DropdownMenuItem
+              onClick={() => onChoose({ everyBot: false, botIds: [agent.id] })}
+            >
+              Only on {agent.name}
+            </DropdownMenuItem>
+          )}
+          {skill.everyBot ? null : (
+            <DropdownMenuItem onClick={() => onChoose({ everyBot: true })}>
+              On every Bot
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Put several of your skills on this Bot at once: the ones it hasn't got, to tick. */
+function AddSkills({
+  agent,
+  skills,
+  roster,
+  showWhere,
+  onClose,
+}: {
+  agent: AgentProfile;
+  skills: readonly Skill[];
+  roster: readonly RosterBot[];
+  /** Say which Bots use each one now: OpenBot Personal's. */
+  showWhere: boolean;
+  onClose: () => void;
+}) {
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [filter, setFilter] = useState("");
+  const add = useMutation({
+    mutationFn: (slugs: string[]) =>
+      putSkillsOnBot(queryClient, slugs, agent.id),
+  });
+  const problems = (add.data ?? []).filter((one) => one.problem);
+  const shown = skills.filter((skill) =>
+    `${skill.title} ${skill.slug} ${skill.summary}`
+      .toLowerCase()
+      .includes(filter.trim().toLowerCase()),
+  );
+  return (
+    <Dialog onOpenChange={(open) => !open && onClose()} open>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Add skills to {agent.name}</DialogTitle>
+          <DialogDescription>
+            Choose your skills for {agent.name} to use. Other Bots keep the ones
+            they have.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="mt-4 grid gap-3">
+          {skills.length > 6 ? (
+            <Input
+              aria-label="Find a skill"
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="Find a skill"
+              value={filter}
+            />
+          ) : null}
+          <ul className="grid max-h-80 gap-1 overflow-y-auto rounded-md border border-border p-1">
+            {shown.map((skill) => (
+              <li
+                className="flex items-start gap-3 rounded-md px-2 py-2 hover:bg-muted/50"
+                key={skill.slug}
+              >
+                <Checkbox
+                  aria-labelledby={`add-skill-${skill.slug}`}
+                  checked={picked.has(skill.slug)}
+                  className="mt-0.5"
+                  disabled={add.isPending || add.isSuccess}
+                  onCheckedChange={(checked) => {
+                    const next = new Set(picked);
+                    if (checked) next.add(skill.slug);
+                    else next.delete(skill.slug);
+                    setPicked(next);
+                  }}
+                />
+                <span className="grid min-w-0 gap-0.5">
+                  <span
+                    className="font-medium text-sm"
+                    id={`add-skill-${skill.slug}`}
+                  >
+                    {skill.title}
+                  </span>
+                  {skill.summary ? (
+                    <span className="text-muted-foreground text-xs">
+                      {skill.summary}
+                    </span>
+                  ) : null}
+                  {showWhere ? (
+                    <span className="text-muted-foreground text-xs">
+                      {whereItIs(skill, agent, roster, false)}
+                    </span>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+            {shown.length === 0 ? (
+              <li className="px-2 py-2 text-muted-foreground text-sm">
+                No skill matches.
+              </li>
+            ) : null}
+          </ul>
+          {add.error ? (
+            <p className="text-destructive text-sm" role="alert">
+              {add.error.message}
+            </p>
+          ) : null}
+          {problems.map((one) => (
+            <p className="text-destructive text-sm" key={one.slug} role="alert">
+              /{one.slug} isn't on {agent.name}: {one.problem}
+            </p>
+          ))}
+        </DialogBody>
+        <DialogFooter>
+          {add.isSuccess ? (
+            <Button onClick={onClose} size="sm" type="button">
+              Done
+            </Button>
+          ) : (
+            <>
+              <Button
+                disabled={add.isPending}
+                onClick={onClose}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={add.isPending || picked.size === 0}
+                onClick={() =>
+                  add.mutate([...picked], {
+                    onSuccess: (results) => {
+                      if (results.every((one) => !one.problem)) onClose();
+                    },
+                  })
+                }
+                size="sm"
+                type="button"
+              >
+                {add.isPending
+                  ? "Adding…"
+                  : `Add ${picked.size} skill${picked.size === 1 ? "" : "s"}`}
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

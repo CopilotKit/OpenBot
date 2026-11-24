@@ -120,6 +120,7 @@ const SKILLS: Skill[] = [
   summary: "",
   instructions: "",
   grantedTo: [BOT],
+  everyBot: false,
   tools: [],
   usableOnYourBots: true,
 }));

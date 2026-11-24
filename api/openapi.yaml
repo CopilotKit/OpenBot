@@ -8929,6 +8929,67 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/skills/{skillId}/bots:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SkillId'
+    put:
+      tags:
+        - Skills
+      operationId: replaceSkillBots
+      summary: Choose the Bots that offer a skill
+      description: 'Put the skill on every Bot, or on exactly these Bots, taking it from any Bot left out. Each Bot it is put on or taken from is checked as a Bot''s own grant is: a person may put their own skill on a Bot they own, and an admin may put any skill on any Bot. Only OpenBot Personal puts a skill on every Bot, Bots made later included. Recorded on the audit trail.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - skills:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillBotsInput'
+            examples:
+              twoBots:
+                value:
+                  everyBot: false
+                  botIds:
+                    - general-assistant
+                    - research-assistant
+              everyBot:
+                value:
+                  everyBot: true
+                  botIds: []
+      responses:
+        '200':
+          description: The skill, on the Bots it is on now.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+              examples:
+                saved:
+                  $ref: '#/components/examples/SkillExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SkillForbidden'
+        '404':
+          $ref: '#/components/responses/SkillNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/skills/{skillId}/team-grants:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -30388,6 +30449,7 @@ components:
         - tools
         - ownerId
         - botIds
+        - everyBot
         - usableOnYourBots
       properties:
         slug:
@@ -30418,6 +30480,9 @@ components:
           description: The Bots that offer it, by id.
           items:
             type: string
+        everyBot:
+          type: boolean
+          description: Whether it is on every Bot, including Bots made later. In OpenBot Personal a new skill is. Choosing its Bots, or taking it from one Bot, makes it false.
         usableOnYourBots:
           type: boolean
           description: 'Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot''s Skills page offers these.'
@@ -30549,6 +30614,24 @@ components:
           type: boolean
           default: false
           description: 'Make a new skill the organization''s. Only an admin may. It applies when the skill is made: rewriting one keeps whose it is.'
+    SkillBotsInput:
+      type: object
+      additionalProperties: false
+      required:
+        - everyBot
+        - botIds
+      properties:
+        everyBot:
+          type: boolean
+          description: Put it on every Bot, including Bots made later. botIds is then ignored. Only OpenBot Personal puts a skill on every Bot.
+        botIds:
+          type: array
+          maxItems: 200
+          description: When everyBot is false, the Bots to offer it, by id. It is taken from every Bot left out. An empty list takes it from every Bot.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
     SkillTeamGrants:
       type: object
       description: The teams the skill is granted to.
@@ -48783,6 +48866,7 @@ components:
             ownerId: user_3f1c9a
             botIds:
               - general-assistant
+            everyBot: false
             usableOnYourBots: true
           - slug: weekly-report
             title: Weekly report
@@ -48793,6 +48877,7 @@ components:
             botIds:
               - general-assistant
               - research-assistant
+            everyBot: true
             usableOnYourBots: false
         nextCursor: null
     GitHubSkillsExample:
@@ -48834,6 +48919,7 @@ components:
         ownerId: user_3f1c9a
         botIds:
           - general-assistant
+        everyBot: false
         usableOnYourBots: true
     SkillTeamGrantsExample:
       summary: Granted to one team.

@@ -41,6 +41,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
+  chooseSkillBotsMutationOptions,
   removeSkillMutationOptions,
   saveSkillMutationOptions,
 } from "@/lib/skills/mutations";
@@ -74,6 +75,10 @@ export function SkillPage({ slug }: { slug: string }) {
     onError: (thrown: Error) => setError(thrown.message),
   });
   const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
+  const chooseBots = useMutation({
+    ...chooseSkillBotsMutationOptions(queryClient),
+    onError: (thrown: Error) => setError(thrown.message),
+  });
   const removeSkill = useMutation(removeSkillMutationOptions(queryClient));
 
   const back = { label: "Skills", linkProps: paths.skills() };
@@ -142,6 +147,38 @@ export function SkillPage({ slug }: { slug: string }) {
           </PageEmpty>
         ) : (
           <PageRows>
+            {/* OpenBot Personal's: on every Bot, Bots made later included. */}
+            {paths.edition === "personal" ? (
+              <>
+                <Item size="sm">
+                  <ItemContent>
+                    <ItemTitle>Every Bot</ItemTitle>
+                    <ItemDescription>
+                      {skill.everyBot
+                        ? "Every Bot uses it, including Bots you make later."
+                        : "Only the Bots switched on below use it."}
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Switch
+                      aria-label={`Every Bot offers ${skill.title}`}
+                      checked={skill.everyBot}
+                      disabled={chooseBots.isPending}
+                      onCheckedChange={(next) => {
+                        setError(null);
+                        chooseBots.mutate({
+                          slug: skill.slug,
+                          bots: next
+                            ? { everyBot: true }
+                            : { everyBot: false, botIds: skill.grantedTo },
+                        });
+                      }}
+                    />
+                  </ItemActions>
+                </Item>
+                <Separator />
+              </>
+            ) : null}
             {bots.map((bot, index) => {
               const held = skill.grantedTo.includes(bot.id);
               return (

@@ -50,6 +50,7 @@ const skill = (
   summary: `${title}, step by step.`,
   instructions: "Do it.",
   grantedTo: [],
+  everyBot: false,
   tools: [],
   usableOnYourBots: ownerUserId !== null,
 });

@@ -20,8 +20,9 @@ import {
 
 const skill = (
   over: Partial<PluginSkill> = {},
-): PluginSkill & { usableOnYourBots: boolean } => ({
+): PluginSkill & { usableOnYourBots: boolean; everyBot: boolean } => ({
   usableOnYourBots: false,
+  everyBot: false,
   id: "skill_1",
   slug: "check-a-claim",
   ownerUserId: null,

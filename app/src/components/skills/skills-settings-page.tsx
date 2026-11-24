@@ -47,9 +47,6 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { grantRoster } from "@/lib/agents/grant-roster";
-import { grantSummary } from "@/lib/agents/grant-summary";
-import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { useManagePaths } from "@/lib/manage-paths";
@@ -59,6 +56,7 @@ import { queryClient } from "@/query-client";
 import { EditSkill } from "./edit-skill";
 import { GitHubImport } from "./import-skills";
 import { NewSkill } from "./new-skill";
+import { SkillBotsButton } from "./skill-bots";
 
 /**
  * Skills: the one page, for every Bot, that answers "what does it know how to do?", in the main
@@ -88,8 +86,6 @@ export function SkillsSettingsPage({
   const personal = paths.edition === "personal";
   const skillList = useQuery(skillListQueryOptions());
   const me = useQuery(currentUserQueryOptions());
-  const { data: agents } = useQuery(agentListQueryOptions());
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
   const browser = useQuery(browserStateQueryOptions());
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -130,6 +126,8 @@ export function SkillsSettingsPage({
         ) : null}
       </ItemContent>
       <ItemActions>
+        {/* Which Bots use it: OpenBot Personal's, where every Bot is the one person's. */}
+        {personal ? <SkillBotsButton skill={skill} /> : null}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -173,12 +171,6 @@ export function SkillsSettingsPage({
 
   /** A personal-edition skill written for every Bot: it opens its own page, with a switch per Bot. */
   const everyBotRow = (skill: Skill) => {
-    const bots = grantRoster({
-      roster: agents ?? [],
-      hidden: hiddenAgents ?? [],
-      holders: skill.grantedTo,
-    });
-    const held = bots.filter((bot) => skill.grantedTo.includes(bot.id)).length;
     return (
       // A real link with no children: children passed to `render` replace the row's own.
       <Item render={<Link {...paths.skill(skill.slug)} />} size="sm">
@@ -195,9 +187,7 @@ export function SkillsSettingsPage({
           ) : null}
         </ItemContent>
         <ItemActions>
-          <span className="text-muted-foreground text-xs">
-            {grantSummary(held, bots.length)}
-          </span>
+          <SkillBotsButton skill={skill} />
           <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
         </ItemActions>
       </Item>
@@ -355,12 +345,12 @@ function ImportFromGitHub({
           <DialogTitle>Import from GitHub</DialogTitle>
           <DialogDescription>
             {personal
-              ? "Bring in the skills from a GitHub repository. They're saved as yours and every Bot can use them."
+              ? "Bring in the skills from a GitHub repository. They're saved as yours, and you choose which Bots use them."
               : "Bring in the skills from a GitHub repository. They're saved as yours, and you choose which Bots use each one."}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">
-          <GitHubImport onCancel={onClose} />
+          <GitHubImport chooseBots={personal} onCancel={onClose} />
         </DialogBody>
       </DialogContent>
     </Dialog>

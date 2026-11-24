@@ -6,6 +6,7 @@ import type {
   GitHubSkills,
   ListSkillsParams,
   Skill,
+  SkillBotsInput,
   SkillInput,
   SkillPage,
   SkillTeamGrants,
@@ -174,6 +175,55 @@ export const deleteSkill = async (
   return apiRequest<void>(getDeleteSkillUrl(organizationId, skillId), {
     ...options,
     method: "DELETE",
+  });
+};
+
+export const getReplaceSkillBotsUrl = (
+  organizationId: string,
+  skillId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/skills/${encodeURIComponent(String(skillId))}/bots`;
+};
+
+/**
+ * Put the skill on every Bot, or on exactly these Bots, taking it from any Bot left out. Each Bot it is put on or taken from is checked as a Bot's own grant is: a person may put their own skill on a Bot they own, and an admin may put any skill on any Bot. Only OpenBot Personal puts a skill on every Bot, Bots made later included. Recorded on the audit trail.
+ * @summary Choose the Bots that offer a skill
+ */
+export const replaceSkillBots = async (
+  organizationId: string,
+  skillId: string,
+  skillBotsInput: SkillBotsInput,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<Skill> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<Skill>(getReplaceSkillBotsUrl(organizationId, skillId), {
+    ...options,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(skillBotsInput),
   });
 };
 

@@ -8,6 +8,7 @@ import type {
   GitHubSkillSource,
   GitHubSkills,
   Skill,
+  SkillBotsInput,
   SkillInput,
   SkillPage,
   SkillTeamGrants,
@@ -25,6 +26,7 @@ export const getListSkillsResponseMock = (): SkillPage => ({
       tools: ["google-calendar/list_events"],
       ownerId: "user_3f1c9a",
       botIds: ["general-assistant"],
+      everyBot: false,
       usableOnYourBots: true,
     },
     {
@@ -36,6 +38,7 @@ export const getListSkillsResponseMock = (): SkillPage => ({
       tools: [],
       ownerId: null,
       botIds: ["general-assistant", "research-assistant"],
+      everyBot: true,
       usableOnYourBots: false,
     },
   ],
@@ -80,6 +83,7 @@ export const getGetSkillResponseMock = (): Skill => ({
   tools: ["google-calendar/list_events"],
   ownerId: "user_3f1c9a",
   botIds: ["general-assistant"],
+  everyBot: false,
   usableOnYourBots: true,
 });
 
@@ -92,6 +96,20 @@ export const getReplaceSkillResponseMock = (): Skill => ({
   tools: ["google-calendar/list_events"],
   ownerId: "user_3f1c9a",
   botIds: ["general-assistant"],
+  everyBot: false,
+  usableOnYourBots: true,
+});
+
+export const getReplaceSkillBotsResponseMock = (): Skill => ({
+  slug: "standup",
+  title: "Standup",
+  summary: "Write today's standup from my calendar and my pull requests.",
+  instructions:
+    "Read my calendar for today and my open pull requests, then write three short lines.",
+  tools: ["google-calendar/list_events"],
+  ownerId: "user_3f1c9a",
+  botIds: ["general-assistant"],
+  everyBot: false,
   usableOnYourBots: true,
 });
 
@@ -252,6 +270,42 @@ export const getDeleteSkillMockHandler = (
   );
 };
 
+export const getReplaceSkillBotsMockHandler = (
+  overrideResponse?:
+    | Skill
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; skillId: string },
+            SkillBotsInput
+          >
+        >[0],
+      ) => Promise<Skill> | Skill),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<{ organizationId: string; skillId: string }, SkillBotsInput>(
+    "*/api/v2/organizations/:organizationId/skills/:skillId/bots",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; skillId: string },
+          SkillBotsInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplaceSkillBotsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getGetSkillTeamGrantsMockHandler = (
   overrideResponse?:
     | SkillTeamGrants
@@ -326,6 +380,7 @@ export const getSkillsMock = () => [
   getGetSkillMockHandler(),
   getReplaceSkillMockHandler(),
   getDeleteSkillMockHandler(),
+  getReplaceSkillBotsMockHandler(),
   getGetSkillTeamGrantsMockHandler(),
   getReplaceSkillTeamGrantsMockHandler(),
 ];

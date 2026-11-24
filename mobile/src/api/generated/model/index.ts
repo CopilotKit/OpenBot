@@ -512,6 +512,7 @@ export * from "./sharedAppsAfterChange";
 export * from "./signInUnavailableResponse";
 export * from "./signOutUnfinishedResponse";
 export * from "./skill";
+export * from "./skillBotsInput";
 export * from "./skillForbiddenResponse";
 export * from "./skillInput";
 export * from "./skillNotFoundResponse";

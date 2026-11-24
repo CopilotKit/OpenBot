@@ -4,7 +4,7 @@ import { findGitHubSkills } from "@/lib/api/generated/skills/skills";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { grantPlugin, invalidatePlugins } from "@/lib/plugins/mutations";
-import { saveSkill } from "./mutations";
+import { chooseSkillBots, type SkillBots, saveSkill } from "./mutations";
 import type { Skill } from "./queries";
 
 /**
@@ -60,14 +60,16 @@ export function slugStatus(
 }
 
 /**
- * Save each skill, then put the saved ones on each of `botIds`. Never throws: each skill's outcome
- * says what happened to it. `onProgress` hears how many are done, for a long import.
+ * Save each skill, then put the saved ones on each of `botIds`, or choose their Bots (`bots`, OpenBot
+ * Personal: every Bot, or only these). Never throws: each skill's outcome says what happened to it.
+ * `onProgress` hears how many are done, for a long import.
  */
 export async function saveSkills(
   queryClient: QueryClient,
   skills: readonly SkillToSave[],
   options: {
     botIds?: readonly string[];
+    bots?: SkillBots;
     onProgress?: (done: number) => void;
   } = {},
 ): Promise<SkillOutcome[]> {
@@ -88,6 +90,16 @@ export async function saveSkills(
         slug: skill.slug,
         saved: false,
         reason: messageOf(error, "Couldn't save it."),
+      });
+      continue;
+    }
+    if (options.bots) {
+      const problem = await chosen(skill.slug, options.bots);
+      outcomes.push({
+        slug: skill.slug,
+        saved: true,
+        onBot: problem === null,
+        note: problem,
       });
       continue;
     }
@@ -134,6 +146,15 @@ async function putOnBot(slug: string, botId: string): Promise<string | null> {
     return null;
   } catch (error) {
     return messageOf(error, "Couldn't put it on the Bot.");
+  }
+}
+
+async function chosen(slug: string, bots: SkillBots): Promise<string | null> {
+  try {
+    await chooseSkillBots(slug, bots);
+    return null;
+  } catch (error) {
+    return messageOf(error, "Couldn't choose its Bots.");
   }
 }
 

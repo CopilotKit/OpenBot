@@ -15,6 +15,7 @@ import {
 } from "@/lib/skills/import";
 import { skillListQueryOptions } from "@/lib/skills/queries";
 import { cn } from "@/lib/utils";
+import { botsFromPicks, ChooseBots, useSkillBotRoster } from "./skill-bots";
 
 /**
  * Importing several skills at once: the list to tick, and the panel that finds them on GitHub. The
@@ -221,6 +222,7 @@ export function GitHubImport({
   findAtOnce = false,
   botIds = [],
   putOnLabel,
+  chooseBots = false,
   onCancel,
   onDone,
 }: {
@@ -231,6 +233,8 @@ export function GitHubImport({
   botIds?: readonly string[];
   /** The tick that puts them on `botIds`, such as "Put them on Personal Assistant". Absent: no tick. */
   putOnLabel?: string;
+  /** Choose which Bots use them, none being every Bot: OpenBot Personal's Skills page. */
+  chooseBots?: boolean;
   onCancel?: () => void;
   onDone?: (outcomes: SkillOutcome[]) => void;
 }) {
@@ -238,6 +242,8 @@ export function GitHubImport({
   const repositoryId = useId();
   const [repository, setRepository] = useState(given);
   const [putOn, setPutOn] = useState(true);
+  const roster = useSkillBotRoster();
+  const [forBots, setForBots] = useState<Set<string>>(() => new Set());
   const [progress, setProgress] = useState(0);
   const find = useMutation({ mutationFn: findSkillsOnGitHub });
   const found = find.data;
@@ -247,6 +253,7 @@ export function GitHubImport({
     mutationFn: (chosen: ListedSkill[]) =>
       saveSkills(queryClient, chosen, {
         botIds: putOnLabel && putOn ? botIds : [],
+        ...(chooseBots ? { bots: botsFromPicks(forBots) } : {}),
         onProgress: setProgress,
       }),
     onSuccess: (outcomes) => onDone?.(outcomes),
@@ -338,6 +345,18 @@ export function GitHubImport({
               Only each SKILL.md comes across. A skill here is its instructions,
               so files beside it are left out.
             </p>
+            {chooseBots && roster.length > 0 ? (
+              <div className="mt-2 grid gap-1.5">
+                <p className="font-medium text-sm">Bots</p>
+                <ChooseBots
+                  bots={roster}
+                  disabled={busy || importing.isSuccess}
+                  onChange={setForBots}
+                  picked={forBots}
+                  what="them"
+                />
+              </div>
+            ) : null}
           </div>
         )
       ) : null}
