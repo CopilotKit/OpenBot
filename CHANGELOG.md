@@ -176,9 +176,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   says that too. Any failure before that removes nothing. A moved person skips first-run setup in
   OpenBot Cloud; the terms and their own AI still ask. When OpenBot Cloud still needs your AI, the
   result asks you to connect it first and names the apps as the next step. OpenBot Cloud then keeps
-  a Reconnect list of the apps that moved, and Connections points to it while any is left. Each
-  app's Reconnect opens that app, and connecting it brings you back to the list with the app marked
-  reconnected. An app you don't want can be dismissed, on every device. Onboarding and Connect your
+  a Reconnect list of the apps that moved, and Connections points to it while any is left. One
+  press of an app's Reconnect connects it: an app you sign in to goes straight to its sign-in, and
+  an app that takes a key opens with its key form, with no second Connect to press. Connecting it
+  brings you back to the list with the app marked reconnected. An app you don't want can be dismissed, on every device. Onboarding and Connect your
   AI now keep where you were headed, and take you there once they're done. On Windows, the Podman
   that OpenBot installed is removed too when nothing else uses it; a Podman you installed or use
   stays. Keep OpenBot on this computer is remembered and never asked again at launch.
