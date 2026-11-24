@@ -43,7 +43,14 @@ Leave it unset anywhere people use OpenBot.
 
 ## The MCP allowlist (team edition)
 
-With **Admin → Apps → MCP servers → Only approved servers** on, a server can only be added by its
-address once an admin has approved that address there (**Approve a server by its address**). An admin
-adding one is offered **Approve and add** on the form. A server added at an approved address is
+With **Admin → Apps → Connectors → Only approved connectors** on, a server can only be added by its
+address once an admin has approved that address there (**Approve a connector by its address**). An
+admin adding one is offered **Approve and add** on the form. A server added at an approved address is
 approved by the same entry, so its calls go through. The personal edition has no allowlist.
+
+Turning the allowlist on approves every app already added, so nothing in use is cut off; the admin
+then turns off the ones they don't want. While it is on, an app an admin adds, connects or gives a
+Bot (from the directory, the chat card, or by approving a request) is approved in the same press. A
+member's request approves nothing until an admin approves it. With it off, each app's switch reads on
+and can't be changed, because every app can be used. Routines and OpenBot settings are always on and
+are never held back.

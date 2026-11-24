@@ -88,7 +88,12 @@ queryClient.setQueryData(organizationKeys.mine(), {
   canCreate: true,
   currentId: ORG,
 });
-queryClient.setQueryData(organizationKeys.members(ORG), [
+// The Members and Invitations lists read a page at a time: one page each, the last.
+const onePage = <T,>(key: string, items: T[]) => ({
+  pages: [{ [key]: items, nextCursor: null }],
+  pageParams: [""],
+});
+const MEMBERS = [
   {
     id: "ana",
     email: "ana@example.com",
@@ -109,8 +114,15 @@ queryClient.setQueryData(organizationKeys.members(ORG), [
     removable: admin,
     assignableRoles: admin ? ["admin"] : [],
   },
-]);
-queryClient.setQueryData(organizationKeys.sentInvitations(ORG), []);
+];
+queryClient.setQueryData(
+  organizationKeys.memberPages(ORG),
+  onePage("members", MEMBERS),
+);
+queryClient.setQueryData(
+  organizationKeys.sentInvitationPages(ORG),
+  onePage("invitations", []),
+);
 
 // As the server words the refusal of a run (the problem's detail), for an admin and for a member.
 const REFUSED =

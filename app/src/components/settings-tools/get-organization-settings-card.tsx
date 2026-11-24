@@ -123,7 +123,7 @@ export function GetOrganizationSettingsCard({
               : {}),
           })}
         </SettingsRow>
-        <SettingsRow label="Only approved servers">
+        <SettingsRow label="Only approved connectors">
           {allowlist({
             ...(settings.appAllowlist?.enabled !== undefined
               ? { enabled: settings.appAllowlist.enabled }

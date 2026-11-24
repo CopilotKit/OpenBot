@@ -5,6 +5,7 @@ import {
   IconShare,
   IconUsers,
   IconUsersGroup,
+  IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
@@ -14,6 +15,7 @@ import {
   PageSection,
 } from "@/components/layout/page-shell";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
+import { PeopleTypeahead } from "@/components/teams/people-typeahead";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -31,7 +33,6 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import {
   Item,
   ItemActions,
@@ -67,12 +68,6 @@ import {
   teamValue,
 } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
-
-const list = (value: string) =>
-  value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
 
 /** Everybody in the organization, as an assignment carries it. */
 const EVERYONE = "*";
@@ -310,7 +305,11 @@ function PublishDialog({
   const [audience, setAudience] = useState<"team" | "people">(
     current?.audience ?? "team",
   );
-  const [emails, setEmails] = useState((current?.people ?? []).join(", "));
+  // The people it is published to, by address, each chosen from the organization's members.
+  const [emails, setEmails] = useState<readonly string[]>(
+    () => current?.people ?? [],
+  );
+  const chosenEmails = new Set(emails.map((email) => email.toLowerCase()));
   const [chosen, setChosen] = useState<ReadonlySet<string>>(
     () => new Set(current?.teams ?? []),
   );
@@ -346,7 +345,7 @@ function PublishDialog({
                 {
                   botId,
                   audience,
-                  emails: named ? list(emails) : [],
+                  emails: named ? [...emails] : [],
                   groups: named ? groups : [],
                   teams: named ? [...chosen] : [],
                 },
@@ -430,17 +429,67 @@ function PublishDialog({
                       </div>
                     )}
                   </fieldset>
-                  <Field>
-                    <FieldLabel htmlFor={`${formId}-people`}>
-                      People, by email
-                    </FieldLabel>
-                    <Input
+                  {/*
+                    People are found among the organization's members as their name or address is
+                    typed, never typed in whole: nobody outside it can be chosen.
+                  */}
+                  <fieldset
+                    aria-labelledby={`${formId}-people`}
+                    className="flex min-w-0 flex-col gap-2"
+                  >
+                    <p
+                      className="font-medium text-xs leading-none"
                       id={`${formId}-people`}
-                      onChange={(event) => setEmails(event.target.value)}
-                      placeholder="Comma separated"
-                      value={emails}
+                    >
+                      People
+                    </p>
+                    {emails.length > 0 ? (
+                      <ul
+                        aria-label="People it is published to"
+                        className="flex flex-wrap gap-1.5"
+                      >
+                        {emails.map((email) => (
+                          <li
+                            // Drawn as the To: field's chips are (ComboboxChip), and cut short
+                            // rather than wider than the dialog.
+                            className="flex h-[calc(--spacing(5.25))] min-w-0 max-w-full items-center gap-1 whitespace-nowrap rounded-sm bg-muted pr-0 pl-1.5 font-medium text-foreground text-xs"
+                            key={email}
+                          >
+                            <span className="truncate">{email}</span>
+                            <Button
+                              aria-label={`Remove ${email}`}
+                              className="-ml-0.5 mr-0.5 size-4 rounded-sm opacity-50 hover:opacity-100"
+                              onClick={() =>
+                                setEmails((now) =>
+                                  now.filter((one) => one !== email),
+                                )
+                              }
+                              size="icon-xs"
+                              type="button"
+                              variant="ghost"
+                            >
+                              <IconX className="pointer-events-none" />
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <PeopleTypeahead
+                      autoFocus={false}
+                      label="People to publish it to"
+                      name="People"
+                      onChoose={(person) =>
+                        setEmails((now) => [...now, person.email])
+                      }
+                      unavailable={(person) =>
+                        chosenEmails.has(person.email.toLowerCase())
+                          ? "Chosen"
+                          : person.email.trim()
+                            ? null
+                            : "Hasn't signed in yet"
+                      }
                     />
-                  </Field>
+                  </fieldset>
                   {groups.length > 0 ? (
                     <Field>
                       <p

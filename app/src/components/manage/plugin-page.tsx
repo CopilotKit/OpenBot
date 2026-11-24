@@ -16,6 +16,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { ORGANIZATION_SWITCH } from "@/components/manage/organization-app-switch";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
@@ -747,13 +748,13 @@ export function PluginPage({
             <Item size="sm">
               <ItemContent>
                 <ItemTitle>
-                  {personal ? "Turned on" : "Enable for this organization"}
+                  {personal ? "Turned on" : ORGANIZATION_SWITCH.title}
                 </ItemTitle>
                 <ItemDescription>
                   {personal
                     ? "Your Bots can use its tools. Turning this off removes it and every Bot's access to its tools."
                     : server
-                      ? "Bots can be given its tools. Turning this off removes it and every Bot's access to its tools."
+                      ? ORGANIZATION_SWITCH.on
                       : "No Bot can reach this vendor. Turn it on to set it up and give Bots its tools."}
                 </ItemDescription>
               </ItemContent>
@@ -762,7 +763,7 @@ export function PluginPage({
                   aria-label={
                     personal
                       ? `Turn ${title} on or off`
-                      : `Enable ${title} for this organization`
+                      : ORGANIZATION_SWITCH.label(title)
                   }
                   checked={server !== undefined}
                   onCheckedChange={(next) => {
