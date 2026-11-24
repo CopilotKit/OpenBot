@@ -5,6 +5,6 @@
 export interface UpdateAppsSettingRequest {
   /** True locks the organization's apps down, false opens them (AppsSetting). */
   lockedDown: boolean;
-  /** Sent with lockedDown true: also take back what OpenBot gave Bots by itself while the organization was open, which is a person's connected apps on their own Bots and the apps that need no sign-in on every Bot. What an administrator or a Bot's owner gave by hand stays. Recorded on the audit trail. Never needed to open up, and refused with lockedDown false. */
+  /** Sent with lockedDown true: also take back what OpenBot gave Bots by itself while the organization was open, which is a person's connected apps on their own Bots and the apps that need no sign-in on every Bot. What an administrator or a Bot's owner gave by hand stays. Recorded on the audit trail. Ignored with lockedDown false: open apps would give it all again. */
   takeBackWhatOpenGave?: boolean;
 }
