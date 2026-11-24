@@ -60,6 +60,7 @@ export function ConversationView({
   queueWhileBusy = false,
   restoring = false,
   intro,
+  corner,
   starterSuggestions,
   onSubmit,
   onStop,
@@ -144,6 +145,12 @@ export function ConversationView({
    * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
    */
   intro?: ReactNode;
+  /**
+   * Drawn over the transcript's bottom right corner, just above the composer: the Bot's buddy while it works
+   * (`ConversationBuddy`). Only a button in it takes clicks; the rest of its box lets them through to
+   * the transcript.
+   */
+  corner?: ReactNode;
   /**
    * One-time starter tasks, separate from the Bot introduction and its attribution. Directly above
    * the composer, and not drawn while `attached` is out.
@@ -529,7 +536,12 @@ export function ConversationView({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
+        {corner ? (
+          <div className="pointer-events-none absolute right-6 bottom-2 z-10 [&_button]:pointer-events-auto">
+            {corner}
+          </div>
+        ) : null}
         {/*
          * The commands and their names as one string, rather than the option objects.
          *

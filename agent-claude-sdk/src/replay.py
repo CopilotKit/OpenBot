@@ -85,10 +85,49 @@ def cut_note(cut):
     )
 
 
+def screen_answer(content):
+    """The screen a client tool's answer carries, as an image block, and the answer without it.
+
+    OpenBot Desktop's `person_computer` answers each action with the screen after it: a JPEG in
+    base64 under `screen` (shared/person-computer.ts). Read as text, that is a hundred thousand
+    characters the model cannot see, so it goes to Claude as an image block, and the answer keeps
+    what was done and the screen's size. None for any other content.
+    """
+    if not isinstance(content, str) or '"screen"' not in content:
+        return None
+    try:
+        answer = json.loads(content)
+    except ValueError:
+        return None
+    screen = answer.get("screen") if isinstance(answer, dict) else None
+    if not isinstance(screen, dict):
+        return None
+    data, media_type = screen.get("base64"), screen.get("mimeType")
+    if not isinstance(data, str) or not isinstance(media_type, str):
+        return None
+    if not media_type.startswith("image/"):
+        return None
+    kept = {
+        **answer,
+        "screen": {
+            "width": screen.get("width"),
+            "height": screen.get("height"),
+            "note": "The screen after this action is the image that follows.",
+        },
+    }
+    image = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}}
+    return json.dumps(kept), image
+
+
 def _cut_result(message, keep):
-    """A tool message with its result cut to its first `keep` characters, saying so."""
+    """A tool message with its result cut to its first `keep` characters, saying so.
+
+    A screen (`screen_answer`) is not cut: it is shown as an image, and its text is short.
+    """
     content = message.content
     if message.role != "tool" or not isinstance(content, str) or len(content) <= keep:
+        return message
+    if screen_answer(content) is not None:
         return message
     return message.model_copy(update={"content": content[:keep] + cut_note(len(content) - keep)})
 
@@ -195,6 +234,10 @@ def _read_as_a_command(block):
 def _entry_blocks(message, strict):
     data = message.model_dump(by_alias=True, exclude_none=True)
     parts = data.pop("content", "")
+    screen = screen_answer(parts) if message.role == "tool" else None
+    if screen is not None:
+        text, image = screen
+        return [{"type": "text", "text": json.dumps({**data, "content": text})}, image]
     if isinstance(parts, str):
         return [{"type": "text", "text": json.dumps({**data, "content": parts})}]
     blocks = [{"type": "text", "text": json.dumps(data)}]

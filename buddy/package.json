@@ -1,0 +1,26 @@
+{
+  "name": "@openbot/buddy",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./core": "./core/index.ts",
+    "./react": "./react/index.ts",
+    "./file": "./file/format.ts",
+    "./file/browser": "./file/browser.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fflate": "0.8.3",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-dom": "*"
+  },
+  "devDependencies": {
+    "@types/react": "*",
+    "@types/react-dom": "*"
+  }
+}

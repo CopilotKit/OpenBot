@@ -2,6 +2,11 @@ import { useFrontendTool, useHumanInTheLoop } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { ProposedSkillCard } from "@/components/skills/proposed-skill";
+import {
+  AddSkillsCard,
+  ImportSkillsCard,
+  ProposedSkillsCard,
+} from "@/components/skills/skill-cards";
 import { appsQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { type OfferRule, useOfferedTo } from "@/lib/copilot/bot-offer";
@@ -9,12 +14,15 @@ import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import type { SkillFormValues } from "@/lib/skills/form";
 import { saveSkillMutationOptions } from "@/lib/skills/mutations";
 import {
+  addSkillsSchema,
   describeSkill,
   describeSkills,
   describeToolRefs,
+  githubImportSchema,
   ownershipOf,
   type ProposedSkill,
   proposedSkillSchema,
+  proposedSkillsSchema,
   SKILL_CREATOR_SLUG,
 } from "@/lib/skills/proposal";
 import { skillListQueryOptions } from "@/lib/skills/queries";
@@ -54,6 +62,9 @@ const OFFERED: Readonly<Record<string, OfferRule>> = {
   read_skill: authoring,
   list_skill_tools: authoring,
   save_skill: authoring,
+  save_skills: authoring,
+  import_skills_from_github: authoring,
+  add_skills_to_bot: authoring,
 };
 
 export function SkillTools() {
@@ -124,6 +135,35 @@ export function SkillTools() {
       "Put a finished skill in front of the person to save. They see the command, the title and the whole instruction, and nothing is written unless they press the button. Call this once, at the end, after they have agreed to what the skill says — not to check your draft.",
     parameters: proposedSkillSchema,
     render: ProposedSkillRender,
+  });
+
+  /*
+   * Several at once, for a person who has more than one skill to bring in. The same card discipline
+   * as save_skill: nothing is written until the person presses the button, and each skill is saved
+   * as them, so the server's rules for one skill hold for every one of them.
+   */
+  useHumanInTheLoop({
+    name: "save_skills",
+    description:
+      "Put several finished skills in front of the person to save together. They tick the ones to keep and press one button. Use this instead of save_skill when there is more than one. For skills in a GitHub repository, use import_skills_from_github instead: it reads them itself.",
+    parameters: proposedSkillsSchema,
+    render: ProposedSkillsCard,
+  });
+
+  useHumanInTheLoop({
+    name: "import_skills_from_github",
+    description:
+      "Offer the person the skills in a public GitHub repository to import. The card reads every SKILL.md there itself, so don't read or copy the files first. They tick the ones to import, and can put them on this Bot in the same step. Only each SKILL.md comes across: files beside it are left out, and the card says which.",
+    parameters: githubImportSchema,
+    render: ImportSkillsCard,
+  });
+
+  useHumanInTheLoop({
+    name: "add_skills_to_bot",
+    description:
+      "Offer to put skills that are already saved on this Bot, the one this conversation is with, so it offers them in its / menu. The person confirms on a card. Name them as list_skills spells them.",
+    parameters: addSkillsSchema,
+    render: AddSkillsCard,
   });
 
   return null;

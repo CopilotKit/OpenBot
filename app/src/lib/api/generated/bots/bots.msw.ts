@@ -19,6 +19,7 @@ import type {
   BotResetRequest,
   BotResponse,
   CreateBotRequest,
+  ReplaceBotBuddyRequest,
   StopBotHandoffRequest,
   UpdateBotRequest,
   UpdateBotResponse,
@@ -264,6 +265,34 @@ export const getPinBotResponseMock = (): BotResponse => ({
 });
 
 export const getUnpinBotResponseMock = (): BotResponse => ({
+  bot: {
+    id: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
+    name: "Expense Review",
+    title: "Finance Operations",
+    roleDescription:
+      "Review receipts, categorize expenses, and prepare reimbursement reports.",
+    avatarSeed: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
+    visibility: "private",
+    hidden: false,
+    pinned: false,
+    systemOwned: false,
+    endpoint: null,
+    hasAuth: false,
+    hasCallbackToken: false,
+    isolated: false,
+    framework: "OpenBot",
+    canManage: true,
+    mine: true,
+    assignedToMe: false,
+    builtIn: false,
+    runsOnOpenBotModel: true,
+    keyFromOpenBot: false,
+    isolationActive: false,
+    isolationOffReason: null,
+  },
+});
+
+export const getReplaceBotBuddyResponseMock = (): BotResponse => ({
   bot: {
     id: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     name: "Expense Review",
@@ -761,6 +790,45 @@ export const getUnpinBotMockHandler = (
   );
 };
 
+export const getReplaceBotBuddyMockHandler = (
+  overrideResponse?:
+    | BotResponse
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; botId: string },
+            ReplaceBotBuddyRequest
+          >
+        >[0],
+      ) => Promise<BotResponse> | BotResponse),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<
+    { organizationId: string; botId: string },
+    ReplaceBotBuddyRequest
+  >(
+    "*/api/v2/organizations/:organizationId/bots/:botId/buddy",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; botId: string },
+          ReplaceBotBuddyRequest
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplaceBotBuddyResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getIssueBotCallbackTokenMockHandler = (
   overrideResponse?:
     | BotCallbackToken
@@ -1117,6 +1185,7 @@ export const getBotsMock = () => [
   getUnhideBotMockHandler(),
   getPinBotMockHandler(),
   getUnpinBotMockHandler(),
+  getReplaceBotBuddyMockHandler(),
   getIssueBotCallbackTokenMockHandler(),
   getRevokeBotCallbackTokenMockHandler(),
   getReportBotDeclineMockHandler(),

@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod assistant;
 mod desktop_about;
 mod desktop_connected;
 mod desktop_connection;
@@ -19,6 +20,7 @@ mod intelligence_bridge;
 mod key_menu;
 mod notice;
 mod outside_links;
+mod person_computer;
 mod zoom;
 
 #[cfg(test)]
@@ -5602,6 +5604,15 @@ async fn start_stack_inner<R: tauri::Runtime>(
         // an earlier release's, they ran with that `up`: `migrate` is the dependency Compose
         // completes before it starts `server`, once, and a failed one fails the `up`.
         report_plain(&app, "services", true, "OpenBot's services are running.");
+        // The plans connected beside the default one: their engines, which `up` doesn't raise.
+        for (plan, problem) in
+            openbot_desktop_lib::ai_connection::start_connected_plans(&found, &root)
+        {
+            log::warn!(
+                "[ai-connection] the {plan:?} plan's engine didn't start: {}",
+                problem.detail.as_deref().unwrap_or(&problem.said)
+            );
+        }
 
         // `compose up` succeeds once it has asked for everything. A service that then exits is not its
         // problem, and both Bots exit immediately without a model key. Reported and made fatal here;
@@ -7880,16 +7891,32 @@ fn show_openbot_on<R: tauri::Runtime>(
     let destination: tauri::Url = destination
         .parse()
         .map_err(|_| "OpenBot returned an invalid app destination.".to_string())?;
+    // Compact view's bubble, on the same OpenBot and through the same entry address.
+    let bubble = assistant::is_on(&app)
+        .then(|| owned_app_entry(&shell, &root, &address, &assistant::page_on(&destination)));
     // Through the entry address, so the window has the install's cookie (`owned_app_entry`).
     let destination = owned_app_entry(&shell, &root, &address, &destination);
     let outcome = window
         .navigate(destination)
         .map_err(|_| Problem::plain("OpenBot could not navigate to its app."));
     log::info!("[show] navigate returned {outcome:?}");
+    // The bubble's window is built on the main thread, which may be waiting for startup.
+    drop(_startup);
     // Setup is over and OpenBot is what the person uses now: in front, wherever they had gone
-    // while it started.
+    // while it started. In compact view that is the bubble, and the main window waits hidden,
+    // loaded, for Show Window.
     if outcome.is_ok() {
-        bring_to_front(&app, "OpenBot is showing");
+        match bubble.map(|page| assistant::open(&app, page)) {
+            Some(Ok(())) => {
+                log::info!("[show] compact view: showing the bubble");
+                let _ = window.hide();
+            }
+            Some(Err(error)) => {
+                log::warn!("[show] compact view could not show the bubble: {error}");
+                bring_to_front(&app, "OpenBot is showing");
+            }
+            None => bring_to_front(&app, "OpenBot is showing"),
+        }
     }
     outcome
 }
@@ -8789,6 +8816,8 @@ fn allow_app_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url
             .remote(format!("{origin}/*"))
             .local(false)
             .window("main")
+            // Compact view's bubble shows the same page, and asks the same commands.
+            .window(assistant::LABEL)
             .permission("core:window:allow-start-dragging")
             .permission("core:window:allow-internal-toggle-maximize");
     for permission in desktop_page::PERMISSIONS
@@ -9066,7 +9095,10 @@ mod app_page_tests {
         );
         let page_load = &main[at(&[".on_page_load(", "|window, payload| {"])..];
         let page_load = &page_load[..page_load.find("\n        })").unwrap()];
-        assert!(page_load.contains("let _ = window.set_zoom(saved_zoom(window.app_handle()));"));
+        // Every page at the kept level, but compact view's bubble, whose window is cut to its size.
+        assert!(page_load.contains(
+            "let _ = window.set_zoom(if bubble {\n                zoom::ACTUAL_SIZE\n            } else {\n                saved_zoom(window.app_handle())\n            });"
+        ));
         let build = &main[at(&["\nfn build_main", "_window"])..];
         let build = &build[..build.find("\n}\n").unwrap()];
         assert!(build.contains("let _ = window.set_zoom(saved_zoom(app));"));
@@ -12758,7 +12790,16 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
             hold_shown_deployment(app, &shell, &root, address.clone(), ports.server);
             refresh_menus(app);
             trust_owned_app(app, &url);
-            let page: tauri::Url = url.parse().ok()?;
+            // A debug build showing a developer's own app goes on showing it, as Start showed it
+            // (`show_openbot_on`), rather than the installation's.
+            let shown = match dev_app_url() {
+                Some(dev) => {
+                    trust_owned_app(app, &dev);
+                    dev
+                }
+                None => url,
+            };
+            let page: tauri::Url = shown.parse().ok()?;
             let entered = owned_app_entry(&shell, &root, &address, &page);
             Some((page, entered))
         } else {
@@ -13482,7 +13523,12 @@ pub(crate) fn zoom_windows<R: tauri::Runtime>(app: &tauri::AppHandle<R>, step: z
             zoom::next(zoom::saved(&directory), step)
         }
     };
-    for window in app.webview_windows().values() {
+    // Compact view's bubble keeps its own size: its window is cut to fit the orb and the panel.
+    for window in app
+        .webview_windows()
+        .values()
+        .filter(|window| window.label() != assistant::LABEL)
+    {
         let _ = window.set_zoom(level);
     }
     log::info!("[zoom] {}%", (level * 100.0).round());
@@ -14443,6 +14489,10 @@ fn main() {
                         | tauri_plugin_window_state::StateFlags::POSITION
                         | tauri_plugin_window_state::StateFlags::MAXIMIZED,
                 )
+                // Compact view's bubble keeps its own place (`assistant::FILE`). Restored by this
+                // plugin, it would come back the size it last had, the panel's as often as the
+                // bubble's.
+                .with_denylist(&[assistant::LABEL])
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
@@ -14568,6 +14618,18 @@ fn main() {
             }
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
+            // Compact view's bubble shows OpenBot, so it goes whenever the main window is back on
+            // setup: stopped, changing the AI connection, an update. Showing OpenBot again brings it
+            // back (`show_openbot_on`).
+            if window.label() == "main"
+                && page == WindowPage::Setup
+                && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                assistant::close(window.app_handle());
+            }
+            // The bubble's window keeps no title bar and no background: the rest of this is the main
+            // window's, and setting a background would paint the bubble's transparent corners.
+            let bubble = window.label() == assistant::LABEL;
             // "Getting OpenBot ready" covers the main window until the setup page's first
             // heartbeat (`first_paint`). Any other page sends none, so it goes as that page starts;
             // and a setup page that loaded but never says it painted is shown after ten seconds.
@@ -14593,9 +14655,16 @@ fn main() {
                         .then(|| ground_color(setup_palette(window.app_handle()))),
                 );
             }
-            match_title_bar(&window.window(), page);
-            // The level kept from the last launch, on every page this window loads (`zoom`).
-            let _ = window.set_zoom(saved_zoom(window.app_handle()));
+            if !bubble {
+                match_title_bar(&window.window(), page);
+            }
+            // The level kept from the last launch, on every page this window loads (`zoom`). The
+            // bubble's window is cut to fit the orb and the panel, so its page stays at actual size.
+            let _ = window.set_zoom(if bubble {
+                zoom::ACTUAL_SIZE
+            } else {
+                saved_zoom(window.app_handle())
+            });
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp) {
                 // On the relay's pages only the page's own origin is OpenBot (`page_for`).
                 let _ = window.eval(outside_links::page_for(desktop_connected::is_relay_page(
@@ -14618,12 +14687,15 @@ fn main() {
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
                 allow_app_page(window.app_handle(), payload.url());
-                open_waiting_notice_page(window, payload.url());
+                // A page a notice asked for opens in the main window, never in the bubble.
+                if !bubble {
+                    open_waiting_notice_page(window, payload.url());
+                }
                 // macOS draws the window's outline from it; Windows tints the title bar with it.
                 if cfg!(any(target_os = "macos", target_os = "windows")) {
                     let _ = window.eval(APP_THEME_PAGE);
                 }
-                if cfg!(target_os = "macos") && page == WindowPage::OwnedApp {
+                if cfg!(target_os = "macos") && page == WindowPage::OwnedApp && !bubble {
                     let _ = window.eval(OVERLAY_TITLE_BAR_PAGE);
                 }
             }
@@ -14633,6 +14705,13 @@ fn main() {
         // only way back is to quit and start again, with a stack still running that nothing on
         // screen can reach.
         .on_window_event(|window, event| match event {
+            // Compact view's panel folds into its bubble, which stays.
+            tauri::WindowEvent::CloseRequested { api, .. }
+                if window.label() == assistant::LABEL =>
+            {
+                api.prevent_close();
+                assistant::close_requested(window.app_handle());
+            }
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
@@ -14647,6 +14726,7 @@ fn main() {
                 if let Some(url) = app
                     .get_webview_window(window.label())
                     .and_then(|own| own.url().ok())
+                    .filter(|_| window.label() != assistant::LABEL)
                 {
                     match_title_bar(window, window_page(app, &url));
                 }

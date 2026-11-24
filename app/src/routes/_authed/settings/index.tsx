@@ -7,6 +7,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { AiModelSection } from "@/components/settings/ai-connection";
+import { CompactViewRow } from "@/components/settings/compact-view";
 import { CompanySignInSection } from "@/components/settings/company-sign-in";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { NameRow } from "@/components/settings/profile";
@@ -73,6 +74,8 @@ function RouteComponent() {
           <ThemeRow />
           <Separator />
           <SkinPicker />
+          {/* Only in OpenBot Desktop on a Mac, which draws the bubble. Brings its own separator. */}
+          <CompactViewRow />
         </PageRows>
         <MessageListPreference />
       </PageSection>

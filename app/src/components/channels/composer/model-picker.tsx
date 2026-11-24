@@ -5,7 +5,7 @@ import {
   IconCpu,
   IconCube,
 } from "@tabler/icons-react";
-import { useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,9 +23,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { providerById } from "@/lib/ai-connection/providers";
+import type { AiConnectionProvider } from "@/lib/api/generated/model";
 import { markFor } from "@/lib/marks";
 import {
+  connectionOf,
   effortLabel,
+  isPicked,
   type ModelPick,
   shownEffort,
   switchModel,
@@ -59,8 +63,19 @@ type ChoiceGroup = { value: "models" | "thinking"; items: Choice[] };
 
 const sameChoice = (a: Choice, b: Choice) =>
   a.kind === "model"
-    ? b.kind === "model" && a.model.id === b.model.id
+    ? b.kind === "model" &&
+      a.model.id === b.model.id &&
+      a.model.connection === b.model.connection
     : b.kind === "effort" && a.effort === b.effort;
+
+/** A model's row key: the same id can come from two connected providers. */
+const modelKey = (model: ModelOption) =>
+  `${model.connection ?? ""}\u0000${model.id}`;
+
+/** What a connected provider is called above its models. */
+function providerName(connection: string): string {
+  return providerById(connection as AiConnectionProvider)?.name ?? connection;
+}
 
 /**
  * The word beside OpenBot's own model, and beside a model's own effort: quiet text at the row's end,
@@ -147,7 +162,17 @@ export function ModelPicker({
   if (!catalogue || (!catalogue.choosable && !allowSingle) || !value)
     return null;
   const selected =
-    catalogue.models.find((model) => model.id === value.model) ??
+    catalogue.models.find((model) =>
+      isPicked(catalogue, model, value.model, value.connection),
+    ) ??
+    catalogue.models.find((model) =>
+      isPicked(
+        catalogue,
+        model,
+        catalogue.default,
+        catalogue.defaultConnection,
+      ),
+    ) ??
     catalogue.models.find((model) => model.id === catalogue.default);
   if (!selected) return null;
   return (
@@ -221,7 +246,27 @@ function Picker({
   }, [catalogue.models, selected, effortStep]);
 
   const matches = (model: ModelOption, typed: string) =>
-    contains(model.label, typed) || contains(model.id, typed);
+    contains(model.label, typed) ||
+    contains(model.id, typed) ||
+    (model.connection
+      ? contains(providerName(model.connection), typed)
+      : false);
+  /*
+   * SEVERAL PROVIDERS CONNECTED: each one's models under its name, the default's first, as the
+   * server lists them. The first model of each provider carries the heading.
+   */
+  const headed = useMemo(() => {
+    const firsts = new Map<string, string>();
+    if ((catalogue.connections?.length ?? 0) < 2) return firsts;
+    let last: string | undefined;
+    for (const model of catalogue.models) {
+      const connection = connectionOf(catalogue, model);
+      if (connection && connection !== last)
+        firsts.set(modelKey(model), providerName(connection));
+      last = connection;
+    }
+    return firsts;
+  }, [catalogue]);
   const noModels =
     query.trim() !== "" &&
     !catalogue.models.some((model) => matches(model, query));
@@ -267,10 +312,13 @@ function Picker({
         if (!choice) return;
         stayOpen.current = choice.kind === "model" && thinks(choice.model);
         picked.current = !stayOpen.current;
+        const on = selected.connection
+          ? { connection: selected.connection }
+          : {};
         onChange(
           choice.kind === "model"
-            ? switchModel({ model: selected.id, effort }, choice.model)
-            : { model: selected.id, effort: choice.effort },
+            ? switchModel({ model: selected.id, effort, ...on }, choice.model)
+            : { model: selected.id, effort: choice.effort, ...on },
         );
       }}
       open={open}
@@ -293,7 +341,8 @@ function Picker({
               className={cn(
                 showValue
                   ? "min-w-0 w-full justify-start gap-2 px-3 font-normal"
-                  : "h-8 shrink-0 gap-1 px-2 font-normal text-muted-foreground",
+                  : // As its neighbours in the row draw theirs: the + and the clock.
+                    "h-8 shrink-0 gap-1 px-2 font-normal",
                 className,
               )}
               data-slot="composer-model"
@@ -306,7 +355,10 @@ function Picker({
               }
               nativeButton
             >
-              <IconCpu aria-hidden className="size-4 shrink-0" />
+              <IconCpu
+                aria-hidden
+                className={cn("shrink-0", showValue ? "size-4" : "size-5")}
+              />
               {showValue ? (
                 <span className="min-w-0 flex-1 truncate text-left">
                   {shown}
@@ -377,36 +429,48 @@ function Picker({
                 <ComboboxCollection>
                   {(choice: Choice) =>
                     choice.kind === "model" ? (
-                      <ComboboxItem
-                        // `pl` only: the item keeps its own right padding, where the check sits.
-                        // At least a row's height, and taller where a name takes two lines.
-                        className="min-h-9 gap-2.5 py-1.5 pl-2.5"
-                        key={choice.model.id}
-                        value={choice}
-                      >
-                        <ModelMark model={choice.model} />
-                        {/*
-                         * Whole words onto a second line, never cut off: on a phone the models
-                         * share the popup with the Thinking column, and the Default tag beside
-                         * OpenBot's own model left room for "GPT-6…" alone.
-                         */}
-                        {/*
-                         * The name and its Default tag wrap as a pair: where both don't fit on a
-                         * line, the tag goes under the name, so the name keeps the row's width and
-                         * isn't broken at its hyphen ("GPT-" over "6.1" over "Terra").
-                         */}
-                        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
-                          <span
-                            className="min-w-0 break-words"
-                            data-slot="model-name"
+                      <Fragment key={modelKey(choice.model)}>
+                        {headed.has(modelKey(choice.model)) &&
+                        query.trim() === "" ? (
+                          <div
+                            className="px-2.5 pt-2.5 pb-1 font-medium text-muted-foreground text-xs"
+                            role="presentation"
                           >
-                            {choice.model.label}
+                            {headed.get(modelKey(choice.model))}
+                          </div>
+                        ) : null}
+                        <ComboboxItem
+                          // `pl` only: the item keeps its own right padding, where the check sits.
+                          // At least a row's height, and taller where a name takes two lines.
+                          className="min-h-9 gap-2.5 py-1.5 pl-2.5"
+                          value={choice}
+                        >
+                          <ModelMark model={choice.model} />
+                          {/*
+                           * Whole words onto a second line, never cut off: on a phone the models
+                           * share the popup with the Thinking column, and the Default tag beside
+                           * OpenBot's own model left room for "GPT-6…" alone.
+                           */}
+                          {/*
+                           * The name and its Default tag wrap as a pair: where both don't fit on a
+                           * line, the tag goes under the name, so the name keeps the row's width and
+                           * isn't broken at its hyphen ("GPT-" over "6.1" over "Terra").
+                           */}
+                          <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+                            <span
+                              className="min-w-0 break-words"
+                              data-slot="model-name"
+                            >
+                              {choice.model.label}
+                            </span>
+                            {choice.model.id === defaultModel &&
+                            connectionOf(catalogue, choice.model) ===
+                              catalogue.defaultConnection ? (
+                              <DefaultTag />
+                            ) : null}
                           </span>
-                          {choice.model.id === defaultModel ? (
-                            <DefaultTag />
-                          ) : null}
-                        </span>
-                      </ComboboxItem>
+                        </ComboboxItem>
+                      </Fragment>
                     ) : null
                   }
                 </ComboboxCollection>

@@ -124,6 +124,29 @@ export type DesktopUsageData = {
 };
 
 /**
+ * Settings' Compact view, as the desktop app keeps it: OpenBot as a small bubble over the person's
+ * other apps, in place of its window. Not `available` anywhere but a Mac, or while the window shows
+ * an OpenBot that runs somewhere else.
+ */
+export type DesktopCompactView = {
+  on: boolean;
+  available: boolean;
+};
+
+/** The corner of compact view's panel that the bubble sits at. The panel opens from it. */
+export type AssistantCorner =
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right";
+
+/** What compact view's window shows: the bubble, or the panel it opened into. */
+export type AssistantLayout = {
+  expanded: boolean;
+  corner: AssistantCorner;
+};
+
+/**
  * Where the OpenBot this window shows runs: on this computer, which the desktop app started itself,
  * or somewhere else, at an address the person typed and signed in to. Never the sign-in itself: the
  * desktop app keeps that and the page never holds it.
@@ -149,6 +172,8 @@ export const desktopKeys = {
   connection: ["desktop", "connection"] as const,
   aiConnection: ["desktop", "ai-connection"] as const,
   usageData: ["desktop", "usage-data"] as const,
+  compactView: ["desktop", "compact-view"] as const,
+  assistantLayout: ["desktop", "assistant-layout"] as const,
   status: (memory: boolean) => ["desktop", "status", { memory }] as const,
   intelligence: ["desktop", "intelligence"] as const,
   appUpdate: ["desktop", "app-update"] as const,
@@ -278,6 +303,34 @@ export function desktopUsageDataQueryOptions() {
     queryFn: (): Promise<DesktopUsageData> => invokeDesktop("usage_data"),
     enabled: desktopShell() !== null,
     retry: false,
+  });
+}
+
+/**
+ * Settings' Compact view row. Asked only inside the Desktop window; an older desktop app has no
+ * such command and refuses it every time, so a refusal is not retried and there is no row.
+ */
+export function desktopCompactViewQueryOptions() {
+  return queryOptions({
+    queryKey: desktopKeys.compactView,
+    queryFn: (): Promise<DesktopCompactView> => invokeDesktop("compact_view"),
+    enabled: desktopShell() !== null,
+    retry: false,
+  });
+}
+
+/**
+ * Whether compact view's window is the bubble or the panel. It changes only when the page asks
+ * (`expandAssistantMutationOptions`, `collapseAssistantMutationOptions`) or when the desktop app
+ * says so (`useAssistantLayout`), so it is never refetched on its own.
+ */
+export function assistantLayoutQueryOptions() {
+  return queryOptions({
+    queryKey: desktopKeys.assistantLayout,
+    queryFn: (): Promise<AssistantLayout> => invokeDesktop("assistant_layout"),
+    enabled: desktopShell() !== null,
+    retry: false,
+    staleTime: Number.POSITIVE_INFINITY,
   });
 }
 

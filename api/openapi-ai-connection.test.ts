@@ -6,15 +6,20 @@ import {
   FinishPersonalAiSignInBody,
   FinishPersonalAiSignInResponse,
   GetAiConnectionResponse,
+  GetAiConnectionsResponse,
+  GetModelCatalogueResponse,
   GetPersonalAiConnectionResponse,
   GetPersonalAiSignInResponse,
   ReplaceAiConnectionBody,
+  ReplaceAiProviderConnectionBody,
+  ReplaceDefaultAiConnectionBody,
+  ReplaceModelChoiceBody,
   ReplacePersonalAiConnectionBody,
   StartPersonalAiSignInResponse,
 } from "../app/src/lib/api/generated/models/models.zod";
 
 /**
- * The AI connection: one per organization, read and switched by an administrator with no restart.
+ * The AI connection: several providers at once, read and switched by an administrator with no restart.
  * A key goes in once and never comes back out, a bad connection is refused before anything is saved
  * with one of five stated reasons, and every example the spec shows is one the generated client
  * accepts, so a fake built from the examples matches what the server answers.
@@ -344,4 +349,173 @@ test("no answer about a person's own AI has a place for a key, and every example
     expect(
       ReplacePersonalAiConnectionBody.safeParse(exampleValue(example)).success,
     ).toBe(true);
+});
+
+const SET = "/api/v2/organizations/{organizationId}/ai-connections";
+const PERSONAL_SET =
+  "/api/v2/organizations/{organizationId}/people/{personId}/ai-connections";
+const set = spec.paths[SET] ?? {};
+const one = spec.paths[`${SET}/{aiProvider}`] ?? {};
+const chooseDefault =
+  spec.paths["/api/v2/organizations/{organizationId}/ai-connection-default"] ??
+  {};
+const personalSet = spec.paths[PERSONAL_SET] ?? {};
+const personalOne = spec.paths[`${PERSONAL_SET}/{aiProvider}`] ?? {};
+const personalDefault =
+  spec.paths[
+    "/api/v2/organizations/{organizationId}/people/{personId}/ai-connection-default"
+  ] ?? {};
+
+test("several AI providers are connected at once: an administrator reads them, connects or disconnects one, and picks the default", () => {
+  const operations = [set.get, one.put, one.delete, chooseDefault.put];
+  expect(operations.map((operation) => operation?.operationId)).toEqual([
+    "getAiConnections",
+    "replaceAiProviderConnection",
+    "deleteAiProviderConnection",
+    "replaceDefaultAiConnection",
+  ]);
+  for (const operation of operations) {
+    expect(operation?.tags).toEqual(["Models"]);
+    expect(operation?.responses["403"]?.$ref).toContain("AdminOnly");
+    const scopes = operation?.security?.flatMap(
+      (scheme) => scheme.appOAuth ?? [],
+    );
+    expect(scopes?.every((scope) => scope.startsWith("ai-connection:"))).toBe(
+      true,
+    );
+  }
+  for (const write of [one.put, one.delete, chooseDefault.put]) {
+    expect(write?.parameters?.map((p) => p.$ref)).toContainEqual(
+      expect.stringContaining("IdempotencyKey"),
+    );
+    expect(write?.responses["409"]?.$ref).toContain("AiConnectionFixed");
+  }
+  // A provider that can't be used is refused with the same five reasons as a switch.
+  expect(one.put?.responses["422"]?.$ref).toContain("AiConnectionRefused");
+  expect(chooseDefault.put?.responses["404"]?.$ref).toContain(
+    "AiConnectionNotConnected",
+  );
+});
+
+test("a person's own providers are theirs alone, as their one connection is", () => {
+  const operations = [
+    personalSet.get,
+    personalOne.put,
+    personalOne.delete,
+    personalDefault.put,
+  ];
+  expect(operations.map((operation) => operation?.operationId)).toEqual([
+    "getPersonalAiConnections",
+    "replacePersonalAiProviderConnection",
+    "deletePersonalAiProviderConnection",
+    "replacePersonalDefaultAiConnection",
+  ]);
+  for (const operation of operations) {
+    expect(operation?.responses["403"]?.$ref).toContain("OwnOnly");
+    const scopes = operation?.security?.flatMap(
+      (scheme) => scheme.appOAuth ?? [],
+    );
+    expect(
+      scopes?.every((scope) => scope.startsWith("personal-ai-connection:")),
+    ).toBe(true);
+  }
+});
+
+test("no answer about the connected providers has a place for a key, and every example parses", () => {
+  for (const operation of [
+    set.get,
+    one.put,
+    one.delete,
+    chooseDefault.put,
+    personalSet.get,
+    personalOne.put,
+    personalOne.delete,
+    personalDefault.put,
+  ]) {
+    const examples = Object.values(
+      operation?.responses["200"]?.content?.["application/json"]?.examples ??
+        {},
+    );
+    expect(examples.length).toBeGreaterThan(0);
+    for (const example of examples) {
+      const parsed = GetAiConnectionsResponse.parse(exampleValue(example));
+      // The default comes first, and each provider is connected once.
+      if (parsed.default !== null)
+        expect(parsed.connections[0]?.provider).toBe(parsed.default);
+      const providers = parsed.connections.map((each) => each.provider);
+      expect(new Set(providers).size).toBe(providers.length);
+    }
+    const names = propertyNames(
+      operation?.responses["200"]?.content?.["application/json"]?.schema,
+    );
+    for (const secret of ["apiKey", "secret", "token", "key"]) {
+      expect(names).not.toContain(secret);
+    }
+  }
+  for (const operation of [one.put, personalOne.put])
+    for (const example of Object.values(
+      operation?.requestBody?.content["application/json"]?.examples ?? {},
+    ))
+      expect(
+        ReplaceAiProviderConnectionBody.safeParse(exampleValue(example))
+          .success,
+      ).toBe(true);
+  for (const operation of [chooseDefault.put, personalDefault.put])
+    for (const example of Object.values(
+      operation?.requestBody?.content["application/json"]?.examples ?? {},
+    ))
+      expect(
+        ReplaceDefaultAiConnectionBody.safeParse(exampleValue(example)).success,
+      ).toBe(true);
+  // The provider is the path's, and unknown fields are refused, so a body can't name another.
+  const input = spec.components.schemas.AiProviderConnectionInput as Schema & {
+    additionalProperties?: boolean;
+  };
+  expect(input.additionalProperties).toBe(false);
+  expect(Object.keys(input.properties ?? {})).not.toContain("provider");
+  expect(
+    Object.entries(input?.properties ?? {})
+      .filter(([, property]) => property.writeOnly)
+      .map(([name]) => name),
+  ).toEqual(["apiKey"]);
+});
+
+test("a conversation picks a model on one connection: the catalogue names each model's, and a choice can name it", () => {
+  const catalogue =
+    spec.paths["/api/v2/organizations/{organizationId}/model-catalogue"]?.get;
+  for (const example of Object.values(
+    catalogue?.responses["200"]?.content?.["application/json"]?.examples ?? {},
+  ))
+    expect(
+      GetModelCatalogueResponse.safeParse(exampleValue(example)).success,
+    ).toBe(true);
+  const several = GetModelCatalogueResponse.parse(
+    exampleValue(
+      spec.components.examples.ModelCatalogueConnectionsExample ?? {},
+    ),
+  );
+  const connected = new Set(several.connections?.map((each) => each.provider));
+  expect(connected.size).toBeGreaterThan(1);
+  for (const model of several.models)
+    expect(connected.has(model.connection ?? "openai")).toBe(true);
+  expect(several.connections?.[0]?.provider).toBe(several.defaultConnection);
+  // A choice without a connection is still accepted, as clients before it send.
+  expect(
+    ReplaceModelChoiceBody.safeParse({ model: "gpt-6.1-pro", effort: null })
+      .success,
+  ).toBe(true);
+  expect(
+    ReplaceModelChoiceBody.safeParse({
+      model: "claude-opus-5-5",
+      effort: "max",
+      connection: "anthropic",
+    }).success,
+  ).toBe(true);
+  expect(
+    ReplaceModelChoiceBody.safeParse({
+      model: "claude-opus-5-5",
+      effort: "max",
+      connection: "claude",
+    }).success,
+  ).toBe(false);
 });

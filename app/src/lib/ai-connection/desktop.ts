@@ -147,7 +147,9 @@ export function prepareAiConnection(
 
 /**
  * Tell Desktop the connection now in use: it records it for its next start, stops a plan engine no
- * longer needed, and moves the default Bot to one that can use it.
+ * longer needed, and moves the default Bot to one that can use it. `connectedPlans`: every plan
+ * connected now, the default's among them, whose engines keep running. Left out, every plan but
+ * the default's stops.
  */
 export function settleAiConnection(connection: {
   /** As the server answered it, so possibly a provider this app doesn't know: Desktop says so. */
@@ -155,6 +157,7 @@ export function settleAiConnection(connection: {
   login: AiConnectionLogin;
   model?: string | null;
   endpointHost?: string | null;
+  connectedPlans?: readonly Plan[];
 }): Promise<void> {
   return desktop(
     "settle_ai_connection",
@@ -164,6 +167,9 @@ export function settleAiConnection(connection: {
       ...(connection.model ? { model: connection.model } : {}),
       ...(connection.endpointHost
         ? { endpointHost: connection.endpointHost }
+        : {}),
+      ...(connection.connectedPlans
+        ? { connectedPlans: connection.connectedPlans }
         : {}),
     },
     "OpenBot Desktop couldn't finish the switch.",

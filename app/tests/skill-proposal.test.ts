@@ -20,8 +20,9 @@ import {
 
 const skill = (
   over: Partial<PluginSkill> = {},
-): PluginSkill & { usableOnYourBots: boolean } => ({
+): PluginSkill & { usableOnYourBots: boolean; everyBot: boolean } => ({
   usableOnYourBots: false,
+  everyBot: false,
   id: "skill_1",
   slug: "check-a-claim",
   ownerUserId: null,
@@ -267,8 +268,9 @@ describe("what the card answers its tool call with", () => {
     expect(wasSaved(skillCardAnswer.unwritable(["slug: no."]))).toBeFalse();
   });
 
-  test("a saved answer names the step that is left, because the skill is on no Bot", () => {
-    expect(skillCardAnswer.saved("standup")).toContain("Skills page");
+  test("a saved answer names the step that is left where the skill is on no Bot", () => {
+    expect(skillCardAnswer.saved("standup")).toContain("add_skills_to_bot");
+    expect(skillCardAnswer.saved("standup")).toContain("OpenBot Personal");
   });
 
   test("an invalid proposal is answered with the problems, so the model can retry", () => {

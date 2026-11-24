@@ -1,5 +1,6 @@
 import {
   IconBook,
+  IconBrandGithub,
   IconChalkboardTeacher,
   IconChevronRight,
   IconDots,
@@ -23,6 +24,14 @@ import {
 } from "@/components/settings/learning-sharing";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -38,9 +47,6 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { grantRoster } from "@/lib/agents/grant-roster";
-import { grantSummary } from "@/lib/agents/grant-summary";
-import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { useManagePaths } from "@/lib/manage-paths";
@@ -48,7 +54,9 @@ import { removeSkillMutationOptions } from "@/lib/skills/mutations";
 import { type Skill, skillListQueryOptions } from "@/lib/skills/queries";
 import { queryClient } from "@/query-client";
 import { EditSkill } from "./edit-skill";
+import { GitHubImport } from "./import-skills";
 import { NewSkill } from "./new-skill";
+import { SkillBotsButton } from "./skill-bots";
 
 /**
  * Skills: the one page, for every Bot, that answers "what does it know how to do?", in the main
@@ -78,10 +86,9 @@ export function SkillsSettingsPage({
   const personal = paths.edition === "personal";
   const skillList = useQuery(skillListQueryOptions());
   const me = useQuery(currentUserQueryOptions());
-  const { data: agents } = useQuery(agentListQueryOptions());
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
   const browser = useQuery(browserStateQueryOptions());
   const [error, setError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const removeSkill = useMutation({
     ...removeSkillMutationOptions(queryClient),
     onError: (thrown: Error) => setError(thrown.message),
@@ -119,6 +126,8 @@ export function SkillsSettingsPage({
         ) : null}
       </ItemContent>
       <ItemActions>
+        {/* Which Bots use it: OpenBot Personal's, where every Bot is the one person's. */}
+        {personal ? <SkillBotsButton skill={skill} /> : null}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -162,12 +171,6 @@ export function SkillsSettingsPage({
 
   /** A personal-edition skill written for every Bot: it opens its own page, with a switch per Bot. */
   const everyBotRow = (skill: Skill) => {
-    const bots = grantRoster({
-      roster: agents ?? [],
-      hidden: hiddenAgents ?? [],
-      holders: skill.grantedTo,
-    });
-    const held = bots.filter((bot) => skill.grantedTo.includes(bot.id)).length;
     return (
       // A real link with no children: children passed to `render` replace the row's own.
       <Item render={<Link {...paths.skill(skill.slug)} />} size="sm">
@@ -184,9 +187,7 @@ export function SkillsSettingsPage({
           ) : null}
         </ItemContent>
         <ItemActions>
-          <span className="text-muted-foreground text-xs">
-            {grantSummary(held, bots.length)}
-          </span>
+          <SkillBotsButton skill={skill} />
           <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
         </ItemActions>
       </Item>
@@ -227,23 +228,34 @@ export function SkillsSettingsPage({
 
         <LearningSharing
           action={
-            <Button
-              render={(props) =>
-                // The personal edition's skills each have a switch per Bot, so a new one is written
-                // on the page that leads to those switches. Elsewhere a person's own skill is
-                // written in the panel beside the list.
-                personal ? (
-                  <Link {...props} {...paths.newSkill()} />
-                ) : (
-                  <Link {...props} search={{ new: true }} to="/skills" />
-                )
-              }
-              size="sm"
-              variant="ghost"
-            >
-              <IconPlus />
-              New skill
-            </Button>
+            <div className="flex gap-1">
+              <Button
+                onClick={() => setImporting(true)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                <IconBrandGithub />
+                Import from GitHub
+              </Button>
+              <Button
+                render={(props) =>
+                  // The personal edition's skills each have a switch per Bot, so a new one is written
+                  // on the page that leads to those switches. Elsewhere a person's own skill is
+                  // written in the panel beside the list.
+                  personal ? (
+                    <Link {...props} {...paths.newSkill()} />
+                  ) : (
+                    <Link {...props} search={{ new: true }} to="/skills" />
+                  )
+                }
+                size="sm"
+                variant="ghost"
+              >
+                <IconPlus />
+                New skill
+              </Button>
+            </div>
           }
           written={written}
           writtenKnown={writtenKnown}
@@ -279,6 +291,13 @@ export function SkillsSettingsPage({
           </PageSection>
         ) : null}
 
+        {importing ? (
+          <ImportFromGitHub
+            onClose={() => setImporting(false)}
+            personal={personal}
+          />
+        ) : null}
+
         <LearningReview />
 
         {/* Only where OpenBot can run a browser for this person. */}
@@ -305,5 +324,35 @@ export function SkillsSettingsPage({
         ) : null}
       </PageShell>
     </DetailPanel>
+  );
+}
+
+/**
+ * Import skills from a GitHub repository, in a dialog over the Skills page. In OpenBot Personal a new
+ * skill goes on every Bot by itself; elsewhere each is put on Bots from its own row, as one written here.
+ */
+function ImportFromGitHub({
+  onClose,
+  personal,
+}: {
+  onClose: () => void;
+  personal: boolean;
+}) {
+  return (
+    <Dialog onOpenChange={(open) => !open && onClose()} open>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Import from GitHub</DialogTitle>
+          <DialogDescription>
+            {personal
+              ? "Bring in the skills from a GitHub repository. They're saved as yours, and you choose which Bots use them."
+              : "Bring in the skills from a GitHub repository. They're saved as yours, and you choose which Bots use each one."}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="mt-4">
+          <GitHubImport chooseBots={personal} onCancel={onClose} />
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 }

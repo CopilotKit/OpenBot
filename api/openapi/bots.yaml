@@ -1509,6 +1509,12 @@ components:
         avatarSeed:
           type: string
           description: The seed its avatar is drawn from.
+        buddy:
+          $ref: './buddies.yaml#/components/schemas/BuddyChoice'
+          description: >-
+            The buddy the caller chose to draw this Bot as (replaceBotBuddy),
+            for them only. Null or absent for the stock buddy picked from
+            avatarSeed.
         visibility:
           $ref: '#/components/schemas/BotVisibility'
         hidden:

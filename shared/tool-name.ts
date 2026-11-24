@@ -676,6 +676,19 @@ const OWN_TOOLS: Record<string, OwnTool> = {
 
   // Skills: the ones it learned, and the ones a person writes with it.
   copilotkit_load_skill: { running: "Using a skill", done: "Used a skill" },
+  // A skill the person saved, loaded by the Bot when the request matched it (the skill library).
+  load_skill: { running: "Using a skill", done: "Used a skill" },
+  // OpenBot Desktop on a Mac: the person's own screen, keyboard and mouse (PC control).
+  person_computer: {
+    running: "Using your computer",
+    done: "Used your computer",
+  },
+  // Code Mode: a short program over the Bot's actions that read, run in a sandbox.
+  execute_typescript: { running: "Running code", done: "Ran code" },
+  discover_tools: {
+    running: "Looking up actions",
+    done: "Looked up actions",
+  },
   copilotkit_read_skill_file: {
     running: "Reading a file from a skill",
     done: "Read a file from a skill",
@@ -690,6 +703,15 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     done: "Checked available tools",
   },
   save_skill: { running: "Proposing a skill", done: "Proposed a skill" },
+  save_skills: { running: "Proposing skills", done: "Proposed skills" },
+  import_skills_from_github: {
+    running: "Finding skills on GitHub",
+    done: "Offered skills from GitHub",
+  },
+  add_skills_to_bot: {
+    running: "Offering skills for this Bot",
+    done: "Offered skills for this Bot",
+  },
 
   /*
    * Drawing a generated interface in the conversation. The runtime offers it, not an OpenBot

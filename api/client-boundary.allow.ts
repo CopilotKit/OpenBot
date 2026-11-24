@@ -442,6 +442,12 @@ export const ALLOWED: Allowed[] = [
     why: "image registries, never OpenBot's server",
   },
   {
+    file: "scripts/fetch-stock-buddies.ts",
+    what: "fetch()",
+    rule: "third-party",
+    why: "the stock buddies' files at labs-buddy, never OpenBot's server",
+  },
+  {
     file: "scripts/model-compat.ts",
     what: /^(fetch\(\)|\/health|\/api\/agents\/openbot\/generate)$/,
     rule: "third-party",

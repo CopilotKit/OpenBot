@@ -23,6 +23,11 @@
           theme === "light" || theme === "dark" ? theme : "system";
       } catch {}
       try {
+        // Compact view's window in OpenBot Desktop: transparent around the bubble (styles.css).
+        if (/^\/assistant(\/|$)/.test(window.location.pathname))
+          document.documentElement.dataset.assistant = "";
+      } catch {}
+      try {
         const saved = window.localStorage.getItem("openbot-skin");
         // A skin saved under the id it was renamed from (shared/user-preferences.ts RENAMED_SKIN_IDS).
         const skin = saved === "openmuse" ? "openfuse" : saved;

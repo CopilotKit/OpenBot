@@ -46,6 +46,7 @@ import {
 } from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
 import { BotActivityGlance, BotActivityRow } from "./activity";
+import { BotBuddyRow } from "./buddy";
 import { BotPausedBanner } from "./pause-banner";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
@@ -223,6 +224,9 @@ export function BotProfile({
                 </Item>
               </>
             ) : null}
+            {/* The character its conversations show in their corner, for this person. */}
+            <Separator />
+            <BotBuddyRow agent={agent} />
             <Separator />
             <Item
               render={<Link to="/channel/new" search={{ agent: agent.id }} />}

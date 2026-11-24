@@ -9,6 +9,7 @@ export * from "./bot-grants/bot-grants";
 export * from "./bots/bots";
 export * from "./boundaries/boundaries";
 export * from "./browsers/browsers";
+export * from "./buddies/buddies";
 export * from "./capabilities/capabilities";
 export * from "./check-ins/check-ins";
 export * from "./components/components";

@@ -23,6 +23,7 @@ import { GalleryTools } from "./gallery-tools";
 import { GENERATIVE_UI_DESIGN_SKILL } from "./generative-ui";
 import { HandoffTool } from "./handoff-tool";
 import { OrchestrationTools } from "./orchestration-tools";
+import { PersonComputerTool } from "./person-computer-tool";
 import { SandboxedTools } from "./sandboxed-tools";
 import { SignInTool } from "./sign-in-tool";
 import { SkillTools } from "./skill-tools";
@@ -88,6 +89,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         {/* Each run is offered its own Bot's tools, never the screen's; see bot-offer.ts. */}
         <BotOffers />
         <ComputerTools />
+        {/* A Bot using the person's own Mac, through OpenBot Desktop. Offered only in its window. */}
+        <PersonComputerTool />
         {/* The private sign-in request: a card whose form posts to the server, never to the Bot. */}
         <SignInTool />
         {/*

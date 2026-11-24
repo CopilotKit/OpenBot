@@ -43,6 +43,15 @@
 //! connected, `status` answers the app's own facts only, and what is about an OpenBot on this
 //! computer (`restart`, `stop`, `intelligence`, `ai_connection`, `change_ai_connection`) is refused.
 //!
+//! And a Bot using this computer (`person_computer`, `person_computer_stop`): the main screen, the
+//! mouse and the keyboard, once the person allowed Bots to in this app's own dialog, for this session
+//! of OpenBot. A prototype, on macOS only. See `person_computer.rs`.
+//!
+//! And compact view (`compact_view`, `set_compact_view`): Settings' switch between the window and a
+//! bubble over every app, and the bubble's own page asking to open into its panel and fold back
+//! (`assistant_layout`, `assistant_expand`, `assistant_collapse`) or to bring the main window back
+//! (`assistant_open_full`). See `assistant.rs`.
+//!
 //! And Settings' Move to OpenBot Cloud (`move_to_cloud`): the setup window at the move, with
 //! OpenBot left running here (`desktop_move`).
 
@@ -55,7 +64,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 38] = [
+pub const PERMISSIONS: [&str; 46] = [
     "openbot-desktop:allow-connection",
     "openbot-desktop:allow-sign-out",
     "openbot-desktop:allow-change-connection",
@@ -93,6 +102,14 @@ pub const PERMISSIONS: [&str; 38] = [
     "openbot-desktop:allow-set-usage-data",
     "openbot-desktop:allow-quit",
     "openbot-desktop:allow-zoom",
+    "openbot-desktop:allow-person-computer",
+    "openbot-desktop:allow-person-computer-stop",
+    "openbot-desktop:allow-compact-view",
+    "openbot-desktop:allow-set-compact-view",
+    "openbot-desktop:allow-assistant-layout",
+    "openbot-desktop:allow-assistant-expand",
+    "openbot-desktop:allow-assistant-collapse",
+    "openbot-desktop:allow-assistant-open-full",
     "openbot-desktop:allow-move-to-cloud",
 ];
 
@@ -484,7 +501,7 @@ async fn prepare_ai_connection(
 }
 
 /// Settle on the connection the server now has: recorded for the next start, a plan engine no
-/// longer needed stopped, and the picked Bot moved to an engine that can use it, alone.
+/// longer connected (`connected_plans`) stopped, and the picked Bot moved to an engine that can use it, alone.
 #[tauri::command]
 async fn settle_ai_connection(
     app: tauri::AppHandle,
@@ -492,6 +509,7 @@ async fn settle_ai_connection(
     login: String,
     model: Option<String>,
     endpoint_host: Option<String>,
+    connected_plans: Option<Vec<openbot_desktop_lib::ai_connection::Plan>>,
 ) -> Result<(), String> {
     crate::settle_ai_connection_now(
         app,
@@ -500,6 +518,7 @@ async fn settle_ai_connection(
             login,
             model,
             endpoint_host,
+            connected_plans,
         },
     )
     .await
@@ -535,6 +554,69 @@ async fn quit(app: tauri::AppHandle) {
 #[tauri::command]
 async fn zoom(app: tauri::AppHandle, step: crate::zoom::Step) {
     crate::zoom_windows(&app, step);
+}
+
+/**
+A Bot's action on this computer, answered with the screen after it. The first action of this
+session of OpenBot asks the person in this app's own dialog. See `person_computer.rs`.
+*/
+#[tauri::command]
+async fn person_computer(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    action: crate::person_computer::Action,
+    conversation: crate::person_computer::Conversation,
+) -> Result<crate::person_computer::Screen, String> {
+    // The question is asked over the window whose page asked: the main window, or compact view's panel.
+    let asking = window.label().to_owned();
+    crate::person_computer::perform(app, action, conversation, asking).await
+}
+
+/// Take back the person's answer: the next action of any Bot asks again.
+#[tauri::command]
+async fn person_computer_stop() {
+    crate::person_computer::stop();
+}
+
+/// Settings' Compact view: whether it is on, and whether this computer can have it.
+#[tauri::command]
+async fn compact_view(app: tauri::AppHandle) -> crate::assistant::CompactView {
+    crate::assistant::compact_view(&app)
+}
+
+/// Settings' Compact view, switched, at once: on, the bubble shows and the main window hides; off,
+/// the bubble goes and the main window comes back. Kept for the next launch.
+#[tauri::command]
+async fn set_compact_view(
+    app: tauri::AppHandle,
+    on: bool,
+) -> Result<crate::assistant::CompactView, String> {
+    crate::assistant::switch(&app, on)
+}
+
+/// The bubble's page: whether it draws the bubble or the panel.
+#[tauri::command]
+async fn assistant_layout(app: tauri::AppHandle) -> crate::assistant::Layout {
+    crate::assistant::layout(&app)
+}
+
+/// The bubble, clicked: it opens into the panel.
+#[tauri::command]
+async fn assistant_expand(app: tauri::AppHandle) -> Result<crate::assistant::Layout, String> {
+    crate::assistant::expand(&app)
+}
+
+/// The panel folds back into the bubble.
+#[tauri::command]
+async fn assistant_collapse(app: tauri::AppHandle) -> Result<crate::assistant::Layout, String> {
+    crate::assistant::collapse(&app)
+}
+
+/// The panel's Open full window: the main window in front, at `path` when it names one of
+/// OpenBot's pages (the conversation the panel shows).
+#[tauri::command]
+async fn assistant_open_full(app: tauri::AppHandle, path: Option<String>) {
+    crate::assistant::open_full(&app, path);
 }
 
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
@@ -577,6 +659,14 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             sign_out,
             change_connection,
             set_organization,
+            person_computer,
+            person_computer_stop,
+            compact_view,
+            set_compact_view,
+            assistant_layout,
+            assistant_expand,
+            assistant_collapse,
+            assistant_open_full,
             move_to_cloud
         ])
         .build()

@@ -98,6 +98,17 @@ fn main() {
                     "sign_out",
                     "change_connection",
                     "set_organization",
+                    // A Bot using this computer's screen, mouse and keyboard, for a conversation
+                    // whose person allowed it. See `src/person_computer.rs`.
+                    "person_computer",
+                    "person_computer_stop",
+                    // Compact view: Settings' switch, and the bubble's own page. See `src/assistant.rs`.
+                    "compact_view",
+                    "set_compact_view",
+                    "assistant_layout",
+                    "assistant_expand",
+                    "assistant_collapse",
+                    "assistant_open_full",
                     // Settings' Move to OpenBot Cloud. See `src/desktop_move.rs`.
                     "move_to_cloud",
                 ]),

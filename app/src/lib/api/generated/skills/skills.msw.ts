@@ -5,7 +5,10 @@ import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
 import type {
+  GitHubSkillSource,
+  GitHubSkills,
   Skill,
+  SkillBotsInput,
   SkillInput,
   SkillPage,
   SkillTeamGrants,
@@ -23,6 +26,7 @@ export const getListSkillsResponseMock = (): SkillPage => ({
       tools: ["google-calendar/list_events"],
       ownerId: "user_3f1c9a",
       botIds: ["general-assistant"],
+      everyBot: false,
       usableOnYourBots: true,
     },
     {
@@ -34,10 +38,40 @@ export const getListSkillsResponseMock = (): SkillPage => ({
       tools: [],
       ownerId: null,
       botIds: ["general-assistant", "research-assistant"],
+      everyBot: true,
       usableOnYourBots: false,
     },
   ],
   nextCursor: null,
+});
+
+export const getFindGitHubSkillsResponseMock = (): GitHubSkills => ({
+  repository: "alemtuzlak/skills",
+  ref: "main",
+  commit: "c06cf6829f3a4b1e0d2c7a5b9e8f1d3c4b6a7e90",
+  skills: [
+    {
+      path: "skills/blog-post",
+      slug: "blog-post",
+      title: "Blog Post Writer",
+      summary:
+        "Use when the user wants to write a blog post about a feature or product change.",
+      instructions:
+        "# Blog Post Writer\n\nWrite high-quality blog posts from code changes.",
+      leftOut: [],
+      problem: null,
+    },
+    {
+      path: "skills/accessible-html",
+      slug: "accessible-html",
+      title: "accessible-html",
+      summary: "Use whenever writing, editing, or reviewing markup or UI code.",
+      instructions: "Build markup that works for everyone.",
+      leftOut: ["references/audit.md", "hooks/a11y-guard.js"],
+      problem: null,
+    },
+  ],
+  notRead: 0,
 });
 
 export const getGetSkillResponseMock = (): Skill => ({
@@ -49,6 +83,7 @@ export const getGetSkillResponseMock = (): Skill => ({
   tools: ["google-calendar/list_events"],
   ownerId: "user_3f1c9a",
   botIds: ["general-assistant"],
+  everyBot: false,
   usableOnYourBots: true,
 });
 
@@ -61,6 +96,20 @@ export const getReplaceSkillResponseMock = (): Skill => ({
   tools: ["google-calendar/list_events"],
   ownerId: "user_3f1c9a",
   botIds: ["general-assistant"],
+  everyBot: false,
+  usableOnYourBots: true,
+});
+
+export const getReplaceSkillBotsResponseMock = (): Skill => ({
+  slug: "standup",
+  title: "Standup",
+  summary: "Write today's standup from my calendar and my pull requests.",
+  instructions:
+    "Read my calendar for today and my open pull requests, then write three short lines.",
+  tools: ["google-calendar/list_events"],
+  ownerId: "user_3f1c9a",
+  botIds: ["general-assistant"],
+  everyBot: false,
   usableOnYourBots: true,
 });
 
@@ -91,6 +140,36 @@ export const getListSkillsMockHandler = (
             ? await overrideResponse(info)
             : overrideResponse
           : getListSkillsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getFindGitHubSkillsMockHandler = (
+  overrideResponse?:
+    | GitHubSkills
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string }, GitHubSkillSource>
+        >[0],
+      ) => Promise<GitHubSkills> | GitHubSkills),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string }, GitHubSkillSource>(
+    "*/api/v2/organizations/:organizationId/skills/find-on-github",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string }, GitHubSkillSource>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getFindGitHubSkillsResponseMock(),
         { status: 200 },
       );
     },
@@ -191,6 +270,42 @@ export const getDeleteSkillMockHandler = (
   );
 };
 
+export const getReplaceSkillBotsMockHandler = (
+  overrideResponse?:
+    | Skill
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; skillId: string },
+            SkillBotsInput
+          >
+        >[0],
+      ) => Promise<Skill> | Skill),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<{ organizationId: string; skillId: string }, SkillBotsInput>(
+    "*/api/v2/organizations/:organizationId/skills/:skillId/bots",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; skillId: string },
+          SkillBotsInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplaceSkillBotsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getGetSkillTeamGrantsMockHandler = (
   overrideResponse?:
     | SkillTeamGrants
@@ -261,9 +376,11 @@ export const getReplaceSkillTeamGrantsMockHandler = (
 };
 export const getSkillsMock = () => [
   getListSkillsMockHandler(),
+  getFindGitHubSkillsMockHandler(),
   getGetSkillMockHandler(),
   getReplaceSkillMockHandler(),
   getDeleteSkillMockHandler(),
+  getReplaceSkillBotsMockHandler(),
   getGetSkillTeamGrantsMockHandler(),
   getReplaceSkillTeamGrantsMockHandler(),
 ];

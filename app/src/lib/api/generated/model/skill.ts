@@ -26,6 +26,8 @@ export interface Skill {
   ownerId: string | null;
   /** The Bots that offer it, by id. */
   botIds: string[];
+  /** Whether it is on every Bot, including Bots made later. In OpenBot Personal a new skill is. Choosing its Bots, or taking it from one Bot, makes it false. */
+  everyBot: boolean;
   /** Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot's Skills page offers these. */
   usableOnYourBots: boolean;
 }

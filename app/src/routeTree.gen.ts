@@ -16,6 +16,7 @@ import { Route as DesktopReturnRouteImport } from './routes/desktop-return'
 import { Route as SignRouteImport } from './routes/sign'
 import { Route as AuthedAppRouteImport } from './routes/_authed/_app'
 import { Route as AuthedAdminRouteRouteImport } from './routes/_authed/admin/route'
+import { Route as AuthedAssistantRouteImport } from './routes/_authed/assistant'
 import { Route as AuthedOnboardingRouteImport } from './routes/_authed/onboarding'
 import { Route as AuthedSettingsRouteRouteImport } from './routes/_authed/settings/route'
 import { Route as AuthedTermsRouteImport } from './routes/_authed/terms'
@@ -170,6 +171,11 @@ const AuthedAppRoute = AuthedAppRouteImport.update({
 const AuthedAdminRouteRoute = AuthedAdminRouteRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedAssistantRoute = AuthedAssistantRouteImport.update({
+  id: '/assistant',
+  path: '/assistant',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedOnboardingRoute = AuthedOnboardingRouteImport.update({
@@ -846,6 +852,7 @@ export interface FileRoutesByFullPath {
   '/sign': typeof SignRoute
   '/admin': typeof AuthedAdminRouteRouteWithChildren
   '/settings': typeof AuthedSettingsRouteRouteWithChildren
+  '/assistant': typeof AuthedAssistantRoute
   '/onboarding': typeof AuthedOnboardingRoute
   '/terms': typeof AuthedTermsRoute
   '/approvals': typeof AuthedAppApprovalsRoute
@@ -972,6 +979,7 @@ export interface FileRoutesByTo {
   '/connecting': typeof ConnectingRoute
   '/desktop-return': typeof DesktopReturnRoute
   '/sign': typeof SignRoute
+  '/assistant': typeof AuthedAssistantRoute
   '/onboarding': typeof AuthedOnboardingRoute
   '/terms': typeof AuthedTermsRoute
   '/approvals': typeof AuthedAppApprovalsRoute
@@ -1102,6 +1110,7 @@ export interface FileRoutesById {
   '/_authed/admin': typeof AuthedAdminRouteRouteWithChildren
   '/_authed/settings': typeof AuthedSettingsRouteRouteWithChildren
   '/_authed/_app': typeof AuthedAppRouteWithChildren
+  '/_authed/assistant': typeof AuthedAssistantRoute
   '/_authed/onboarding': typeof AuthedOnboardingRoute
   '/_authed/terms': typeof AuthedTermsRoute
   '/_authed/_app/approvals': typeof AuthedAppApprovalsRoute
@@ -1234,6 +1243,7 @@ export interface FileRouteTypes {
     | '/sign'
     | '/admin'
     | '/settings'
+    | '/assistant'
     | '/onboarding'
     | '/terms'
     | '/approvals'
@@ -1360,6 +1370,7 @@ export interface FileRouteTypes {
     | '/connecting'
     | '/desktop-return'
     | '/sign'
+    | '/assistant'
     | '/onboarding'
     | '/terms'
     | '/approvals'
@@ -1489,6 +1500,7 @@ export interface FileRouteTypes {
     | '/_authed/admin'
     | '/_authed/settings'
     | '/_authed/_app'
+    | '/_authed/assistant'
     | '/_authed/onboarding'
     | '/_authed/terms'
     | '/_authed/_app/approvals'
@@ -1669,6 +1681,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AuthedAdminRouteRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/assistant': {
+      id: '/_authed/assistant'
+      path: '/assistant'
+      fullPath: '/assistant'
+      preLoaderRoute: typeof AuthedAssistantRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/onboarding': {
@@ -2819,6 +2838,7 @@ interface AuthedRouteChildren {
   AuthedAdminRouteRoute: typeof AuthedAdminRouteRouteWithChildren
   AuthedSettingsRouteRoute: typeof AuthedSettingsRouteRouteWithChildren
   AuthedAppRoute: typeof AuthedAppRouteWithChildren
+  AuthedAssistantRoute: typeof AuthedAssistantRoute
   AuthedOnboardingRoute: typeof AuthedOnboardingRoute
   AuthedTermsRoute: typeof AuthedTermsRoute
   AuthedSignInRequestIdRoute: typeof AuthedSignInRequestIdRoute
@@ -2828,6 +2848,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedAdminRouteRoute: AuthedAdminRouteRouteWithChildren,
   AuthedSettingsRouteRoute: AuthedSettingsRouteRouteWithChildren,
   AuthedAppRoute: AuthedAppRouteWithChildren,
+  AuthedAssistantRoute: AuthedAssistantRoute,
   AuthedOnboardingRoute: AuthedOnboardingRoute,
   AuthedTermsRoute: AuthedTermsRoute,
   AuthedSignInRequestIdRoute: AuthedSignInRequestIdRoute,

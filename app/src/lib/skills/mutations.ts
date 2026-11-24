@@ -1,5 +1,9 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { deleteSkill, replaceSkill } from "@/lib/api/generated/skills/skills";
+import {
+  deleteSkill,
+  replaceSkill,
+  replaceSkillBots,
+} from "@/lib/api/generated/skills/skills";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { pluginKeys } from "@/lib/plugins/queries";
 
@@ -36,26 +40,30 @@ function invalidateSkills(queryClient: QueryClient) {
  */
 export function saveSkillMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (input: SkillInput): Promise<unknown> =>
-      replaceSkill(
-        organizationId(),
-        input.slug,
-        {
-          title: input.title,
-          summary: input.summary ?? "",
-          instructions: input.instructions,
-          tools: input.tools,
-          forEveryone: input.global === true,
-        },
-        { "Idempotency-Key": idempotencyKey() },
-        /*
-         * The server refuses for reasons a form cannot check — a slug somebody else already owns is
-         * the common one — and paraphrasing that would throw away the only part worth reading.
-         */
-        { fallback: "Couldn't save the skill." },
-      ),
+    mutationFn: saveSkill,
     onSettled: () => invalidateSkills(queryClient),
   });
+}
+
+/** The write itself, for a caller saving several and refreshing once at the end (`import.ts`). */
+export function saveSkill(input: SkillInput): Promise<unknown> {
+  return replaceSkill(
+    organizationId(),
+    input.slug,
+    {
+      title: input.title,
+      summary: input.summary ?? "",
+      instructions: input.instructions,
+      tools: input.tools,
+      forEveryone: input.global === true,
+    },
+    { "Idempotency-Key": idempotencyKey() },
+    /*
+     * The server refuses for reasons a form cannot check — a slug somebody else already owns is
+     * the common one — and paraphrasing that would throw away the only part worth reading.
+     */
+    { fallback: "Couldn't save the skill." },
+  );
 }
 
 export function removeSkillMutationOptions(queryClient: QueryClient) {
@@ -68,6 +76,40 @@ export function removeSkillMutationOptions(queryClient: QueryClient) {
         { fallback: "Couldn't delete the skill." },
       );
     },
+    onSettled: () => invalidateSkills(queryClient),
+  });
+}
+
+/** Which Bots use a skill: every Bot, Bots made later included, or exactly these. */
+export type SkillBots =
+  | { everyBot: true }
+  | { everyBot: false; botIds: string[] };
+
+/** The write itself, for a caller choosing several skills' Bots and refreshing once (`import.ts`). */
+export function chooseSkillBots(
+  slug: string,
+  bots: SkillBots,
+): Promise<unknown> {
+  return replaceSkillBots(
+    organizationId(),
+    slug,
+    bots.everyBot
+      ? { everyBot: true, botIds: [] }
+      : { everyBot: false, botIds: bots.botIds },
+    { "Idempotency-Key": idempotencyKey() },
+    // The server says which Bot it couldn't change, and why: that sentence is the useful part.
+    { fallback: "Couldn't change which Bots use the skill." },
+  );
+}
+
+/**
+ * Choose the Bots that use a skill. Each Bot it is put on or taken from is that Bot's own change,
+ * so a Bot's Skills page and "What it can use" are refreshed with the skill list.
+ */
+export function chooseSkillBotsMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (variables: { slug: string; bots: SkillBots }) =>
+      chooseSkillBots(variables.slug, variables.bots),
     onSettled: () => invalidateSkills(queryClient),
   });
 }

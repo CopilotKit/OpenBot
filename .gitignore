@@ -60,3 +60,6 @@ extension/**/*.pem
 
 # The folder scripts/start.sh mounts into the server's container for a model sign-in file.
 .openbot/
+
+# The stock buddies, unpacked by scripts/fetch-stock-buddies.ts (79 MB).
+app/public/buddies/

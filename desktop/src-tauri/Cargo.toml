@@ -101,6 +101,9 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# A Bot using this computer: Quartz's mouse, keyboard and scroll events, and the main display's size.
+# The version tao already builds; `highsierra` adds only the scroll event. See `person_computer.rs`.
+core-graphics = { version = "0.25", features = ["highsierra"] }
 # The macOS quit OpenBot did not start (Dock, AppleScript, log out) routed through its own Quit.
 # The version Tauri already uses. See `macos_quit` in main.rs. `exception`: an AppKit exception
 # caught as an error, never unwound into a Rust thread (`reveal_in_file_manager`); Tauri's objc2

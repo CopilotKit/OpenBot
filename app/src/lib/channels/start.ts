@@ -168,7 +168,15 @@ export async function startWithModel(input: {
  * stays stashed until they open it, which is when it is sent. Going back to the placeholder opens
  * it too (`settlePendingStart`).
  */
-export function useStartChannel() {
+export function useStartChannel(
+  options: {
+    /**
+     * Where a started conversation opens, in place of `/channel/$channelId`: compact view's panel
+     * keeps it in its own page. Not called for a start behind a placeholder the person left.
+     */
+    open?: (channelId: string) => Promise<unknown>;
+  } = {},
+) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const router = useRouter();
@@ -215,6 +223,10 @@ export function useStartChannel() {
           settlePendingStart(pendingId, channelId);
           if (router.state.location.pathname !== pendingStartPath(pendingId))
             return;
+        }
+        if (options.open) {
+          await options.open(channelId);
+          return;
         }
         await navigate({
           params: { channelId },
