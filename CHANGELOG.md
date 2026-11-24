@@ -272,6 +272,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   everyone in the organization, so the button shows only for an admin, and for the one person of
   a personal OpenBot. Anybody else who opens the Add server page is told that only an admin can add
   a server, and to ask one.
+- Turning on Only approved servers starts with your added apps approved, and an app an admin adds is
+  approved in the same press.
 - **Only an owner removes another owner.** An admin could remove a co-owner, though they couldn't
   change one's role. That is now refused with "Only an owner of this organization can remove
   another owner." The last owner still can't be removed. In Organization settings, Members offers
