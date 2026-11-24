@@ -25,12 +25,12 @@ export const RULES: Record<Exclude<Rule, "card">, RegExp> = {
   // A corner step the rules don't name. Controls are md, cards lg, menus and dialogs xl, round
   // things full; `none` squares a part off. Bare `rounded` is the sm step.
   cornerStep: new RegExp(`^rounded${SIDE}(?:-(?:xs|sm|2xl|3xl|4xl))?$`),
-  // A shadow of its own: `shadow-[0_1px_2px_…]`.
-  shadow: /^shadow-[[(]/,
+  // A shadow of its own: `shadow-[0_1px_2px_…]`, or a drop shadow written out.
+  shadow: /^(?:drop-)?shadow-[[(]/,
   // A shadow step the rules don't name. xs is raised, lg floats, 2xl sits over the app.
   shadowStep: /^shadow(?:-(?:sm|md|xl|inner))?$/,
-  // Text sized by hand: `text-[10px]`, `text-[0.8rem]`.
-  text: /^text-\[[\d.]+(?:px|rem|em)\]$/,
+  // Text sized by hand: `text-[10px]`, `text-[0.8rem]`, with or without a line height after it.
+  text: /^text-\[[\d.]+(?:px|rem|em)\](?:\/.+)?$/,
   // A color utility; `darkColor` counts it only under a `dark:` variant.
   darkColor:
     /^(?:bg|text|border(?:-[trblxyse])?|ring|ring-offset|outline|fill|stroke|divide|from|via|to|decoration|placeholder|caret|shadow|accent)-(?!(?:\d+|xs|sm|base|md|lg|xl|\d+xl|none|hidden|solid|dashed|dotted|double|left|center|right|justify|start|end|wrap|nowrap|balance|pretty|clip|ellipsis|inset|x|y|t|r|b|l|s|e|offset-\d+)$)/,

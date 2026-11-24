@@ -49,7 +49,7 @@ describe("the rules", () => {
       ],
     },
     shadow: {
-      finds: ["shadow-[0_1px_2px_black]"],
+      finds: ["shadow-[0_1px_2px_black]", "drop-shadow-[0_8px_24px_black]"],
       ignores: ["shadow-ring/25"],
     },
     shadowStep: {
@@ -63,7 +63,12 @@ describe("the rules", () => {
       ],
     },
     text: {
-      finds: ["text-[10px]", "text-[0.8rem]"],
+      finds: [
+        "text-[10px]",
+        "text-[0.8rem]",
+        "text-[1rem]/[1.5]",
+        "text-[13px]/5",
+      ],
       ignores: ["text-xs", "text-[color:var(--x)]"],
     },
     darkColor: {

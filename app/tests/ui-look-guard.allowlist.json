@@ -43,6 +43,7 @@
   },
   "components/browser/browser-screen.tsx": {
     "corner": 1,
+    "shadow": 2,
     "shadowStep": 1,
     "darkColor": 1
   },
@@ -52,7 +53,8 @@
     "text": 5
   },
   "components/channels/chat-transcript.tsx": {
-    "cornerStep": 3
+    "cornerStep": 3,
+    "text": 1
   },
   "components/channels/coding-tool-cards.tsx": {
     "corner": 1,
