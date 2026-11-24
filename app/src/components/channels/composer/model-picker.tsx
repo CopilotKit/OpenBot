@@ -3,6 +3,7 @@ import {
   IconAlertTriangle,
   IconCheck,
   IconChevronDown,
+  IconCloud,
   IconCpu,
   IconCube,
 } from "@tabler/icons-react";
@@ -26,6 +27,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { connectionName } from "@/lib/ai-connection/describe";
+import { providerById } from "@/lib/ai-connection/providers";
 import { markFor } from "@/lib/marks";
 import { connectionOf, pickerGroups } from "@/lib/models/connections";
 import {
@@ -109,6 +111,18 @@ function ModelMark({ model }: { model: ModelOption }) {
 }
 
 /**
+ * A connection's mark in the providers rail: its provider's, or a cloud for a server of your own.
+ */
+function ConnectionMark({ connection }: { connection: CatalogueConnection }) {
+  const provider = providerById(connection.provider);
+  return provider?.mark && markFor(provider.mark) ? (
+    <HarnessMark className="size-4" id={provider.mark} name={provider.name} />
+  ) : (
+    <IconCloud aria-hidden className="size-4 text-muted-foreground" />
+  );
+}
+
+/**
  * The model a conversation's Bot answers on, and how hard it thinks, picked in the composer.
  *
  * A quiet icon button in the controls row, a CPU and a chevron, rather than the model's mark and
@@ -133,6 +147,12 @@ function ModelMark({ model }: { model: ModelOption }) {
  * efforts as options in a labelled group. The models scroll on their own; the efforts stay put, and
  * stay while a search is typed, since a search only ever looks for a model. A model that takes no
  * effort has no column, and the popup is one column wide.
+ *
+ * A PROVIDERS RAIL, with several connections: one button per connection down the popup's left
+ * edge, as T3 Code's picker has its providers. The list shows the models of the one chosen there,
+ * and opens on the connection in use. A search looks through every connection, each under its
+ * name, so a model is found without knowing whose it is. The rail's buttons are not options: they
+ * change what the list shows, and keep the focus in the search.
  *
  * Renders nothing when there is nothing to pick: a plan, a provider that could not be read, or an
  * allowlist that leaves one model.
@@ -266,6 +286,14 @@ function Picker({
    */
   const stayOpen = useRef(false);
   const [effortStep, setEffortStep] = useState(false);
+  /** The connection the rail shows the models of: the one in use, each time the popup opens. */
+  const [tab, setTab] = useState<string | null>(null);
+  const searching = query.trim() !== "";
+  /** Shown in the list: every connection while searching, otherwise the rail's. */
+  const listed =
+    searching || tab === null
+      ? connections
+      : connections.filter((connection) => connection.id === tab);
   const current: Choice | null = useMemo(
     () =>
       selected
@@ -283,8 +311,14 @@ function Picker({
     const models: ChoiceGroup = {
       value: "models",
       items: grouped
-        ? connections.flatMap((connection): Choice[] => [
-            { kind: "heading", connection },
+        ? listed.flatMap((connection): Choice[] => [
+            // Its name over its models where the rail doesn't say it (one connection, or several
+            // searched at once). A stopped one says why, always.
+            ...(connections.length === 1 ||
+            listed.length > 1 ||
+            !connection.ready
+              ? [{ kind: "heading", connection } as Choice]
+              : []),
             ...(connection.ready
               ? connection.models.map(
                   (model): Choice => ({
@@ -308,7 +342,7 @@ function Picker({
       efforts.unshift({ kind: "effort", effort: null, label: "Default" });
     const thinking: ChoiceGroup = { value: "thinking", items: efforts };
     return effortStep ? [thinking] : [models, thinking];
-  }, [catalogue.models, connections, grouped, selected, effortStep]);
+  }, [catalogue.models, connections, listed, grouped, selected, effortStep]);
 
   const matches = (model: ModelOption, typed: string) =>
     contains(model.label, typed) || contains(model.id, typed);
@@ -322,6 +356,9 @@ function Picker({
   const twoColumns = groups.length > 1;
   /** On the efforts alone: only the "Thinking" column shows. */
   const effortsOnly = effortStep && thinks(selected);
+  /** The providers rail, down the left: with two connections or more, beside the models. */
+  const rail = connections.length > 1 && !effortsOnly;
+  const modelsColumn = rail ? "col-start-2" : "col-start-1";
 
   const effortText = running
     ? effortLabel(running)
@@ -353,6 +390,7 @@ function Picker({
             ? connectionName(choice.connection)
             : choice.label
       }
+      inputValue={query}
       onInputValueChange={setQuery}
       onOpenChange={(next, details) => {
         const keep =
@@ -364,6 +402,14 @@ function Picker({
         }
         // Opened or closed: both columns, the next time it shows.
         setEffortStep(false);
+        // Opened: on the connection in use, the default's while nothing is picked.
+        if (next)
+          setTab(
+            selectedConnection ??
+              defaultConnection ??
+              connections[0]?.id ??
+              null,
+          );
         setOpen(next);
       }}
       onValueChange={(choice) => {
@@ -451,13 +497,17 @@ function Picker({
          */
         align={showValue ? "start" : "end"}
         className={cn(
-          // A grid: the search over the models on the left, the efforts down the right.
+          // A grid: the rail, the search over the models, and the efforts down the right.
           "grid grid-rows-[auto_minmax(0,1fr)] *:data-[slot=input-group]:m-2 *:data-[slot=input-group]:mb-1",
           effortsOnly
             ? "w-44 grid-cols-1"
-            : twoColumns
-              ? "w-[30rem] grid-cols-[minmax(0,1fr)_11rem]"
-              : "w-72 grid-cols-1",
+            : rail
+              ? twoColumns
+                ? "w-[33rem] grid-cols-[3rem_minmax(0,1fr)_11rem]"
+                : "w-[21rem] grid-cols-[3rem_minmax(0,1fr)]"
+              : twoColumns
+                ? "w-[30rem] grid-cols-[minmax(0,1fr)_11rem]"
+                : "w-72 grid-cols-1",
         )}
         // After a pick, the message box, where the person goes next; otherwise back to the trigger.
         finalFocus={() => {
@@ -473,6 +523,49 @@ function Picker({
          */
         collisionPadding={16}
       >
+        {rail ? (
+          <fieldset className="col-start-1 row-span-2 row-start-1 m-0 flex min-h-0 min-w-0 flex-col items-center gap-1 overflow-y-auto border-y-0 border-r border-l-0 p-1.5">
+            <legend className="sr-only">Providers</legend>
+            {connections.map((connection) => {
+              const shown = !searching && tab === connection.id;
+              const name = connectionName(connection);
+              return (
+                <Tooltip key={connection.id}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        aria-label={
+                          connection.ready ? name : `${name}, can't run now`
+                        }
+                        aria-pressed={shown}
+                        className={cn(
+                          "relative flex size-9 shrink-0 items-center justify-center rounded-lg outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
+                          shown && "bg-muted",
+                        )}
+                        onClick={() => {
+                          setTab(connection.id);
+                          setQuery("");
+                        }}
+                        // The focus stays in the search, where the arrows and Enter work.
+                        onMouseDown={(event) => event.preventDefault()}
+                        type="button"
+                      />
+                    }
+                  >
+                    <ConnectionMark connection={connection} />
+                    {connection.ready ? null : (
+                      <span
+                        aria-hidden
+                        className="absolute top-1 right-1 size-2 rounded-full bg-destructive"
+                      />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{name}</TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </fieldset>
+        ) : null}
         <ComboboxInput
           // On the efforts alone there is no model to search for: it stays only to keep the keys.
           className={
@@ -480,13 +573,18 @@ function Picker({
               ? // Out of the popup's flow, so it takes no row: as `sr-only` it still held one, a
                 // blank band under the last effort.
                 "pointer-events-none absolute! m-0! h-0! w-0! overflow-hidden border-0! opacity-0"
-              : "col-start-1 row-start-1"
+              : cn(modelsColumn, "row-start-1")
           }
           placeholder="Search models"
           showTrigger={false}
         />
         {noModels && !effortsOnly ? (
-          <p className="col-start-1 row-start-2 px-3 py-6 text-center text-muted-foreground text-sm">
+          <p
+            className={cn(
+              modelsColumn,
+              "row-start-2 px-3 py-6 text-center text-muted-foreground text-sm",
+            )}
+          >
             No models match.
           </p>
         ) : null}
@@ -495,7 +593,10 @@ function Picker({
             group.value === "models" ? (
               <ComboboxGroup
                 aria-label="Models"
-                className="no-scrollbar col-start-1 row-start-2 max-h-[min(20rem,calc(var(--available-height)-4rem))] min-h-0 scroll-py-1 overflow-y-auto overscroll-contain p-1.5 pt-0.5"
+                className={cn(
+                  modelsColumn,
+                  "no-scrollbar row-start-2 max-h-[min(20rem,calc(var(--available-height)-4rem))] min-h-0 scroll-py-1 overflow-y-auto overscroll-contain p-1.5 pt-0.5",
+                )}
                 items={group.items}
                 key="models"
               >
@@ -572,7 +673,10 @@ function Picker({
                   "min-h-0 overflow-y-auto p-1.5",
                   effortsOnly
                     ? "col-start-1 row-span-2 row-start-1"
-                    : "col-start-2 row-span-2 row-start-1 border-l",
+                    : cn(
+                        rail ? "col-start-3" : "col-start-2",
+                        "row-span-2 row-start-1 border-l",
+                      ),
                 )}
                 items={group.items}
                 key="thinking"

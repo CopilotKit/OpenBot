@@ -330,6 +330,8 @@ test("saving from the second group sends its source; with one connection none is
   await user.click(await dialog.findByRole("combobox", { name: /Model:/ }));
   const popups = await view.findAllByRole("dialog");
   const popup = within(popups[popups.length - 1] as HTMLElement);
+  // The second connection's models, from the picker's providers rail.
+  await user.click(popup.getByRole("button", { name: /^Claude plan/ }));
   await user.click(popup.getByRole("option", { name: /Claude Sonnet 5.5/ }));
   await act(async () => {
     fireEvent.click(dialog.getByRole("button", { name: "Save" }));

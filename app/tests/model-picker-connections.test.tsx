@@ -24,8 +24,9 @@ const { ModelPicker } = await import(
 
 /*
  * The composer's picker with several AI connections (plans/multiple-ai-connections-spec.md, step
- * 3): models grouped under each connection's name, the default first, and a pick that names its
- * connection. With one connection it is the picker it was.
+ * 3): a providers rail down the left, one button per connection, the default first; the list shows
+ * the chosen one's models and opens on the one in use; a search looks through all of them, each
+ * under its name; and a pick names its connection. With one connection it is the picker it was.
  */
 
 const SOL = { id: "gpt-6.2-sol", label: "GPT-6.2 Sol", vendor: "openai" };
@@ -108,6 +109,28 @@ async function open(view: ReturnType<typeof render>, name: string | RegExp) {
   return { user, popup: await view.findByRole("dialog") };
 }
 
+/** The rail's buttons, in order. */
+function rail(popup: HTMLElement) {
+  return within(within(popup).getByRole("group", { name: "Providers" }))
+    .getAllByRole("button")
+    .map((button) => ({
+      name: button.getAttribute("aria-label"),
+      shown: button.getAttribute("aria-pressed"),
+      button,
+    }));
+}
+
+/** Show the models of the rail's button named `name`. */
+async function showProvider(
+  user: ReturnType<typeof userEvent.setup>,
+  popup: HTMLElement,
+  name: RegExp,
+) {
+  const button = rail(popup).find((one) => name.test(one.name ?? ""));
+  if (!button) throw new Error(`No rail button ${name}`);
+  await user.click(button.button);
+}
+
 test("one connection: the picker is as before and the pick is sent without a connection", async () => {
   const one = catalogueOf([{ ...CLAUDE, isDefault: true }]);
   const view = render(
@@ -126,7 +149,7 @@ test("one connection: the picker is as before and the pick is sent without a con
   expect(saved).toEqual({ model: SONNET.id, effort: null });
 });
 
-test("two connections: models are grouped under each connection's name, the default first", async () => {
+test("two connections: a rail with each one, the default first, opening on the one in use", async () => {
   const view = render(
     <ModelPicker
       catalogue={TWO}
@@ -134,12 +157,36 @@ test("two connections: models are grouped under each connection's name, the defa
       value={{ model: SOL.id, effort: null, connection: "openai" }}
     />,
   );
-  const { popup } = await open(view, "Model: GPT-6.2 Sol");
-  const text = popup.textContent ?? "";
-  const order = ["ChatGPT plan", "GPT-6.2 Sol", "Claude plan", "Claude Opus"];
-  const at = order.map((words) => text.indexOf(words));
-  expect(at.every((index) => index >= 0)).toBe(true);
-  expect([...at].sort((a, b) => a - b)).toEqual(at);
+  const { user, popup } = await open(view, "Model: GPT-6.2 Sol");
+  expect(rail(popup).map(({ name, shown }) => [name, shown])).toEqual([
+    ["ChatGPT plan", "true"],
+    ["Claude plan", "false"],
+  ]);
+  const names = () =>
+    within(popup)
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+  expect(names().some((name) => name?.includes("GPT-6.2 Sol"))).toBe(true);
+  expect(names().some((name) => name?.includes("Claude"))).toBe(false);
+  // The rail says whose models these are: no heading over them.
+  expect(within(popup).queryByText("ChatGPT plan")).toBeNull();
+  await showProvider(user, popup, /^Claude plan/);
+  expect(rail(popup).map(({ shown }) => shown)).toEqual(["false", "true"]);
+  expect(names().some((name) => name?.includes("Claude Opus 5.5"))).toBe(true);
+  expect(names().some((name) => name?.includes("GPT-6.2 Sol"))).toBe(false);
+});
+
+test("one connection draws no rail", async () => {
+  const one = catalogueOf([{ ...CLAUDE, isDefault: true }]);
+  const view = render(
+    <ModelPicker
+      catalogue={one}
+      onChange={() => {}}
+      value={{ model: SONNET.id, effort: null }}
+    />,
+  );
+  const { popup } = await open(view, "Model: Claude Sonnet 5.5");
+  expect(within(popup).queryByRole("group", { name: "Providers" })).toBeNull();
 });
 
 test("the same model id under two connections saves the connection picked, and only that one reads as picked", async () => {
@@ -165,12 +212,19 @@ test("the same model id under two connections saves the connection picked, and o
     />,
   );
   const { user, popup } = await open(view, "Model: GPT-6.2 Sol");
-  const options = within(popup).getAllByRole("option", { name: /GPT-6.2 Sol/ });
-  expect(options).toHaveLength(2);
-  expect(options.map((option) => option.getAttribute("aria-selected"))).toEqual(
-    ["false", "true"],
-  );
-  await user.click(options[0] as HTMLElement);
+  // Opened on the connection in use: its Sol is the one picked.
+  const inUse = within(popup).getAllByRole("option", { name: /GPT-6.2 Sol/ });
+  expect(inUse.map((option) => option.getAttribute("aria-selected"))).toEqual([
+    "true",
+  ]);
+  // The other connection's Sol is another model, not picked.
+  const keyButton = rail(popup)[0];
+  await user.click(keyButton?.button as HTMLElement);
+  const other = within(popup).getAllByRole("option", { name: /GPT-6.2 Sol/ });
+  expect(other.map((option) => option.getAttribute("aria-selected"))).toEqual([
+    "false",
+  ]);
+  await user.click(other[0] as HTMLElement);
   expect(picks).toEqual([
     { model: SOL.id, effort: null, connection: "openai-key" },
   ]);
@@ -190,7 +244,10 @@ test("a stopped connection's group shows its sentence and offers no model", asyn
       value={{ model: SOL.id, effort: null, connection: "openai" }}
     />,
   );
-  const { popup } = await open(view, "Model: GPT-6.2 Sol");
+  const { user, popup } = await open(view, "Model: GPT-6.2 Sol");
+  // Marked on the rail, and named as one that can't run.
+  expect(rail(popup)[1]?.name).toBe("Claude plan, can't run now");
+  await showProvider(user, popup, /^Claude plan/);
   expect(within(popup).getByText(sentence)).toBeTruthy();
   expect(within(popup).queryByRole("option", { name: /Claude/ })).toBeNull();
 });
@@ -235,6 +292,7 @@ test("no default connection: the trigger asks to choose, and a pick still saves"
     />,
   );
   const { user, popup } = await open(view, /Choose a model/);
+  await showProvider(user, popup, /^Claude plan/);
   await user.click(within(popup).getByRole("option", { name: /Sonnet/ }));
   expect(picks[0]).toEqual({
     model: SONNET.id,
@@ -269,7 +327,7 @@ test("a new conversation's pick keeps its connection on the first save", () => {
   });
 });
 
-test("search finds a model in a later group", async () => {
+test("search looks through every connection, whichever the rail shows", async () => {
   const view = render(
     <ModelPicker
       catalogue={TWO}
@@ -304,7 +362,8 @@ test("a stopped connection of the person's own offers Reconnect in its group; th
       value={{ model: SOL.id, effort: null, connection: "openai" }}
     />,
   );
-  const { popup } = await open(view, "Model: GPT-6.2 Sol");
+  const { user, popup } = await open(view, "Model: GPT-6.2 Sol");
+  await showProvider(user, popup, /^Claude plan/);
   expect(
     within(popup).getByRole("link", { name: "Reconnect" }).getAttribute("href"),
   ).toBe("/settings/providers/anthropic?owner=personal");
@@ -320,6 +379,7 @@ test("a stopped connection of the person's own offers Reconnect in its group; th
     />,
   );
   const second = await open(theirs, "Model: GPT-6.2 Sol");
+  await showProvider(second.user, second.popup, /^Claude plan/);
   expect(within(second.popup).getByText("Sign in again.")).toBeTruthy();
   expect(
     within(second.popup).queryByRole("link", { name: "Reconnect" }),
