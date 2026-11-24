@@ -15,10 +15,19 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { BotRoster } from "@/components/bots/bot-roster";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import type { BotAttention } from "@/lib/bot-lifecycle/queries";
+import { authKeys } from "@/lib/auth/queries";
+import { rosterTagKey } from "@/lib/agents/roster-tags";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { approvalInboxResponse } from "./approvals-api";
 import {
@@ -120,10 +129,20 @@ function serving(
 
 let queryClient: QueryClient;
 beforeEach(() => {
+  localStorage.clear();
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
 });
+
+function signIn(id = "alice") {
+  queryClient.setQueryData(authKeys.currentUser(), {
+    id,
+    email: `${id}@example.com`,
+    role: "member",
+    onboarding: null,
+  });
+}
 
 function draw() {
   const rootRoute = createRootRoute();
@@ -463,4 +482,252 @@ test("with every Bot hidden it doesn't claim there are none", async () => {
   expect(await view.findByText("No Bots on your list")).toBeTruthy();
   expect(view.queryByText("No Bots yet")).toBeNull();
   expect(view.getByText("Hidden")).toBeTruthy();
+});
+
+test("search and ownership combine, empty results can be cleared", async () => {
+  serving(
+    [
+      bot({ id: "zoe", name: "Zoe", roleDescription: "Reviews invoices" }),
+      bot({
+        id: "ada",
+        name: "Ada",
+        title: "Writer",
+        mine: false,
+        canManage: true,
+      }),
+    ],
+    [],
+  );
+  const view = draw();
+  await view.findByText("Zoe");
+  const search = view.getByRole("searchbox", { name: "Search Bots" });
+  await userEvent.setup({ document }).type(search, "  INVOICES ");
+  expect(view.queryByText("Ada")).toBeNull();
+  expect(view.getByText("Zoe")).toBeTruthy();
+  fireEvent.change(view.getByLabelText("Show Bots"), {
+    target: { value: "shared" },
+  });
+  expect(view.getByText("No matching Bots")).toBeTruthy();
+  expect(view.queryByText("No Bots yet")).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Clear filters" }));
+  expect(view.getByText("Ada")).toBeTruthy();
+  expect(view.getByText("Zoe")).toBeTruthy();
+});
+
+test("sort changes DOM order within groups while pinned Bots stay first", async () => {
+  serving(
+    [
+      bot({ id: "pinned", name: "Pinned Bot", pinned: true }),
+      bot({ id: "zoe", name: "Zoe" }),
+      bot({ id: "ada", name: "Ada" }),
+    ],
+    [],
+  );
+  const view = draw();
+  await view.findByText("Zoe");
+  fireEvent.change(view.getByLabelText("Sort Bots"), {
+    target: { value: "name-asc" },
+  });
+  const names = () =>
+    [...view.container.querySelectorAll('a[href^="/bots/"]')].map(
+      (a) => a.textContent,
+    );
+  expect(names().map((name) => name?.replace("Title", ""))).toEqual([
+    "Pinned Bot",
+    "Ada",
+    "Zoe",
+  ]);
+  fireEvent.change(view.getByLabelText("Sort Bots"), {
+    target: { value: "name-desc" },
+  });
+  expect(names().map((name) => name?.replace("Title", ""))).toEqual([
+    "Pinned Bot",
+    "Zoe",
+    "Ada",
+  ]);
+});
+
+test("search reaches hidden Bots without unfolding them or showing a false empty account", async () => {
+  serving(
+    [bot({ id: "visible", name: "Visible" })],
+    [
+      bot({ id: "hidden", name: "Archived Analyst", hidden: true }),
+      bot({ id: "other", name: "Other Hidden", hidden: true }),
+    ],
+  );
+  const view = draw();
+  await view.findByText("Hidden");
+  await userEvent
+    .setup({ document })
+    .type(view.getByRole("searchbox"), "analyst");
+  expect(view.queryByText("No matching Bots")).toBeNull();
+  expect(view.queryByText("Archived Analyst")).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Show" }));
+  expect(view.getByText("Archived Analyst")).toBeTruthy();
+  expect(view.queryByText("Other Hidden")).toBeNull();
+  expect(view.queryByText("Visible")).toBeNull();
+  expect(view.getByRole("status").textContent).toContain("1 hidden");
+});
+
+test("personal tags save, survive remount, and filter alongside search and ownership", async () => {
+  signIn();
+  serving(
+    [
+      bot({ id: "ada", name: "Ada", mine: false, canManage: false }),
+      bot({ id: "zoe", name: "Zoe" }),
+    ],
+    [],
+  );
+  let view = draw();
+  await view.findByText("Ada");
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: "Edit tags for Ada" }));
+  expect(view.getByText(/Saved only for you in this browser/)).toBeTruthy();
+  await user.type(
+    view.getByLabelText("Tags, separated by commas"),
+    "Finance, finance, Client work",
+  );
+  await user.click(view.getByRole("button", { name: "Save tags" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  expect(
+    JSON.parse(localStorage.getItem(rosterTagKey("alice", "ada")) ?? "null"),
+  ).toEqual(["Finance", "Client work"]);
+  view.unmount();
+  view = draw();
+  await view.findByText("Finance");
+  fireEvent.change(view.getByLabelText("Filter by tag"), {
+    target: { value: "tag:finance" },
+  });
+  expect(view.queryByText("Zoe")).toBeNull();
+  await user.type(view.getByRole("searchbox"), "client");
+  expect(view.getByText("Ada")).toBeTruthy();
+  fireEvent.change(view.getByLabelText("Show Bots"), {
+    target: { value: "yours" },
+  });
+  expect(view.getByText("No matching Bots")).toBeTruthy();
+  await user.click(view.getByRole("button", { name: "Clear filters" }));
+  fireEvent.change(view.getByLabelText("Filter by tag"), {
+    target: { value: "untagged" },
+  });
+  expect(view.queryByText("Ada")).toBeNull();
+  expect(view.getByText("Zoe")).toBeTruthy();
+});
+
+test("cancelling edits leaves tags unchanged, removing all tags persists", async () => {
+  signIn();
+  localStorage.setItem(rosterTagKey("alice", "ada"), '["Finance"]');
+  serving([bot({ id: "ada", name: "Ada" })], []);
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await user.click(
+    await view.findByRole("button", { name: "Edit tags for Ada" }),
+  );
+  await user.click(view.getByLabelText("Tags, separated by commas"));
+  await user.keyboard("{Control>}a{/Control}{Backspace}");
+  await user.click(view.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  expect(view.getByText("Finance")).toBeTruthy();
+  await user.click(view.getByRole("button", { name: "Edit tags for Ada" }));
+  await user.click(view.getByLabelText("Tags, separated by commas"));
+  await user.keyboard("{Control>}a{/Control}{Backspace}");
+  await user.click(view.getByRole("button", { name: "Save tags" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  expect(localStorage.getItem(rosterTagKey("alice", "ada"))).toBeNull();
+  expect(view.queryByText("Finance")).toBeNull();
+});
+
+test("invalid tags keep the dialog open with feedback and do not overwrite saved tags", async () => {
+  signIn();
+  serving([bot({ id: "ada", name: "Ada" })], []);
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await user.click(
+    await view.findByRole("button", { name: "Edit tags for Ada" }),
+  );
+  await user.type(
+    view.getByLabelText("Tags, separated by commas"),
+    "x".repeat(41),
+  );
+  await user.click(view.getByRole("button", { name: "Save tags" }));
+  expect(view.getByRole("alert").textContent).toContain("40 characters");
+  expect(view.getByRole("dialog")).toBeTruthy();
+  expect(localStorage.getItem(rosterTagKey("alice", "ada"))).toBeNull();
+});
+
+test("tags from another account never appear in the roster", async () => {
+  signIn("bob");
+  localStorage.setItem(rosterTagKey("alice", "ada"), '["Private category"]');
+  serving([bot({ id: "ada", name: "Ada" })], []);
+  const view = draw();
+  await view.findByText("Ada");
+  expect(view.queryByText("Private category")).toBeNull();
+  expect(view.queryByRole("option", { name: "Private category" })).toBeNull();
+});
+
+test("another tab's tag changes refresh the roster and active filter", async () => {
+  signIn();
+  serving([bot({ id: "ada", name: "Ada" })], []);
+  const view = draw();
+  await view.findByText("Ada");
+  const key = rosterTagKey("alice", "ada");
+  localStorage.setItem(key, '["Finance"]');
+  act(() =>
+    window.dispatchEvent(
+      new StorageEvent("storage", { key, newValue: '["Finance"]' }),
+    ),
+  );
+  expect(view.getByText("Finance")).toBeTruthy();
+  fireEvent.change(view.getByLabelText("Filter by tag"), {
+    target: { value: "tag:finance" },
+  });
+  localStorage.removeItem(key);
+  act(() =>
+    window.dispatchEvent(new StorageEvent("storage", { key, newValue: null })),
+  );
+  expect(view.getByText("No matching Bots")).toBeTruthy();
+});
+
+test("a failed browser save keeps the editor open and never claims success", async () => {
+  signIn();
+  serving([bot({ id: "ada", name: "Ada" })], []);
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await user.click(
+    await view.findByRole("button", { name: "Edit tags for Ada" }),
+  );
+  await user.type(view.getByLabelText("Tags, separated by commas"), "Finance");
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    get() {
+      throw new Error("Denied");
+    },
+  });
+  try {
+    await user.click(view.getByRole("button", { name: "Save tags" }));
+    expect(view.getByRole("alert").textContent).toContain("Couldn't save");
+    expect(view.getByRole("dialog")).toBeTruthy();
+  } finally {
+    if (original) Object.defineProperty(globalThis, "localStorage", original);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
+
+test("changing account clears the previous account's selected tag label", async () => {
+  signIn();
+  localStorage.setItem(rosterTagKey("alice", "ada"), '["Private category"]');
+  serving([bot({ id: "ada", name: "Ada" })], []);
+  const view = draw();
+  await view.findByText("Ada");
+  fireEvent.change(view.getByLabelText("Filter by tag"), {
+    target: { value: "tag:private category" },
+  });
+  act(() => signIn("bob"));
+  await waitFor(() => expect(view.queryByText("Private category")).toBeNull());
+  expect(
+    view.queryByRole("option", { name: "Tag: private category" }),
+  ).toBeNull();
+  expect(
+    (view.getByLabelText("Filter by tag") as HTMLSelectElement).value,
+  ).toBe("all");
 });
