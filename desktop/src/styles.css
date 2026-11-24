@@ -3199,6 +3199,33 @@ main > .rail + .sheet > * {
   min-height: 0;
 }
 
+/*
+ * Connect your AI in the shell: every provider in view at the window's default size (1000x800)
+ * with the heading on the sidebar title's line. The rows a shade tighter and the gaps around the
+ * list a little smaller: 8 px in each row instead of 12, 6 px between them instead of 8, 16 px
+ * under the lede and above Continue instead of 20 and 24. Measured in the workbench (Inter, a Mac
+ * window), the step was 838 px in a page of 778, 60 over; it is now 764, 14 under.
+ */
+main > .rail + .sheet > fieldset.picker.providers {
+  gap: 6px;
+}
+
+main > .rail + .sheet > fieldset.picker.providers .tile {
+  padding-block: 8px;
+}
+
+main > .rail + .sheet:has(> fieldset.picker.providers) > .lede {
+  margin-bottom: 16px;
+}
+
+main
+  > .rail
+  + .sheet:has(> fieldset.picker.providers)
+  > .step-footer
+  > .row:first-child {
+  padding-top: 16px;
+}
+
 /* Narrower windows (the window's least is 720 px): a narrower sidebar, its rows' lines left out. */
 @media (max-width: 860px) {
   main:has(> .rail) {
