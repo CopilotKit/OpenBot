@@ -52,6 +52,7 @@ export const getGetOrganizationSettingsResponseMock =
     skillSharing: false,
     proactiveDailyRuns: 24,
     modelSelection: true,
+    lockedDown: false,
     context: {
       builtInModel: "openai/gpt-5.6-terra",
       directoryGroups: ["Finance", "Sales"],
@@ -87,6 +88,7 @@ export const getUpdateOrganizationSettingsResponseMock =
     skillSharing: false,
     proactiveDailyRuns: 24,
     modelSelection: true,
+    lockedDown: false,
     context: {
       builtInModel: "openai/gpt-5.6-terra",
       directoryGroups: ["Finance", "Sales"],

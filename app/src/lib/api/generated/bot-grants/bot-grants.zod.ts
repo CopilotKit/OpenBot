@@ -1113,7 +1113,7 @@ export const GetBotAppResponse = zod
   );
 
 /**
- * Give a Bot you own one of your apps: every action it has. Actions that change something still ask first wherever the approval rules say so. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, which it is unless an administrator closed it, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn't have yet are listed in given. Recorded on the audit trail.
+ * Give a Bot you own one of your apps: every action it has, or where the organization's apps are locked down (lockedDown in getOrganizationSettings), the actions that only read, or every action of Routines. Actions that change something still ask first wherever the approval rules say so. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, which it is unless an administrator closed it, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn't have yet are listed in given. Recorded on the audit trail.
  * @summary Give your own app to a Bot you own
  */
 
@@ -1174,7 +1174,7 @@ export const GiveBotAppBody = zod.object({
     .max(giveBotAppBodyActionsMax)
     .optional()
     .describe(
-      "The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app.",
+      "The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app, or the actions that only read where the organization's apps are locked down.",
     ),
 });
 
@@ -1237,7 +1237,7 @@ export const TakeBackBotAppResponse = zod.object({
 });
 
 /**
- * Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot every action of it, or confirm the app's shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can't be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.
+ * Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot every action of it (the actions that only read where the organization's apps are locked down), or confirm the app's shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can't be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.
  * @summary Turn an app on and give it to a Bot
  */
 
@@ -1298,7 +1298,7 @@ export const ApproveBotAppBody = zod.object({
     .max(approveBotAppBodyActionsMax)
     .optional()
     .describe(
-      "The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app.",
+      "The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app, or the actions that only read where the organization's apps are locked down.",
     ),
 });
 

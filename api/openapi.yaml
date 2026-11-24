@@ -2062,7 +2062,7 @@ paths:
         - Organization settings
       operationId: getOrganizationSettings
       summary: Read the organization's settings
-      description: 'Return the settings the organization''s administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Each organization has its own, and a new one starts with OpenBot''s defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization''s members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.'
+      description: 'Return the settings the organization''s administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day, choosing a model, and whether apps are open or locked down. Each organization has its own, and a new one starts with OpenBot''s defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization''s members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -2117,6 +2117,10 @@ paths:
               idle:
                 value:
                   inactiveComputerDays: 14
+              lockDown:
+                value:
+                  lockedDown: true
+                  takeBackWhatOpenGave: true
       responses:
         '200':
           description: Every setting, as saved.
@@ -5656,7 +5660,7 @@ paths:
         - Apps
       operationId: updateApp
       summary: Change who may give an app to a Bot, or give it to every Bot
-      description: 'Change who may give the app to a Bot: any Bot''s owner, for their own Bot (any), only an administrator (admin), or null for the default, which is any. Recorded on the audit trail. When owners stop deciding, the approvals to use the app''s shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.'
+      description: 'Change who may give the app to a Bot: any Bot''s owner, for their own Bot (any), only an administrator (admin), or null for the default (AppOwnerGrants). Recorded on the audit trail. When owners stop deciding, the approvals to use the app''s shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.'
       security:
         - webSession: []
         - appOAuth:
@@ -7478,7 +7482,7 @@ paths:
         - Bot grants
       operationId: giveBotApp
       summary: Give your own app to a Bot you own
-      description: 'Give a Bot you own one of your apps: every action it has. Actions that change something still ask first wherever the approval rules say so. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, which it is unless an administrator closed it, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn''t have yet are listed in given. Recorded on the audit trail.'
+      description: 'Give a Bot you own one of your apps: every action it has, or where the organization''s apps are locked down (lockedDown in getOrganizationSettings), the actions that only read, or every action of Routines. Actions that change something still ask first wherever the approval rules say so. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, which it is unless an administrator closed it, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn''t have yet are listed in given. Recorded on the audit trail.'
       security:
         - webSession: []
         - appOAuth:
@@ -7585,7 +7589,7 @@ paths:
         - Bot grants
       operationId: approveBotApp
       summary: Turn an app on and give it to a Bot
-      description: 'Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot every action of it, or confirm the app''s shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can''t be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.'
+      description: 'Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot every action of it (the actions that only read where the organization''s apps are locked down), or confirm the app''s shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can''t be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.'
       security:
         - webSession: []
         - appOAuth:
@@ -7954,7 +7958,7 @@ paths:
         - App access requests
       operationId: approveAppAccessRequest
       summary: Approve a request for an app
-      description: 'Do what a request asks: turn the app on, give the Bot its actions, or confirm the app''s shared account is connected. actions names the actions to give. Without it the Bot gets the actions the request names, or, for a request that names none, every action of the app. The request is answered before anything changes, so a second answer loses. A change that can''t be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.'
+      description: 'Do what a request asks: turn the app on, give the Bot its actions, or confirm the app''s shared account is connected. actions names the actions to give. Without it the Bot gets the actions the request names, or, for a request that names none, every action of the app (only the actions that only read where the organization''s apps are locked down). The request is answered before anything changes, so a second answer loses. A change that can''t be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.'
       security:
         - webSession: []
         - appOAuth:
@@ -25398,6 +25402,13 @@ components:
         modelSelection:
           type: boolean
           description: Whether people may pick the model a built-in Bot answers on, per conversation.
+        lockedDown:
+          type: boolean
+          description: 'Whether the organization''s apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, and the apps that need no sign-in are on for every Bot. True is locked down: an administrator approves access requests, one press gives an app''s read-only actions, and an app is open to Bot owners only once an administrator opens it. Switching changes what giving does from then on. It doesn''t take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.'
+        takeBackWhatOpenGave:
+          type: boolean
+          writeOnly: true
+          description: 'Sent with lockedDown true: also take back what OpenBot gave Bots by itself while the organization was open, which is a person''s connected apps on their own Bots and the apps that need no sign-in on every Bot. What an administrator or a Bot''s owner gave by hand stays. Recorded on the audit trail. Never needed to open up.'
     OrganizationSettings:
       allOf:
         - $ref: '#/components/schemas/OrganizationSettingValues'
@@ -25410,6 +25421,7 @@ components:
             - skillSharing
             - proactiveDailyRuns
             - modelSelection
+            - lockedDown
             - context
     OrganizationSettingsContext:
       type: object
@@ -28546,7 +28558,7 @@ components:
       enum:
         - any
         - admin
-      description: 'Who may give the app to a Bot: any Bot''s owner, for their own Bot, or only an administrator. Any Bot''s owner unless an administrator chose otherwise.'
+      description: 'Who may give the app to a Bot: any Bot''s owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot''s owner; where the organization''s apps are locked down, an administrator for any app that doesn''t run on each person''s own account.'
     AppTool:
       type: object
       description: One action an app offers.
@@ -28701,7 +28713,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AppOwnerGrants'
             - type: 'null'
-          description: What an administrator chose for ownerGrants, or null where the default, any, applies.
+          description: What an administrator chose for ownerGrants, or null where the default applies.
         everyBot:
           type: boolean
           description: Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.
@@ -28881,7 +28893,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AppOwnerGrants'
             - type: 'null'
-          description: Who may give the app to a Bot, or null for the default, which is any.
+          description: Who may give the app to a Bot, or null for the default (AppOwnerGrants).
         everyBot:
           type: boolean
           description: True gives the app to every Bot in the organization, and to every Bot made later. False takes back what giving it to every Bot gave. What a Bot was given any other way stays.
@@ -30300,7 +30312,7 @@ components:
           type: array
           minItems: 1
           maxItems: 50
-          description: The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app.
+          description: The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app, or the actions that only read where the organization's apps are locked down.
           items:
             type: string
             minLength: 1
@@ -30540,7 +30552,7 @@ components:
         actions:
           type: array
           maxItems: 2000
-          description: The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app.
+          description: The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app, or the actions that only read where the organization's apps are locked down.
           items:
             type: string
             minLength: 1
@@ -48224,6 +48236,7 @@ components:
         skillSharing: false
         proactiveDailyRuns: 24
         modelSelection: true
+        lockedDown: false
         context:
           builtInModel: openai/gpt-5.6-terra
           directoryGroups:

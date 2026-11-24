@@ -487,9 +487,11 @@ paths:
       operationId: giveBotApp
       summary: Give your own app to a Bot you own
       description: >-
-        Give a Bot you own one of your apps: every action it has. Actions
-        that change something still ask first wherever the approval rules
-        say so. They run on the account of whoever asks the Bot. The app must
+        Give a Bot you own one of your apps: every action it has, or where the
+        organization's apps are locked down (lockedDown in
+        getOrganizationSettings), the actions that only read, or every action
+        of Routines. Actions that change something still ask first wherever
+        the approval rules say so. They run on the account of whoever asks the Bot. The app must
         be turned on and open to owners, which it is unless an administrator
         closed it, and an administrator must not have turned this off for
         you. A Bot that
@@ -602,8 +604,9 @@ paths:
       summary: Turn an app on and give it to a Bot
       description: >-
         Do in one step what approving a request for this app on this Bot would
-        do: turn the app on if it is off, give the Bot every action of it, or
-        confirm the app's shared account is connected. With actions,
+        do: turn the app on if it is off, give the Bot every action of it (the
+        actions that only read where the organization's apps are locked
+        down), or confirm the app's shared account is connected. With actions,
         the Bot is given those actions of the app instead, including to a Bot
         that already has some of the app. The audit trail reads as a request
         filed and approved by the same administrator. When it can't be done
@@ -996,8 +999,9 @@ paths:
         Do what a request asks: turn the app on, give the Bot its actions, or
         confirm the app's shared account is connected. actions names the
         actions to give. Without it the Bot gets the actions the request
-        names, or, for a request that names none, every action of the app.
-        The request is answered before anything changes, so a second
+        names, or, for a request that names none, every action of the app
+        (only the actions that only read where the organization's apps are
+        locked down). The request is answered before anything changes, so a second
         answer loses. A change that can't be made puts the request back to
         wait, and the answer says what is missing. Recorded on the audit
         trail. Only an administrator may approve.
@@ -1846,7 +1850,9 @@ components:
           maxItems: 50
           description: >-
             The actions of the app to give the Bot, written <app id>/<action
-            name>. Left out, the Bot gets every action of the app.
+            name>. Left out, the Bot gets every action of the app, or the
+            actions that only read where the organization's apps are locked
+            down.
           items:
             type: string
             minLength: 1
@@ -1861,7 +1867,8 @@ components:
           maxItems: 2000
           description: >-
             The actions to give the Bot, written <app id>/<action name>. Left
-            out, the Bot gets every action of the app.
+            out, the Bot gets every action of the app, or the actions that only
+            read where the organization's apps are locked down.
           items:
             type: string
             minLength: 1

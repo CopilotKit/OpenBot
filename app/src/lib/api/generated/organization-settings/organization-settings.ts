@@ -269,7 +269,7 @@ export const getGetOrganizationSettingsUrl = (organizationId: string) => {
 };
 
 /**
- * Return the settings the organization's administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Each organization has its own, and a new one starts with OpenBot's defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization's members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.
+ * Return the settings the organization's administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day, choosing a model, and whether apps are open or locked down. Each organization has its own, and a new one starts with OpenBot's defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization's members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.
  * @summary Read the organization's settings
  */
 export const getOrganizationSettings = async (

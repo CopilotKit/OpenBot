@@ -199,7 +199,7 @@ export const GetDeploymentResponse = zod
   .describe("What this OpenBot offers and how people sign in to it.");
 
 /**
- * Return the settings the organization's administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Each organization has its own, and a new one starts with OpenBot's defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization's members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.
+ * Return the settings the organization's administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day, choosing a model, and whether apps are open or locked down. Each organization has its own, and a new one starts with OpenBot's defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization's members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.
  * @summary Read the organization's settings
  */
 
@@ -349,6 +349,17 @@ export const GetOrganizationSettingsResponse = zod
       .boolean()
       .describe(
         "Whether people may pick the model a built-in Bot answers on, per conversation.",
+      ),
+    lockedDown: zod
+      .boolean()
+      .describe(
+        "Whether the organization's apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, and the apps that need no sign-in are on for every Bot. True is locked down: an administrator approves access requests, one press gives an app's read-only actions, and an app is open to Bot owners only once an administrator opens it. Switching changes what giving does from then on. It doesn't take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.",
+      ),
+    takeBackWhatOpenGave: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Sent with lockedDown true: also take back what OpenBot gave Bots by itself while the organization was open, which is a person's connected apps on their own Bots and the apps that need no sign-in on every Bot. What an administrator or a Bot's owner gave by hand stays. Recorded on the audit trail. Never needed to open up.",
       ),
   })
   .describe(
@@ -531,6 +542,18 @@ export const UpdateOrganizationSettingsBody = zod
       .describe(
         "Whether people may pick the model a built-in Bot answers on, per conversation.",
       ),
+    lockedDown: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether the organization's apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, and the apps that need no sign-in are on for every Bot. True is locked down: an administrator approves access requests, one press gives an app's read-only actions, and an app is open to Bot owners only once an administrator opens it. Switching changes what giving does from then on. It doesn't take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.",
+      ),
+    takeBackWhatOpenGave: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Sent with lockedDown true: also take back what OpenBot gave Bots by itself while the organization was open, which is a person's connected apps on their own Bots and the apps that need no sign-in on every Bot. What an administrator or a Bot's owner gave by hand stays. Recorded on the audit trail. Never needed to open up.",
+      ),
   })
   .describe(
     "The organization's settings. Context is read only: it comes back with the settings and is never sent.",
@@ -678,6 +701,17 @@ export const UpdateOrganizationSettingsResponse = zod
       .boolean()
       .describe(
         "Whether people may pick the model a built-in Bot answers on, per conversation.",
+      ),
+    lockedDown: zod
+      .boolean()
+      .describe(
+        "Whether the organization's apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, and the apps that need no sign-in are on for every Bot. True is locked down: an administrator approves access requests, one press gives an app's read-only actions, and an app is open to Bot owners only once an administrator opens it. Switching changes what giving does from then on. It doesn't take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.",
+      ),
+    takeBackWhatOpenGave: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Sent with lockedDown true: also take back what OpenBot gave Bots by itself while the organization was open, which is a person's connected apps on their own Bots and the apps that need no sign-in on every Bot. What an administrator or a Bot's owner gave by hand stays. Recorded on the audit trail. Never needed to open up.",
       ),
   })
   .describe(

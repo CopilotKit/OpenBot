@@ -273,8 +273,8 @@ paths:
       summary: Change who may give an app to a Bot, or give it to every Bot
       description: >-
         Change who may give the app to a Bot: any Bot's owner, for their own
-        Bot (any), only an administrator (admin), or null for the default,
-        which is any. Recorded on the audit trail. When owners stop
+        Bot (any), only an administrator (admin), or null for the default
+        (AppOwnerGrants). Recorded on the audit trail. When owners stop
         deciding, the approvals to use the app's shared account that their
         gifts made are withdrawn. What they gave stays, for an administrator
         to keep or take back. everyBot gives the app to every Bot in the
@@ -814,8 +814,10 @@ components:
       enum: [any, admin]
       description: >-
         Who may give the app to a Bot: any Bot's owner, for their own Bot, or
-        only an administrator. Any Bot's owner unless an administrator chose
-        otherwise.
+        only an administrator. Unless an administrator chose, any Bot's
+        owner; where the organization's apps are locked down, an
+        administrator for any app that doesn't run on each person's own
+        account.
     AppTool:
       type: object
       description: One action an app offers.
@@ -983,7 +985,7 @@ components:
             - type: 'null'
           description: >-
             What an administrator chose for ownerGrants, or null where the
-            default, any, applies.
+            default applies.
         everyBot:
           type: boolean
           description: >-
@@ -1163,7 +1165,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AppOwnerGrants'
             - type: 'null'
-          description: Who may give the app to a Bot, or null for the default, which is any.
+          description: Who may give the app to a Bot, or null for the default (AppOwnerGrants).
         everyBot:
           type: boolean
           description: >-
