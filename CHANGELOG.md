@@ -321,6 +321,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **An app's Connect card shows once.** A reply that called two tools of an app you haven't
+  connected showed the same card twice. It now shows one card per app. When a later reply asks for
+  the same app again, its card moves down to that reply.
 - The composer's model picker names every model whole. On a phone, OpenBot's own model beside its
   Default tag was cut to "GPT-6…"; a long name now takes a second line.
 - **After a move to OpenBot Cloud you can tell where everything went.** OpenBot Desktop stays on the
