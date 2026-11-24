@@ -313,6 +313,9 @@ mod native {
         // `build()` returns: on a new machine WebView2 can take a minute (`crate::match_title_bar`
         // takes over from there).
         if COVERED.load(Ordering::SeqCst) == window.0 as isize {
+            // And without its title text: the window opens on setup, whose sidebar says OpenBot
+            // (`crate::window_title_shown`). The tint below redraws the frame.
+            crate::show_title_text_of(window.0 as isize, false);
             let dark = *PALETTE.lock().unwrap_or_else(|held| held.into_inner()) == super::DARK;
             crate::tint_title_bar_of(window.0 as isize, Some(dark));
         }
