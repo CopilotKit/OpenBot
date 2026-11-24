@@ -6,13 +6,9 @@ import {
   BOOKING_CALENDAR_ORIGIN,
   BUSINESS_URL,
 } from "../../shared/openbot-for-business";
-mock.module("./Mark", () => ({
-  Mark: ({ name }: { name: string }) => <span>{name}</span>,
-  ButtonMark: ({ id }: { id: string | null }) =>
-    id ? <img alt="" data-mark={id} /> : null,
-  MarkImage: ({ id, name }: { id: string; name: string }) => (
-    <img alt={name} data-mark={id} />
-  ),
+// Cloud marks are display-only here. Isolate them from other tests' shared Mark mocks.
+mock.module("./CloudMarks", () => ({
+  CloudMarks: () => null,
 }));
 const { BusinessBooker } = await import("./BusinessBooker");
 
