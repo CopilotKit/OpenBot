@@ -230,9 +230,24 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   to the Bot once you're in. On OpenBot Cloud that is the admin of their own organization. A card or
   a Bot's Apps row shown to an admin says what is missing, never to ask an admin. Where the press
   still can't go on, the card says "Couldn't get Notion ready for this Bot. Try again in a moment."
+- **Find any app from Connections, in the team edition too.** Connections listed only the apps
+  already added, its search filtered only those, and the wider directory was reachable only through
+  Admin, then Apps, then More apps. Connections now has Browse apps, and its search asks the
+  directory, showing apps nobody has added under Add an app. One press adds the app and connects
+  your account (a sign-in, a key form, or nothing for an app with no account) when you're an owner
+  or admin of the organization, which on OpenBot Cloud is usually you. A member's press asks an admin
+  to add it, and the request reads "Add Slack for everyone" in the admin's requests. Browse apps
+  opened from Connections does the same; Admin's own Browse apps still only adds. An owner or admin
+  also removes an app from its own page under Connections, with Admin's "Enable for this
+  organization" switch, so adding and removing never need Admin. A member isn't shown it.
 
 ### API
 
+- **Anybody signed in searches the app directory, and asks for an app with no Bot named.**
+  `listAppDirectory` answers the wider directory (`source=directory`) to every member, not only to
+  an admin. Only an admin adds from it. `createAppAccessRequest` takes `botId` as optional: left out,
+  the request is to add an app nobody has added yet, for everyone, its `kind` is `enable` and its
+  `botId` is null. `appId` is then the directory entry's slug.
 - **A person's own AI connection.** `getPersonalAiConnection`, `replacePersonalAiConnection` and
   `deletePersonalAiConnection` under `people/{personId}/ai-connection`, own only, on the new scopes
   `personal-ai-connection:read` and `personal-ai-connection:write`. The answer says which AI the

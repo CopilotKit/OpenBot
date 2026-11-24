@@ -113,7 +113,7 @@ export const ListAppAccessRequestsResponse = zod.object({
 });
 
 /**
- * Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app's state: turning it on, giving it to the Bot, or connecting its shared account. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask.
+ * Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app's state: turning it on, giving it to the Bot, or connecting its shared account. Leave botId out to ask for an app nobody has added yet, for everyone in the organization: the request is to turn it on, and its botId is null. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask, and anybody signed in may ask for an app alone.
  * @summary Ask an administrator for an app
  */
 
@@ -150,13 +150,19 @@ export const CreateAppAccessRequestBody = zod.object({
     .string()
     .min(1)
     .max(createAppAccessRequestBodyBotIdMax)
-    .regex(createAppAccessRequestBodyBotIdRegExp),
+    .regex(createAppAccessRequestBodyBotIdRegExp)
+    .optional()
+    .describe(
+      "The Bot the app is for. Left out, the request is for an app nobody has added yet, to turn it on for everyone.",
+    ),
   appId: zod
     .string()
     .min(1)
     .max(createAppAccessRequestBodyAppIdMax)
     .regex(createAppAccessRequestBodyAppIdRegExp)
-    .describe("The app's id, or its name."),
+    .describe(
+      "The app's id, or its name. For an app from the directory that nobody has added yet, the slug of its directory entry (the part of its entry id after directory:).",
+    ),
 });
 
 export const CreateAppAccessRequestResponse = zod

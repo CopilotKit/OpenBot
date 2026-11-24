@@ -63,6 +63,25 @@ export function requestAppAccessMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/**
+ * Ask an admin to add an app nobody has added yet, for everyone in the organization, with no Bot
+ * named. `app` is the directory entry's slug. A second press answers the request already waiting.
+ */
+export function requestAppMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (app: string): Promise<AppAccessRequest> =>
+      accessRequestOf(
+        await createAppAccessRequest(
+          organizationId(),
+          { appId: app },
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: "Couldn't send that request. Try again." },
+        ),
+      ),
+    onSettled: () => refresh(queryClient),
+  });
+}
+
 /** Withdraw one's own pending request. */
 export function cancelAppAccessRequestMutationOptions(
   queryClient: QueryClient,

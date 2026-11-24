@@ -16,6 +16,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { OrganizationAppSwitch } from "@/components/manage/organization-app-switch";
 import { PluginPage } from "@/components/manage/plugin-page";
 import {
   BrokeredAccountRow,
@@ -335,6 +336,33 @@ function AppConnectionPage({
   }).data;
   const isAdmin = isOrganizationAdmin(me?.role);
   const appNames = [key, server?.title ?? key];
+  /*
+   * ADMIN'S SWITCH, HERE TOO, for an organization's owner or admin in the team edition: the same row
+   * Admin draws for the app, so somebody who runs their own organization (OpenBot Cloud's usual case)
+   * removes an app where they added it, without opening Admin. A member is never shown it.
+   */
+  const role = useQuery(currentUserQueryOptions()).data?.role;
+  const removable =
+    paths.edition === "team" &&
+    isOrganizationAdmin(role) &&
+    server !== undefined;
+  /* In the card under the row above it, where the page has one. */
+  const switchRow =
+    removable && server ? (
+      <>
+        <Separator />
+        <OrganizationAppSwitch appId={server.id} title={server.title} />
+      </>
+    ) : null;
+  /* As a card of its own, where the page says what it is without one. */
+  const switchSection =
+    removable && server ? (
+      <PageSection>
+        <PageRows className="mt-0">
+          <OrganizationAppSwitch appId={server.id} title={server.title} />
+        </PageRows>
+      </PageSection>
+    ) : null;
 
   /*
    * THE SIGN-IN ON ARRIVAL, for an app OpenBot signs in to itself: one added by its address that
@@ -536,6 +564,7 @@ function AppConnectionPage({
                 </ItemDescription>
               </ItemContent>
             </Item>
+            {switchRow}
           </PageRows>
         </PageSection>
 
@@ -579,6 +608,7 @@ function AppConnectionPage({
           An admin connects {server.title} once as a shared account and gives it
           to Bots.
         </PageEmpty>
+        {switchSection}
       </PageShell>
     );
   }
@@ -637,6 +667,7 @@ function AppConnectionPage({
               provider={provider}
               title={server.title}
             />
+            {switchRow}
           </PageRows>
         </PageSection>
 
@@ -679,6 +710,7 @@ function AppConnectionPage({
         <PageEmpty icon={IconPlug} title="No account needed">
           {`Bots use ${app.title} as it is, the same for everybody. It's at ${app.vendor}.`}
         </PageEmpty>
+        {switchSection}
       </PageShell>
     );
   }
@@ -698,6 +730,7 @@ function AppConnectionPage({
             ? "Bots use one shared account for this app, the same for everybody."
             : "OpenBot has no app by that name."}
         </PageEmpty>
+        {switchSection}
       </PageShell>
     );
   }
@@ -803,6 +836,7 @@ function AppConnectionPage({
               )}
             </ItemActions>
           </Item>
+          {switchRow}
         </PageRows>
       </PageSection>
 

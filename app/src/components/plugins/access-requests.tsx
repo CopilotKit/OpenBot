@@ -91,7 +91,10 @@ export function askedFor(request: AppAccessRequest): string {
   const bot = request.botName ?? "a Bot";
   switch (request.kind) {
     case "enable":
-      return `Turn on ${request.appTitle} for ${bot}`;
+      // Asked from Connections, with no Bot named: the app, added for everyone.
+      return request.agentId === null
+        ? `Add ${request.appTitle} for everyone`
+        : `Turn on ${request.appTitle} for ${bot}`;
     case "grant":
       return `Give ${request.appTitle} to ${bot}`;
     case "connect_shared":

@@ -146,6 +146,7 @@ export const appAccessKeys = {
     ["plugins", "app-access", "bot", agentId, "app", app] as const,
   inbox: (app?: string) =>
     ["plugins", "app-access", "inbox", { app: app ?? null }] as const,
+  mine: ["plugins", "app-access", "mine"] as const,
   giveable: ["plugins", "app-access", "giveable"] as const,
 };
 
@@ -265,6 +266,36 @@ export function botAppQueryOptions(agentId: string, app: string) {
           fallback: `What ${app} is for this Bot could not be loaded.`,
         }),
       ),
+  });
+}
+
+/**
+ * The apps this person has asked an admin to add, still waiting: their own requests with no Bot named
+ * (`botId` null, kind `enable`), by the app each names. A member's list holds only their own, so this
+ * is read by a member, never an admin, whose list is everybody's.
+ */
+export function myAppRequestsQueryOptions(enabled: boolean) {
+  return queryOptions({
+    queryKey: appAccessKeys.mine,
+    queryFn: async ({ signal }): Promise<AppAccessRequest[]> => {
+      const requests = await everyPage(async (cursor) => {
+        const page = await listAppAccessRequests(
+          organizationId(),
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { signal, fallback: "Couldn't load your requests." },
+        );
+        return { items: page.appAccessRequests, nextCursor: page.nextCursor };
+      });
+      return requests
+        .map(accessRequestOf)
+        .filter(
+          (request) =>
+            request.status === "pending" &&
+            request.kind === "enable" &&
+            request.agentId === null,
+        );
+    },
+    enabled,
   });
 }
 
