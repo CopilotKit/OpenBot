@@ -966,55 +966,52 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           await page.screenshot({ path: `${shots}/welcome-on-${theme}.png` });
         }
         /*
-         * OpenBot for Business picked: what it adds, then Book a demo and its calendar, taller than
-         * the window. The page scrolls, never the window or the sidebar, and scrolled to it the
-         * calendar is whole inside the page, nothing cut at either edge. Self-Contained's line
-         * stays in the sidebar's foot, in view, wherever the page is scrolled to.
+         * OpenBot for Business picked: its page, the way it runs, Book a demo and what it adds, all
+         * of it inside the page with no scrollbar. Book a demo opens the booking step, its heading
+         * at the top and focused, and the calendar held to the room left, still with no scrollbar.
          */
         await page.getByText("Your own cloud or on-prem. Book a demo.").click();
         await page
-          .locator(
-            '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
-          )
+          .getByRole("button", { name: "Book a demo", exact: true })
           .waitFor();
         await page.waitForTimeout(200);
         if (shots)
           await page.screenshot({
             path: `${shots}/welcome-on-business-${theme}.png`,
           });
-        // Book a demo is in view as soon as Business is picked, and takes the page to the calendar.
-        const button = page.getByRole("button", {
-          name: "Book a demo",
-          exact: true,
-        });
-        const at = await button.boundingBox();
-        expect((at?.y ?? 760) + (at?.height ?? 0)).toBeLessThanOrEqual(760);
-        await button.click();
-        await page.waitForTimeout(800);
-        const jumped = await page.evaluate(() => {
-          const view = (
-            document.querySelector("main > .sheet") as HTMLElement
-          ).getBoundingClientRect();
-          const heading = document
-            .querySelector("#book-a-demo-title")
+        const business = await page.evaluate(() => {
+          const card = document.querySelector("main > .sheet") as HTMLElement;
+          const view = card.getBoundingClientRect();
+          const book = [...card.querySelectorAll("button")]
+            .find((button) => button.textContent === "Book a demo")
             ?.getBoundingClientRect();
-          const frame = document
-            .querySelector('iframe[title="Booking calendar"]')
+          const more = card
+            .querySelector(".business-all")
             ?.getBoundingClientRect();
           return {
-            heading:
-              !!heading &&
-              heading.top >= view.top &&
-              heading.top <= view.top + 40,
-            calendar: !!frame && frame.top < view.bottom - 300,
-            focused: document.activeElement?.id === "book-a-demo-title",
+            overflow: card.scrollHeight - card.clientHeight <= 0,
+            book: !!book && book.bottom <= view.bottom,
+            more: !!more && more.bottom <= view.bottom,
+            marks: card.querySelectorAll(".cloud-mark").length,
+            calendar: !!card.querySelector('iframe[title="Booking calendar"]'),
           };
         });
-        expect(jumped).toEqual({
-          heading: true,
-          calendar: true,
-          focused: true,
+        expect(business).toEqual({
+          overflow: true,
+          book: true,
+          more: true,
+          marks: 4,
+          calendar: false,
         });
+        await page
+          .getByRole("button", { name: "Book a demo", exact: true })
+          .click();
+        await page
+          .locator(
+            '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
+          )
+          .waitFor();
+        await page.waitForTimeout(200);
         if (shots)
           await page.screenshot({
             path: `${shots}/welcome-on-business-booker-${theme}.png`,
@@ -1025,65 +1022,48 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           ) as HTMLElement;
           const rail = document.querySelector("main > .rail") as HTMLElement;
           const view = card.getBoundingClientRect();
-          const element = document.querySelector(
-            'iframe[title="Booking calendar"]',
-          ) as HTMLElement;
-          // The calendar fits the card's visible area whole, scrolled to it.
-          element.scrollIntoView({ block: "center" });
-          const frame = element.getBoundingClientRect();
+          const frame = document
+            .querySelector('iframe[title="Booking calendar"]')
+            ?.getBoundingClientRect();
           const heading = document
             .querySelector("#book-a-demo-title")
             ?.getBoundingClientRect();
-          const calendar =
-            frame.height >= 320 &&
-            frame.top >= view.top &&
-            frame.bottom <= view.bottom;
-          // At the page's end, Self-Contained's line is where it was, in the sidebar's foot.
-          const foot = () =>
-            rail
-              .querySelector(":scope > .rail-foot > .this-computer-foot")
-              ?.getBoundingClientRect().top;
-          const before = foot();
-          card.scrollTop = card.scrollHeight;
-          const after = foot();
-          // Nothing in the page runs past its right edge.
-          const edge = card.getBoundingClientRect().right;
-          const wider = [...card.querySelectorAll("*")]
-            .filter(
-              (element) => element.getBoundingClientRect().right > edge + 0.5,
-            )
-            .map((element) => element.className);
           return {
             page: document.documentElement.scrollHeight <= window.innerHeight,
-            cardScrolls: card.scrollHeight > card.clientHeight + 1,
-            railScrolls: rail.scrollHeight > rail.clientHeight + 1,
+            overflow: card.scrollHeight - card.clientHeight <= 0,
             sideways: card.scrollWidth - card.clientWidth <= 0,
-            wider,
-            calendar,
-            // Its heading sits above it.
-            heading: !!heading && heading.bottom <= frame.top,
-            foot:
-              before !== undefined &&
-              before === after &&
-              before < window.innerHeight,
+            focused: document.activeElement?.id === "book-a-demo-title",
+            heading: !!heading && heading.top >= view.top,
+            // Under its heading, inside the page, as tall as Calendly's month needs at least.
+            calendar:
+              !!frame &&
+              !!heading &&
+              frame.top >= heading.bottom &&
+              frame.bottom <= view.bottom &&
+              frame.height >= 530,
+            features: !!document.querySelector(".business-features"),
+            // The sidebar never scrolls: only the page does, when anything does.
+            railScrolls: rail.scrollHeight > rail.clientHeight + 1,
           };
         });
         expect(booker).toEqual({
           page: true,
-          cardScrolls: true,
-          railScrolls: false,
+          overflow: true,
           sideways: true,
-          wider: [],
-          calendar: true,
+          focused: true,
           heading: true,
-          foot: true,
+          calendar: true,
+          features: false,
+          railScrolls: false,
         });
-        if (shots)
-          await page.screenshot({
-            path: `${shots}/welcome-on-business-end-${theme}.png`,
-          });
-        // Self-Contained opened from the sidebar's foot: what this computer needs and Install in the
-        // page, still without a scrollbar.
+        // Back: the features again.
+        await page.getByRole("button", { name: "Back", exact: true }).click();
+        await page.locator(".business-features").waitFor();
+        expect(
+          await page.locator('iframe[title="Booking calendar"]').count(),
+        ).toBe(0);
+        // Self-Contained opened at the foot: what this computer needs and Install, still without a
+        // scrollbar.
         await page
           .getByRole("button", { name: "Use OpenBot (Self-Contained)" })
           .click();
@@ -1130,90 +1110,159 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
   }
 
   /*
-   * OpenBot for Business books a call: either of its two ways to run, picked, shows the app's
-   * OpenBot for Business view, what it adds and the booking calendar, where it used to show an
-   * address field. Taller than the window, it scrolls in the page as any tall step does; the window
-   * and the sidebar never do, nothing runs off the page's side, and the calendar takes the height
-   * Calendly reports. Both ways are the sidebar's rows, picked by name.
+   * OpenBot for Business books a call: either of its two ways to run, picked, is its own page, what
+   * that way means, Book a demo and what it adds, where it used to show an address field. All of it
+   * fits the window at 1000x760, the default size less a title bar, and the booking step does too:
+   * the calendar takes the room left under its heading, never more than Calendly reports. At the
+   * window's least size, 720x560, the page may scroll, but Book a demo is in view.
    */
-  test("at 1000x760, OpenBot for Business shows its booker in the page, which scrolls, and no address field", async () => {
-    const page = await browser.newPage({
-      viewport: { width: 1000, height: 760 },
-    });
-    try {
-      await routeCalendar(page);
-      await open(page);
-      await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
-      const way = (name: string) =>
-        page.locator("main > .rail .tile-option", {
-          hasText: new RegExp(`^${name}`),
+  for (const [width, height] of [
+    [1000, 760],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, OpenBot for Business shows each way's page and books a demo as its own step, and no address field`, async () => {
+      const page = await browser.newPage({ viewport: { width, height } });
+      const roomy = width === 1000;
+      try {
+        await routeCalendar(page);
+        await open(page);
+        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+        const pick = async (way: "own-cloud" | "cloud") => {
+          await page
+            .locator(`label:has(input[value="business-${way}"])`)
+            .click();
+          await page.locator(".tile-option.chosen").waitFor();
+          await settled(page);
+        };
+        const shape = () =>
+          page.evaluate(() => {
+            const card = document.querySelector("main > .sheet") as HTMLElement;
+            const view = card.getBoundingClientRect();
+            const book = [...card.querySelectorAll("button")]
+              .find((button) => button.textContent === "Book a demo")
+              ?.getBoundingClientRect();
+            const wider = [...card.querySelectorAll("*")].filter(
+              (element) =>
+                element.getBoundingClientRect().right > view.right + 0.5,
+            );
+            return {
+              page: document.documentElement.scrollHeight <= window.innerHeight,
+              cardScrolls: card.scrollHeight > card.clientHeight + 1,
+              sideways: card.scrollWidth - card.clientWidth,
+              wider: wider.map((element) => element.className),
+              book: !!book && book.bottom <= view.bottom,
+              marks: card.querySelectorAll(".cloud-mark").length,
+              way: card.querySelector("#business-way")?.textContent,
+              rows: card.querySelectorAll(".business-row").length,
+              // From the rows' top hairline to the full list's last line, and whether that is in view.
+              ...(() => {
+                const rows = card
+                  .querySelector(".business-features")
+                  ?.getBoundingClientRect();
+                const all = card
+                  .querySelector(".business-all")
+                  ?.getBoundingClientRect();
+                return {
+                  features: rows && all ? Math.round(all.bottom - rows.top) : 0,
+                  inView: !!all && all.bottom <= view.bottom,
+                };
+              })(),
+            };
+          });
+        await pick("own-cloud");
+        const selfHosted = await shape();
+        await pick("cloud");
+        const cloud = await shape();
+        for (const [seen, way, marks] of [
+          [
+            selfHosted,
+            "Run it in your own VPC on AWS, Azure or GCP, or on-prem.",
+            4,
+          ],
+          [cloud, "We run OpenBot for you on OpenBot Cloud.", 0],
+        ] as const) {
+          expect(seen.page).toBe(true);
+          expect(seen.cardScrolls).toBe(!roomy);
+          expect(seen.sideways).toBeLessThanOrEqual(0);
+          expect(seen.wider).toEqual([]);
+          expect(seen.book).toBe(true);
+          expect(seen.way).toBe(way);
+          expect(seen.marks).toBe(marks);
+          expect(seen.rows).toBe(3);
+        }
+        // Everything fits at the default size: the rows and the full list, about 40% of the old
+        // lists' 900-odd pixels.
+        if (roomy) {
+          expect(cloud.features).toBeLessThanOrEqual(400);
+          expect([cloud.inView, selfHosted.inView]).toEqual([true, true]);
+        }
+        expect(
+          await page
+            .getByLabel("Your company's OpenBot address", { exact: true })
+            .count(),
+        ).toBe(0);
+        expect(
+          await page
+            .getByRole("button", { name: "Connect", exact: true })
+            .count(),
+        ).toBe(0);
+        expect(
+          await page.getByText("A full audit trail, with export").count(),
+        ).toBe(1);
+        expect(
+          await page.locator('iframe[title="Booking calendar"]').count(),
+        ).toBe(0);
+        // The booking step.
+        await page
+          .getByRole("button", { name: "Book a demo", exact: true })
+          .click();
+        await page
+          .locator(
+            '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
+          )
+          .waitFor();
+        await settled(page);
+        const booking = await page.evaluate(() => {
+          const card = document.querySelector("main > .sheet") as HTMLElement;
+          const frame = document.querySelector(
+            'iframe[title="Booking calendar"]',
+          ) as HTMLElement;
+          return {
+            page: document.documentElement.scrollHeight <= window.innerHeight,
+            cardScrolls: card.scrollHeight > card.clientHeight + 1,
+            sideways: card.scrollWidth - card.clientWidth,
+            frame: frame.getBoundingClientRect().height,
+            focused: document.activeElement?.id === "book-a-demo-title",
+          };
         });
-      await way("Self-Hosted").click();
-      await page.locator(".tile-option.chosen").waitFor();
-      await way("Cloud").click();
-      await page
-        .locator(
-          '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
-        )
-        .waitFor();
-      // At rest: a box measured during the page's entrance came back 659.99994 px tall.
-      await settled(page);
-      expect(
+        expect(booking.page).toBe(true);
+        expect(booking.sideways).toBeLessThanOrEqual(0);
+        expect(booking.focused).toBe(true);
+        if (roomy) {
+          // Held to the room left, which is less than the 660 the stand-in reports.
+          expect(booking.cardScrolls).toBe(false);
+          expect(booking.frame).toBeGreaterThanOrEqual(530);
+          expect(booking.frame).toBeLessThan(660);
+        } else {
+          // Too little room for Calendly's month: it takes what it reports, and the page scrolls.
+          expect(booking.cardScrolls).toBe(true);
+          expect(booking.frame).toBe(660);
+        }
+        // Back to the features, and the way to connect is still under the rows.
+        await page.getByRole("button", { name: "Back", exact: true }).click();
+        await page.locator(".business-features").waitFor();
+        await page.getByRole("button", { name: "Connect to it" }).click();
         await page
           .getByLabel("Your company's OpenBot address", { exact: true })
-          .count(),
-      ).toBe(0);
-      expect(
-        await page
-          .getByRole("button", { name: "Connect", exact: true })
-          .count(),
-      ).toBe(0);
-      expect(
-        await page.getByText("A full audit trail, with export").count(),
-      ).toBe(1);
-      const shape = await page.evaluate(() => {
-        const card = document.querySelector(
-          "main > .rail + .sheet",
-        ) as HTMLElement;
-        const rail = document.querySelector("main > .rail") as HTMLElement;
-        const frame = document.querySelector(
-          'iframe[title="Booking calendar"]',
-        ) as HTMLElement;
-        const wider = [...card.querySelectorAll("*")].filter(
-          (element) =>
-            element.getBoundingClientRect().right >
-            card.getBoundingClientRect().right + 0.5,
-        );
-        return {
-          page: document.documentElement.scrollHeight,
-          cardScrolls: card.scrollHeight > card.clientHeight + 1,
-          railScrolls: rail.scrollHeight > rail.clientHeight + 1,
-          sideways: card.scrollWidth - card.clientWidth,
-          wider: wider.map((element) => element.className),
-          frame: frame.getBoundingClientRect().height,
-        };
-      });
-      expect(shape.page).toBeLessThanOrEqual(760);
-      expect(shape.cardScrolls).toBe(true);
-      expect(shape.railScrolls).toBe(false);
-      expect(shape.sideways).toBeLessThanOrEqual(0);
-      expect(shape.wider).toEqual([]);
-      expect(shape.frame).toBe(660);
-      // The way to connect is still in the sidebar's foot, and leads to the address.
-      await page
-        .locator("main > .rail > .rail-foot")
-        .getByRole("button", { name: "Connect to it" })
-        .click();
-      await page
-        .getByLabel("Your company's OpenBot address", { exact: true })
-        .waitFor();
-      expect(
-        await page.locator('iframe[title="Booking calendar"]').count(),
-      ).toBe(0);
-    } finally {
-      await page.close();
-    }
-  }, 30_000);
+          .waitFor();
+        expect(
+          await page.locator('iframe[title="Booking calendar"]').count(),
+        ).toBe(0);
+      } finally {
+        await page.close();
+      }
+    });
+  }
 });
 
 /**

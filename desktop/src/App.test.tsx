@@ -15,6 +15,11 @@ import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { DOESNT_UPDATE_ITSELF } from "../../shared/desktop-updates";
+import {
+  BOOK_A_DEMO_LINE,
+  BUSINESS_FEATURE_GROUPS,
+  BUSINESS_FEATURES_MORE,
+} from "../../shared/openbot-for-business";
 import { DEFAULT_HARNESS } from "./harness";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
@@ -753,11 +758,12 @@ test("the first screen offers OpenBot (Self-Contained), then OpenBot for Busines
 });
 
 /*
- * OpenBot for Business books a call: picked, it shows what the app's OpenBot for Business view
- * shows, what it adds and the booking calendar, and never an address to type. Before, it replaced
- * Install with an address field and Connect.
+ * OpenBot for Business books a call. Each way picked is its own page: what that way means (the
+ * clouds' marks for Self-Hosted only), Book a demo, and every feature the app's dialog lists, in its
+ * three groups. No calendar and never an address to type. Book a demo opens the booking step: its
+ * heading takes the focus, the calendar loads there, and Back returns to the features.
  */
-test("picking OpenBot for Business shows what it adds and the booking calendar, and no address field", async () => {
+test("picking OpenBot for Business shows its way, what it adds and Book a demo, which opens the calendar as its own step", async () => {
   setupRootConfiguration("/tmp/business-booker", async () =>
     emptyConfiguration(),
   );
@@ -782,12 +788,14 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
   expect(
     view.queryByRole("heading", { name: "What this computer needs" }),
   ).toBeNull();
-  // What it adds, in the app's words.
+  const page = () => document.querySelector(".sheet") as HTMLElement;
+  // Cloud's way: we run it, and no clouds' marks on the page.
   expect(
-    view.getByText(
-      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
-    ),
+    view.getByText("We run OpenBot for you on OpenBot Cloud."),
   ).toBeTruthy();
+  expect(page().querySelectorAll(".cloud-mark")).toHaveLength(0);
+  // What it adds, in the app's words: its three groups, each summed up in a sentence, then every
+  // feature and "And tons more", all showing. No calendar yet.
   expect(
     view.getAllByRole("heading", { level: 3 }).map((h) => h.textContent),
   ).toEqual([
@@ -795,10 +803,44 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
     "Where your Bots work",
     "In control",
   ]);
-  expect(view.getByText("A computer for each Bot")).toBeTruthy();
-  expect(view.getByText("A full audit trail, with export")).toBeTruthy();
+  for (const group of BUSINESS_FEATURE_GROUPS) {
+    expect(view.getByText(group.summary)).toBeTruthy();
+  }
+  expect(
+    within(view.getByRole("list", { name: "Everything it adds" }))
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual([
+    ...BUSINESS_FEATURE_GROUPS.flatMap((group) =>
+      group.features.map((feature) => feature.title),
+    ),
+    BUSINESS_FEATURES_MORE,
+  ]);
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+  expectPlain(view);
+  // Self-Hosted: a company's own cloud or on-prem, with the clouds' marks.
+  const ownCloud = view.getByRole("radio", {
+    name: /^Self-Hosted/,
+  }) as HTMLInputElement;
+  await userEvent.click(ownCloud);
+  expect([business.checked, ownCloud.checked]).toEqual([false, true]);
+  expect(
+    view.getByText("Run it in your own VPC on AWS, Azure or GCP, or on-prem."),
+  ).toBeTruthy();
+  expect(
+    view.queryByText("We run OpenBot for you on OpenBot Cloud."),
+  ).toBeNull();
+  expect(page().querySelectorAll(".cloud-mark")).toHaveLength(4);
+  // Book a demo: the booking step, its heading focused, and the features gone.
+  await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
+  const heading = view.getByRole("heading", { name: "Book a demo" });
+  expect(document.activeElement).toBe(heading);
+  expect(
+    view.queryByRole("heading", { name: "OpenBot for Business" }),
+  ).toBeNull();
+  expect(view.queryByText("A full audit trail, with export")).toBeNull();
+  expect(view.getByText(BOOK_A_DEMO_LINE)).toBeTruthy();
   // The calendar: OpenBot for Business's Calendly event, as an inline embed, while it loads.
-  expect(view.getByRole("heading", { name: "Book a demo" })).toBeTruthy();
   const calendar = view.getByTitle("Booking calendar") as HTMLIFrameElement;
   const src = new URL(calendar.getAttribute("src") ?? "");
   expect(`${src.origin}${src.pathname}`).toBe(
@@ -820,14 +862,20 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
   expect(view.queryByText("Loading the calendar")).toBeNull();
   expect(calendar.style.height).toBe("640px");
   expectPlain(view);
-  // Self-Hosted, on a company's own cloud, books the same call on the same calendar.
-  const ownCloud = view.getByRole("radio", {
-    name: /^Self-Hosted/,
-  }) as HTMLInputElement;
-  await userEvent.click(ownCloud);
-  expect([business.checked, ownCloud.checked]).toEqual([false, true]);
-  expect(view.getByTitle("Booking calendar")).toBe(calendar);
-  expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
+  // Back: the features again, with Book a demo focused, and no calendar.
+  await userEvent.click(view.getByRole("button", { name: "Back" }));
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+  expect(view.getByText("A full audit trail, with export")).toBeTruthy();
+  expect(document.activeElement).toBe(
+    view.getByRole("button", { name: "Book a demo" }),
+  );
+  // The other way, picked while booking, opens on its features.
+  await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
+  await userEvent.click(business);
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+  expect(
+    view.getByText("We run OpenBot for you on OpenBot Cloud."),
+  ).toBeTruthy();
   // Self-Contained again: its needs and Install, as before.
   await userEvent.click(
     view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
@@ -848,6 +896,7 @@ test("a calendar that can't load gives way to Book a demo, which opens the OpenB
   });
   const view = await renderApp();
   await userEvent.click(view.getByRole("radio", { name: /^Cloud/ }));
+  await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
   // Blocked: the frame errors.
   await act(async () => {
     view.getByTitle("Booking calendar").dispatchEvent(new Event("error"));
@@ -890,6 +939,7 @@ test("offline, OpenBot for Business offers Book a demo in the browser straight a
   });
   try {
     await userEvent.click(view.getByRole("radio", { name: /^Cloud/ }));
+    await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
     expect(view.queryByTitle("Booking calendar")).toBeNull();
     expect(
       view.getByRole("link", { name: "Book a demo" }).getAttribute("href"),
@@ -1096,9 +1146,9 @@ test("Connect to it asks for an address in place of Install, and going back brin
     (view.getByLabelText("Your company's OpenBot address") as HTMLInputElement)
       .value,
   ).toBe("openbot.example.com");
-  // OpenBot for Business from here is its booker, and Connect to it goes back to the address.
+  // OpenBot for Business from here is its page, and Connect to it goes back to the address.
   await userEvent.click(business);
-  expect(view.getByTitle("Booking calendar")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Book a demo" })).toBeTruthy();
   expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
   await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   expect(
@@ -1497,9 +1547,16 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
       ].map((mark) => mark.getAttribute("data-mark")),
     ).toEqual(["aws", "azure", "google-cloud", "kubernetes"]);
     // OpenBot for Business books a demo, and Self-Contained's line stays at the sidebar's foot.
+    // Its one row is a company's own cloud or on-prem: the page says so, with the clouds' marks.
     await userEvent.click(radios[1] as HTMLInputElement);
     expect(radios[1]?.checked).toBe(true);
-    expect(view.getByTitle("Booking calendar")).toBeTruthy();
+    expect(
+      view.getByText(
+        "Run it in your own VPC on AWS, Azure or GCP, or on-prem.",
+      ),
+    ).toBeTruthy();
+    expect(document.querySelectorAll(".sheet .cloud-mark")).toHaveLength(4);
+    expect(view.queryByTitle("Booking calendar")).toBeNull();
     expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
     expect(
       view.queryByRole("button", { name: "Sign in to OpenBot Cloud" }),
@@ -1509,11 +1566,12 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
         .getByRole("button", { name: "Use OpenBot (Self-Contained)" })
         .closest(".rail-foot"),
     ).not.toBeNull();
-    // The calendar is below the lists: Book a demo, in view from the start, takes the person there.
+    // Book a demo opens the calendar as its own step, its heading focused.
     await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
     expect(document.activeElement).toBe(
       view.getByRole("heading", { name: "Book a demo" }),
     );
+    expect(view.getByTitle("Booking calendar")).toBeTruthy();
     // Connect to it, under OpenBot for Business: the address, who has it, and Connect, no row
     // picked.
     await userEvent.click(view.getByRole("button", { name: "Connect to it" }));

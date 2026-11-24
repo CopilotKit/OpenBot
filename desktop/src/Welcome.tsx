@@ -5,7 +5,8 @@ import {
   IconServer2,
 } from "@tabler/icons-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { BusinessBooker } from "./BusinessBooker";
+import { BusinessBooker, type BusinessWay } from "./BusinessBooker";
+import { CloudMarks } from "./CloudMarks";
 import { CloudSignIn, cloudAddress, cloudEnabled } from "./CloudSignIn";
 import { ConnectToOpenBot, useConnectToOpenBot } from "./ConnectToOpenBot";
 import {
@@ -13,9 +14,11 @@ import {
   earlyDownloadsMeasured,
   useEarlyDownloads,
 } from "./EarlyDownloads";
-import { MarkImage } from "./Mark";
-import { SetupRail } from "./Sections";
 import type { Problem } from "./Problem";
+import { SetupRail } from "./Sections";
+
+// The move screen draws the same marks on its OpenBot for Business row.
+export { CloudMarks };
 
 /** What the first choice is: OpenBot, whole, on this computer. */
 export const SELF_CONTAINED_SUMMARY =
@@ -59,14 +62,6 @@ const BUSINESS_CHOICES: readonly {
   },
 ];
 
-/** The clouds a company runs OpenBot for Business on, by their vendored marks (`shared/marks`). */
-const CLOUDS = [
-  { id: "aws", name: "AWS" },
-  { id: "azure", name: "Azure" },
-  { id: "google-cloud", name: "Google Cloud" },
-  { id: "kubernetes", name: "Kubernetes" },
-] as const;
-
 /**
  * The least a computer needs to run every part of OpenBot itself.
  *
@@ -96,8 +91,9 @@ export type Hosting = "this-computer" | "connect";
  * Self-Contained that is what this computer needs and why, which is that every part of OpenBot runs
  * on it, how long setup takes, and Install, and it fits the window's default size (1000×800, less a
  * title bar) with no scrollbar. For OpenBot Cloud it is Sign in to OpenBot Cloud (`CloudSignIn`).
- * For OpenBot for Business it is the app's OpenBot for Business view: what it adds and the booking
- * calendar (`BusinessBooker`), which scrolls in the card as any tall step does.
+ * For OpenBot for Business it is the picked way's page (`BusinessBooker`): what that way means, Book a
+ * demo, and what it adds, all in the window at its default size. Book a demo opens the booking
+ * calendar as a step of its own in the page.
  *
  * OpenBot Cloud shows only in a build that turns it on (`VITE_OPENBOT_CLOUD_ENABLED`, `cloudEnabled`).
  * There the screen steers to OpenBot Cloud and OpenBot for Business. They are the two rows, Cloud
@@ -256,13 +252,22 @@ export function Welcome({
       : shown === "cloud"
         ? { name: "OpenBot Cloud", line: CLOUD_SUMMARY }
         : shown === "business"
-          ? {
+          ? // Not where it runs: the page's next line says that, for the picked way.
+            {
               name: "OpenBot for Business",
-              line: cloudOn
-                ? BUSINESS_SUMMARY
-                : "For your whole team. Book a demo to see it.",
+              line: "For your whole team. Book a demo to see it.",
             }
           : { name: "OpenBot (Self-Contained)", line: SELF_CONTAINED_SUMMARY };
+  const pageHead = (
+    <header className="choice-head">
+      <h2>{head.name}</h2>
+      {head.line && <p>{head.line}</p>}
+    </header>
+  );
+  // OpenBot for Business's way, as its page says it. With Cloud on, its one row is a company's own
+  // cloud or on-prem: OpenBot Cloud is the row above it.
+  const way: BusinessWay =
+    cloudOn || businessWay === "own-cloud" ? "self-hosted" : "cloud";
   return (
     <>
       <SetupRail
@@ -417,16 +422,14 @@ export function Welcome({
         </fieldset>
       </SetupRail>
       <div className="sheet welcome">
-        <header className="choice-head">
-          <h2>{head.name}</h2>
-          {head.line && <p>{head.line}</p>}
-        </header>
+        {shown !== "business" && pageHead}
         {shown === "connect" ? (
           <ConnectToOpenBot connecting={connecting} onBack={back} />
         ) : shown === "cloud" ? (
           <CloudSignIn connecting={signingIn} focus={pickedNow} />
         ) : shown === "business" ? (
-          <BusinessBooker />
+          // Each way is its own page: picking the other one starts it from its features.
+          <BusinessBooker key={way} way={way} head={pageHead} />
         ) : (
           <SelfContained
             startDownloads={startDownloads}
@@ -516,19 +519,6 @@ function Install({
       </div>
       <EarlyDownloadsLine firstScreen />
     </>
-  );
-}
-
-/** The clouds OpenBot for Business runs on, by their marks. The move screen's row draws them too. */
-export function CloudMarks() {
-  return (
-    <span className="cloud-marks">
-      {CLOUDS.map((each) => (
-        <span className="cloud-mark" key={each.id}>
-          <MarkImage id={each.id} name={each.name} />
-        </span>
-      ))}
-    </span>
   );
 }
 
