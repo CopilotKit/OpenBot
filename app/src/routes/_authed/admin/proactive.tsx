@@ -62,6 +62,7 @@ import {
   type EnterpriseOverview,
   enterpriseOverviewQueryOptions,
 } from "@/lib/enterprise/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/proactive")({
@@ -141,7 +142,10 @@ export function CheckInsPage() {
         </PageSection>
       ) : overview.isPending ? null : overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load check-in settings. Try again in a moment.
+          {loadFailure(
+            overview.error,
+            "Couldn't load check-in settings. Try again in a moment.",
+          )}
         </p>
       ) : (
         <CheckInSettings data={overview.data} />
@@ -291,7 +295,10 @@ function Activity({
     >
       {metrics.isPending ? null : metrics.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load check-in activity. Try again in a moment.
+          {loadFailure(
+            metrics.error,
+            "Couldn't load check-in activity. Try again in a moment.",
+          )}
         </p>
       ) : (
         <>

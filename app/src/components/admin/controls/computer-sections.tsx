@@ -57,6 +57,7 @@ import {
   type NetworkPolicy,
   type NetworkScopeKind,
 } from "@/lib/enterprise/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { MISSING_TEAM, teamName } from "@/lib/teams/names";
 import { type TeamSummary, teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
@@ -266,7 +267,10 @@ function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
       </PageRows>
       {teams.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load teams. Try again in a moment.
+          {loadFailure(
+            teams.error,
+            "Couldn't load teams. Try again in a moment.",
+          )}
         </p>
       ) : null}
       {known.some(

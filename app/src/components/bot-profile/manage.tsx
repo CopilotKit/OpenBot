@@ -45,6 +45,7 @@ import {
   deploymentCapabilitiesQueryOptions,
   useOffersMemory,
 } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /**
@@ -106,7 +107,10 @@ function ResetDialog({
         <DialogBody className="mt-4 overflow-y-auto">
           {plan.isPending ? null : plan.error ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't check what a reset would delete. Try again.
+              {loadFailure(
+                plan.error,
+                "Couldn't check what a reset would delete. Try again.",
+              )}
             </p>
           ) : reset.isSuccess ? (
             <p className="text-sm">Done. {agent.name} starts fresh with you.</p>

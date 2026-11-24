@@ -22,6 +22,7 @@ import {
   type AppAccessRequest,
   appAccessInboxQueryOptions,
 } from "@/lib/app-access/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
@@ -59,7 +60,10 @@ export function AccessRequestsSection({ app }: { app?: string }) {
     return (
       <PageSection title="Requests">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load access requests. Try again in a moment.
+          {loadFailure(
+            inbox.error,
+            "Couldn't load access requests. Try again in a moment.",
+          )}
         </p>
       </PageSection>
     );

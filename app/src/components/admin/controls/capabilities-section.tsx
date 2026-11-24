@@ -44,6 +44,7 @@ import type {
   CapabilitySetting,
   EnterpriseOverview,
 } from "@/lib/enterprise/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { MISSING_TEAM } from "@/lib/teams/names";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
@@ -285,7 +286,10 @@ function OverridesDialog({
           </Select>
           {teams.error ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't load teams. Try again in a moment.
+              {loadFailure(
+                teams.error,
+                "Couldn't load teams. Try again in a moment.",
+              )}
             </p>
           ) : null}
           <p className="text-muted-foreground text-xs">

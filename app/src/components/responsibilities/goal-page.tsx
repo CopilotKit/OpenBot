@@ -56,6 +56,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { loadFailure } from "@/lib/load-failure";
 import { BotMarkdown, markdownComponents } from "@/lib/markdown";
 import { stopIfNeedsCard } from "@/lib/plan/queries";
 import {
@@ -624,7 +625,7 @@ function Runs({ goalId, channelId }: { goalId: string; channelId: string }) {
       ) : runs.error ? (
         <div className="mt-4 flex flex-wrap items-center gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load its runs. Try again.
+            {loadFailure(runs.error, "Couldn't load its runs. Try again.")}
           </p>
           <Button
             disabled={runs.isFetching}

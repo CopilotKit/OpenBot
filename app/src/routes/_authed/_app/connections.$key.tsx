@@ -51,6 +51,7 @@ import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useDropBrokerReturn } from "@/lib/connections/broker-return";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
 import { useBackAfterConnect } from "@/lib/plugins/connect-return";
@@ -488,8 +489,10 @@ function AppConnectionPage({
     return (
       <PageShell backButton={back} title={server?.title ?? key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this connection. Try again in a moment, or ask an admin
-          if it keeps happening.
+          {loadFailure(
+            connections.error,
+            "Couldn't load this connection. Try again in a moment, or ask an admin if it keeps happening.",
+          )}
         </p>
       </PageShell>
     );
@@ -504,8 +507,10 @@ function AppConnectionPage({
     return (
       <PageShell backButton={back} title={key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this app. Try again in a moment, or ask an admin if it
-          keeps happening.
+          {loadFailure(
+            [plugins.error, catalogue.error, setup.error],
+            "Couldn't load this app. Try again in a moment, or ask an admin if it keeps happening.",
+          )}
         </p>
       </PageShell>
     );

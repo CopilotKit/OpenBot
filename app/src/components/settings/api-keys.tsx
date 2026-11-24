@@ -36,6 +36,7 @@ import {
 import { type ApiKey, apiKeyListQueryOptions } from "@/lib/api-keys/queries";
 import { desktopConnectionQueryOptions } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { loadFailure } from "@/lib/load-failure";
 import {
   ONLY_ORGANIZATION,
   useOrganizationChoices,
@@ -118,7 +119,10 @@ export function ApiKeysPage() {
       <PageSection>
         {list.isPending ? null : list.error ? (
           <p className="text-destructive text-sm" role="alert">
-            Couldn't load your API keys. Try again in a moment.
+            {loadFailure(
+              list.error,
+              "Couldn't load your API keys. Try again in a moment.",
+            )}
           </p>
         ) : list.data.state === "unavailable" ? (
           <PageEmpty

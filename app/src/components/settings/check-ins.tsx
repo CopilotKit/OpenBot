@@ -10,6 +10,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
+import { unavailableSaid } from "@/lib/load-failure";
 import { proactiveAllowedQueryOptions } from "@/lib/proactive";
 import {
   saveUserPreferencesMutationOptions,
@@ -42,9 +43,12 @@ export function CheckInsSection() {
   return (
     <PageSection>
       {preferences.isPending ? null : preferences.error ? (
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your check-ins. Try again in a moment.
-        </p>
+        // OpenBot saying why it isn't answering is said once, by the list above, for the whole page.
+        unavailableSaid(preferences.error) ? null : (
+          <p className="mt-4 text-destructive text-sm" role="alert">
+            Couldn't load your check-ins. Try again in a moment.
+          </p>
+        )
       ) : (
         <PageRows>
           <Item size="sm">

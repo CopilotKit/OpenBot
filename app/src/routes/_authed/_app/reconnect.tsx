@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { appsQueryOptions } from "@/lib/apps/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { botList, type MovedApp } from "@/lib/moves/moved-apps";
 import { clearReconnectReturn, useMovedApps } from "@/lib/moves/use-moved-apps";
 import { searchTextEntry } from "@/lib/search-text";
@@ -69,7 +70,10 @@ function ReconnectPage() {
       <PageShell description={DESCRIPTION} title={TITLE}>
         <div className="flex flex-col items-start gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load the apps from your move. Try again in a moment.
+            {loadFailure(
+              moved.error,
+              "Couldn't load the apps from your move. Try again in a moment.",
+            )}
           </p>
           <Button
             disabled={moved.retrying}

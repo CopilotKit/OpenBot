@@ -61,6 +61,7 @@ import {
   deploymentCapabilitiesQueryOptions,
   useNoBotComputers,
 } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   RestoreComputerDialog,
@@ -203,7 +204,10 @@ export function ComputersPage({
    * instead, because the top of this page is a long scroll away from them.
    */
   const problem = fleet.error
-    ? "Couldn't load the computers. Try again in a moment."
+    ? loadFailure(
+        fleet.error,
+        "Couldn't load the computers. Try again in a moment.",
+      )
     : null;
   const hostProblem = hostAccess.error
     ? hostAccess.error.message

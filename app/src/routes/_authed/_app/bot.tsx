@@ -27,6 +27,7 @@ import { useBotThread } from "@/lib/copilot/bot-thread";
 import { LiveThreadUpdates } from "@/lib/copilot/live-thread-updates";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
 import { useNoBotComputers } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { searchTextEntry } from "@/lib/search-text";
 
 export const Route = createFileRoute("/_authed/_app/bot")({
@@ -80,6 +81,7 @@ function RouteComponent() {
   const agent = search.agent === "" ? undefined : search.agent;
   const {
     data: agents,
+    error,
     isError,
     isPending,
   } = useQuery(agentListQueryOptions());
@@ -90,6 +92,7 @@ function RouteComponent() {
     Boolean(agent) && agents !== undefined && listedBot === undefined;
   const {
     data: detail,
+    error: detailError,
     isError: isDetailError,
     isPending: isDetailPending,
   } = useQuery({
@@ -107,7 +110,10 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your Bots. Try again in a moment.
+          {loadFailure(
+            error,
+            "Couldn't load your Bots. Try again in a moment.",
+          )}
         </p>
       </div>
     );
@@ -116,7 +122,10 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot. Try again in a moment.
+          {loadFailure(
+            detailError,
+            "Couldn't load this Bot. Try again in a moment.",
+          )}
         </p>
       </div>
     );

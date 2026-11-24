@@ -23,6 +23,7 @@ import {
   isChannelSearchable,
   normalizeChannelSearch,
 } from "@/lib/channels/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
@@ -277,7 +278,7 @@ function SearchResults({
         <div className="px-2 py-3 text-center">
           {results.isFetchNextPageError ? (
             <p role="alert" className="mb-2 text-xs text-muted-foreground">
-              Couldn't load more results.
+              {loadFailure(results.error, "Couldn't load more results.")}
             </p>
           ) : null}
           <Button

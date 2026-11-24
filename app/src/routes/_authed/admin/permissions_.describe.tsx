@@ -19,6 +19,7 @@ import {
   translateCapabilityChanges,
 } from "@/lib/capability-changes/translate";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
 
@@ -150,7 +151,10 @@ function DescribePermissionsPage() {
             ) : null}
             {teams.error ? (
               <p className="text-destructive text-sm" role="alert">
-                Couldn't load teams. Try again in a moment.
+                {loadFailure(
+                  teams.error,
+                  "Couldn't load teams. Try again in a moment.",
+                )}
               </p>
             ) : null}
             {changes.length > 0 && teams.data ? (

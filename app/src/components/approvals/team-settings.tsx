@@ -41,6 +41,7 @@ import {
   teamApprovalSettingsMutationOptions,
   updateTeamApprovalRuleMutationOptions,
 } from "@/lib/approvals";
+import { loadFailure } from "@/lib/load-failure";
 import { reviewerGuidanceQueryOptions } from "@/lib/reviewer-guidance/queries";
 import { queryClient } from "@/query-client";
 import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
@@ -145,7 +146,10 @@ export function TeamApprovalSettings() {
                   {guidance.isPending
                     ? null
                     : guidance.error
-                      ? "Couldn't load the guidance."
+                      ? loadFailure(
+                          guidance.error,
+                          "Couldn't load the guidance.",
+                        )
                       : (guidance.data ??
                         "None. Tell the reviewer what your organization needs a person for.")}
                 </ItemDescription>

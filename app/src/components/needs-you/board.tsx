@@ -13,6 +13,7 @@ import { TaskBoardRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { loadFailure } from "@/lib/load-failure";
 import {
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
@@ -212,7 +213,12 @@ function ReadFailureNotice({
       data-needs-you-failure={what}
       role="alert"
     >
-      <p className="text-sm">Couldn't load {what}. Some may be missing here.</p>
+      <p className="text-sm">
+        {loadFailure(
+          failure.error,
+          `Couldn't load ${what}. Some may be missing here.`,
+        )}
+      </p>
       <Button
         disabled={failure.retrying}
         onClick={failure.retry}

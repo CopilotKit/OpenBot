@@ -23,6 +23,11 @@ import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import { BrandName } from "@/components/edition/brand-name";
 import { navigationRender } from "@/components/edition/team-features-dialog";
+import {
+  COMMAND_MENU_KEYS,
+  openCommandMenu,
+  useBeforeCommandNavigate,
+} from "@/components/navigation/command-menu";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
@@ -35,11 +40,7 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import {
-  COMMAND_MENU_KEYS,
-  openCommandMenu,
-  useBeforeCommandNavigate,
-} from "@/components/navigation/command-menu";
+import { loadFailure } from "@/lib/load-failure";
 import { useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
@@ -49,11 +50,11 @@ import { MainChatLink, NewChatLink } from "./links";
 import {
   Divider,
   ErrorNotice,
-  LinkRow,
   FuseButton,
   FuseLinkButton,
   FuseSheet,
   fuseText,
+  LinkRow,
 } from "./ui";
 
 /**
@@ -136,7 +137,12 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
           />
         </label>
         {channels.isPending ? null : channels.error ? (
-          <ErrorNotice error="Couldn't load your conversations." />
+          <ErrorNotice
+            error={loadFailure(
+              channels.error,
+              "Couldn't load your conversations.",
+            )}
+          />
         ) : shown.length === 0 ? (
           <p className={fuseText.muted}>
             {searching

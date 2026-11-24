@@ -49,6 +49,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { deleteQuestion } from "@/lib/delete-question";
+import { loadFailure } from "@/lib/load-failure";
 import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { routineDoes } from "@/lib/routines/merged";
@@ -177,7 +178,7 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
       ) : runs.error ? (
         <div className="mt-4 flex flex-wrap items-center gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load its runs. Try again.
+            {loadFailure(runs.error, "Couldn't load its runs. Try again.")}
           </p>
           <Button
             disabled={runs.isFetching}

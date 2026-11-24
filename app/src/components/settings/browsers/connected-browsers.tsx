@@ -25,6 +25,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { loadFailure } from "@/lib/load-failure";
 import { revokeRecorderConnectionMutationOptions } from "@/lib/recorder/mutations";
 import { recorderConnectionsQueryOptions } from "@/lib/recorder/queries";
 import { relativeTime } from "@/lib/relative-time";
@@ -50,7 +51,10 @@ export function ConnectedBrowsers({
     <PageSection title="Connected browsers">
       {connections.isPending ? null : connections.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your connected browsers. Try again in a moment.
+          {loadFailure(
+            connections.error,
+            "Couldn't load your connected browsers. Try again in a moment.",
+          )}
         </p>
       ) : connections.data.connections.length === 0 ? (
         <PageEmpty>No browsers connected yet.</PageEmpty>

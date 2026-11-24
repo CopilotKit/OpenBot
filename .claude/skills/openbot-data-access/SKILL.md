@@ -388,6 +388,14 @@ factories already hold.
   being signed in is an answer there rather than a failure.
 - **The server returns no `error` field**: `client` falls back to the `fallback` option. Name the
   entity in it ("Learning settings could not be loaded."). Do not print a status code to a person.
+- **A screen's own load-failure sentence**: pass it through `loadFailure(query.error, "Couldn't load
+  your …")` (`lib/load-failure.ts`). A 503 that carries the server's sentence ("OpenBot is moving this
+  organization. Try again in a moment.") is shown in its words, and the query client asks the read
+  again once by itself after its `Retry-After`. Any other failure keeps the screen's sentence.
+- **A refusal that may mean the person left the organization** (404 `ORGANIZATION_NOT_FOUND`, or a 403
+  with no code): handled once for the whole app. The query client reads their organizations again, and
+  when the one they work in is gone the app moves them to another with a notice
+  (`lib/organizations/left.ts`). A screen adds nothing for it.
 - **A refusal arrives as a thrown `Error` instead of a value**: the call site used `client` where it
   needed `tryClient`. The gateway declining is the product working, not a fault.
 - **The server rejects a body it should accept, or reads it as a string**: something stringified

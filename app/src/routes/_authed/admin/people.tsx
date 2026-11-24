@@ -39,12 +39,13 @@ import { Switch } from "@/components/ui/switch";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { terminateMemberComputersMutationOptions } from "@/lib/enterprise/mutations";
+import { loadFailure } from "@/lib/load-failure";
+import { useCurrentOrganizationId } from "@/lib/organizations/current";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
 import {
   setPersonAccessMutationOptions,
   setPersonRoleMutationOptions,
 } from "@/lib/people/mutations";
-import { useCurrentOrganizationId } from "@/lib/organizations/current";
-import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { type Person, peopleListQueryOptions } from "@/lib/people/queries";
 import { queryClient } from "@/query-client";
 
@@ -203,7 +204,10 @@ function PeoplePage() {
 
         {people.isPending ? null : people.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load people. Try again in a moment.
+            {loadFailure(
+              people.error,
+              "Couldn't load people. Try again in a moment.",
+            )}
           </p>
         ) : rows.length === 0 ? (
           <PageEmpty

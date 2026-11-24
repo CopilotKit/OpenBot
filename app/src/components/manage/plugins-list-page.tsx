@@ -39,6 +39,7 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { mayAddApps } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   directoryProvider,
@@ -201,7 +202,10 @@ export function PluginsListPage({
       {plugins.isPending || catalogue.isPending ? null : plugins.error ||
         catalogue.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load apps. Try again in a moment.
+          {loadFailure(
+            [plugins.error, catalogue.error],
+            "Couldn't load apps. Try again in a moment.",
+          )}
         </p>
       ) : (
         <>

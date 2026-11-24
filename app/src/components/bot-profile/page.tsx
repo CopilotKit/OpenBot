@@ -4,6 +4,7 @@ import { BotProfile } from "@/components/bot-profile/profile";
 import { BotSettingsRows } from "@/components/bot-profile/settings-rows";
 import { useBot } from "@/components/bot-profile/use-bot-reads";
 import { PageShell } from "@/components/layout/page-shell";
+import { loadFailure } from "@/lib/load-failure";
 
 /** A Bot's own page: its profile, its settings and what can be done to it. */
 export function BotProfileRoutePage({ agentId }: { agentId: string }) {
@@ -18,7 +19,10 @@ export function BotProfileRoutePage({ agentId }: { agentId: string }) {
     >
       {agent.isPending ? null : agent.error ? (
         <p className="mt-6 text-destructive text-sm" role="alert">
-          Couldn't open this Bot. It may not be shared with you.
+          {loadFailure(
+            agent.error,
+            "Couldn't open this Bot. It may not be shared with you.",
+          )}
         </p>
       ) : (
         <BotProfile

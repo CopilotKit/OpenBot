@@ -25,13 +25,6 @@ import {
 } from "@/components/layout/page-shell";
 import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { ProposalDialog } from "@/components/learning/proposal-dialog";
-import {
-  containerIdFor,
-  containerName,
-  containerNameLimit,
-  containerTitle,
-  skillTitle,
-} from "@/lib/learning/display";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -54,6 +47,13 @@ import { Separator } from "@/components/ui/separator";
 import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
+  containerIdFor,
+  containerName,
+  containerNameLimit,
+  containerTitle,
+  skillTitle,
+} from "@/lib/learning/display";
+import {
   createLearningContainer,
   type LearningParticipation,
   reviewLearningProposalMutationOptions,
@@ -73,6 +73,7 @@ import {
   learningRunsQueryOptions,
   learningSettingsQueryOptions,
 } from "@/lib/learning/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useCurrentOrganizationName } from "@/lib/organizations/queries";
 import { queryClient as appQueryClient } from "@/query-client";
 
@@ -394,8 +395,10 @@ export function LearningPage() {
               </legend>
               {(agents.error || hiddenAgents.error) && (
                 <p role="alert" className="text-destructive">
-                  Couldn't load the Bot list. Saved settings for each Bot are
-                  below.
+                  {loadFailure(
+                    [agents.error, hiddenAgents.error],
+                    "Couldn't load the Bot list. Saved settings for each Bot are below.",
+                  )}
                 </p>
               )}
               {botIds.map((id) => {

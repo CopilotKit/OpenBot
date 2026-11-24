@@ -177,18 +177,45 @@ export class ClientError extends Error {
    * such as the rule that refused a Bot's action on its computer.
    */
   readonly body: Record<string, unknown> | undefined;
+  /**
+   * The server's own sentence, when it sent one: `error` today, `detail` in problem details. Undefined
+   * when the message is the caller's fallback.
+   */
+  readonly said: string | undefined;
+  /** How long the server asked to be left before it is asked again (`Retry-After`), when it said. */
+  readonly retryAfterMs: number | undefined;
   constructor(
     message: string,
     status: number,
     code?: string,
     body?: Record<string, unknown>,
+    retryAfterMs?: number,
   ) {
     super(message);
     this.name = "ClientError";
     this.status = status;
     this.code = code;
     this.body = body;
+    this.said =
+      typeof body?.error === "string"
+        ? body.error
+        : typeof body?.detail === "string"
+          ? body.detail
+          : undefined;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+/**
+ * `Retry-After` as milliseconds from now: a number of seconds, or a date (RFC 9110). Undefined when
+ * there is none, or it is neither.
+ */
+function retryAfterOf(response: Response): number | undefined {
+  const value = response.headers.get("Retry-After")?.trim();
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
 }
 
 /**
@@ -223,6 +250,7 @@ async function refusal(
     body && typeof body === "object" && !Array.isArray(body)
       ? (body as Record<string, unknown>)
       : undefined,
+    retryAfterOf(response),
   );
   /*
    * A run refused for want of a plan, from whichever screen asked for it: the one dialog that says

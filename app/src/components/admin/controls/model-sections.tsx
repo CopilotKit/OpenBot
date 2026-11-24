@@ -57,6 +57,7 @@ import {
   enterpriseOverviewQueryOptions,
   modelUsageQueryOptions,
 } from "@/lib/enterprise/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { markFor } from "@/lib/marks";
 import { effortLabel } from "@/lib/models/effort";
 import { modelLabel, modelNamer } from "@/lib/models/names";
@@ -127,7 +128,10 @@ export function ProviderSection() {
       >
         {connection.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load the AI connection. Try again in a moment.
+            {loadFailure(
+              connection.error,
+              "Couldn't load the AI connection. Try again in a moment.",
+            )}
           </p>
         ) : connection.data === null ? (
           // An OpenBot older than the AI connection: what the model listing says serves it.
@@ -248,7 +252,10 @@ function CatalogueProviderRow() {
   if (available.error)
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load the provider. Try again in a moment.
+        {loadFailure(
+          available.error,
+          "Couldn't load the provider. Try again in a moment.",
+        )}
       </p>
     );
   return <ProviderRow listing={available.data} />;
@@ -344,7 +351,7 @@ export function ModelChoiceSection() {
         allowed={
           allowlist && allowlistNarrows(allowlist) ? allowlist.models : null
         }
-        failed={overview.error !== null}
+        failed={overview.error}
       />
     );
   // Open unless an admin narrowed it: one person, or a team whose allowlist narrows nothing.
@@ -373,7 +380,10 @@ export function ModelChoiceSection() {
     >
       {overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load these settings. Try again in a moment.
+          {loadFailure(
+            overview.error,
+            "Couldn't load these settings. Try again in a moment.",
+          )}
         </p>
       ) : (
         <PageRows>
@@ -415,7 +425,8 @@ function OwnModelsChoice({
 }: {
   /** The models an admin allowed, when the allowlist narrows anything. Null while it is open. */
   allowed: readonly string[] | null;
-  failed: boolean;
+  /** Why the settings couldn't be read, or null when they were. */
+  failed: unknown;
 }) {
   return (
     <PageSection
@@ -428,7 +439,10 @@ function OwnModelsChoice({
     >
       {failed ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load these settings. Try again in a moment.
+          {loadFailure(
+            failed,
+            "Couldn't load these settings. Try again in a moment.",
+          )}
         </p>
       ) : (
         <PageRows>
@@ -889,7 +903,10 @@ export function ModelUsageSection({ team }: { team: boolean }) {
     >
       {usage.isPending ? null : usage.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load model usage. Try again in a moment.
+          {loadFailure(
+            usage.error,
+            "Couldn't load model usage. Try again in a moment.",
+          )}
         </p>
       ) : usage.data.summary.length === 0 ? (
         <PageEmpty icon={IconChartBar} title="No recent runs">

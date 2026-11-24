@@ -73,6 +73,7 @@ import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { keyedLookup } from "@/lib/lookup";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
@@ -652,11 +653,14 @@ function RouteComponent() {
            */
           <div className="mt-4 flex flex-col items-start gap-3" role="alert">
             <p className="text-destructive text-sm">
-              {edition === "team"
-                ? "Couldn't load your connections. Try again, or ask an admin if it keeps happening."
-                : edition === "personal"
-                  ? "Couldn't load your connections. Try again, or check Setup if it keeps happening."
-                  : "Couldn't load your connections. Try again."}
+              {loadFailure(
+                [...appReads.map((read) => read.error), connections.error],
+                edition === "team"
+                  ? "Couldn't load your connections. Try again, or ask an admin if it keeps happening."
+                  : edition === "personal"
+                    ? "Couldn't load your connections. Try again, or check Setup if it keeps happening."
+                    : "Couldn't load your connections. Try again.",
+              )}
             </p>
             <div className="flex gap-2">
               <Button
@@ -737,8 +741,10 @@ function RouteComponent() {
         )}
         {links.error || providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load GitHub and Slack, so they aren't listed. Try again in
-            a moment.
+            {loadFailure(
+              [links.error, providers.error],
+              "Couldn't load GitHub and Slack, so they aren't listed. Try again in a moment.",
+            )}
           </p>
         ) : null}
       </PageSection>

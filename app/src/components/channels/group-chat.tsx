@@ -25,6 +25,7 @@ import {
   groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
+import { loadFailure } from "@/lib/load-failure";
 import {
   BotMarkdown,
   markdownComponents,
@@ -34,8 +35,8 @@ import {
 import { newId } from "@/lib/new-id";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
-import { SentFileCard } from "./sent-file-card";
 import { Composer, toAgentOptions } from "./composer";
+import { SentFileCard } from "./sent-file-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
 
 /**
@@ -145,7 +146,10 @@ export function GroupChat({ channelId }: { channelId: string }) {
         role="alert"
       >
         <p className="text-sm text-destructive">
-          Couldn't load this conversation. Try again.
+          {loadFailure(
+            group.error,
+            "Couldn't load this conversation. Try again.",
+          )}
         </p>
         <Button
           disabled={group.isFetching}
