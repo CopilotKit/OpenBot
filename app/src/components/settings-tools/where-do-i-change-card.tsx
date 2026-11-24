@@ -1,4 +1,4 @@
-import { IconArrowUpRight, IconCompass } from "@tabler/icons-react";
+import { IconChevronRight, IconCompass } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import type { SettingsToolCardProps } from "./registry";
 import { SettingsReadCard } from "./settings-read-card";
@@ -52,9 +52,9 @@ export function WhereDoIChangeCard({
                     {screen.about}
                   </span>
                 </span>
-                <IconArrowUpRight
+                <IconChevronRight
                   aria-hidden
-                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                  className="size-4 shrink-0 self-center text-muted-foreground"
                 />
               </Link>
             </li>

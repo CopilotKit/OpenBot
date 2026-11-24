@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { screenLinkLooks } from "./screen-link-style";
 
 /**
  * The cards OpenBot settings' read tools draw in a conversation, in a real browser: the person's
@@ -336,6 +337,37 @@ describe.skipIf(!asked)("the settings read cards", () => {
             ]);
             expect(where?.links[0]?.text).toContain("AI connection");
             expect(where?.links[1]?.text).toContain("never in chat");
+
+            // Every card opens its screen with the same link as the change cards: primary, a chevron.
+            const links = await screenLinkLooks(page);
+            expect(links.map((link) => link.text)).toEqual([
+              "Open Settings",
+              "Open Bots",
+              "Open Admin",
+            ]);
+            for (const link of links)
+              expect(link).toMatchObject({
+                underlined: false,
+                chevron: true,
+                primary: true,
+                weight: "500",
+              });
+            expect(new Set(links.map((link) => link.size)).size).toBe(1);
+            // A row that opens a screen ends in a chevron, as a row that opens one does on a screen.
+            expect(
+              await page.evaluate(() =>
+                [
+                  ...document.querySelectorAll(
+                    "[data-bot] > a, [data-screen] > a",
+                  ),
+                ].map(
+                  (row) =>
+                    row.lastElementChild?.classList.contains(
+                      "tabler-icon-chevron-right",
+                    ) ?? false,
+                ),
+              ),
+            ).toEqual([true, true, true, true, true]);
           } finally {
             await page.close();
           }

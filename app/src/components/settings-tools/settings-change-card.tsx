@@ -4,10 +4,10 @@ import {
   IconUsers,
   type TablerIcon,
 } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Badge, type Tone } from "@/components/gallery/frame";
 import { cn } from "@/lib/utils";
+import { ScreenLink, type SettingsScreenLink } from "./screen-link";
 
 /**
  * The shared card for a change to OpenBot's settings: what it was, what it is now, in the words the
@@ -283,9 +283,6 @@ function Affected({ affected }: { affected: string | SettingsAffected }) {
   );
 }
 
-/** A screen to open, as a link at the foot of a card. */
-export type SettingsScreenLink = { to: string; label: string };
-
 /**
  * The card a settings change draws in the conversation: what changed (or would have), its state,
  * and the screen it lives on.
@@ -356,14 +353,7 @@ export function SettingsChangeCard({
           ) : null}
           {change ? <SettingsChangeRows change={change} state={state} /> : null}
           {children}
-          {link ? (
-            <Link
-              className="self-start text-sm underline underline-offset-2 hover:text-foreground/80"
-              to={link.to as never}
-            >
-              {link.label}
-            </Link>
-          ) : null}
+          {link ? <ScreenLink {...link} /> : null}
         </div>
       ) : null}
     </figure>
