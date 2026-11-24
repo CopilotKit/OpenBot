@@ -2,6 +2,7 @@ import { IconListDetails, IconSettings } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
+import type { ReactNode } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
 import { ConversationApprovals } from "@/components/approvals/inline-approval";
@@ -26,6 +27,7 @@ import {
 import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { useNoBotComputers } from "@/lib/deployment/queries";
 import { useConnectionLost } from "@/lib/desktop/connection-lost";
+import { loadFailure } from "@/lib/load-failure";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 
@@ -244,7 +246,10 @@ function RouteComponent() {
         waitingForOpenBot={lost}
         failure={
           channel.error
-            ? conversationLoadFailure(channel.error, organization)
+            ? loadFailure(
+                channel.error,
+                conversationLoadFailure(channel.error, organization),
+              )
             : null
         }
       />
@@ -266,8 +271,11 @@ function ChannelBody({
   isPending: boolean;
   /** The connection line shows: the read waits for OpenBot, however long that takes. */
   waitingForOpenBot: boolean;
-  /** What to say when there is no conversation to draw (`conversationLoadFailure`). */
-  failure: string | null;
+  /**
+   * What to say when there is no conversation to draw (`conversationLoadFailure`), through the
+   * shared rule so OpenBot holding off is said calmly (lib/load-failure.tsx).
+   */
+  failure: ReactNode;
 }) {
   if (isPending) {
     // Nothing while the channel loads: a placeholder inside a local round-trip is a flicker. While

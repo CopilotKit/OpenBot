@@ -13,15 +13,15 @@ import { TaskBoardRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { loadFailure, unavailableSaid } from "@/lib/load-failure";
+import { isHeld, loadFailure, unavailableSaid } from "@/lib/load-failure";
 import {
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
 import type { ReadFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
-import { cn } from "@/lib/utils";
 import { countsAsWaiting, heldByTaskOf } from "@/lib/tasks/groups";
+import { cn } from "@/lib/utils";
 import { useNeedsYou } from "./needs-you";
 import { StalledHandoffBoardRow, useStalledHandoffs } from "./stalled-handoffs";
 
@@ -115,6 +115,27 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   ].flatMap(({ failure, ...source }) =>
     failure ? [{ ...source, failure }] : [],
   );
+  /*
+   * OpenBot holding off holds every read at once, and its sentence is the same for each: said once,
+   * with a Retry that asks each of them again. A real failure still says which part is missing.
+   */
+  const held = failures.filter(({ failure }) => isHeld(failure.error));
+  const notices =
+    held.length > 1
+      ? [
+          {
+            ...held[0],
+            failure: {
+              error: held[0].failure.error,
+              retry: () => {
+                for (const { failure } of held) failure.retry();
+              },
+              retrying: held.some(({ failure }) => failure.retrying),
+            },
+          },
+          ...failures.filter(({ failure }) => !isHeld(failure.error)),
+        ]
+      : failures;
 
   if (blocked.size === 0 && found.size === 0 && failures.length === 0)
     return null;
@@ -139,9 +160,9 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
       title="Needs you"
     >
       <div className="flex flex-col gap-5">
-        {failures.length ? (
+        {notices.length ? (
           <div className="flex flex-col gap-2">
-            {failures.map(({ key, what, failure }) => (
+            {notices.map(({ key, what, failure }) => (
               <ReadFailureNotice failure={failure} key={key} what={what} />
             ))}
           </div>

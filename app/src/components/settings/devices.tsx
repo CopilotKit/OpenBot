@@ -16,14 +16,25 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { updateRoutingQueryOptions } from "@/lib/bot-lifecycle/queries";
 import {
   type Delivery,
   deliveriesQueryOptions,
   devicesQueryOptions,
   removePushDeviceMutationOptions,
 } from "@/lib/delivery";
+import { failureSaid, isHeld } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
-import { failureSaid } from "@/lib/load-failure";
+
+/**
+ * Whether OpenBot holding off is already said on this page, by "Where updates go" above
+ * (`UpdateRoutingSection`), whose read it holds off at the same time. Said there once, not again
+ * under each section.
+ */
+function useHoldSaidAbove(): boolean {
+  const routing = useQuery(updateRoutingQueryOptions());
+  return routing.data === undefined && isHeld(routing.error);
+}
 
 const PLATFORM: Record<"ios" | "android", string> = {
   ios: "iOS",
@@ -85,7 +96,8 @@ export function deliveryLine(
 export function NativeDevices() {
   const devices = useQuery(devicesQueryOptions());
   const remove = useMutation(removePushDeviceMutationOptions(queryClient));
-  const error = devices.error ?? remove.error;
+  const saidAbove = useHoldSaidAbove() && isHeld(devices.error);
+  const error = (saidAbove ? null : devices.error) ?? remove.error;
   return (
     <PageSection
       description="Sign in to the OpenBot app on your phone and turn on notifications to add it here."
@@ -134,9 +146,10 @@ export function NativeDevices() {
 /** What was sent to the person outside the web app, most recent first, with any failure. */
 export function RecentDeliveries() {
   const deliveries = useQuery(deliveriesQueryOptions());
+  const saidAbove = useHoldSaidAbove() && isHeld(deliveries.error);
   return (
     <PageSection title="Recent deliveries">
-      {deliveries.error ? (
+      {deliveries.error && !saidAbove ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {failureSaid(deliveries.error)}
         </p>

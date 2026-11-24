@@ -32,7 +32,12 @@ import {
   personalProposalQueryOptions,
   personalReviewQueryOptions,
 } from "@/lib/learning/queries";
-import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  isHeld,
+} from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /** What a proposal would do to the Skills, in the person's words. */
@@ -116,7 +121,15 @@ function GroupError({ state }: { state: StartState | undefined }) {
  * Settings, Learning: the skills Learning proposed from the person's own recordings. Where people approve their own,
  * a row opens a dialog with Approve and Reject; where admins do, the same dialog is read-only.
  */
-export function LearningReview() {
+export function LearningReview({
+  heldAbove = false,
+}: {
+  /**
+   * The page above has already said OpenBot is holding off (a move, or the database out of reach):
+   * a hold here too is not said a second time.
+   */
+  heldAbove?: boolean;
+} = {}) {
   const review = useQuery(personalReviewQueryOptions());
   const decide = useMutation(
     reviewPersonalProposalMutationOptions(queryClient),
@@ -181,6 +194,7 @@ export function LearningReview() {
   if (review.isPending) return null;
   // A read that failed after one that answered leaves what that one said on screen, with why it may be out of date.
   if (!review.data) {
+    if (heldAbove && isHeld(review.error)) return null;
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
         {failureSaid(review.error)}

@@ -403,9 +403,9 @@ function marksModule(): string {
   return `const marks = ${JSON.stringify(marks)}; export const markFor = (id) => (id && marks[id]) || null;`;
 }
 
-async function bundle(): Promise<string> {
+async function bundle(fixture: string): Promise<string> {
   const built = await Bun.build({
-    entrypoints: [join(import.meta.dir, "organization-notices.fixture.tsx")],
+    entrypoints: [join(import.meta.dir, fixture)],
     target: "browser",
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
     plugins: [
@@ -477,9 +477,11 @@ async function stylesheet(classes: string[]): Promise<string> {
 const browsers = new Map<string, Browser>();
 let script: string;
 
-/** Build the app and start each browser asked for. */
-export async function start(): Promise<void> {
-  script = await bundle();
+/** Build the app (`fixture`, beside this file) and start each browser asked for. */
+export async function start(
+  fixture = "organization-notices.fixture.tsx",
+): Promise<void> {
+  script = await bundle(fixture);
   const playwright = await import("playwright-core");
   for (const engine of engines) {
     const type: BrowserType = playwright[engine];

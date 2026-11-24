@@ -44,7 +44,7 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
@@ -150,9 +150,17 @@ function YourApps({ agent }: { agent: AgentProfile }) {
   const held = useQuery(botAppsQueryOptions(agent.id));
   const give = useMutation(giveBotAppMutationOptions(queryClient));
   const takeBack = useMutation(takeBackBotAppMutationOptions(queryClient));
+  // What it holds, read by the section below too: while OpenBot holds off, that section says so once.
+  const whole = useQuery(agentPluginsQueryOptions(agent.id));
   const error = give.error ?? takeBack.error;
   const busy = give.isPending || takeBack.isPending;
   if (giveable.isPending || held.isPending) return null;
+  if (
+    isHeld([giveable.error, held.error]) &&
+    whole.data === undefined &&
+    isHeld(whole.error)
+  )
+    return null;
   const states = new Map((held.data ?? []).map((app) => [app.key, app]));
   /*
    * What you could give, and then anything you already gave that no longer is — an account you
@@ -181,10 +189,11 @@ function YourApps({ agent }: { agent: AgentProfile }) {
           {failureSaid(error)}
         </p>
       ) : null}
-      {giveable.error ? (
+      {/* Without what it holds, every switch would be drawn off: said as a failure instead. */}
+      {giveable.error || held.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {loadFailure(
-            giveable.error,
+            [giveable.error, held.error],
             "Couldn't load your apps. Try again in a moment.",
           )}
         </p>
@@ -272,6 +281,8 @@ function YourSkills({ agentId }: { agentId: string }) {
   const grant = useMutation(setPluginGrantMutationOptions(queryClient));
   const skills = (page.data ?? []).filter((skill) => skill.usableOnYourBots);
   const carried = new Set((held.data?.skills ?? []).map((skill) => skill.slug));
+  // The section below reads what it holds too, and says once that OpenBot is holding off.
+  if (held.data === undefined && isHeld(held.error)) return null;
   return (
     <PageSection
       description="Turn on a skill to use it with this Bot. Type / in a conversation to run it."

@@ -116,6 +116,7 @@ import {
   useConnectionLost,
   useReconnected,
 } from "@/lib/desktop/connection-lost";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
 import { stopIfNeedsCard } from "@/lib/plan/queries";
@@ -136,7 +137,6 @@ import {
 import { useVoiceCall } from "@/lib/voice/use-voice-call";
 import { queryClient } from "@/query-client";
 import { newId } from "../../lib/new-id";
-import { failureSaid } from "@/lib/load-failure";
 
 /**
  * How long a stalled thread join is worth waiting for before it is ended.
@@ -2191,7 +2191,10 @@ export function ChannelChat({
                 />
                 {voiceArchive.error && (
                   <p className="pb-2 text-sm text-destructive" role="alert">
-                    Couldn’t load voice chats. Try again in a moment.
+                    {loadFailure(
+                      voiceArchive.error,
+                      "Couldn’t load voice chats. Try again in a moment.",
+                    )}
                   </p>
                 )}
                 {/* The picked model stopped being offered: what this conversation uses now. */}

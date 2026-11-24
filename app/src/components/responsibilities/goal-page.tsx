@@ -56,7 +56,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { BotMarkdown, markdownComponents } from "@/lib/markdown";
 import { stopIfNeedsCard } from "@/lib/plan/queries";
 import {
@@ -168,6 +168,7 @@ export function GoalRoutePage({
         back={back}
         goal={goal}
         key={goal.id}
+        routinesError={routines.error}
         routines={
           routines.error
             ? undefined
@@ -209,6 +210,7 @@ function deleteWords(routines: readonly RoutineRecord[] | undefined): string {
 export function GoalPage({
   goal,
   routines,
+  routinesError,
   back,
 }: {
   goal: ResponsibilityRecord;
@@ -217,6 +219,8 @@ export function GoalPage({
    * the routines could not be read, so what starts it and what a delete takes with it are not known.
    */
   routines: readonly RoutineRecord[] | undefined;
+  /** Why the routines couldn't be read, when they couldn't. */
+  routinesError?: unknown;
   /** The Routines list it came from. */
   back: LinkProps;
 }) {
@@ -517,6 +521,7 @@ export function GoalPage({
 
       <GoalSchedules
         completed={goal.status === "completed"}
+        error={routinesError}
         paused={goal.status === "paused"}
         routines={routines}
       />

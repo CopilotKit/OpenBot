@@ -280,6 +280,7 @@ export function BotActivityGlance({ agentId }: { agentId: string }) {
         <AllActivityItem
           activity={activity.data}
           agentId={agentId}
+          error={activity.error}
           groups={groups}
         />
       </PageRows>
@@ -301,6 +302,7 @@ export function BotActivityRow({ agentId }: { agentId: string }) {
       <AllActivityItem
         activity={activity.data}
         agentId={agentId}
+        error={activity.error}
         groups={groups}
         title="Activity"
         withIcon
@@ -312,12 +314,15 @@ export function BotActivityRow({ agentId }: { agentId: string }) {
 function AllActivityItem({
   activity,
   agentId,
+  error,
   groups,
   title = "All activity",
   withIcon = false,
 }: {
   activity: BotActivity | undefined;
   agentId: string;
+  /** Why the activity couldn't be read, when it couldn't. */
+  error?: unknown;
   /** What the Activity page lists, which the summary counts. */
   groups: readonly ActivityGroup[];
   title?: string;
@@ -338,7 +343,7 @@ function AllActivityItem({
         <ItemDescription>
           {activity
             ? activitySummary(activity, groups)
-            : "Couldn't load this Bot's activity."}
+            : loadFailure(error, "Couldn't load this Bot's activity.")}
         </ItemDescription>
       </ItemContent>
       <ItemActions>

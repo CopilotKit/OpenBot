@@ -52,6 +52,7 @@ import {
   type Failure,
   failureOf,
   failureSaid,
+  isHeld,
   loadFailure,
   unavailableSaid,
 } from "@/lib/load-failure";
@@ -403,7 +404,18 @@ function RouteComponent() {
                 ))}
               </ul>
             </section>
-          ) : personal ? null : failed && agents === undefined ? (
+          ) : personal ? null : failed &&
+            agents === undefined &&
+            isHeld(agentsError) &&
+            !error ? (
+            // OpenBot holding off (a move, a brief outage) is said once, under the composer, and
+            // the list fills in by itself when it is back (lib/load-failure.tsx). Saying the same
+            // sentence here again read as two things wrong.
+            <>
+              <h2 className="font-semibold text-base">Explore Bots</h2>
+              <Skeleton className="mt-4 h-[140px]" />
+            </>
+          ) : failed && agents === undefined ? (
             // `agents === undefined` narrows this to "the query has never once returned
             // successfully" — not merely "the last request errored". `?.length` alone can't
             // tell that apart from a slice that loaded and is genuinely empty: TanStack Query
