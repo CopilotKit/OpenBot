@@ -29,6 +29,7 @@ import type {
   ListRoutinesParams,
   OrganizationNotFoundResponse,
   PauseRoutineHeaders,
+  PlanRequiredResponse,
   ResumeRoutineHeaders,
   RoutineNotFoundResponse,
   RoutinePage,
@@ -1072,6 +1073,7 @@ export const getRunRoutineMutationOptions = <
   TError =
     | InvalidRoutineResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | RoutineNotFoundResponse
     | IdempotencyConflictResponse
@@ -1120,6 +1122,7 @@ export type RunRoutineMutationResult = NonNullable<
 export type RunRoutineMutationError =
   | InvalidRoutineResponse
   | UnauthenticatedResponse
+  | PlanRequiredResponse
   | ForbiddenResponse
   | RoutineNotFoundResponse
   | IdempotencyConflictResponse
@@ -1138,6 +1141,7 @@ export const useRunRoutine = <
   TError =
     | InvalidRoutineResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | RoutineNotFoundResponse
     | IdempotencyConflictResponse
