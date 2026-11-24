@@ -4900,3 +4900,300 @@ describe.skipIf(!asked)("approved layout: provider", () => {
     }
   }
 });
+describe.skipIf(!asked)("approved layout: install", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    for (const colorScheme of ["light", "dark"] as const) {
+      test(`${width}x${height} ${colorScheme}: download, unpack, prompt, failure and completion`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        const emit = (payload: Record<string, unknown>) =>
+          page.evaluate(
+            (payload) =>
+              globalThis.__workbench!.emit("setup:progress", payload),
+            payload,
+          );
+        const shot = async (state: string) => {
+          await settled(page);
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/install-${width}-${colorScheme}-${state}.png`,
+            });
+        };
+        const geometry = () =>
+          page.evaluate(() => {
+            const sheet =
+              document.querySelector<HTMLElement>(".install-layout")!;
+            const body = sheet.querySelector<HTMLElement>(".setup-body")!;
+            const content = body.querySelector<HTMLElement>(".setup-content")!;
+            const footer = sheet.querySelector<HTMLElement>(".setup-footer")!;
+            const header = sheet.querySelector<HTMLElement>(
+              ".setup-header-block",
+            )!;
+            const b = body.getBoundingClientRect(),
+              c = content.getBoundingClientRect(),
+              f = footer.getBoundingClientRect(),
+              h = header.getBoundingClientRect();
+            const rows = [
+              ...sheet.querySelectorAll<HTMLElement>(
+                ".setup-progress-focus > .step",
+              ),
+            ];
+            return {
+              pageWidth: document.documentElement.scrollWidth,
+              pageHeight: document.documentElement.scrollHeight,
+              horizontalOverflow: [body, content, ...rows].some(
+                (e) => e.scrollWidth > e.clientWidth + 1,
+              ),
+              headerBottom: h.bottom,
+              bodyTop: b.top,
+              bodyBottom: b.bottom,
+              bodyHeight: b.height,
+              footerTop: f.top,
+              footerBottom: f.bottom,
+              contentWidth: c.width,
+              contentHeight: c.height,
+              centerX: (c.left + c.right - b.left - b.right) / 2,
+              centerY: (c.top + c.bottom - b.top - b.bottom) / 2,
+              topOffset:
+                c.top +
+                body.scrollTop -
+                b.top -
+                Number.parseFloat(getComputedStyle(body).paddingTop),
+              rows: rows.map((row) => ({
+                label: row.getAttribute("aria-label"),
+                top: row.getBoundingClientRect().top,
+                current: !!row.querySelector(
+                  ".mark.active, .mark.waiting, .mark.bad",
+                ),
+                labelSize: Number.parseFloat(
+                  getComputedStyle(
+                    row.querySelector<HTMLElement>(".step-label")!,
+                  ).fontSize,
+                ),
+                background: getComputedStyle(row).backgroundColor,
+                border: Number.parseFloat(
+                  getComputedStyle(row).borderRightWidth,
+                ),
+              })),
+            };
+          });
+        const check = async () => {
+          await settled(page);
+          const now = await geometry();
+          expect(now.pageWidth).toBeLessThanOrEqual(width);
+          expect(now.pageHeight).toBeLessThanOrEqual(height);
+          expect(now.horizontalOverflow).toBe(false);
+          expect(now.bodyTop).toBeGreaterThanOrEqual(now.headerBottom - 1);
+          expect(now.bodyBottom).toBeLessThanOrEqual(now.footerTop + 1);
+          expect(now.footerBottom).toBeLessThanOrEqual(height);
+          expect(now.contentWidth).toBeLessThanOrEqual(480);
+          expect(Math.abs(now.centerX)).toBeLessThanOrEqual(1);
+          if (width === 1000 && now.contentHeight + 60 <= now.bodyHeight)
+            expect(Math.abs(now.centerY)).toBeLessThanOrEqual(1);
+          if (width === 720)
+            expect(Math.abs(now.topOffset)).toBeLessThanOrEqual(1);
+          const current = now.rows.findIndex((row) => row.current);
+          if (current >= 0) expect(current).toBe(0);
+          if (now.rows.length > 1 && now.rows[0]?.current) {
+            expect(now.rows[0].labelSize).toBeGreaterThan(
+              now.rows[1]!.labelSize,
+            );
+            expect(now.rows[0].border).toBe(1);
+            expect(now.rows[1]!.border).toBe(0);
+            expect(now.rows[1]!.top).toBeGreaterThan(now.rows[0].top);
+          }
+          return now;
+        };
+        const reach = async (label: string) => {
+          // Use actual Tab navigation; programmatic focus alone does not establish keyboard reachability.
+          let focused = false;
+          for (let n = 0; n < 30 && !focused; n++) {
+            await page.keyboard.press("Tab");
+            focused = await page.evaluate(
+              (label) => document.activeElement?.textContent?.trim() === label,
+              label,
+            );
+          }
+          expect(focused).toBe(true);
+          expect(
+            await page.evaluate((label) => {
+              const element = [
+                ...document.querySelectorAll<HTMLButtonElement>(
+                  ".install-layout button",
+                ),
+              ].find((e) => e.textContent?.trim() === label)!;
+              const r = element.getBoundingClientRect(),
+                hit = document.elementFromPoint(
+                  r.x + r.width / 2,
+                  r.y + r.height / 2,
+                );
+              const container = element
+                .closest<HTMLElement>(".setup-body, .setup-footer")!
+                .getBoundingClientRect();
+              return {
+                hit: !!hit && element.contains(hit),
+                visible:
+                  r.top >= container.top - 1 &&
+                  r.bottom <= container.bottom + 1 &&
+                  r.bottom <= innerHeight &&
+                  r.left >= 0 &&
+                  r.right <= innerWidth,
+                enabled: !element.disabled,
+              };
+            }, label),
+          ).toEqual({ hit: true, visible: true, enabled: true });
+        };
+        try {
+          await open(page, "#licence-installing");
+          await page
+            .getByRole("button", { name: "Install", exact: true })
+            .waitFor();
+          await page.evaluate(() => {
+            globalThis.__workbench!.setAnswer("prepare_installation", {
+              mode: "never",
+            });
+            globalThis.__workbench!.setAnswer("allow_podman_install", {
+              mode: "value",
+              value: true,
+            });
+            globalThis.__workbench!.setAnswer("set_up_local_eval", {
+              mode: "never",
+            });
+          });
+          await page
+            .getByRole("button", { name: "Install", exact: true })
+            .click();
+          await page
+            .getByRole("button", { name: "Accept", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Installing OpenBot", exact: true })
+            .waitFor();
+          await emit({
+            step: "engine",
+            ok: true,
+            running: false,
+            detail: "The software OpenBot runs on is ready.",
+          });
+          await emit({
+            step: "images",
+            ok: true,
+            running: true,
+            detail: "Downloading local software.",
+            downloads: {
+              bytes: 568_900_000,
+              size: 872_800_000,
+              done: 2,
+              total: 5,
+              bytesPerSecond: 9_000_000,
+            },
+          });
+          await page
+            .getByText("568.9 MB of 872.8 MB", { exact: false })
+            .waitFor();
+          const download = await check();
+          expect(download.rows[0]?.label).toBe("Downloading OpenBot");
+          expect(download.rows[1]?.label).toBe("Preparing this computer");
+          expect(
+            await page
+              .getByRole("button", { name: "Cancel", exact: true })
+              .count(),
+          ).toBe(0);
+          await shot("download");
+          await emit({
+            step: "images",
+            ok: true,
+            running: true,
+            detail: "Unpacking local software.",
+            downloads: {
+              bytes: 872_800_000,
+              size: 872_800_000,
+              done: 2,
+              total: 5,
+            },
+          });
+          await page
+            .getByText("Unpacking OpenBot (3 of 5).", { exact: false })
+            .waitFor();
+          await check();
+          await shot("unpack");
+          const asking =
+            "OpenBot needs your password to install what it needs to run. Try again to open the password prompt.";
+          await emit({
+            step: "install-engine",
+            ok: true,
+            running: true,
+            asks: true,
+            detail: asking,
+          });
+          await page
+            .getByRole("region", { name: "Your password is needed" })
+            .waitFor();
+          await check();
+          await reach("Try again");
+          await shot("prompt");
+          await page
+            .getByRole("button", { name: "Try again", exact: true })
+            .click();
+          expect(
+            await page.evaluate(
+              () =>
+                globalThis
+                  .__workbench!.calls()
+                  .filter((c) => c.command === "allow_podman_install").length,
+            ),
+          ).toBe(1);
+          await emit({
+            step: "install-engine",
+            ok: true,
+            running: false,
+            detail: "Ready.",
+          });
+          await emit({
+            step: "images",
+            ok: false,
+            running: false,
+            detail: "The download was interrupted.",
+          });
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("prepare_installation", {
+              mode: "fail",
+              problem: {
+                said: "The download was interrupted. Check your internet connection and retry installation.",
+                detail: "Connection reset while downloading OpenBot.",
+              },
+            }),
+          );
+          await page
+            .getByRole("button", { name: "Retry installation", exact: true })
+            .waitFor();
+          await check();
+          await reach("Back");
+          await reach("Retry installation");
+          await shot("failure");
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("prepare_installation", {
+              mode: "value",
+              value: null,
+            }),
+          );
+          await page
+            .getByRole("button", { name: "Retry installation", exact: true })
+            .click();
+          // Successful installation advances automatically to AI, preserving the real flow.
+          await page
+            .getByRole("heading", { name: "Connect your AI" })
+            .waitFor();
+          await shot("complete");
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+    }
+  }
+});
