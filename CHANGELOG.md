@@ -185,9 +185,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   says that too. Any failure before that removes nothing. A moved person skips first-run setup in
   OpenBot Cloud; the terms and their own AI still ask. When OpenBot Cloud still needs your AI, the
   result asks you to connect it first and names the apps as the next step. OpenBot Cloud then keeps
-  a Reconnect list of the apps that moved, and Connections points to it while any is left. Each
-  app's Reconnect opens that app, and connecting it brings you back to the list with the app marked
-  reconnected. An app you don't want can be dismissed, on every device. Onboarding and Connect your
+  a Reconnect list of the apps that moved, and Connections points to it while any is left. One
+  press of an app's Reconnect connects it: an app you sign in to goes straight to its sign-in, and
+  an app that takes a key opens with its key form, with no second Connect to press. Connecting it
+  brings you back to the list with the app marked reconnected. An app you don't want can be dismissed, on every device. Onboarding and Connect your
   AI now keep where you were headed, and take you there once they're done. On Windows, the Podman
   that OpenBot installed is removed too when nothing else uses it; a Podman you installed or use
   stays. While the move runs, the window stays on it: bringing the window back, from the Dock or
@@ -420,11 +421,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   swapped in a second Connect. Now Connect turns the app on and carries straight on: a key app opens
   its page under Connections with the key form open, and a sign-in app opens its sign-in in a new
   tab. An admin's Turn on and give it carries on the same way.
-- Reconnecting an app after moving to OpenBot Cloud takes one press.
 - A Bot shows one connect card per app, and no longer says an app's tools are ready before it's
   connected.
-- On OpenBot Cloud, Connections leads to every app in the directory, and searching it finds apps you
-  haven't added yet.
+- On OpenBot Cloud, Connections leads to every app in the directory, searching it finds apps you
+  haven't added yet, and an admin can turn an app off from its Connections page.
 - Connecting an app whose maker offers a sign-in, like PostHog or Fireflies, now takes you to that
   sign-in instead of asking for a key.
 - Signing in to an app's own server works with servers that identify OpenBot by its published
