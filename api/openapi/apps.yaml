@@ -1331,7 +1331,8 @@ components:
           type: string
           description: >-
             What the key version is called once added, so it reads apart from
-            the sign-in beside it.
+            the sign-in beside it: the app's own name followed by (key), as in
+            PostHog (key).
         actionCount:
           type: integer
           minimum: 0

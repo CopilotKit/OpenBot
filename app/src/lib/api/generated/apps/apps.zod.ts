@@ -1962,7 +1962,7 @@ export const ListAppDirectoryResponse = zod.object({
                   title: zod
                     .string()
                     .describe(
-                      "What the key version is called once added, so it reads apart from the sign-in beside it.",
+                      "What the key version is called once added, so it reads apart from the sign-in beside it: the app's own name followed by (key), as in PostHog (key).",
                     ),
                   actionCount: zod
                     .int()
