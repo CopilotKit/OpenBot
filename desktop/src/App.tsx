@@ -1818,112 +1818,118 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     return (
       <main>
         <SetupRail />
-        <div className="sheet connection-sheet">
-          <h1>
-            {updatingSelf
-              ? UPDATING_SELF_CONTAINED
-              : localStarting || installingAfresh
-                ? "Starting OpenBot"
-                : appBehind
-                  ? forSecurity(displayedFailure) && displayedFailure
-                    ? displayedFailure.said
-                    : "Update OpenBot"
+        <div className="sheet connection-sheet setup-layout finishing-layout returning-layout">
+          <header className="setup-header-block">
+            <h1>
+              {updatingSelf
+                ? UPDATING_SELF_CONTAINED
+                : localStarting || installingAfresh
+                  ? "Starting OpenBot"
+                  : appBehind
+                    ? forSecurity(displayedFailure) && displayedFailure
+                      ? displayedFailure.said
+                      : "Update OpenBot"
+                    : roomShort
+                      ? ROOM_HEADING
+                      : "OpenBot is stopped"}
+            </h1>
+            {!appBehind && (
+              <p className="lede">
+                {localStarting || installingAfresh
+                  ? // No time of its own: the card under it says how long is left, from how long each
+                    // part takes. "This usually takes a minute or two" sat over "About 3 minutes left"
+                    // on Windows G, and the start took four.
+                    "OpenBot is getting ready and opens by itself."
                   : roomShort
-                    ? ROOM_HEADING
-                    : "OpenBot is stopped"}
-          </h1>
-          {!appBehind && (
-            <p className="lede">
-              {localStarting || installingAfresh
-                ? // No time of its own: the card under it says how long is left, from how long each
-                  // part takes. "This usually takes a minute or two" sat over "About 3 minutes left"
-                  // on Windows G, and the start took four.
-                  "OpenBot is getting ready and opens by itself."
-                : roomShort
-                  ? resourcesShortSaid(roomShort)
-                  : "Your installation and saved connections are ready to reopen."}
-            </p>
-          )}
-          {roomShort && (
-            <div className="row room-retry">
-              <button type="button" disabled={busy} onClick={local.retry}>
-                Retry
-              </button>
-            </div>
-          )}
-          {freshInstall || appBehind || (
-            <LocalIntelligence
-              sequence={local}
-              offerStart
-              handOff={handOff}
-              open={steps}
-              releaseDue={releaseDue}
-              room={
-                roomShort
-                  ? {
-                      reason: ROOM_REASON,
-                      logs: displayedFailure ?? {
-                        said: resourcesShortSaid(roomShort),
-                      },
-                    }
-                  : null
-              }
-            />
-          )}
-          {goAhead && <PodmanGoAhead asking={goAhead} />}
-          {pauseCard}
-          {updatingLine}
-          {displayedFailure &&
-            !roomShort &&
-            (appBehind ? (
-              <AppTooOld problem={displayedFailure} headed={false} />
-            ) : (
-              <Failure problem={displayedFailure} />
-            ))}
-          {updatingSelf && <SelfContainedNote />}
-          {/* While a local step runs, its Cancel is the only control. */}
-          {!localStarting && !installingAfresh && (
-            <>
-              <div className="row">
-                <button
-                  type="button"
-                  className="quiet"
-                  disabled={busy}
-                  onClick={() => setStep("model")}
-                >
-                  Change AI connection
-                </button>
-                {/* Room is what is short: a repair installs again, and needs room too. And a
-                  release that needs a newer app is not broken: a repair lays the same one out. */}
-                {displayedFailure && !roomShort && !appBehind && (
-                  <button
-                    type="button"
-                    className="quiet"
-                    disabled={busy}
-                    onClick={() => install()}
-                  >
-                    Repair installation
+                    ? resourcesShortSaid(roomShort)
+                    : "Your installation and saved connections are ready to reopen."}
+              </p>
+            )}
+          </header>
+          <div className="setup-body">
+            <div className="setup-content">
+              {roomShort && (
+                <div className="row room-retry">
+                  <button type="button" disabled={busy} onClick={local.retry}>
+                    Retry
                   </button>
-                )}
-              </div>
-              {appUpdates}
-              <details>
-                <summary>Installation options</summary>
-                <button
-                  type="button"
-                  className="quiet"
-                  disabled={busy}
-                  onClick={() => {
-                    setPreparation(null);
-                    setSteps([]);
-                    setStep("install");
-                  }}
-                >
-                  Change installation
-                </button>
-              </details>
-            </>
-          )}
+                </div>
+              )}
+              {freshInstall || appBehind || (
+                <LocalIntelligence
+                  sequence={local}
+                  offerStart
+                  handOff={handOff}
+                  open={steps}
+                  releaseDue={releaseDue}
+                  room={
+                    roomShort
+                      ? {
+                          reason: ROOM_REASON,
+                          logs: displayedFailure ?? {
+                            said: resourcesShortSaid(roomShort),
+                          },
+                        }
+                      : null
+                  }
+                />
+              )}
+              {goAhead && <PodmanGoAhead asking={goAhead} />}
+              {pauseCard}
+              {updatingLine}
+              {displayedFailure &&
+                !roomShort &&
+                (appBehind ? (
+                  <AppTooOld problem={displayedFailure} headed={false} />
+                ) : (
+                  <Failure problem={displayedFailure} />
+                ))}
+              {updatingSelf && <SelfContainedNote />}
+              {/* While a local step runs, its Cancel is the only control. */}
+              {!localStarting && !installingAfresh && (
+                <>
+                  <div className="row">
+                    <button
+                      type="button"
+                      className="quiet"
+                      disabled={busy}
+                      onClick={() => setStep("model")}
+                    >
+                      Change AI connection
+                    </button>
+                    {/* Room is what is short: a repair installs again, and needs room too. And a
+                  release that needs a newer app is not broken: a repair lays the same one out. */}
+                    {displayedFailure && !roomShort && !appBehind && (
+                      <button
+                        type="button"
+                        className="quiet"
+                        disabled={busy}
+                        onClick={() => install()}
+                      >
+                        Repair installation
+                      </button>
+                    )}
+                  </div>
+                  {appUpdates}
+                  <details>
+                    <summary>Installation options</summary>
+                    <button
+                      type="button"
+                      className="quiet"
+                      disabled={busy}
+                      onClick={() => {
+                        setPreparation(null);
+                        setSteps([]);
+                        setStep("install");
+                      }}
+                    >
+                      Change installation
+                    </button>
+                  </details>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </main>
     );

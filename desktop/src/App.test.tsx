@@ -3808,6 +3808,7 @@ test("Finishing setup has a usage-data checkbox, checked by default, that turns 
     ".sheet.setup-layout.finishing-layout",
   );
   expect(sheet).not.toBeNull();
+  expect(sheet?.classList.contains("returning-layout")).toBe(false);
   const header = sheet?.querySelector<HTMLElement>(
     ":scope > .setup-header-block",
   );
@@ -5091,6 +5092,27 @@ test("relaunch upgrades an older installation to this app's release as part of S
       invokeCalls.some((call) => call.command === "upgrade_and_start"),
     ).toBe(true),
   );
+  const sheet = view.container.querySelector<HTMLElement>(
+    ".sheet.setup-layout.finishing-layout.returning-layout",
+  );
+  expect(sheet).not.toBeNull();
+  const header = sheet?.querySelector<HTMLElement>(
+    ":scope > .setup-header-block",
+  );
+  const body = sheet?.querySelector<HTMLElement>(":scope > .setup-body");
+  const content = body?.querySelector<HTMLElement>(":scope > .setup-content");
+  expect(
+    header?.contains(
+      view.getByRole("heading", {
+        name: "Updating OpenBot (Self-Contained)",
+      }),
+    ),
+  ).toBe(true);
+  expect(
+    content?.contains(view.getByRole("region", { name: "How far along" })),
+  ).toBe(true);
+  // Returning installs keep their existing consent and do not ask again.
+  expect(view.queryByRole("checkbox")).toBeNull();
   // Said while the upgrade runs, which can take minutes.
   const said =
     "Updating OpenBot. Your Bots, sign-ins and data stay as they are.";
@@ -5106,6 +5128,18 @@ test("relaunch upgrades an older installation to this app's release as part of S
   ).toBeTruthy();
   expect(view.queryByRole("heading", { name: "Starting OpenBot" })).toBeNull();
   expect(view.getByText(said)).toBeTruthy();
+  expect(
+    view.container.querySelector<HTMLElement>(
+      ".finishing-layout > .setup-header-block",
+    ),
+  ).toBe(header!);
+  expect(content?.contains(view.getByText(said))).toBe(true);
+  expect(
+    content?.contains(
+      view.getByRole("heading", { name: "Everything runs on this computer" }),
+    ),
+  ).toBe(true);
+
   await act(async () =>
     moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
   );
