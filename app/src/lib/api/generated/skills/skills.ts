@@ -20,7 +20,12 @@ import type {
 import type {
   AdminOnlyResponse,
   DeleteSkillHeaders,
+  FindGitHubSkillsHeaders,
   ForbiddenResponse,
+  GitHubRepositoryNotFoundResponse,
+  GitHubSkillSource,
+  GitHubSkills,
+  GitHubUnavailableResponse,
   IdempotencyConflictResponse,
   InvalidRequestResponse,
   InvalidSkillResponse,
@@ -284,6 +289,151 @@ export function useListSkills<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+export const getFindGitHubSkillsUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/skills/find-on-github`;
+};
+
+/**
+ * Read the skills in a public GitHub repository, for the caller to import. A skill there is a folder with a SKILL.md: front matter naming it and saying when to use it, then its instructions. Each one is answered in a skill's shape, its slug from its name and its title from its first heading, with the folder's other files named in leftOut, since a skill here is its instructions alone. Nothing is saved: replaceSkill saves the ones the caller picks. Only a public repository can be read, and GitHub allows a few dozen reads an hour. At most 100 skills are read, and notRead counts the rest.
+ * @summary Find the skills in a GitHub repository
+ */
+export const findGitHubSkills = async (
+  organizationId: string,
+  gitHubSkillSource: GitHubSkillSource,
+  headers: FindGitHubSkillsHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<GitHubSkills> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<GitHubSkills>(getFindGitHubSkillsUrl(organizationId), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(gitHubSkillSource),
+  });
+};
+
+export const getFindGitHubSkillsMutationKey = () =>
+  ["findGitHubSkills"] as const;
+
+export const getFindGitHubSkillsMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | GitHubRepositoryNotFoundResponse
+    | ServerErrorResponse
+    | GitHubUnavailableResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof findGitHubSkills>>,
+    TError,
+    FindGitHubSkillsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof findGitHubSkills>>,
+  TError,
+  FindGitHubSkillsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getFindGitHubSkillsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof findGitHubSkills>>,
+    FindGitHubSkillsMutationVariables
+  > = (props) => {
+    const { organizationId, data, headers } = props ?? {};
+
+    return findGitHubSkills(organizationId, data, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type FindGitHubSkillsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof findGitHubSkills>>
+>;
+export type FindGitHubSkillsMutationBody = GitHubSkillSource;
+export type FindGitHubSkillsMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | GitHubRepositoryNotFoundResponse
+  | ServerErrorResponse
+  | GitHubUnavailableResponse
+  | UnexpectedErrorResponse;
+export type FindGitHubSkillsMutationVariables = {
+  organizationId: string;
+  data: GitHubSkillSource;
+  headers: FindGitHubSkillsHeaders;
+};
+
+/**
+ * @summary Find the skills in a GitHub repository
+ */
+export const useFindGitHubSkills = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | GitHubRepositoryNotFoundResponse
+    | ServerErrorResponse
+    | GitHubUnavailableResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof findGitHubSkills>>,
+      TError,
+      FindGitHubSkillsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof findGitHubSkills>>,
+  TError,
+  FindGitHubSkillsMutationVariables,
+  TContext
+> => {
+  return useMutation(getFindGitHubSkillsMutationOptions(options), queryClient);
+};
 export const getGetSkillUrl = (organizationId: string, skillId: string) => {
   return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/skills/${encodeURIComponent(String(skillId))}`;
 };

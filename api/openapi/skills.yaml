@@ -51,6 +51,69 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/skills/find-on-github:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Skills]
+      operationId: findGitHubSkills
+      summary: Find the skills in a GitHub repository
+      description: >-
+        Read the skills in a public GitHub repository, for the caller to
+        import. A skill there is a folder with a SKILL.md: front matter
+        naming it and saying when to use it, then its instructions. Each one
+        is answered in a skill's shape, its slug from its name and its title
+        from its first heading, with the folder's other files named in
+        leftOut, since a skill here is its instructions alone. Nothing is
+        saved: replaceSkill saves the ones the caller picks. Only a public
+        repository can be read, and GitHub allows a few dozen reads an hour.
+        At most 100 skills are read, and notRead counts the rest.
+      security:
+        - webSession: []
+        - appOAuth: [skills:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubSkillSource'
+            examples:
+              repository:
+                value:
+                  repository: alemtuzlak/skills
+              folder:
+                value:
+                  repository: https://github.com/alemtuzlak/skills/tree/main/skills/blog-post
+      responses:
+        '200':
+          description: The skills the repository holds.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubSkills'
+              examples:
+                found:
+                  $ref: '#/components/examples/GitHubSkillsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GitHubRepositoryNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/GitHubUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/skills/{skillId}:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
@@ -366,6 +429,75 @@ components:
           description: >-
             Make a new skill the organization's. Only an admin may. It
             applies when the skill is made: rewriting one keeps whose it is.
+    GitHubSkillSource:
+      type: object
+      additionalProperties: false
+      required: [repository]
+      properties:
+        repository:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: \S
+          description: >-
+            The repository as owner/repo, its GitHub address, or the address
+            of a branch or folder in it (github.com/owner/repo/tree/branch/folder),
+            which reads only the skills under that folder.
+    GitHubSkills:
+      type: object
+      required: [repository, ref, commit, skills, notRead]
+      properties:
+        repository:
+          type: string
+          description: The repository as GitHub names it, owner/repo.
+        ref:
+          type: string
+          description: The branch, tag or commit read. Its default branch when none was named.
+        commit:
+          type: string
+          description: The commit the skills were read at.
+        skills:
+          type: array
+          description: By folder.
+          items:
+            $ref: '#/components/schemas/GitHubSkill'
+        notRead:
+          type: integer
+          minimum: 0
+          description: How many skills past the first 100 were not read.
+    GitHubSkill:
+      type: object
+      required: [path, slug, title, summary, instructions, leftOut, problem]
+      properties:
+        path:
+          type: string
+          description: The skill's folder in the repository. Empty for one at its root.
+        slug:
+          type: string
+          minLength: 2
+          maxLength: 40
+          description: >-
+            What a person would type after /, from the name in its front
+            matter or else its folder. Another skill may already have it.
+        title:
+          type: string
+          description: Its first heading, or its slug in words.
+        summary:
+          type: string
+          description: Its description, cut to one line of up to 200 characters. May be empty.
+        instructions:
+          type: string
+          description: Its SKILL.md after the front matter. Empty when it has a problem.
+        leftOut:
+          type: array
+          description: >-
+            The folder's other files, as paths in it, which a skill here has
+            no place for. Its README and LICENSE aren't listed.
+          items:
+            type: string
+        problem:
+          type: [string, 'null']
+          description: Why it can't be imported as it is. Null when it can.
     SkillTeamGrants:
       type: object
       description: The teams the skill is granted to.
@@ -407,6 +539,42 @@ components:
             Pass as cursor for the next page. Null ends the list. Written in
             URL-safe base64, the only form the cursor parameter accepts.
   responses:
+    GitHubRepositoryNotFound:
+      description: GitHub has no public repository by that name, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/github-repository-not-found
+                title: Repository not found.
+                status: 404
+                detail: Couldn't find that repository on GitHub. Check the name, and that it's public.
+                code: GITHUB_REPOSITORY_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    GitHubUnavailable:
+      description: GitHub couldn't be reached or is limiting reads from OpenBot. Asking again later may work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            limited:
+              value:
+                type: https://open.bot/errors/github-unavailable
+                title: GitHub is unavailable.
+                status: 502
+                detail: GitHub is limiting how often OpenBot can read from it. Try again in an hour.
+                code: GITHUB_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
     SkillNotFound:
       description: >-
         No skill has that slug, the caller isn't an admin and can't see it,
@@ -521,6 +689,28 @@ components:
                 requestId: req_example
                 traceId: trace_example
   examples:
+    GitHubSkillsExample:
+      summary: Two skills, one with files left out
+      value:
+        repository: alemtuzlak/skills
+        ref: main
+        commit: c06cf6829f3a4b1e0d2c7a5b9e8f1d3c4b6a7e90
+        skills:
+          - path: skills/blog-post
+            slug: blog-post
+            title: Blog Post Writer
+            summary: Use when the user wants to write a blog post about a feature or product change.
+            instructions: "# Blog Post Writer\n\nWrite high-quality blog posts from code changes."
+            leftOut: []
+            problem: null
+          - path: skills/accessible-html
+            slug: accessible-html
+            title: accessible-html
+            summary: Use whenever writing, editing, or reviewing markup or UI code.
+            instructions: "Build markup that works for everyone."
+            leftOut: [references/audit.md, hooks/a11y-guard.js]
+            problem: null
+        notRead: 0
     SkillPageExample:
       summary: Every skill the caller can see, on one page.
       value:

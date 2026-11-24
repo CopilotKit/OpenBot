@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { PluginServer } from "@/lib/plugins/queries";
-import type { Skill } from "./queries";
 import { type SkillFormValues, skillFormSchema } from "./form";
+import type { Skill } from "./queries";
 
 /**
  * A skill a Bot proposes during a conversation, and the checks it goes through before anybody is
@@ -36,7 +36,7 @@ const SAVED_MARKER = "Saved.";
 
 export const skillCardAnswer = {
   saved: (slug: string) =>
-    `${SAVED_MARKER} /${slug} is now in the slash menu. It is on no Bot yet — putting it on one is done from the Skills page, so tell the person that is the remaining step.`,
+    `${SAVED_MARKER} /${slug} is now in the slash menu. In OpenBot Personal a new skill is on every Bot already. Elsewhere it is on no Bot yet: offer to put it on this Bot with add_skills_to_bot.`,
   declined: () =>
     "The person did not save this skill. Ask what to change rather than saving it again unchanged.",
   /** A proposal the fields refuse, answered rather than shown as a question. See the card. */
@@ -252,3 +252,50 @@ export function describeToolRefs(servers: readonly PluginServer[]): string {
     ...blocks,
   ].join("\n");
 }
+
+/** `save_skills`: several finished skills at once, each as `save_skill` takes one. */
+export const proposedSkillsSchema = z.object({
+  skills: z
+    .array(proposedSkillSchema)
+    .min(1)
+    .max(20)
+    .describe("The skills, each as save_skill takes one. Up to 20."),
+});
+
+/** `import_skills_from_github`: the repository whose skills to offer. */
+export const githubImportSchema = z.object({
+  repository: z
+    .string()
+    .min(1)
+    .describe(
+      "The public GitHub repository as owner/repo or its address, or the address of a folder in it to import only the skills there.",
+    ),
+});
+
+/** `add_skills_to_bot`: skills already saved, to put on the Bot this conversation is with. */
+export const addSkillsSchema = z.object({
+  skills: z
+    .array(z.string().min(1))
+    .min(1)
+    .max(50)
+    .describe(
+      "The skills' commands, as list_skills spells them, without the /.",
+    ),
+});
+
+/** What the cards that handle several skills answer with. Addressed to the model, as above. */
+export const skillsCardAnswer = {
+  declined: () =>
+    "The person chose not to go ahead. Nothing was saved or changed. Ask what they'd like instead.",
+  /** An import or a save, in `describeOutcomes`'s words, with the next step. */
+  done: (summary: string) =>
+    `${summary} Tell the person what happened in a sentence or two. A skill they want on this Bot that isn't on it can be put there with add_skills_to_bot.`,
+  put: (botName: string, on: readonly string[], problems: readonly string[]) =>
+    [
+      on.length > 0
+        ? `${on.map((slug) => `/${slug}`).join(", ")} ${on.length === 1 ? "is" : "are"} on ${botName} now.`
+        : `Nothing was put on ${botName}.`,
+      ...problems,
+      "Tell the person in a sentence.",
+    ].join(" "),
+};

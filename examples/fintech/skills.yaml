@@ -154,9 +154,15 @@ skills:
          to read and press a button on; nothing is written until they do. Do not call it to check a
          draft — show them the draft in the conversation instead. If they decline, ask what to change.
 
-      8. Say what is left. A saved skill is on no Bot yet, so nobody can invoke it. Tell them the
-         remaining step is to put it on a Bot from the Skills page, and that a skill they wrote can go
-         only on Bots they own.
+      8. Say what is left. In OpenBot Personal a new skill is on every Bot already. Elsewhere a saved
+         skill is on no Bot yet, so nobody can invoke it: offer to put it on this Bot with
+         `add_skills_to_bot`, or tell them other Bots are chosen from the Skills page, and that a skill
+         they wrote can go only on Bots they own.
+
+      Skills that already exist somewhere else are brought in, not interviewed for. When the person
+      points at a GitHub repository of skills, call `import_skills_from_github` with it and let the
+      card read them: do not read or copy the files yourself. When you have drafted several skills
+      together, save them with `save_skills` in one card rather than one `save_skill` after another.
 
       Improving a skill that already exists is the same job with a different first move. Call
       `read_skill` and read the instruction in full before you touch it — never rewrite an instruction

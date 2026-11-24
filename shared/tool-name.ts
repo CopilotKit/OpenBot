@@ -598,6 +598,15 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     done: "Checked available tools",
   },
   save_skill: { running: "Proposing a skill", done: "Proposed a skill" },
+  save_skills: { running: "Proposing skills", done: "Proposed skills" },
+  import_skills_from_github: {
+    running: "Finding skills on GitHub",
+    done: "Offered skills from GitHub",
+  },
+  add_skills_to_bot: {
+    running: "Offering skills for this Bot",
+    done: "Offered skills for this Bot",
+  },
 
   /*
    * Drawing a generated interface in the conversation. The runtime offers it, not an OpenBot

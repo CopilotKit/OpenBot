@@ -36,26 +36,30 @@ function invalidateSkills(queryClient: QueryClient) {
  */
 export function saveSkillMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (input: SkillInput): Promise<unknown> =>
-      replaceSkill(
-        organizationId(),
-        input.slug,
-        {
-          title: input.title,
-          summary: input.summary ?? "",
-          instructions: input.instructions,
-          tools: input.tools,
-          forEveryone: input.global === true,
-        },
-        { "Idempotency-Key": idempotencyKey() },
-        /*
-         * The server refuses for reasons a form cannot check — a slug somebody else already owns is
-         * the common one — and paraphrasing that would throw away the only part worth reading.
-         */
-        { fallback: "Couldn't save the skill." },
-      ),
+    mutationFn: saveSkill,
     onSettled: () => invalidateSkills(queryClient),
   });
+}
+
+/** The write itself, for a caller saving several and refreshing once at the end (`import.ts`). */
+export function saveSkill(input: SkillInput): Promise<unknown> {
+  return replaceSkill(
+    organizationId(),
+    input.slug,
+    {
+      title: input.title,
+      summary: input.summary ?? "",
+      instructions: input.instructions,
+      tools: input.tools,
+      forEveryone: input.global === true,
+    },
+    { "Idempotency-Key": idempotencyKey() },
+    /*
+     * The server refuses for reasons a form cannot check — a slug somebody else already owns is
+     * the common one — and paraphrasing that would throw away the only part worth reading.
+     */
+    { fallback: "Couldn't save the skill." },
+  );
 }
 
 export function removeSkillMutationOptions(queryClient: QueryClient) {
