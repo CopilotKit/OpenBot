@@ -121,7 +121,7 @@ function AuthedApp() {
           <AppHotkeys />
           {/* The skin saved on the account, drawn over the browser's cached one once it loads. */}
           <SkinAccountSync />
-          {/* Opened by the personal edition's "OpenBot for Business" entry, from whichever skin draws it. */}
+          {/* Opened by the "OpenBot for Business" entry (personal edition and OpenBot Cloud), from whichever skin draws it. */}
           <TeamFeaturesDialog />
           {/*
            * Opened when the free trial is used up, and on every try at something that uses the AI
