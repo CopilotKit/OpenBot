@@ -37,22 +37,36 @@ mod connected_ipc {
             )
         }
 
-        /// The same, with the page plugin's real `record_problem` in place of the stand-in, under
-        /// the same ACL: what OpenBot's page reaches when it records a problem.
-        fn recording_problems() -> Self {
-            Self::with_page_plugin(
+        /// The same, with the page plugin's real `record_problem` and `save_logs` in place of the
+        /// stand-in, under the same ACL: what OpenBot's page reaches when it records a problem.
+        /// Under an identifier of its own (`identifier`), so its log folder is the test's and never
+        /// the log folder of whoever runs the tests.
+        fn recording_problems(identifier: &str) -> Self {
+            Self::with_page_plugin_as(
                 tauri::plugin::Builder::<tauri::test::MockRuntime>::new(desktop_page::PLUGIN)
                     .invoke_handler(tauri::generate_handler![
                         desktop_page::record_problem,
                         desktop_page::save_logs
                     ])
                     .build(),
+                Some(identifier),
             )
         }
 
         fn with_page_plugin(
             stand_in: tauri::plugin::TauriPlugin<tauri::test::MockRuntime>,
         ) -> Self {
+            Self::with_page_plugin_as(stand_in, None)
+        }
+
+        fn with_page_plugin_as(
+            stand_in: tauri::plugin::TauriPlugin<tauri::test::MockRuntime>,
+            identifier: Option<&str>,
+        ) -> Self {
+            let mut context = side_by_side(tauri::generate_context!(test = true));
+            if let Some(identifier) = identifier {
+                context.config_mut().identifier = identifier.to_owned();
+            }
             let app = tauri::test::mock_builder()
                 .plugin(stand_in)
                 .plugin(tauri_plugin_notification::init())
@@ -68,7 +82,7 @@ mod connected_ipc {
                     desktop_connected::use_this_computer,
                     desktop_connected::take_connection_notice,
                 ])
-                .build(side_by_side(tauri::generate_context!(test = true)))
+                .build(context)
                 .unwrap();
             know_app_page_grants(app.handle());
             let window = app.get_webview_window("main").unwrap_or_else(|| {
@@ -905,17 +919,29 @@ mod connected_ipc {
         ) {
             return;
         }
+        // Windows finds the local data folder through the system, never the environment, so there
+        // the app's own identifier is what keeps its log folder the test's.
         let home = temp_root("openbot-connected-logs-home");
-        std::env::set_var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }, &home);
-        std::env::set_var("XDG_DATA_HOME", home.join(".local/share"));
-        let shell = Connected::recording_problems();
+        if !cfg!(windows) {
+            std::env::set_var("HOME", &home);
+            std::env::set_var("XDG_DATA_HOME", home.join(".local/share"));
+        }
+        let identifier = format!(
+            "ai.copilotkit.openbot.desktop.test-{}",
+            std::process::id()
+        );
+        let shell = Connected::recording_problems(&identifier);
         let address = health_answering();
         // As Better Auth makes an organization's id: 32 letters and digits, both cases.
         let organization = "Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ";
         shell.choose(choice::Mode::Connected, &address, Some(organization));
         desktop_connected::showing_for_test(shell.handle(), RELAY);
         let folder = logging::folder(shell.handle()).unwrap();
-        assert!(folder.starts_with(&home), "{} is not the test's", folder.display());
+        assert!(
+            folder.components().any(|part| part.as_os_str() == identifier.as_str()),
+            "{} is not the test's",
+            folder.display()
+        );
         std::fs::create_dir_all(&folder).unwrap();
         // This app's log as it reads after a reply broke: the relay's lines among the others.
         std::fs::write(
@@ -1052,6 +1078,13 @@ mod connected_ipc {
         );
         assert!(!text.contains(key.as_str()));
         drop(shell);
+        // The app's own folder under its test identifier, wherever the system put it.
+        if let Some(own) = folder
+            .ancestors()
+            .find(|dir| dir.file_name().is_some_and(|name| name == identifier.as_str()))
+        {
+            let _ = std::fs::remove_dir_all(own);
+        }
         let _ = std::fs::remove_dir_all(&home);
     }
 
