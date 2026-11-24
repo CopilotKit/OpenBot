@@ -980,12 +980,13 @@ describe.skipIf(!asked)("the sidebar and the window's buttons", () => {
   }, 120_000);
 
   test("without the mark, on Windows or in a browser, every corner is where it has always been", async () => {
-    // Measured on main before the room was made, so a sidebar that moves outside the desktop fails.
+    // Measured on main without the mark, so a sidebar that moves outside the desktop fails. Measured
+    // again after the strip was redrawn wider (#2124), which moved its pieces on purpose.
     const before: Record<string, Awaited<ReturnType<typeof corner>>> = {
       "app-conversations": {
-        orb: { x: 18, y: 22 },
-        firstSection: { x: 14, y: 64 },
-        heading: { x: 72, y: 21 },
+        orb: { x: 22, y: 22 },
+        firstSection: { x: 8, y: 64 },
+        heading: { x: 80, y: 21 },
         back: null,
       },
       admin: {
