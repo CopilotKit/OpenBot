@@ -15,6 +15,7 @@
  */
 
 import {
+  frontEndRelease,
   KEPT_FOR_MS,
   type KeptProblem,
   problemClockNow,
@@ -22,7 +23,6 @@ import {
 } from "@/lib/desktop/problems";
 import { invokeDesktop } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
-import { appVersion } from "@/lib/error-details";
 import { redact, redactKeepingIds } from "./redact";
 
 /** The sentence at the top of the file, saying what was taken out and what was kept. */
@@ -210,7 +210,7 @@ export async function saveTroubleshootingLogs(
     troubleshootingText({
       now,
       address: location.origin,
-      frontEnd: appVersion(),
+      frontEnd: frontEndRelease(),
       server: person?.openbotVersion,
       organizationId,
       personId: person?.id,

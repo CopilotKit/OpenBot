@@ -25,9 +25,19 @@
  * No imports that reach `lib/client.ts`, so the transport can record here without a cycle.
  */
 
+import { RELEASE } from "@openbot/shared/client-version";
 import { appVersion } from "@/lib/error-details";
 import { invokeDesktop } from "./queries";
 import { desktopShell } from "./shell";
+
+/**
+ * The web app's own release: the build's label when it has one, and otherwise the release it was
+ * built from, the one every request names in `OpenBot-Client`. Found on a test OpenBot: the image's
+ * web app had no build label, and both troubleshooting files said its version wasn't known.
+ */
+export function frontEndRelease(): string {
+  return appVersion() ?? RELEASE;
+}
 
 /** One problem, in the shape the desktop app's `record_problem` takes. */
 export type ReportedProblem = {
@@ -121,7 +131,7 @@ export function recordProblem(problem: ReportedProblem): void {
   sentAt = sentAt.filter((at) => now - at < 60_000);
   if (sentAt.length >= MAX_PER_MINUTE) return;
   sentAt.push(now);
-  const version = appVersion();
+  const version = frontEndRelease();
   const sent: ReportedProblem = {
     ...problem,
     ...(problem.message === undefined

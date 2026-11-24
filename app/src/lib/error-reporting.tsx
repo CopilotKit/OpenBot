@@ -115,7 +115,8 @@ function recordForTroubleshooting(
  */
 export function thrownAt(event: ErrorEvent): string | undefined {
   const file = (event.filename ?? "").split(/[?#]/, 1)[0] ?? "";
-  if (!file) return undefined;
+  // WebKit names a script with no file of its own "undefined".
+  if (!file || file === "undefined") return undefined;
   return event.lineno ? `${file}:${event.lineno}:${event.colno ?? 0}` : file;
 }
 

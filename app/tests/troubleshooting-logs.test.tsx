@@ -22,6 +22,7 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { RELEASE } from "@openbot/shared/client-version";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -328,6 +329,23 @@ test("with nothing gone wrong, the file says so", async () => {
   expect(
     text?.endsWith("Problems the app met:\nNone in the last 30 minutes.\n"),
   ).toBe(true);
+});
+
+/**
+ * FOUND ON A TEST OPENBOT: its image's web app had no build label, and the file said its version
+ * wasn't known while every request named `web/<release>`. The file names that release then.
+ */
+test("a web app with no build label names the release it was built from", async () => {
+  delete (globalThis as Record<string, unknown>).__OPENBOT_APP_VERSION__;
+  const { view, user } = renderSidebar();
+  await settleReactWork();
+  setProblemClock(clock);
+  await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+  await user.click(
+    await view.findByRole("menuitem", { name: "Get troubleshooting logs" }),
+  );
+  await waitFor(() => expect(downloads).toHaveLength(1));
+  expect(await downloads[0]?.blob.text()).toContain(`Front end: ${RELEASE}\n`);
 });
 
 test("inside OpenBot Desktop, the item has the desktop app save its own file, and says where", async () => {
