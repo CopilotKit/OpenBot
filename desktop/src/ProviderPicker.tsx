@@ -288,12 +288,19 @@ export function ProviderPicker({
   // stringifying it printed "[object Object]" where the diagnosis should have been.
   const [failure, setFailure] = useState<Problem | null>(null);
   const providerPickerRef = useRef<HTMLFieldSetElement>(null);
-  const restoreProviderFocus = useRef(false);
+  const restoreProviderFocus = useRef<string | null>(null);
   useEffect(() => {
-    if (!open || !restoreProviderFocus.current) return;
-    restoreProviderFocus.current = false;
-    providerPickerRef.current
-      ?.querySelector<HTMLInputElement>('input[name="provider"]:checked')
+    if (!restoreProviderFocus.current) return;
+    const provider = open ?? restoreProviderFocus.current;
+    restoreProviderFocus.current = null;
+    // The fieldset remounts when moving between the catalogue and anchored selection.
+    // Returning clears the selection, so find the previous provider by value, not :checked.
+    Array.from(
+      providerPickerRef.current?.querySelectorAll<HTMLInputElement>(
+        'input[name="provider"]',
+      ) ?? [],
+    )
+      .find((input) => input.value === provider)
       ?.focus({ preventScroll: true });
   }, [open]);
   const openRef = useRef(open);
@@ -614,6 +621,7 @@ export function ProviderPicker({
 
   /** Back to every provider: the chosen one's sign-in, if any, stops. */
   function chooseAnother() {
+    restoreProviderFocus.current = open;
     if (oauthAttempt.current) void cancelOAuth();
     stopPlanSignIn();
     signInRunRef.current += 1;
@@ -661,7 +669,7 @@ export function ProviderPicker({
               // Selecting a row moves its fieldset outside the scrolling catalogue. Keep the
               // focused radio focused when React mounts it in that anchored position.
               restoreProviderFocus.current =
-                document.activeElement === event.currentTarget;
+                document.activeElement === event.currentTarget ? r.id : null;
               if (oauthAttempt.current) void cancelOAuth();
               stopPlanSignIn();
               signInRunRef.current += 1;

@@ -288,6 +288,81 @@ test("provider catalogue scrolls separately from the anchored selection and acti
   ).toBe(footer);
 });
 
+for (const returnKey of ["{Enter}", "{Escape}"]) {
+  test(`returning to the catalogue with ${returnKey} restores the previous provider focus`, async () => {
+    invokeHandler = async (command) => {
+      if (command === "providers") return providers;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const choices: unknown[] = [];
+    const view = await renderPicker((choice) => choices.push(choice));
+    const user = userEvent.setup({ document });
+
+    // Repeat with both providers: the return target must follow the latest choice.
+    for (const name of [/^Anthropic/, /^OpenAI/, /^Anthropic/]) {
+      const radio = await view.findByRole("radio", { name });
+      radio.focus();
+      await user.keyboard(" ");
+      expect(document.activeElement === view.getByRole("radio", { name })).toBe(
+        true,
+      );
+      expect(view.getAllByRole("radio")).toHaveLength(1);
+      expect(
+        view
+          .getByRole("tab", { name: "Sign in with my plan" })
+          .getAttribute("aria-selected"),
+      ).toBe("true");
+
+      view.getByRole("button", { name: "Choose a different provider" }).focus();
+      await user.keyboard(returnKey);
+      expect(view.getAllByRole("radio")).toHaveLength(providers.length);
+      expect(document.activeElement === view.getByRole("radio", { name })).toBe(
+        true,
+      );
+      expect(
+        view
+          .getAllByRole("radio")
+          .every((input) => !(input as HTMLInputElement).checked),
+      ).toBe(true);
+    }
+    expect(choices).toEqual([]);
+    expect(invokeCalls.map(({ command }) => command)).toEqual(["providers"]);
+  });
+}
+
+test("provider focus restoration does not steal focus from fields or unrelated updates", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const onChoose = () => {};
+  const view = await renderPicker(onChoose);
+  const radio = await view.findByRole("radio", { name: /^Anthropic/ });
+  const back = view.getByRole("button", { name: "Back" });
+  back.focus();
+  // A selection dispatched while another control owns focus must not claim it.
+  fireEvent.click(radio);
+  expect(document.activeElement === back).toBe(true);
+  await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+  const key = view.getByLabelText("Anthropic API key");
+  await userEvent.type(key, "test-key");
+  view.rerender(
+    <ProviderPicker
+      chosen={null}
+      held={{}}
+      root=" /tmp/openbot-provider-root "
+      onBack={() => {}}
+      onChoose={onChoose}
+      status="Updated setup progress"
+    />,
+  );
+  expect(document.activeElement === key).toBe(true);
+  expect((key as HTMLInputElement).value).toBe("test-key");
+  await userEvent.setup({ document }).keyboard("{Escape}");
+  expect(view.getAllByRole("radio")).toHaveLength(1);
+  expect(document.activeElement === key).toBe(true);
+});
+
 test("plan wait, signed-in confirmation and API key share one body with stable footer actions", async () => {
   const finished = deferred<string>();
   invokeHandler = async (command) => {
