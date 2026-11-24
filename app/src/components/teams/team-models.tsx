@@ -338,7 +338,7 @@ function TeamModelsDialog({
           )}
           {failure ? (
             <p className="text-destructive text-sm" role="alert">
-              {failure.message}
+              {failureSaid(failure)}
             </p>
           ) : null}
         </DialogBody>

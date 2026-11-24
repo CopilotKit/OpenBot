@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/generated/computers/computers";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import type { Failure } from "@/lib/load-failure";
 
 /**
  * Handing control of a Bot's computer to a person, and back.
@@ -151,19 +152,20 @@ export function cancelControl(computerId: string, requestId: string) {
 export async function supplySecret(
   computerId: string,
   text: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: Failure }> {
   try {
     await supplyComputerSecret(organizationId(), computerId, { text }, once(), {
       fallback: "Couldn't type that into the page. Try again.",
     });
     return { ok: true };
   } catch (error) {
+    // The server's refusal kept whole, so a hold is drawn calmly (`failureSaid`).
     return {
       ok: false,
       error:
         error instanceof ClientError
-          ? error.message
-          : "Couldn't reach the Bot's computer. Try again.",
+          ? error
+          : { message: "Couldn't reach the Bot's computer. Try again." },
     };
   }
 }

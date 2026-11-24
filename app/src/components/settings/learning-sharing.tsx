@@ -37,8 +37,8 @@ import {
   type PersonalLearningSharing,
   personalLearningQueryOptions,
 } from "@/lib/learning/queries";
-import { queryClient } from "@/query-client";
 import { failureSaid } from "@/lib/load-failure";
+import { queryClient } from "@/query-client";
 
 /** The three choices, each with the one plain line that says who sees what. */
 export const SHARING_CHOICES: {
@@ -473,7 +473,7 @@ export function LearningSharing({
       {choiceSection}
       {failure ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {failure.message}
+          {failureSaid(failure)}
         </p>
       ) : null}
     </>

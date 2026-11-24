@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { DirectoryKeyVersion } from "@/lib/api/generated/model";
 import { addDirectoryAppMutationOptions } from "@/lib/apps/mutations";
 import { directoryAppsQueryOptions } from "@/lib/apps/queries";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { keyVersionOffer } from "@/lib/plugins/directory-state";
 import { cn } from "@/lib/utils";
@@ -97,11 +98,12 @@ export function KeyVersionOffer({
   const paths = useManagePaths();
   const directory = useQuery(directoryAppsQueryOptions(title));
   const entry = keyVersionOffer(directory.data, appId);
-  const [error, setError] = useState<string | null>(null);
+  // The refusal itself, not its words: a hold is drawn calmly (`failureSaid`).
+  const [error, setError] = useState<Failure | null>(null);
   const add = useMutation({
     ...addDirectoryAppMutationOptions(queryClient),
     onMutate: () => setError(null),
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
     onSuccess: (keyAppId) =>
       mode === "connect"
         ? navigate({
@@ -127,7 +129,7 @@ export function KeyVersionOffer({
       />
       {error ? (
         <p className="mt-3 text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
     </>

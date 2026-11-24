@@ -16,6 +16,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { type Failure, unavailableSaid } from "@/lib/load-failure";
 import { cn } from "@/lib/utils";
 
 /*
@@ -257,23 +258,31 @@ export function FuseEmpty({
 export function ErrorNotice({
   error,
   held = false,
+  failure,
 }: {
   error?: string | null;
   /** OpenBot holding off for now (lib/load-failure.tsx): drawn calm, never as a failure. */
   held?: boolean;
+  /**
+   * A press's failure, kept whole: its words, drawn calm when it is OpenBot holding off for now, so
+   * the caller needn't work that out (lib/load-failure.tsx).
+   */
+  failure?: Failure | null;
 }) {
-  if (!error) return null;
+  const words = failure ? failure.message : error;
+  const calm = failure ? unavailableSaid(failure) !== undefined : held;
+  if (!words) return null;
   return (
     <div
       className={cn(
         "my-2.5 rounded-[14px] p-4 text-[15px] leading-[23px]",
-        held
+        calm
           ? "bg-muted text-muted-foreground"
           : "bg-[var(--openfuse-danger-tint)] text-destructive",
       )}
       role="alert"
     >
-      {error}
+      {words}
     </div>
   );
 }

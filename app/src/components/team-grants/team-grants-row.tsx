@@ -21,6 +21,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { failureSaid } from "@/lib/load-failure";
 import {
   replaceAppTeamGrantsMutationOptions,
   replaceSkillTeamGrantsMutationOptions,
@@ -33,7 +34,6 @@ import {
 import { MISSING_TEAM, teamName } from "@/lib/teams/names";
 import { type TeamSummary, teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
-import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The Teams row of an app's page and of a skill's page in Admin, and the dialog it opens.
@@ -147,8 +147,9 @@ function TeamGrantsRow({
         <ItemContent>
           <ItemTitle>Teams</ItemTitle>
           <ItemDescription role="alert">
-            {failed?.message ??
-              "Couldn't load the teams it's given to. Try again in a moment."}
+            {failed
+              ? failureSaid(failed)
+              : "Couldn't load the teams it's given to. Try again in a moment."}
           </ItemDescription>
         </ItemContent>
       </Item>

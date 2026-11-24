@@ -107,9 +107,9 @@ import type {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { ClientError } from "@/lib/client";
 import { desktopShell } from "@/lib/desktop/shell";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { markFor } from "@/lib/marks";
 import { queryClient } from "@/query-client";
-import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Choosing an AI connection: the provider list, the way in (a key, an address, or a sign-in), and
@@ -395,7 +395,7 @@ export function ChooseConnection({
   const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [signInCode, setSignInCode] = useState("");
   const [signedIn, setSignedIn] = useState(false);
-  const [signInFailure, setSignInFailure] = useState<string | null>(null);
+  const [signInFailure, setSignInFailure] = useState<Failure | null>(null);
   const [signingIn, setSigningIn] = useState(false);
   const [chatGptWay, setChatGptWay] = useState<ChatGptWay>(firstChatGptWay);
   /*
@@ -704,9 +704,7 @@ export function ChooseConnection({
       attempt.current = null;
       setWaiting(null);
       setSigningIn(false);
-      setSignInFailure(
-        error instanceof Error ? error.message : "Couldn't sign in. Try again.",
-      );
+      setSignInFailure(failureOf(error, "Couldn't sign in. Try again."));
     }
   }
 
@@ -724,7 +722,7 @@ export function ChooseConnection({
     const wrong =
       signInId && provider?.id === "openai" ? wrongPage(pasted) : null;
     if (wrong) {
-      setSignInFailure(wrong);
+      setSignInFailure({ message: wrong });
       return;
     }
     setSigningIn(true);
@@ -742,9 +740,7 @@ export function ChooseConnection({
       setSignedIn(true);
     } catch (error) {
       if (run.current !== mine) return;
-      const message =
-        error instanceof Error ? error.message : "Couldn't sign in. Try again.";
-      setSignInFailure(message);
+      setSignInFailure(failureOf(error, "Couldn't sign in. Try again."));
       /*
        * The server refused what was pasted (400: from another sign-in, or with no code in it) and
        * the sign-in waits on: the box stays open for the right one. Anything else, a sign-in that
@@ -1193,7 +1189,7 @@ function SignInFields({
   /** This sign-in finishes through Desktop's listener: no paste box, and no page that won't load. */
   noPaste: boolean;
   code: string;
-  failure: string | null;
+  failure: Failure | null;
   /** Signed in already: the admin's own sign-in, kept for them, to share as it is. */
   kept: boolean;
   login: AiConnectionLogin;
@@ -1380,7 +1376,7 @@ function SignInFields({
       {failure && !waiting && !signedIn ? (
         <div className="flex flex-col gap-1 text-sm">
           <p className="text-destructive" role="alert">
-            {failure}
+            {failureSaid(failure)}
           </p>
           {/* A code that didn't work: the setting it needs is the likeliest reason. */}
           {chatGptCode ? (
@@ -1444,7 +1440,7 @@ function SignInFields({
       {/* A code the server refused while the sign-in waits on; ChatGPT's paste box says it itself. */}
       {failure && waiting && !chatGptInBrowser ? (
         <p className="text-destructive text-sm" role="alert">
-          {failure}
+          {failureSaid(failure)}
         </p>
       ) : null}
     </div>

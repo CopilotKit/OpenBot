@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { addCuratedServerMutationOptions } from "@/lib/apps/mutations";
 import { appsQueryOptions } from "@/lib/apps/queries";
+import { type Failure, failureOf } from "@/lib/load-failure";
 import {
   connectAccountMutationOptions,
   invalidatePlugins,
@@ -23,7 +24,8 @@ export function useConnectApp() {
   const add = useMutation(addCuratedServerMutationOptions(queryClient));
   const connect = useMutation(connectAccountMutationOptions("settings"));
   const [pending, setPending] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The refusal itself, not its words: a hold is drawn calmly (`failureSaid`).
+  const [error, setError] = useState<Failure | null>(null);
 
   const freshServer = async (key: string) =>
     (
@@ -56,7 +58,7 @@ export function useConnectApp() {
         queryKey: connectionsQueryOptions().queryKey,
       });
     } catch (thrown) {
-      setError((thrown as Error).message);
+      setError(failureOf(thrown, "Couldn't connect that app."));
     } finally {
       setPending(null);
     }

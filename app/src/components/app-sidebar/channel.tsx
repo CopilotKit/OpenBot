@@ -16,6 +16,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 import type { ConversationView } from "@/lib/settings/conversation-view";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
 import { useTypedReveal } from "@/lib/typed-reveal";
@@ -90,7 +91,7 @@ export const Channel = memo(function Channel({
    * app, and the row is where the person was looking, so the sentence goes here and is replaced by
    * the next attempt.
    */
-  const [pinProblem, setPinProblem] = useState<string | null>(null);
+  const [pinProblem, setPinProblem] = useState<Failure | null>(null);
 
   return (
     <>
@@ -138,7 +139,7 @@ export const Channel = memo(function Channel({
               setPinProblem(null);
               setPinned.mutate(
                 { channelId, pinned: !pinned },
-                { onError: (thrown) => setPinProblem(thrown.message) },
+                { onError: (thrown) => setPinProblem(thrown) },
               );
             }}
           >
@@ -162,7 +163,7 @@ export const Channel = memo(function Channel({
       </ContextMenu>
       {pinProblem ? (
         <p className="px-2 pb-1 text-destructive text-xs" role="alert">
-          {pinProblem}
+          {failureSaid(pinProblem)}
         </p>
       ) : null}
       <RenameConversationDialog

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { LiveWaveform } from "@/components/ui/live-waveform";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { failureSaid } from "@/lib/load-failure";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { cn } from "@/lib/utils";
@@ -273,7 +274,7 @@ export function VoiceCallWidget({
           {failed && (
             <div className="mt-3 text-xs">
               <p className="text-destructive" role="alert">
-                {state.error}
+                {failureSaid(state.error)}
               </p>
               <Button
                 variant="ghost"

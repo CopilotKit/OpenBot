@@ -42,6 +42,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import {
   addMemorySourceMutationOptions,
   availableMemorySourcesQueryOptions,
@@ -49,7 +50,6 @@ import {
   memorySourcesQueryOptions,
 } from "@/lib/memory";
 import { queryClient } from "@/query-client";
-import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Connected apps a Bot reads facts from. Given a Bot, only that Bot's sources, and a new one is that
@@ -67,7 +67,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
   const [toolRef, setToolRef] = useState("");
   const [title, setTitle] = useState("");
   const [args, setArgs] = useState<Record<string, string>>({});
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Failure | null>(null);
   const id = useId();
   const tools = useQuery(availableMemorySourcesQueryOptions(agentId));
   const chosen = tools.data?.find((tool) => tool.ref === toolRef);
@@ -104,7 +104,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
         <Button
           onClick={() => {
             // The draft is kept on purpose; the last attempt's failure is not.
-            setError("");
+            setError(null);
             add.reset();
             setAdding(true);
           }}
@@ -128,7 +128,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
             <Button
               onClick={() => {
                 // The draft is kept on purpose; the last attempt's failure is not.
-                setError("");
+                setError(null);
                 add.reset();
                 setAdding(true);
               }}
@@ -260,7 +260,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                       );
                     else values[setting.name] = value;
                   }
-                  setError("");
+                  setError(null);
                   add.mutate(
                     {
                       botId: agentId,
@@ -276,11 +276,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                     },
                   );
                 } catch (cause) {
-                  setError(
-                    cause instanceof Error
-                      ? cause.message
-                      : "Check the source settings.",
-                  );
+                  setError(failureOf(cause, "Check the source settings."));
                 }
               }}
             >
@@ -409,7 +405,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
             </form>
             {(error || add.error || tools.error) && (
               <p role="alert" className="text-destructive text-sm">
-                {error || failureSaid(add.error ?? tools.error)}
+                {failureSaid(error ?? add.error ?? tools.error)}
               </p>
             )}
           </DialogBody>

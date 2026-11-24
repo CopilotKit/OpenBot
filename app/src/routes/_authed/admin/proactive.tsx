@@ -62,7 +62,7 @@ import {
   type EnterpriseOverview,
   enterpriseOverviewQueryOptions,
 } from "@/lib/enterprise/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/proactive")({
@@ -241,7 +241,7 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
       </PageRows>
       {failure ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {failure.message}
+          {failureSaid(failure)}
         </p>
       ) : null}
       <DailyLimitDialog

@@ -23,7 +23,12 @@ import {
 } from "@/components/ui/item";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
-import { loadFailure } from "@/lib/load-failure";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
 import {
   effortLabel,
   type ModelPick,
@@ -61,7 +66,8 @@ export function DefaultModelSection({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ModelPick>();
   const [useDeploymentDefault, setUseDeploymentDefault] = useState(true);
-  const [error, setError] = useState<string>();
+  // A refused save is kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const [error, setError] = useState<Failure>();
   if (!eligible) return null;
 
   const open = () => {
@@ -83,11 +89,7 @@ export function DefaultModelSection({
       await onSave(useDeploymentDefault ? null : (custom ?? null));
       setEditing(false);
     } catch (failure) {
-      setError(
-        failure instanceof Error
-          ? failure.message
-          : "Couldn't save the default model.",
-      );
+      setError(failureOf(failure, "Couldn't save the default model."));
     }
   };
   const deploymentSummary = deploymentModel
@@ -223,7 +225,7 @@ export function DefaultModelSection({
               </fieldset>
               {error ? (
                 <p role="alert" className="text-destructive text-sm">
-                  {error}
+                  {failureSaid(error)}
                 </p>
               ) : null}
             </DialogBody>
