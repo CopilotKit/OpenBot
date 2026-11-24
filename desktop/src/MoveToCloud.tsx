@@ -183,11 +183,15 @@ export const MOVE_LATER_IN_SETTINGS =
 
 /** Why an app the person signed in to doesn't move, said on the preview. */
 export const SIGN_INS_CANT_MOVE =
-  "Sign-ins stay with the app you signed in to, so they can't move.";
+  "Sign-ins can't move, so you'll sign in to each one again.";
 
-/** The same, said on the result. */
+/** The same, said on the result, over each app's Reconnect. */
 export const SIGN_INS_DIDNT_MOVE =
-  "Sign-ins stay with the app you signed in to, so they didn't move.";
+  "Sign-ins can't move, so sign in to each one again.";
+
+/** The same, on a result that sends the person to Connect your AI first. */
+export const SIGN_INS_AFTER_AI =
+  "Sign-ins can't move. Once your AI is connected, you'll reconnect each one from a list in OpenBot Cloud.";
 
 /** Over the apps connected with a key, on the preview. */
 export const CARRIED_HEADING = "These apps come across connected";
@@ -1085,10 +1089,7 @@ function Done({ moved }: { moved: Moved }) {
         (aiFirst ? (
           <section className="move-then" aria-labelledby="moved-apps-heading">
             <h2 id="moved-apps-heading">Then reconnect your apps</h2>
-            <p>
-              {SIGN_INS_DIDNT_MOVE} Once your AI is connected, you'll reconnect
-              each one from a list in OpenBot Cloud.
-            </p>
+            <p>{SIGN_INS_AFTER_AI}</p>
             <AppList apps={moved.apps} />
           </section>
         ) : (

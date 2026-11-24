@@ -508,9 +508,7 @@ test("before the move, the apps that must be reconnected are listed by name, abo
     "Google Drive",
   ]);
   expect(
-    view.getByText(
-      "Sign-ins stay with the app you signed in to, so they can't move.",
-    ),
+    view.getByText("Sign-ins can't move, so you'll sign in to each one again."),
   ).toBeTruthy();
   // An older shell names no apps that move connected: none is said.
   expect(view.queryByText("These apps come across connected")).toBe(null);
@@ -633,9 +631,7 @@ test("a finished move says which apps came across connected, and one it couldn't
     NOT_ALLOWED,
   );
   expect(
-    view.getByText(
-      "Sign-ins stay with the app you signed in to, so they didn't move.",
-    ),
+    view.getByText("Sign-ins can't move, so sign in to each one again."),
   ).toBeTruthy();
   expect(
     view
@@ -905,7 +901,9 @@ test("a finished move that still needs the person's AI leads with Connect your A
     "Google Drive",
   ]);
   expect(
-    view.getByText(/reconnect each one from a list in OpenBot Cloud/),
+    view.getByText(
+      "Sign-ins can't move. Once your AI is connected, you'll reconnect each one from a list in OpenBot Cloud.",
+    ),
   ).toBeTruthy();
   expect(view.queryByRole("button", { name: /^Reconnect/ })).toBe(null);
   // No way past the step: Connect your AI is the one button.
