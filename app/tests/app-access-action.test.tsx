@@ -664,14 +664,15 @@ test("an admin's press that cannot be carried out says what is missing", async (
 /*
  * OpenBot Cloud, an admin in their own organization: a Bot asked for Notion, and the card said
  * "This Bot hasn't been given Notion. Only an admin can give it." to the admin. Pressing Give it
- * answered "Notion has no tools to give yet": Notion lists its tools only for somebody who has
- * signed in, and the press never signed them in.
+ * answered "Notion has no tools to give yet": the app had listed nothing, and the press stopped
+ * before the admin's sign-in, after which the app is asked for its tools again as them. Notion and
+ * Gmail from the directory, each run on the person's own account.
  */
 const NOTION: Partial<AppAccess> = {
-  key: "notion",
+  key: "composio-notion",
   displayName: "Notion",
-  source: "catalogue",
-  connect: "oauth",
+  source: "directory",
+  connect: "consent",
   account: "personal",
   connectedAt: null,
 };
@@ -789,7 +790,7 @@ test("an admin already signed in to Notion gives it in one press, with no sign-i
   await waitFor(() =>
     expect(
       sent.filter((call) => call.method === "POST").map((call) => call.url),
-    ).toEqual([`${botAppPath("expenses", "notion")}/approve`]),
+    ).toEqual([`${botAppPath("expenses", "composio-notion")}/approve`]),
   );
   // Settled: nothing more was asked, and no sign-in was opened.
   await new Promise((resolve) => setTimeout(resolve, 200));

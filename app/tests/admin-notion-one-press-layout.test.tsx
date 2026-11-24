@@ -11,10 +11,10 @@ import { myConnectionPath } from "./connections-api";
  *
  * On OpenBot Cloud an admin asked General Assistant to connect Notion. The card told them "This Bot
  * hasn't been given Notion. Only an admin can give it.", and Give it answered "Notion has no tools
- * to give yet". Notion lists its tools only for somebody who has signed in, and the press never
- * signed them in. Now the card says what is missing, and its one press turns Notion on, opens the
- * admin's sign-in in a tab claimed on the click, and gives Notion to the Bot once they're in. The
- * same for Gmail from the directory, for any app that has listed nothing before the admin signs in.
+ * to give yet": the app had listed nothing, and the press stopped before the admin's sign-in. Now
+ * the card says what is missing, and its one press turns the app on, opens the admin's sign-in in a
+ * tab claimed on the click, and gives the app to the Bot once they're in. Notion and Gmail, both from
+ * the directory.
  * app-access-card-one-press.test.tsx holds the behaviour; this drives it with a real mouse in the
  * app's stylesheet and looks at each step.
  *
@@ -218,13 +218,13 @@ const events = async (page: Page, key: string) =>
     )
   ).filter((event) => event.includes(key) || event.startsWith("tab "));
 
-/** The two apps: Notion, OpenBot's own, and Gmail from the directory. */
+/** The two apps, both from the directory: Notion and Gmail. */
 const APPS = [
   {
     query: "",
-    key: "notion",
+    key: "composio-notion",
     title: "Notion",
-    signIn: "https://mcp.notion.com/authorize?client_id=openbot",
+    signIn: "https://backend.composio.dev/api/v3/s/notion-consent",
   },
   {
     query: "&app=gmail",

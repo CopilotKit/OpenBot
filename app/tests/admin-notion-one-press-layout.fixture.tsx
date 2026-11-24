@@ -39,19 +39,17 @@ import {
 } from "./connections-api";
 
 /**
- * A conversation in which General Assistant was asked to connect Notion, seen by the admin of their
- * own organization, as a page of its own for admin-notion-one-press-layout.test.tsx to bundle and
- * load in a browser. The real conversation view draws the real card from the `show_app_access`
- * answer, with this page playing the server.
+ * A conversation in which General Assistant was asked to connect Notion, from the directory, seen by
+ * the admin of their own organization, as a page of its own for admin-notion-one-press-layout.test.tsx
+ * to bundle and load in a browser. The real conversation view draws the real card from the
+ * `show_app_access` answer, with this page playing the server.
  *
- * Notion lists its tools only for somebody who has signed in. `?server=refuses` answers the press as
- * the server did before it let an admin's own press through without tools: 409, "Notion has no
- * tools to give yet". Otherwise the press turns Notion on with nothing given, and once
- * `window.__signIn()` has recorded the admin's account, the next press gives its read-only tools.
- * `?app=gmail` is Gmail from the directory, which signs in through OpenBot's own step before the
- * vendor's, in place of Notion, the same way: listed nothing until the admin is in. `?on=1` starts
- * with the app already on, `?theme=dark` draws it dark. What the page does is kept in order on
- * `window.__events`.
+ * The app has listed none of its tools yet. `?server=refuses` answers the press as the server did
+ * before it let an admin's own press through without tools: 409, "Notion has no tools to give yet".
+ * Otherwise the press turns the app on with nothing given, and once `window.__signIn()` has recorded
+ * the admin's account, the next press gives its read-only tools. `?app=gmail` is Gmail in place of
+ * Notion. `?on=1` starts with the app already on, `?theme=dark` draws it dark. What the page does is
+ * kept in order on `window.__events`.
  */
 type Page = Window & { __events: string[]; __signIn: () => void };
 const page = window as unknown as Page;
@@ -64,11 +62,9 @@ if (params.get("theme") === "dark")
 const refuses = params.get("server") === "refuses";
 
 const gmail = params.get("app") === "gmail";
-const APP = gmail ? "composio-gmail" : "notion";
+const APP = gmail ? "composio-gmail" : "composio-notion";
 const TITLE = gmail ? "Gmail" : "Notion";
-const SIGN_IN = gmail
-  ? "https://backend.composio.dev/api/v3/s/gmail-consent"
-  : "https://mcp.notion.com/authorize?client_id=openbot";
+const SIGN_IN = `https://backend.composio.dev/api/v3/s/${gmail ? "gmail" : "notion"}-consent`;
 const BOT = "assistant";
 const SIGNED_IN = "2026-11-23T23:10:00.000Z";
 
@@ -76,8 +72,8 @@ const notion = (overrides: Partial<AppAccess>): AppAccess =>
   appAccess({
     key: APP,
     displayName: TITLE,
-    source: gmail ? "directory" : "catalogue",
-    connect: gmail ? "consent" : "oauth",
+    source: "directory",
+    connect: "consent",
     granted: false,
     requestKind: "grant",
     ...overrides,
@@ -140,7 +136,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       }),
       enabled: !wasOn,
       granted: given
-        ? [gmail ? `${APP}/GMAIL_FETCH_EMAILS` : `${APP}/notion-search`]
+        ? [gmail ? `${APP}/GMAIL_FETCH_EMAILS` : `${APP}/NOTION_SEARCH`]
         : [],
     });
   }
