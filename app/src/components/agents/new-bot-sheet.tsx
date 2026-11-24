@@ -73,7 +73,12 @@ import { isComposing } from "@/lib/composing";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
-import { failureSaid, loadFailure } from "@/lib/load-failure";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
 import { useOrganizationAudience } from "@/lib/organizations/queries";
 import { type PluginServer, pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
@@ -234,8 +239,11 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const [tried, setTried] = useState(false);
   /** Continue on the address is dialling it, before anything is created. */
   const [checking, setChecking] = useState(false);
-  /** Why the server could not reach the address on the last Continue, in its own words. */
-  const [unreachable, setUnreachable] = useState<string>();
+  /**
+   * Why the server could not reach the address on the last Continue, in its own words. The refusal
+   * itself, not its words: a hold is drawn calmly (lib/load-failure.tsx).
+   */
+  const [unreachable, setUnreachable] = useState<Failure>();
   /** The Bot just made, held for the moment the sheet spends saying so before it hands over. */
   const [createdId, setCreatedId] = useState<string>();
   /**
@@ -391,11 +399,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         await create(runtime);
       } catch (error) {
         createAgent.reset();
-        setUnreachable(
-          error instanceof Error && error.message
-            ? error.message
-            : MASTRA_UNREACHABLE,
-        );
+        setUnreachable(failureOf(error, MASTRA_UNREACHABLE));
         focusAddress();
       }
       return;
@@ -526,7 +530,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             ) : (
               <EndpointStep
                 endpoint={endpoint}
-                endpointError={tried ? endpointIssue : unreachable}
+                endpointError={
+                  tried
+                    ? endpointIssue === undefined
+                      ? undefined
+                      : { message: endpointIssue }
+                    : unreachable
+                }
                 harness={runtime?.kind === "managed" ? runtime.harness : null}
                 onEndpoint={(value) => {
                   setEndpoint(value);
@@ -1060,7 +1070,7 @@ export function EndpointStep({
   harness: string | null;
   endpoint: string;
   secret: string;
-  endpointError?: string;
+  endpointError?: Failure;
   onEndpoint: (value: string) => void;
   onKey: (value: string) => void;
 }) {
@@ -1099,10 +1109,9 @@ export function EndpointStep({
             value={endpoint}
           />
           {endpointError ? (
-            <FieldError
-              className="text-pretty"
-              errors={[{ message: endpointError }]}
-            />
+            <FieldError className="text-pretty">
+              {failureSaid(endpointError)}
+            </FieldError>
           ) : mastra ? (
             <FieldDescription>
               Give the address of your Mastra server. It needs to run one agent,

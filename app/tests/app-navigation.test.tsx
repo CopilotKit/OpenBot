@@ -198,10 +198,15 @@ test.each(["user", "admin"] as const)(
     // (Bots) as a button that switches the panel, any other as a link to its page.
     const names = [
       ...footer.querySelectorAll<HTMLElement>("a[href], button"),
-    ].map((item) => item.querySelector(".sr-only")?.textContent);
+    ].map(
+      (item) => item.querySelector('[data-slot="strip-label"]')?.textContent,
+    );
+    // The strip's short names: Chats for Conversations, Apps for Connections; the rest as listed.
     expect(names).toEqual([
-      "Conversations",
-      ...expected(role, "primary").map((item) => item.label),
+      "Chats",
+      ...expected(role, "primary").map((item) =>
+        item.label === "Connections" ? "Apps" : item.label,
+      ),
     ]);
     expect(links(footer).map(({ to }) => to)).toEqual([
       "/routines",

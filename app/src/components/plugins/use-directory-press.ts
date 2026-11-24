@@ -8,6 +8,7 @@ import {
   type DirectoryAppInput,
 } from "@/lib/apps/mutations";
 import { type DirectoryApp, directorySlug } from "@/lib/apps/queries";
+import type { Failure } from "@/lib/load-failure";
 import { directoryConnect } from "@/lib/plugins/directory-state";
 import { invalidatePlugins } from "@/lib/plugins/mutations";
 import { connectionsQueryOptions } from "@/lib/plugins/queries";
@@ -38,7 +39,8 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const tab = useConnectInNewTab();
-  const [error, setError] = React.useState<string | null>(null);
+  // The refusal itself, not its words: a hold is drawn calmly (`failureSaid`).
+  const [error, setError] = React.useState<Failure | null>(null);
   const [adding, setAdding] = React.useState<ReadonlySet<string>>(new Set());
   const [requesting, setRequesting] = React.useState<ReadonlySet<string>>(
     new Set(),
@@ -61,7 +63,7 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
       setError(null);
       setAdding((set) => held(set, input.directoryEntryId));
     },
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
     // Spelled out: a second `onSettled` replaces the spread one, and its refetch is what turns the
     // added row into its connection state.
     onSettled: (_data, _error, input) => {
@@ -82,7 +84,7 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
       setError(null);
       setAddingKey((set) => held(set, input.directoryEntryId));
     },
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
     onSettled: (_data, _error, input) => {
       setAddingKey((set) => released(set, input.directoryEntryId));
       return invalidatePlugins(queryClient);
@@ -94,7 +96,7 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
       setError(null);
       setRequesting((set) => held(set, slug));
     },
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
     onSettled: (_data, _error, slug) => {
       setRequesting((set) => released(set, slug));
       return queryClient.invalidateQueries({ queryKey: ["plugins"] });

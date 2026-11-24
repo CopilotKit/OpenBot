@@ -38,7 +38,7 @@ import { toast } from "@/components/ui/toast";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
@@ -64,15 +64,17 @@ export function SkillPage({ slug }: { slug: string }) {
   const skillList = useQuery(skillListQueryOptions());
   // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
   const scope = useBotListScope();
-  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
+  const roster = useQuery(agentListQueryOptions(false, scope));
+  const agents = roster.data;
   /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
   const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
   const [removing, setRemoving] = useState(false);
 
   const setGrant = useMutation({
     ...setPluginGrantMutationOptions(queryClient),
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
   });
   const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
   const removeSkill = useMutation(removeSkillMutationOptions(queryClient));
@@ -127,7 +129,7 @@ export function SkillPage({ slug }: { slug: string }) {
     >
       {error ? (
         <p className="text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
 
@@ -140,10 +142,21 @@ export function SkillPage({ slug }: { slug: string }) {
         }
         title="Bots"
       >
+        {/* A roster that couldn't be read is not a roster of none. */}
+        {agents === undefined && roster.error ? (
+          <p className="mt-4 text-destructive text-sm" role="alert">
+            {loadFailure(
+              roster.error,
+              "Couldn't load your Bots. Try again in a moment.",
+            )}
+          </p>
+        ) : null}
         {bots.length === 0 ? (
-          <PageEmpty icon={IconBolt} title="No Bots yet">
-            Create a Bot to offer this skill.
-          </PageEmpty>
+          agents === undefined ? null : (
+            <PageEmpty icon={IconBolt} title="No Bots yet">
+              Create a Bot to offer this skill.
+            </PageEmpty>
+          )
         ) : (
           <PageRows>
             {bots.map((bot, index) => {

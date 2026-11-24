@@ -436,6 +436,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   optional. 402 `PLAN_REQUIRED` is now declared on every operation that starts a run: `runRoutine`,
   `runCheckIn`, `startCheckInItem`, `workOnCheckInItem`, `runGoal`, `startVoiceCall` and
   `retryTask`, besides `sendConversationMessage`. The plan's descriptions no longer say 30-day trial.
+- **Inviting into an organization that pays for each member.** `createOrganizationInvitation` can
+  answer 402 `SEAT_REQUIRED` when every seat the organization paid for is taken. The problem
+  carries `addSeatUrl`, where an owner or an admin adds a seat in the browser; nothing is invited.
+  `addSeatUrl` is an optional problem property.
 
 ### Kubernetes
 
@@ -473,6 +477,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **A sharper look, at the same sizes.** Corners come from one 8px radius, cards are flat with a
+  hairline border you can see in both themes, and shadows show only on what floats: menus and
+  popovers, then dialogs and sheets over the app. The grays are slate, a quiet blue-gray in dark,
+  with CopilotKit's lavender kept for the focus ring and the selected sidebar row. The message box
+  glows while you type in it. On Home, OpenBot's orb sits behind the message box as a pale field
+  with rings of dots that brighten as you type, and the page rises in on the first Home of a visit.
+  Nothing moves when your system asks for less motion. Skins keep their own look.
+- **Product telemetry says which kind of install sent it.** An event's `environment` was read from
+  `NODE_ENV`, which a Compose install and OpenBot Desktop leave empty, so every event said
+  `unknown`. It now comes from the build: a release, a release candidate or an internal build says
+  `production`; a development server or a local image build says `development`. Nothing else in the
+  events changes. `docs/TELEMETRY.md` says how older events are read.
 - **An app's Connect card shows once.** A reply that called two tools of an app you haven't
   connected showed the same card twice. It now shows one card per app. When a later reply asks for
   the same app again, its card moves down to that reply.

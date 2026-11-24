@@ -39,7 +39,7 @@ import { Switch } from "@/components/ui/switch";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { terminateMemberComputersMutationOptions } from "@/lib/enterprise/mutations";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import {
@@ -177,7 +177,7 @@ function PeoplePage() {
       >
         {failure ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {failure.message}
+            {failureSaid(failure)}
           </p>
         ) : null}
         {terminate.data ? (

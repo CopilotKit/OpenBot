@@ -12,8 +12,9 @@
  * Only with `Retry-After`: a 503 without one is something that broke or isn't there (a proxy, a
  * service OpenBot depends on, "Service unavailable."), and the screen's own sentence says it better.
  *
- * Such a 503 is asked again once, by itself, after its `Retry-After` (query-client.ts), so the screen
- * fills in when OpenBot is back without the person doing anything.
+ * Such a 503 is asked again by itself after its `Retry-After`, and again after each refusal while the
+ * hold lasts (query-client.ts), so the screen fills in when OpenBot is back without the person doing
+ * anything.
  *
  * AND IT IS NOT DRAWN AS A FAILURE. The app keeps the destructive red for what failed or deletes. A
  * move or a brief outage is neither: it is temporary, and OpenBot is already waiting it out. So the
@@ -22,14 +23,79 @@
  */
 import type { ReactNode } from "react";
 import { ClientError } from "@/lib/client";
+import { cn } from "@/lib/utils";
 
-/** The server's own sentence when `error` is a 503 that carries one and a `Retry-After`. */
+/**
+ * The server's own sentence when `error` is a 503 that carries one and a `Retry-After`.
+ *
+ * Or, when `error` was thrown because of one (its `cause`), the error's own longer sentence that
+ * folds it in: "It's saved on the Routines page, but it didn't start. OpenBot is moving this
+ * organization. Try again in a moment." is still OpenBot holding off, so it is drawn calmly too.
+ */
 export function unavailableSaid(error: unknown): string | undefined {
-  return error instanceof ClientError &&
+  if (
+    error instanceof ClientError &&
     error.status === 503 &&
     error.retryAfterMs !== undefined
-    ? error.said
+  )
+    return error.said;
+  return error instanceof Error &&
+    !(error instanceof ClientError) &&
+    error.message &&
+    error.cause instanceof ClientError &&
+    unavailableSaid(error.cause) !== undefined
+    ? error.message
     : undefined;
+}
+
+/** Whether `failed` (or one of several reads) is OpenBot holding off for now, not a failure. */
+export function isHeld(failed: unknown | readonly unknown[]): boolean {
+  return heldSaid(failed) !== undefined;
+}
+
+/**
+ * A failure said in a box of its own, above or beside what it is about: the box the app draws in
+ * red for what failed, and in the muted colours of a notice for OpenBot holding off (a move, or a
+ * database briefly out of reach). A box drawn by hand around {@link failureSaid} kept its red border
+ * and fill around calm words (Admin, Computers). Nothing when there is no error.
+ *
+ * `own` is the screen's own sentence for a real failure; without it the error's own words are said.
+ */
+export function FailureNotice({
+  error,
+  own,
+  className,
+}: {
+  error: unknown;
+  own?: string;
+  className?: string;
+}): ReactNode {
+  if (!error) return null;
+  const held = isHeld(error);
+  const words =
+    own ??
+    (error instanceof Error && error.message
+      ? error.message
+      : typeof error === "object" &&
+          "message" in error &&
+          typeof error.message === "string"
+        ? error.message
+        : "Something went wrong. Try again in a moment.");
+  return (
+    <p
+      className={cn(
+        "rounded-md border px-3 py-2 text-sm",
+        held
+          ? "border-border bg-muted/40 text-muted-foreground"
+          : "border-destructive/40 bg-destructive/10",
+        className,
+      )}
+      data-held={held ? "" : undefined}
+      role="alert"
+    >
+      {loadFailure(error, words)}
+    </p>
+  );
 }
 
 /** The server's own sentence for the first of `failed` that is such a 503, if any is. */
@@ -75,6 +141,43 @@ export function failureSaid(
 }
 
 /**
+ * A failure kept to be drawn later through {@link failureSaid}: what a press that failed keeps in its
+ * state, in place of the words alone.
+ *
+ * A press (export the audit log, add someone to a team, create a Bot) used to keep only the error's
+ * words in its state and draw them in red later. The words alone can't say whether
+ * they were a hold's, so a move or a brief outage was drawn as a failure. Kept as one of these, the
+ * server's own refusal is kept whole and `failureSaid` draws it calmly; anything else draws as before.
+ */
+export type Failure = { readonly message: string };
+
+/**
+ * What a press keeps when it fails: the error itself, so `failureSaid` can tell a hold from a
+ * failure and draw the error's own words for a real one, or `otherwise` when what was thrown isn't
+ * an error with words of its own.
+ */
+export function failureOf(thrown: unknown, otherwise: string): Failure {
+  return thrown instanceof Error && thrown.message
+    ? thrown
+    : { message: otherwise };
+}
+
+/**
+ * What a press keeps when it fails and says so in its own sentence: the server's refusal, kept whole,
+ * when it is a hold (to be drawn calmly), and `own` for anything else.
+ */
+export function failureInstead(thrown: unknown, own: string): Failure {
+  return unavailableSaid(thrown) === undefined
+    ? { message: own }
+    : (thrown as ClientError);
+}
+
+/** A toast's type for `error`: a hold is told calmly, as news, and only a failure as an error. */
+export function failureToastType(error: unknown): "error" | "info" {
+  return unavailableSaid(error) === undefined ? "error" : "info";
+}
+
+/**
  * The same choice as {@link loadFailure}, as plain words, for a place that takes a string (a title,
  * a prop typed `string`). A place that draws it should draw a held 503 calmly too.
  */
@@ -87,7 +190,8 @@ export function loadFailureText(
 
 /**
  * How long to wait before asking again, when the refusal is a 503 that said (`Retry-After`): the
- * read is then asked again once by itself after that long, and not retried at once before.
+ * read is then asked again by itself after that long, each time it is refused, and not retried at
+ * once before.
  */
 export function askAgainAfterMs(error: unknown): number | undefined {
   return error instanceof ClientError && error.status === 503

@@ -351,7 +351,7 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
         // The sidebar's hover rather than `muted`, which is nearly the sidebar's own colour.
         <Button
           aria-label="New conversation"
-          className="hover:bg-foreground/5 dark:hover:bg-foreground/5"
+          className="hover:bg-foreground/5"
           size="icon"
           variant="ghost"
           render={(props) => (

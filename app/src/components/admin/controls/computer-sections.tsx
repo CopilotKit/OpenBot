@@ -57,7 +57,7 @@ import {
   type NetworkPolicy,
   type NetworkScopeKind,
 } from "@/lib/enterprise/queries";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { MISSING_TEAM, teamName } from "@/lib/teams/names";
 import { type TeamSummary, teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
@@ -535,7 +535,7 @@ function NetworkDialog({
           </form>
           {(save.error ?? remove.error) ? (
             <p className="text-destructive text-sm" role="alert">
-              {(save.error ?? remove.error)?.message}
+              {failureSaid(save.error ?? remove.error)}
             </p>
           ) : null}
         </DialogBody>

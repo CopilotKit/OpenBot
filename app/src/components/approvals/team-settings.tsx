@@ -242,7 +242,8 @@ export function TeamApprovalSettings() {
         description="These apply to every member's Bots. Members can't change them."
         title="Organization rules"
       >
-        {teamRules.length === 0 ? (
+        {/* "None" only once the inbox has said so: a read that failed is said above instead. */}
+        {inbox.data && teamRules.length === 0 ? (
           <PageEmpty icon={IconChecklist} title="No organization rules" />
         ) : null}
         <PageRows>

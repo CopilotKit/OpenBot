@@ -20,6 +20,7 @@ import { type ReactNode, useContext, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { elapsed, useNow } from "@/lib/elapsed";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 import { relativeTime } from "@/lib/relative-time";
 import { stopTaskMutationOptions } from "@/lib/tasks/mutations";
 import {
@@ -234,12 +235,13 @@ function StopTask({
   onError,
 }: {
   taskId: string;
-  onError: (message: string | null) => void;
+  /** The failure kept whole, so a hold is drawn calmly (lib/load-failure.tsx). */
+  onError: (failure: Failure | null) => void;
 }) {
   const stop = useMutation({
     ...stopTaskMutationOptions(queryClient),
     onMutate: () => onError(null),
-    onError: (error) => onError(error.message),
+    onError: (error) => onError(error),
   });
   return (
     <Button
@@ -314,7 +316,7 @@ export function TaskCard({
     enabled: Boolean(taskId),
   });
   const state = cardState(taskId ? task.data : undefined);
-  const [stopError, setStopError] = useState<string | null>(null);
+  const [stopError, setStopError] = useState<Failure | null>(null);
   // The card's clock, once there is a task to time: every second while it works, and every half
   // minute otherwise.
   const now = useNow(
@@ -385,7 +387,7 @@ export function TaskCard({
       ) : null}
       {stopError ? (
         <p className="text-destructive text-xs" role="alert">
-          {stopError}
+          {failureSaid(stopError)}
         </p>
       ) : null}
     </TaskFrame>

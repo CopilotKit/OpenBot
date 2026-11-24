@@ -19,9 +19,21 @@ import type { Browser, BrowserType, Page, Request } from "playwright-core";
 import { compile } from "tailwindcss";
 import { ListCheckInsResponse } from "@/lib/api/generated/check-ins/check-ins.zod";
 import { ListGoalsResponse } from "@/lib/api/generated/goals/goals.zod";
-import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
-import { GetPreferencesResponse } from "@/lib/api/generated/people/people.zod";
+import {
+  ListOrganizationMembersResponse,
+  ListOrganizationsResponse,
+} from "@/lib/api/generated/organizations/organizations.zod";
+import {
+  GetPreferencesResponse,
+  GetServiceTermsResponse,
+} from "@/lib/api/generated/people/people.zod";
 import { ListRoutinesResponse } from "@/lib/api/generated/routines/routines.zod";
+import {
+  GetTeamModelsResponse,
+  GetTeamResponse,
+  ListTeamMembersResponse,
+  ListTeamsResponse,
+} from "@/lib/api/generated/teams/teams.zod";
 import { personBody } from "./accounts-api";
 import { conversationPage, problemBody } from "./conversations-api";
 
@@ -115,6 +127,18 @@ export class FakeServer {
   holdSaid: string = MOVING;
   /** A hold that lasts this long from the first request it refuses, however long that takes to come. */
   private holdFromFirstRefusalMs: number | undefined;
+  /**
+   * Hold only what writes: every read about Northwind is answered, and a press (create a Bot, add
+   * somebody to a team) is refused with the hold, as it is when the move begins after the page opened.
+   */
+  holdWrites = false;
+  /** Each write asked of Northwind, as `METHOD /path`, in order. */
+  wrote: string[] = [];
+  /**
+   * OpenBot Cloud's terms, which Dana has agreed to. Without them the server answers as an OpenBot
+   * that has no terms, and the gate never asks again.
+   */
+  cloudTerms = false;
 
   /** Hold Northwind from now, until `ms` after the first request the hold refuses. */
   holdFromFirstRefusal(ms: number): void {
@@ -162,7 +186,12 @@ export class FakeServer {
       };
     if (organization === NORTHWIND.id && this.removed === "403")
       return { status: 403, json: { error: LEFT_REFUSAL } };
-    if (organization === NORTHWIND.id && Date.now() < this.movingUntil) {
+    if (organization === NORTHWIND.id && method !== "GET")
+      this.wrote.push(`${method} ${rest}`);
+    if (
+      organization === NORTHWIND.id &&
+      (Date.now() < this.movingUntil || (this.holdWrites && method !== "GET"))
+    ) {
       if (this.holdFromFirstRefusalMs !== undefined) {
         this.movingUntil = Date.now() + this.holdFromFirstRefusalMs;
         this.holdFromFirstRefusalMs = undefined;
@@ -195,6 +224,10 @@ export class FakeServer {
         };
       case "/people/me/preferences":
         return { status: 200, json: PREFERENCES };
+      case "/people/me/terms":
+        return this.cloudTerms
+          ? { status: 200, json: AGREED_TERMS }
+          : this.notFound();
       case "/routines":
         return {
           status: 200,
@@ -242,6 +275,43 @@ export class FakeServer {
           status: 200,
           json: { attention: [], lastPingId: null, nextCursor: null },
         };
+      // One team, which Dana may add people to, and one person in the organization to add.
+      case "/teams":
+        return {
+          status: 200,
+          json: ListTeamsResponse.parse({
+            teams: [TEAM],
+            canCreate: true,
+            nextCursor: null,
+          }),
+        };
+      case `/teams/${TEAM.id}`:
+        return { status: 200, json: GetTeamResponse.parse({ team: TEAM }) };
+      case `/teams/${TEAM.id}/members`:
+        return {
+          status: 200,
+          json: ListTeamMembersResponse.parse({
+            members: url.searchParams.get("search") ? [] : [TEAM_MEMBER],
+            nextCursor: null,
+          }),
+        };
+      case `/teams/${TEAM.id}/models`:
+        return {
+          status: 200,
+          json: GetTeamModelsResponse.parse({
+            models: null,
+            updatedBy: null,
+            updatedAt: null,
+          }),
+        };
+      case "/members":
+        return {
+          status: 200,
+          json: ListOrganizationMembersResponse.parse({
+            members: [PRIYA],
+            nextCursor: null,
+          }),
+        };
       default:
         return this.notFound();
     }
@@ -273,6 +343,43 @@ export class FakeServer {
   }
 }
 
+/** Northwind's one team: Dana keeps it, so she may add people to it. */
+export const TEAM = {
+  id: "team_ops",
+  name: "Operations",
+  description: null,
+  parentTeamId: null,
+  source: "openbot" as const,
+  memberCount: 1,
+  role: "maintainer" as const,
+  canManage: true,
+  canMove: false,
+  canDelete: false,
+  createdAt: "2026-11-20T09:00:00.000Z",
+};
+
+const TEAM_MEMBER = {
+  id: "dana",
+  email: "dana@example.com",
+  name: "Dana Whitfield",
+  image: null,
+  role: "maintainer" as const,
+  isCaller: true,
+  joinedAt: "2026-11-20T09:00:00.000Z",
+};
+
+/** Somebody in Northwind who isn't in the team yet. */
+export const PRIYA = {
+  removable: true,
+  assignableRoles: [],
+  id: "priya",
+  email: "priya@example.com",
+  name: "Priya Shah",
+  image: null,
+  role: "member",
+  joinedAt: "2026-11-20T09:00:00.000Z",
+};
+
 const DEPLOYMENT = {
   generativeUi: true,
   selfHostBanner: false,
@@ -283,6 +390,17 @@ const DEPLOYMENT = {
   ssoRequired: false,
   hostedSignIn: true,
 };
+
+/** OpenBot Cloud's terms in force, and Dana's agreement to them. */
+const AGREED_TERMS = GetServiceTermsResponse.parse({
+  current: {
+    version: "2026-11-21",
+    termsOfServiceUrl: "https://open.bot/terms",
+    acceptableUseUrl: "https://open.bot/acceptable-use",
+  },
+  accepted: { version: "2026-11-21", acceptedAt: "2026-11-21T09:00:00.000Z" },
+  acceptanceNeeded: false,
+});
 
 const PREFERENCES = GetPreferencesResponse.parse({
   messageListEmphasis: "thread",
@@ -308,11 +426,14 @@ function marksModule(): string {
   return `const marks = ${JSON.stringify(marks)}; export const markFor = (id) => (id && marks[id]) || null;`;
 }
 
-async function bundle(): Promise<string> {
+async function bundle(fixture: string): Promise<string> {
   const built = await Bun.build({
-    entrypoints: [join(import.meta.dir, "organization-notices.fixture.tsx")],
+    entrypoints: [join(import.meta.dir, fixture)],
     target: "browser",
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    // The signed-in gate's module brings the app behind it, whose chat loads a map library only
+    // when a Bot draws a map. Nothing here does.
+    external: ["maplibre-gl"],
     plugins: [
       {
         name: "marks",
@@ -382,9 +503,11 @@ async function stylesheet(classes: string[]): Promise<string> {
 const browsers = new Map<string, Browser>();
 let script: string;
 
-/** Build the app and start each browser asked for. */
-export async function start(): Promise<void> {
-  script = await bundle();
+/** Build the app (`fixture`, beside this file) and start each browser asked for. */
+export async function start(
+  fixture = "organization-notices.fixture.tsx",
+): Promise<void> {
+  script = await bundle(fixture);
   const playwright = await import("playwright-core");
   for (const engine of engines) {
     const type: BrowserType = playwright[engine];

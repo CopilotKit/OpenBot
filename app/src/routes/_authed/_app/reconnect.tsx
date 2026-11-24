@@ -143,7 +143,10 @@ function ReconnectPage() {
       </PageRows>
       {moved.dismissError ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't dismiss that app. Try again in a moment.
+          {loadFailure(
+            moved.dismissError,
+            "Couldn't dismiss that app. Try again in a moment.",
+          )}
         </p>
       ) : null}
     </PageShell>

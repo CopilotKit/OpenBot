@@ -244,7 +244,7 @@ function strip(page: Page) {
 }
 
 /** Click a section's icon on the strip, then move the pointer off it so no tooltip stays. */
-async function choose(page: Page, name: "Conversations" | "Bots" | "Routines") {
+async function choose(page: Page, name: "Chats" | "Bots" | "Routines") {
   const item =
     name === "Routines"
       ? strip(page).getByRole("link", { name, exact: true })
@@ -389,7 +389,7 @@ describe.skipIf(!asked)("Routines on the strip", () => {
     for (const [engine, browser] of engines) {
       const page = await open(browser, "/routines");
       try {
-        await choose(page, "Conversations");
+        await choose(page, "Chats");
         await choose(page, "Bots");
         expect({
           engine,
@@ -434,7 +434,7 @@ describe.skipIf(!asked)("Routines on the strip", () => {
         for (const theme of ["light", "dark"] as const) {
           const page = await open(browser, "/routines", theme);
           try {
-            await choose(page, "Conversations");
+            await choose(page, "Chats");
             await choose(page, "Bots");
             await choose(page, "Routines");
             await page.waitForTimeout(400);

@@ -20,6 +20,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { failureSaid } from "@/lib/load-failure";
 import {
   cancelSignInMutationOptions,
   confirmSavedLoginMutationOptions,
@@ -33,7 +34,6 @@ import {
   signInRequestQueryOptions,
 } from "@/lib/passwords/queries";
 import { queryClient } from "@/query-client";
-import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The private sign-in form.
@@ -155,7 +155,7 @@ export function SignInForm({
           </label>
           {failure || data.outcome ? (
             <p className="text-destructive text-sm" role="alert">
-              {failure?.message ?? data.outcome}
+              {failure ? failureSaid(failure) : data.outcome}
             </p>
           ) : null}
           <div className="flex flex-wrap justify-end gap-2">
@@ -222,7 +222,7 @@ export function SignInForm({
         </div>
         {failure ? (
           <p className="mt-2 text-destructive text-sm" role="alert">
-            {failure.message}
+            {failureSaid(failure)}
           </p>
         ) : null}
       </PageSection>
@@ -343,7 +343,7 @@ export function SignInForm({
           ) : null}
           {failure ? (
             <p className="text-destructive text-sm" role="alert">
-              {failure.message}
+              {failureSaid(failure)}
             </p>
           ) : null}
           <div className="flex flex-wrap justify-end gap-2">

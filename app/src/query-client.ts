@@ -93,7 +93,10 @@ focusManager.setEventListener((handleFocus) => {
  * company (`heldOutBySso`), and a refusal that may mean the person left the organization
  * (`refusedInOrganization`), which reads their organizations instead. A 503 that says when to ask
  * again is not retried at once either: the screen shows its sentence, and the read is asked again
- * after the time it gave (`askAgainWhenTold`). Said here rather than in one query's options, where it
+ * after the time it gave, and again after each refusal until it answers (`askAgainWhenTold`). Not
+ * through `retry` and `retryDelay`: a read that is being retried keeps its failure to itself until
+ * the last try (TanStack Query hands it over as `failureReason`, not `error`), and the screen would
+ * say nothing about the hold while it waits. Said here rather than in one query's options, where it
  * would replace the retry rule this client was given.
  */
 class OpenBotQueryClient extends QueryClient {
@@ -172,27 +175,42 @@ function holdOutWhenRefusedForIt(error: unknown): void {
 /** Any read in the cache, as its events hand it over. */
 type AnyQuery = Query<unknown, unknown, unknown>;
 
-/** The reads already asked again once after a 503's Retry-After, until one of them answers. */
-const askedAgain = new WeakSet<AnyQuery>();
+/** The reads waiting to be asked again after a 503's Retry-After: one wait each, never two. */
+const askingAgain = new WeakSet<AnyQuery>();
+
+/** The soonest a held read is asked again, whatever Retry-After said: never in a tight loop. */
+const SOONEST_ASK_AGAIN_MS = 1_000;
+/** The longest a held read waits before it is asked again, whatever Retry-After said. */
+const LONGEST_ASK_AGAIN_MS = 60_000;
 
 /**
- * A read refused 503 with a Retry-After (an organization being moved, `lib/load-failure.ts`): asked
- * again once, by itself, after that long, so the screen fills in when OpenBot is back. Not when the
- * read is gone by then (the person works in another organization now) or nobody shows it any more:
- * the next screen that wants it asks for it afresh.
+ * A read refused 503 with a Retry-After (an organization being moved, or its database out of reach,
+ * `lib/load-failure.ts`): asked again by itself after that long, and again after each refusal for as
+ * long as the hold lasts, so the screen fills in within one Retry-After of OpenBot being back. Not
+ * when the read is gone by then (the person works in another organization now) or nobody shows it
+ * any more: the next screen that wants it asks for it afresh.
+ *
+ * It was asked again only once. A hold longer than one Retry-After (a database down for a few
+ * minutes) left the screen saying the hold until the person reloaded.
+ *
+ * One read, one wait: a read refused again while its wait runs (a second screen asking for it)
+ * waits the same wait, and the server is asked about it once per Retry-After at most.
  */
 function askAgainWhenTold(error: unknown, query: AnyQuery): void {
   const wait = askAgainAfterMs(error);
-  if (wait === undefined || askedAgain.has(query)) return;
-  askedAgain.add(query);
-  setTimeout(() => {
-    if (queryClient.getQueryCache().get(query.queryHash) !== query) return;
-    if (!query.isActive()) {
-      askedAgain.delete(query);
-      return;
-    }
-    void query.fetch().catch(() => undefined);
-  }, wait);
+  if (wait === undefined || askingAgain.has(query)) return;
+  askingAgain.add(query);
+  setTimeout(
+    () => {
+      askingAgain.delete(query);
+      if (queryClient.getQueryCache().get(query.queryHash) !== query) return;
+      // Answered meanwhile (Try again was pressed): nothing to ask.
+      if (!query.isActive() || query.state.status !== "error") return;
+      // Refused again, the cache's onError brings it back here for the next wait.
+      void query.fetch().catch(() => undefined);
+    },
+    Math.min(Math.max(wait, SOONEST_ASK_AGAIN_MS), LONGEST_ASK_AGAIN_MS),
+  );
 }
 
 /**
@@ -215,9 +233,6 @@ export const queryClient = new OpenBotQueryClient({
       holdOutWhenRefusedForIt(error);
       askAgainWhenTold(error, query);
       askWhetherStillMemberWhenRefused(error, query.queryKey);
-    },
-    onSuccess: (_data, query) => {
-      askedAgain.delete(query);
     },
   }),
   mutationCache: new MutationCache({

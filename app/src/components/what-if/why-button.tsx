@@ -13,8 +13,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { explainAuditEvent, type WhatIfExplained } from "@/lib/what-if/check";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { cn } from "@/lib/utils";
+import { explainAuditEvent, type WhatIfExplained } from "@/lib/what-if/check";
 import { OUTCOMES, WhatIfResultView } from "./what-if-result";
 
 /** Whether "Why did this happen?" can answer for a row: one OpenBot's controls decided. */
@@ -38,7 +39,7 @@ const RECORDED_WORDS = {
 export function WhyButton({ event }: { event: AuditEvent }) {
   const [open, setOpen] = useState(false);
   const [answer, setAnswer] = useState<WhatIfExplained | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Failure | null>(null);
   const [loading, setLoading] = useState(false);
 
   const show = async () => {
@@ -49,7 +50,7 @@ export function WhyButton({ event }: { event: AuditEvent }) {
     try {
       setAnswer(await explainAuditEvent(event.id));
     } catch (thrown) {
-      setProblem((thrown as Error).message);
+      setProblem(failureOf(thrown, String(thrown)));
     } finally {
       setLoading(false);
     }
@@ -86,7 +87,7 @@ export function WhyButton({ event }: { event: AuditEvent }) {
           <DialogBody className="mt-4 overflow-y-auto">
             {loading ? null : problem ? (
               <p className="text-destructive text-sm" role="alert">
-                {problem}
+                {failureSaid(problem)}
               </p>
             ) : answer ? (
               <div className="flex flex-col gap-4">
