@@ -356,7 +356,7 @@
  */
 .bot-orb-live .agent-orb {
   /* tokens/src/scheme.ts, light: background (bun run tokens:generate) */
-  --background: oklch(0.983 0.003 286.4);
+  --background: oklch(0.983 0.003 247.9);
   /* end of tokens/src/scheme.ts */
   background-color: var(--background);
   background-image: radial-gradient(
