@@ -5607,7 +5607,7 @@ paths:
         - Apps
       operationId: listAppDirectory
       summary: List the apps that can be added
-      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue) in the catalogue''s own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read the catalogue. Only an administrator sees the wider directory, so anybody else''s list holds catalogue entries only, and asking for source=directory is refused. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
+      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue) in the catalogue''s own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included, so a person can find an app and ask an administrator to add it (createAppAccessRequest). Only an administrator adds one. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
       security:
         - webSession: []
         - appOAuth:
@@ -7404,7 +7404,7 @@ paths:
         - App access requests
       operationId: createAppAccessRequest
       summary: Ask an administrator for an app
-      description: 'Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app''s state: turning it on, giving it to the Bot, or connecting its shared account. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask.'
+      description: 'Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app''s state: turning it on, giving it to the Bot, or connecting its shared account. Leave botId out to ask for an app nobody has added yet, for everyone in the organization: the request is to turn it on, and its botId is null. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask, and anybody signed in may ask for an app alone.'
       security:
         - webSession: []
         - appOAuth:
@@ -7423,6 +7423,9 @@ paths:
                 value:
                   botId: research-assistant
                   appId: notion
+              appAlone:
+                value:
+                  appId: slack
       responses:
         '200':
           description: The request, filed now or already waiting.
@@ -29104,7 +29107,6 @@ components:
       type: object
       additionalProperties: false
       required:
-        - botId
         - appId
       properties:
         botId:
@@ -29112,12 +29114,13 @@ components:
           minLength: 1
           maxLength: 200
           pattern: \S
+          description: The Bot the app is for. Left out, the request is for an app nobody has added yet, to turn it on for everyone.
         appId:
           type: string
           minLength: 1
           maxLength: 200
           pattern: \S
-          description: The app's id, or its name.
+          description: The app's id, or its name. For an app from the directory that nobody has added yet, the slug of its directory entry (the part of its entry id after directory:).
     AppAccessApprovalInput:
       type: object
       additionalProperties: false
