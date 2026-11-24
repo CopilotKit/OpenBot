@@ -1159,8 +1159,9 @@ components:
           description: >-
             not_required when this OpenBot needs no plan. free when the
             organization isn't on the plan and the person reading has free
-            runs left, or is a CopilotKit employee (copilotKitEmployee), whose
-            runs go ahead even once the allowance is used. active on the plan. past_due when a payment failed and
+            runs left, or works for the company that makes OpenBot
+            (copilotKitEmployee), whose runs go ahead even once the allowance
+            is used. active on the plan. past_due when a payment failed and
             the card needs updating. none when a card is needed: the person's
             free runs are used up, or there are none, or the plan ended.
             trialing during a free trial that ends on a date (trialEndsAt);
@@ -1184,13 +1185,14 @@ components:
           description: >-
             How many free runs each person gets. Present only once the reading
             person has used them all (freeRunsUsedPercent is 100, and status is
-            none, or free for a CopilotKit employee), so the number is never
+            none, or free for copilotKitEmployee), so the number is never
             shown while runs are left; absent otherwise.
         copilotKitEmployee:
           type: boolean
           description: >-
-            True when the reading person is a CopilotKit employee: their
-            verified email address is on the copilotkit.ai domain. An
+            True when the reading person works for the company that makes
+            OpenBot: their verified email address is on the copilotkit.ai
+            domain exactly. An
             employee's own runs are never refused for want of a plan, in any
             organization, so once their free allowance is used status stays
             free, freeRunsUsedPercent reads 100, freeRunsAllowance is present
@@ -1650,7 +1652,7 @@ components:
         renewsAt: null
         addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
     OrganizationPlanCopilotKitEmployee:
-      summary: A CopilotKit employee past the free allowance, whose runs still go ahead.
+      summary: An employee of the company that makes OpenBot, past the free allowance, whose runs still go ahead.
       value:
         required: true
         status: free
