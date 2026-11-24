@@ -18,8 +18,33 @@ fn gmail() -> ReconnectApp {
         account_label: Some("sam@example.com".into()),
         icon_url: None,
         bot_names: vec!["Inbox helper".into()],
+        reason: None,
     }
 }
+
+/// An app connected with a key, which moves connected.
+fn fireflies() -> CarriedApp {
+    CarriedApp {
+        app_id: "fireflies".into(),
+        app_name: "Fireflies".into(),
+        icon_url: None,
+        bot_names: vec!["Standup".into()],
+    }
+}
+
+/// Another, which the organization on Cloud doesn't allow.
+fn team_wiki() -> CarriedApp {
+    CarriedApp {
+        app_id: "team-wiki".into(),
+        app_name: "Team wiki".into(),
+        icon_url: None,
+        bot_names: Vec::new(),
+    }
+}
+
+/// OpenBot Cloud's sentence for a carried app its organization doesn't allow.
+const NOT_ALLOWED: &str =
+    "Your organization doesn't allow Team wiki yet. Ask an admin to approve it, then connect it here.";
 
 fn quick() -> Limits {
     Limits {
@@ -215,6 +240,7 @@ fn verification(matches: bool, kinds: &[(&str, u64, u64, u64)]) -> Verification 
             .collect(),
         notes: Vec::new(),
         reconnect: Vec::new(),
+        carried: Vec::new(),
     }
 }
 
@@ -284,6 +310,9 @@ struct MemoryLocal {
     /// Downloads of a part that come back damaged first.
     damaged: u32,
     asked_key: Option<serde_json::Value>,
+    asked_model_keys: Option<bool>,
+    /// The apps the export carries connected.
+    carried: Vec<CarriedApp>,
 }
 
 impl MemoryLocal {
@@ -296,6 +325,8 @@ impl MemoryLocal {
             chunk: usize::MAX,
             damaged: 0,
             asked_key: None,
+            asked_model_keys: None,
+            carried: Vec::new(),
         }
     }
 
@@ -306,6 +337,7 @@ impl MemoryLocal {
             parts: self.parts.iter().map(|(part, _)| part.clone()).collect(),
             counts: self.counts.clone(),
             reconnect: vec![gmail()],
+            carried: self.carried.clone(),
             progress: None,
             error: None,
         }
@@ -318,11 +350,17 @@ impl Local for MemoryLocal {
             counts: self.counts.clone(),
             stored_bytes: 1,
             reconnect: vec![gmail()],
+            carried: self.carried.clone(),
             model_keys_available: true,
         })
     }
-    fn create_export(&mut self, key: Option<&serde_json::Value>) -> Result<Export, String> {
+    fn create_export(
+        &mut self,
+        key: Option<&serde_json::Value>,
+        include_model_keys: bool,
+    ) -> Result<Export, String> {
         self.asked_key = key.cloned();
+        self.asked_model_keys = Some(include_model_keys);
         Ok(Export {
             status: "preparing".into(),
             parts: Vec::new(),
@@ -372,6 +410,8 @@ struct MemoryCloud {
     failed_imports: u32,
     polls_before_imported: u32,
     verification: Option<Verification>,
+    /// What the finished import says came across connected.
+    imported_carried: Vec<CarriedApp>,
 }
 
 impl MemoryCloud {
@@ -381,6 +421,11 @@ impl MemoryCloud {
             status: status.into(),
             recipient_key: Some(serde_json::json!({"kty": "RSA", "kid": "imp_1"})),
             received_parts: self.received.keys().copied().collect(),
+            carried: if status == "imported" {
+                self.imported_carried.clone()
+            } else {
+                Vec::new()
+            },
             // What OpenBot Cloud says of a run that stopped part way (`failureOf`).
             error: (status == "failed").then(|| PASSING.into()),
         }
@@ -480,6 +525,7 @@ fn a_move_that_arrives_and_matches_removes_openbot_and_says_what_it_freed() {
     }
     // The model key is sealed to this import's key, when the person brings it.
     assert_eq!(local.asked_key.unwrap()["kid"], "imp_1");
+    assert_eq!(local.asked_model_keys, Some(true));
     assert_eq!(
         steps.0,
         [
@@ -497,7 +543,8 @@ fn a_move_that_arrives_and_matches_removes_openbot_and_says_what_it_freed() {
     );
 }
 
-/// Without the model key, the export is asked for none.
+/// Without the model key, the export is asked for none, and still gets the import's key, which the
+/// keys of apps connected with a key are sealed to.
 #[test]
 fn the_model_key_stays_unless_the_person_brings_it() {
     let mut local = MemoryLocal::new(bundle(&[10]));
@@ -513,7 +560,83 @@ fn the_model_key_stays_unless_the_person_brings_it() {
         &mut Steps::default(),
     )
     .unwrap();
-    assert_eq!(local.asked_key, None);
+    assert_eq!(local.asked_model_keys, Some(false));
+    assert_eq!(local.asked_key.unwrap()["kid"], "imp_1");
+}
+
+/// An app connected with a key comes across connected, and the result says so. One the organization
+/// on Cloud doesn't allow is to connect again there, with Cloud's own reason; one Cloud names in
+/// neither list is to connect again too.
+#[test]
+fn apps_connected_with_a_key_come_across_connected() {
+    let mut local = MemoryLocal::new(bundle(&[10]));
+    local.carried = vec![fireflies(), team_wiki()];
+    let refused = ReconnectApp {
+        reason: Some(NOT_ALLOWED.into()),
+        ..team_wiki().to_reconnect()
+    };
+    let mut cloud = MemoryCloud {
+        verification: Some(Verification {
+            reconnect: vec![gmail(), refused.clone()],
+            carried: vec![fireflies()],
+            ..verification(true, &[("bots", 2, 2, 0), ("conversations", 5, 5, 0)])
+        }),
+        ..MemoryCloud::default()
+    };
+    let moved = run(
+        &mut local,
+        &mut cloud,
+        &mut here(),
+        &asked(),
+        &mut Steps::default(),
+    )
+    .unwrap();
+    assert_eq!(moved.carried, [fireflies()]);
+    assert_eq!(moved.apps, [gmail(), refused]);
+
+    // Cloud's check names none: the finished import says which came across connected.
+    let mut local = MemoryLocal::new(bundle(&[10]));
+    local.carried = vec![fireflies()];
+    let mut cloud = MemoryCloud {
+        imported_carried: vec![fireflies()],
+        ..MemoryCloud::default()
+    };
+    let moved = run(
+        &mut local,
+        &mut cloud,
+        &mut here(),
+        &asked(),
+        &mut Steps::default(),
+    )
+    .unwrap();
+    assert_eq!(moved.carried, [fireflies()]);
+    assert_eq!(moved.apps, [gmail()]);
+}
+
+/// An older OpenBot Cloud says nothing of carried apps and doesn't connect them: absent reads as
+/// none, and every app the export carried is to connect again, so the person still sees it.
+#[test]
+fn an_older_cloud_that_connects_no_carried_app_lists_it_to_reconnect() {
+    let mut local = MemoryLocal::new(bundle(&[10]));
+    local.carried = vec![fireflies()];
+    let moved = run(
+        &mut local,
+        &mut MemoryCloud::default(),
+        &mut here(),
+        &asked(),
+        &mut Steps::default(),
+    )
+    .unwrap();
+    assert!(moved.carried.is_empty());
+    assert_eq!(moved.apps, [gmail(), fireflies().to_reconnect()]);
+    // An older answer, read as the move reads it.
+    let verification: Verification = serde_json::from_value(serde_json::json!({
+        "matches": true, "kinds": [], "notes": [],
+        "reconnect": [{"appId": "gmail", "appName": "Gmail"}]
+    }))
+    .unwrap();
+    assert!(verification.carried.is_empty());
+    assert_eq!(verification.reconnect[0].reason, None);
 }
 
 /// A download that drops resumes where it stopped, and a part that arrives damaged is fetched
@@ -1008,8 +1131,18 @@ const BEARER: &str = "synthetic-cloud-access";
 /// The OpenBot on this computer, as the API says it answers: one organization, an export that is
 /// preparing once and then ready, and its parts with Range.
 fn local_openbot(parts: Vec<(Part, Vec<u8>)>, counts: Vec<Count>) -> String {
+    local_openbot_recording(parts, counts).0
+}
+
+/// The same, keeping every body `createExport` was sent.
+fn local_openbot_recording(
+    parts: Vec<(Part, Vec<u8>)>,
+    counts: Vec<Count>,
+) -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {
     let polled = Arc::new(Mutex::new(0u32));
-    serve(move |request| {
+    let exports: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
+    let sent = exports.clone();
+    let address = serve(move |request| {
         if request
             .headers
             .get("x-openbot-install-token")
@@ -1029,12 +1162,24 @@ fn local_openbot(parts: Vec<(Part, Vec<u8>)>, counts: Vec<Count>) -> String {
             })).collect::<Vec<_>>(),
             "counts": counts.iter().map(|c| serde_json::json!({"kind": c.kind, "count": c.count})).collect::<Vec<_>>(),
             "reconnect": [{"appId": "gmail", "appName": "Gmail", "accountLabel": "sam@example.com"}],
+            "carried": [{"appId": "fireflies", "appName": "Fireflies", "botNames": ["Standup"]}],
         });
         // OpenBot (Self-Contained) lists no organizations (box A: that address answered 404);
         // its one organization is `default`.
         match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/api/v2/organizations/default/export-estimate") => json_response(
+                200,
+                serde_json::json!({
+                    "counts": ready["counts"], "storedBytes": 1000,
+                    "reconnect": ready["reconnect"], "carried": ready["carried"],
+                    "modelKeysAvailable": true,
+                }),
+            ),
             ("POST", "/api/v2/organizations/default/exports") => {
                 assert!(request.headers.contains_key("idempotency-key"));
+                sent.lock()
+                    .unwrap()
+                    .push(serde_json::from_slice(&request.body).unwrap());
                 let mut preparing = ready.clone();
                 preparing["status"] = "preparing".into();
                 json_response(202, preparing)
@@ -1076,7 +1221,8 @@ fn local_openbot(parts: Vec<(Part, Vec<u8>)>, counts: Vec<Count>) -> String {
             }
             _ => json_response(404, serde_json::json!({"code": "NOT_FOUND"})),
         }
-    })
+    });
+    (address, exports)
 }
 
 /// The parts an OpenBot Cloud in a test received, by number.
@@ -1341,9 +1487,20 @@ fn a_real_move_removes_the_installation_and_reports_the_space_it_freed() {
             {"kind": "memories", "expected": 4, "found": 4, "leftOut": 0}
         ],
         "notes": [],
-        "reconnect": [{"appId": "gmail", "appName": "Gmail", "accountLabel": "sam@example.com"}]
+        "reconnect": [
+            {"appId": "gmail", "appName": "Gmail", "accountLabel": "sam@example.com"},
+            {"appId": "team-wiki", "appName": "Team wiki", "reason": NOT_ALLOWED}
+        ],
+        "carried": [{"appId": "fireflies", "appName": "Fireflies", "botNames": ["Standup"]}]
     }));
     let moved = outcome.unwrap();
+    // The window is told which came across connected, and why one didn't.
+    assert_eq!(moved.carried, [fireflies()]);
+    assert_eq!(moved.apps[1].reason.as_deref(), Some(NOT_ALLOWED));
+    let told = serde_json::to_value(&moved).unwrap();
+    assert_eq!(told["carried"][0]["appName"], "Fireflies");
+    assert_eq!(told["apps"][1]["reason"], NOT_ALLOWED);
+    assert!(told["apps"][0].get("reason").is_none());
     assert!(!root.exists(), "the installation folder is still there");
     assert!(home.join("Documents/notes.txt").exists());
     assert_eq!(answered(&home.join("config")), Some(Answer::Moved));
@@ -1355,6 +1512,59 @@ fn a_real_move_removes_the_installation_and_reports_the_space_it_freed() {
     assert!(removed >= 2_902_734, "{removed}");
     assert_eq!(moved.apps[0].app_name, "Gmail");
     let _ = std::fs::remove_dir_all(home);
+}
+
+/**
+The move over HTTP: every export is given the import's key, so the apps connected with a key move
+connected whether or not the person brings their AI key. The AI key comes only when they do.
+
+Before apps moved connected, the export got the key only with "Bring my AI key" ticked: without it,
+there was nothing to seal an app's key to, and every app had to be connected again.
+*/
+#[test]
+fn every_export_gets_the_imports_key_and_the_ai_key_only_when_brought() {
+    for bring in [false, true] {
+        let parts = bundle(&[100, 5]);
+        let (local_address, exports) =
+            local_openbot_recording(parts.clone(), vec![count("bots", 1)]);
+        let (cloud_address, _) = cloud_openbot(
+            parts.iter().map(|(part, _)| part.clone()).collect(),
+            serde_json::json!({
+                "importId": "imp_1", "matches": true,
+                "kinds": [{"kind": "bots", "expected": 1, "found": 1, "leftOut": 0}],
+                "notes": []
+            }),
+            None,
+        );
+        let mut local = Api::at(
+            &local_address,
+            Box::new(InstallToken(Some(TOKEN.into()))),
+            THIS_COMPUTERS_ORGANIZATION,
+        )
+        .unwrap();
+        let mut cloud =
+            Api::open(&cloud_address, Box::new(Bearer), their_own_organization).unwrap();
+        // What the preview reads: the apps that move connected, apart from those to sign in to.
+        let estimate = Local::estimate(&mut local).unwrap();
+        assert_eq!(estimate.carried, [fireflies()]);
+        assert_eq!(estimate.reconnect[0].app_id, "gmail");
+        let asked = Asked {
+            include_model_keys: bring,
+            ..asked()
+        };
+        run(
+            &mut local,
+            &mut cloud,
+            &mut here(),
+            &asked,
+            &mut Steps::default(),
+        )
+        .unwrap();
+        let sent = exports.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert_eq!(sent[0]["recipientKey"]["kid"], "imp_1", "{sent:?}");
+        assert_eq!(sent[0]["includeModelKeys"], bring, "{sent:?}");
+    }
 }
 
 /// The same move over HTTP, but Cloud's check finds a conversation missing: nothing on this

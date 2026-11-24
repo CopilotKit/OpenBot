@@ -5,8 +5,10 @@ import type { Import, ReconnectApp } from "@/lib/api/generated/model";
  * THE APPS A MOVE TO OPENBOT CLOUD LEFT FOR THE PERSON TO CONNECT AGAIN, AND THE RULES FOR WHEN ONE
  * STOPS ASKING.
  *
- * A move carries every connection as its app and account name only: the sign-in stays private on the
- * person's computer, so each app is listed in the import's `reconnect` and connected again here. An
+ * A move carries a connection the person signed in to as its app and account name only: the sign-in
+ * stays with the service it was made through, so the app is listed in the import's `reconnect` and
+ * connected again here. An app connected with a key comes across connected (the import's `carried`)
+ * and is never listed; one of those OpenBot Cloud couldn't connect is listed, with its `reason`. An
  * app stops asking once the person's own connections have it, or once they dismiss it. Both are read
  * from the server (their connections, and `dismissedNotices` in their preferences), so the list is
  * the same after a reload and on every device.

@@ -233,8 +233,22 @@ const APPS: AppsFixture = {
   ],
 };
 
-/** A finished move, as listImports answers it, listing `reconnect`. */
-function finishedMove(reconnect: ReconnectApp[]): Import {
+/** OpenBot Cloud's sentence for a carried app its organization doesn't allow. */
+const NOT_ALLOWED =
+  "Your organization doesn't allow Team wiki yet. Ask an admin to approve it, then connect it here.";
+/** Meant to come across connected with its key; the organization here doesn't allow it. */
+const TEAM_WIKI: ReconnectApp = {
+  appId: "team-wiki",
+  appName: "Team wiki",
+  botNames: ["Research"],
+  reason: NOT_ALLOWED,
+};
+
+/** A finished move, as listImports answers it, listing `reconnect` and `carried`. */
+function finishedMove(
+  reconnect: ReconnectApp[],
+  carried: Import["carried"] = undefined,
+): Import {
   return {
     id: "imp_0e1f2a3b4c5d6f1d",
     status: "imported",
@@ -252,6 +266,7 @@ function finishedMove(reconnect: ReconnectApp[]): Import {
     maxPartBytes: 33554432,
     receivedParts: [1],
     reconnect,
+    ...(carried ? { carried } : {}),
   } as Import;
 }
 
@@ -1038,6 +1053,66 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         await page.close();
       }
     }, 120_000);
+
+  /*
+   * Reported in dogfooding: a move left about 20 apps to reconnect. Apps connected with a key come
+   * across connected now and are never listed; one OpenBot Cloud couldn't connect is, with its
+   * reason on its row in place of the line it would otherwise have.
+   */
+  for (const engine of engines)
+    test(`an app that came across connected isn't listed, and one that couldn't says why on its row, in ${engine}`, async () => {
+      const server = new FakeServer([
+        finishedMove(
+          [GMAIL, TEAM_WIKI, SLACK],
+          [{ appId: "fireflies", appName: "Fireflies", botNames: ["Standup"] }],
+        ),
+      ]);
+      const page = await open("/reconnect", server, engine);
+      try {
+        // OpenBot Cloud's reason, and beside it who the admins are, owner first.
+        const withAdmins = `${NOT_ALLOWED} Your admins are Priya Raman (priya@example.com) and Ines Duarte (ines@example.com).`;
+        await row(page, "team-wiki").getByText(withAdmins).waitFor();
+        expect(
+          await row(page, "team-wiki")
+            .locator("[data-moved-app-reason]")
+            .textContent(),
+        ).toBe(withAdmins);
+        // The reason says what to do, so the admin line isn't said twice.
+        expect(
+          await row(page, "team-wiki")
+            .getByText(/An admin has to turn/)
+            .count(),
+        ).toBe(0);
+        // Its other line is still there.
+        expect(await row(page, "team-wiki").textContent()).toContain(
+          "Used by Research",
+        );
+        // The rest as before.
+        await row(page, "slack").getByText(SLACK_WAITS).waitFor();
+        expect(
+          await row(page, "gmail").locator("[data-moved-app-reason]").count(),
+        ).toBe(0);
+        // The app that came across connected is nowhere on the list.
+        expect(await row(page, "fireflies").count()).toBe(0);
+        expect(
+          await page
+            .getByText(
+              "These apps were connected in OpenBot on your computer. Connect each one again here.",
+            )
+            .count(),
+        ).toBe(1);
+        for (const theme of ["light", "dark"] as const)
+          for (const window of [WIDE, PHONE]) {
+            await page.emulateMedia({ colorScheme: theme });
+            await page.setViewportSize(window);
+            await page.waitForTimeout(200);
+            expect(await measured(page)).toEqual(FINE);
+            await shoot(page, "list-reason", engine, theme, window);
+          }
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
 
   for (const engine of engines)
     test(`an admin's Reconnect adds an app the organization hasn't yet, and says so when it can't, in ${engine}`, async () => {

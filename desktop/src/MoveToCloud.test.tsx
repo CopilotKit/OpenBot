@@ -507,7 +507,13 @@ test("before the move, the apps that must be reconnected are listed by name, abo
     "Slack",
     "Google Drive",
   ]);
-  expect(view.getByText(/can't move safely/)).toBeTruthy();
+  expect(
+    view.getByText(
+      "Sign-ins stay with the app you signed in to, so they can't move.",
+    ),
+  ).toBeTruthy();
+  // An older shell names no apps that move connected: none is said.
+  expect(view.queryByText("These apps come across connected")).toBe(null);
   const move = view.getByRole("button", { name: "Move to OpenBot Cloud" });
   // The notice comes before the button a person presses.
   expect(
@@ -525,6 +531,128 @@ test("before the move, the apps that must be reconnected are listed by name, abo
       /Removes about 18\.4 GB of OpenBot files\. Nothing is removed/,
     ),
   ).toBeTruthy();
+});
+
+const FIREFLIES = {
+  appId: "fireflies",
+  appName: "Fireflies",
+  botNames: ["Standup"],
+};
+const POSTHOG = { appId: "posthog", appName: "PostHog" };
+/** OpenBot Cloud's sentence for a carried app its organization doesn't allow. */
+const NOT_ALLOWED =
+  "Your organization doesn't allow Team wiki yet. Ask an admin to approve it, then connect it here.";
+
+/**
+ * Reported in dogfooding: after moving, a person reconnected about 20 apps, over an hour, because
+ * the move said every app connection had to be connected again. Apps connected with a key now come
+ * across connected, and the move says which, apart from the apps the person signs in to again.
+ */
+test("before the move, the apps that come across connected are said apart from those to sign in to again", async () => {
+  selfContainedRunning({ due: false, fromSettings: true });
+  answers.move_preview = { ...PREVIEW, carried: [FIREFLIES, POSTHOG] };
+  const view = await launch();
+  const carried = await view.findByRole("list", {
+    name: "Apps that move connected",
+  });
+  expect(
+    [...carried.querySelectorAll("li")].map((li) => li.textContent),
+  ).toEqual(["FirefliesUsed by Standup", "PostHog"]);
+  expect(
+    view.getByRole("heading", { name: "These apps come across connected" }),
+  ).toBeTruthy();
+  expect(
+    view.getByText(
+      "Their keys are sealed so only your OpenBot Cloud account can read them.",
+    ),
+  ).toBeTruthy();
+  const reconnect = view.getByRole("list", { name: "Apps to reconnect" });
+  expect(
+    [...reconnect.querySelectorAll("li")].map(
+      (li) => li.querySelector(".move-app-name")?.textContent,
+    ),
+  ).toEqual(["Gmail, sam@example.com", "Slack", "Google Drive"]);
+  expect(
+    view.getByRole("heading", {
+      name: "You'll reconnect these apps in OpenBot Cloud",
+    }),
+  ).toBeTruthy();
+  // Connected first, then the ones to do something about, then the button.
+  expect(
+    carried.compareDocumentPosition(reconnect) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  // Without the AI key, the apps still come across connected: the move is asked as before.
+  await userEvent.click(
+    view.getByRole("checkbox", { name: /Bring my AI key to OpenBot Cloud/ }),
+  );
+  answers.move_to_cloud = () => new Promise(() => {});
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  expect(called("move_to_cloud")[0]?.args).toEqual({
+    address: "https://api.open.bot",
+    includeModelKeys: false,
+  });
+});
+
+test("a finished move says which apps came across connected, and one it couldn't connect says why, with its Reconnect", async () => {
+  const view = await atConfirm();
+  answers.move_to_cloud = {
+    ...MOVED,
+    connectAi: false,
+    carried: [FIREFLIES],
+    apps: [
+      ...APPS,
+      { appId: "team-wiki", appName: "Team wiki", reason: NOT_ALLOWED },
+    ],
+  };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  const carried = view.getByRole("list", {
+    name: "Apps that came across connected",
+  });
+  expect(
+    [...carried.querySelectorAll("li")].map((li) => li.textContent),
+  ).toEqual(["FirefliesUsed by Standup"]);
+  expect(
+    view.getByRole("heading", { name: "These apps came across connected" }),
+  ).toBeTruthy();
+  expect(
+    view.getByText("Your Bots can use them in OpenBot Cloud as before."),
+  ).toBeTruthy();
+  // Nothing to press on an app that came across connected.
+  expect(carried.querySelectorAll("button")).toHaveLength(0);
+  const reconnect = view.getByRole("list", { name: "Apps to reconnect" });
+  const wiki = [...reconnect.querySelectorAll("li")].find((li) =>
+    li.textContent?.startsWith("Team wiki"),
+  );
+  expect(wiki?.querySelector("[data-move-app-reason]")?.textContent).toBe(
+    NOT_ALLOWED,
+  );
+  expect(
+    view.getByText(
+      "Sign-ins stay with the app you signed in to, so they didn't move.",
+    ),
+  ).toBeTruthy();
+  expect(
+    view
+      .getAllByRole("button", { name: /^Reconnect / })
+      .map((button) => button.getAttribute("aria-label")),
+  ).toEqual([
+    "Reconnect Gmail",
+    "Reconnect Slack",
+    "Reconnect Google Drive",
+    "Reconnect Team wiki",
+  ]);
+  await userEvent.click(
+    view.getByRole("button", { name: "Reconnect Team wiki" }),
+  );
+  expect(called("open_moved_cloud").map((call) => call.args)).toEqual([
+    { path: "/reconnect/team-wiki" },
+  ]);
 });
 
 test("a move that fails removes nothing, and Try again moves again", async () => {
