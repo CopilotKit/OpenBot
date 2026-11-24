@@ -215,8 +215,7 @@ things are drawn, not how big they are.
 
 1. **Colors.** Only the scheme's tokens, as above.
 2. **Type.** Inter and the type scale in `theme.css`. Controls, rows and navigation are `text-sm`;
-   labels, times and counts are `text-xs`. The sidebar strip's section names alone are `text-2xs`
-   (10px). No text size written by hand (`text-[13px]`).
+   labels, times and counts are `text-xs`. No text size written by hand (`text-[13px]`).
 3. **Corners.** All from `--radius`. Controls are `rounded-md`, cards and the page's panel
    `rounded-lg`, menus, dialogs and the message box `rounded-xl`, round things `rounded-full`.
    `rounded-none` squares a part off. No other step and no corner of its own (`rounded-[20px]`).

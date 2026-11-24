@@ -134,7 +134,6 @@ body {
  * unclassed text is 15px too.
  */
 @theme inline {
-  --text-2xs: 0.625rem; /* 10px: only the sidebar strip's section names */
   --text-xs: 0.703125rem; /* 11.25px */
   --text-sm: 0.8203125rem; /* 13.125px */
   --text-base: 0.9375rem; /* 15px */

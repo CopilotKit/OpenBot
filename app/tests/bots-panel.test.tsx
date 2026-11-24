@@ -546,7 +546,7 @@ test("after switching to Conversations, a conversation opened there keeps Conver
   await waitFor(() =>
     expect(router.state.location.pathname).toBe("/channel/i1"),
   );
-  await user.click(view.getByRole("button", { name: "Conversations" }));
+  await user.click(view.getByRole("button", { name: "Chats" }));
   await view.findByRole("heading", { level: 2, name: "Conversations" });
   await router.navigate({
     to: "/channel/$channelId",
