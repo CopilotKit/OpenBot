@@ -140,6 +140,33 @@ test("groups the waiting status, current comparison code and recovery actions as
     screen.getByText(/If your browser shows a dashboard/).parentElement,
   ).toBe(group);
   expect(onPage).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("heading")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(onCancel).toHaveBeenCalledTimes(1);
+});
+
+test("the optional instruction heading appears only for the current browser page", async () => {
+  let answer: ((found: unknown) => void) | undefined;
+  invokeHandler = async () =>
+    new Promise((resolve) => {
+      answer = resolve;
+    });
+  const props = {
+    waiting: "Finish signing in to OpenBot in your browser…",
+    waitingStatus: "Waiting for you to finish signing in…",
+    before: "Checking your OpenBot account…",
+    onCancel: () => {},
+  };
+  const screen = render(<CopilotKitSignInWait {...props} attempt="first" />);
+  expect(screen.queryByRole("heading")).toBeNull();
+  expect(screen.getByText(props.before).closest(".status-line")).not.toBeNull();
+  answer?.(page("TEST-0042"));
+  await screen.findByRole("heading", { level: 3, name: props.waiting });
+  expect(
+    screen.getByText(props.waitingStatus).closest(".status-line"),
+  ).not.toBeNull();
+  screen.rerender(<CopilotKitSignInWait {...props} attempt="retry" />);
+  expect(screen.queryByRole("heading")).toBeNull();
+  expect(screen.queryByText(props.waitingStatus)).toBeNull();
+  expect(screen.getByText(props.before).closest(".status-line")).not.toBeNull();
 });

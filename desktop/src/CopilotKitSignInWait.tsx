@@ -22,6 +22,7 @@ export function CopilotKitSignInWait({
   attempt,
   waiting,
   before = waiting,
+  waitingStatus,
   onPage,
   onCancel,
 }: {
@@ -29,6 +30,8 @@ export function CopilotKitSignInWait({
   attempt: string;
   /** What is said while it waits. */
   waiting: string;
+  /** When supplied, promote the browser instruction to a heading above this waiting status. */
+  waitingStatus?: string;
   /**
    * What is said until the CLI has opened a page. It checks for a sign-in it already has first, and
    * opens nothing when it finds one.
@@ -78,7 +81,8 @@ export function CopilotKitSignInWait({
 
   return (
     <div className="sign-in-wait">
-      <StatusLine>{page ? waiting : before}</StatusLine>
+      {page && waitingStatus && <h3>{waiting}</h3>}
+      <StatusLine>{page ? (waitingStatus ?? waiting) : before}</StatusLine>
       {page && (
         <>
           <p className="footnote sign-in-code-row">

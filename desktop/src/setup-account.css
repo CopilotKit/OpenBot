@@ -10,8 +10,14 @@
   min-width: 0;
 }
 
-.account-layout .sign-in-wait > :is(p, .status-line, .row) {
+.account-layout .sign-in-wait > :is(h3, p, .status-line, .row) {
   margin: 0;
+}
+
+.account-layout .sign-in-wait > h3 {
+  font-size: var(--text-lg);
+  line-height: 1.4;
+  font-weight: 500;
 }
 
 .account-layout .sign-in-wait > .row {

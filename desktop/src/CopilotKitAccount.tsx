@@ -513,6 +513,7 @@ export function CopilotKitAccount({
           attempt={seen.attempt}
           before="Checking your OpenBot account…"
           waiting="Finish signing in to OpenBot in your browser…"
+          waitingStatus="Waiting for you to finish signing in…"
           onPage={() => setSignInPage(true)}
           onCancel={cancelSignIn}
         />

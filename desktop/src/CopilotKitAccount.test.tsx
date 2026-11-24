@@ -365,7 +365,16 @@ test("a refused engine with no sentence from the CLI says so in OpenBot's words"
 test("a sign-in waiting on the browser shows its code and a way back to the page", async () => {
   waitingSignIn();
   const screen = await startSigningIn();
-  await screen.findByText("Finish signing in to OpenBot in your browser…");
+  const instruction = await screen.findByRole("heading", {
+    level: 3,
+    name: "Finish signing in to OpenBot in your browser…",
+  });
+  const waiting = screen.getByText("Waiting for you to finish signing in…");
+  expect(waiting.closest(".status-line")).not.toBeNull();
+  expect(instruction.closest(".status-line")).toBeNull();
+  expect(
+    screen.container.querySelectorAll(".sign-in-wait .step-spinner"),
+  ).toHaveLength(1);
   expect((await screen.findByText(PAGE.userCode)).tagName).toBe("STRONG");
   expect(
     screen.getByText(
