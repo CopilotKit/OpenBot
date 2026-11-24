@@ -275,6 +275,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - When an admin asks a Bot for an app it can't use yet, the Bot names the step the admin's own app
   card offers (Give it to, Turn on and give it to, Set it up, or Connect the shared account). It
   used to tell them to ask an administrator, even when they were the organization's only one.
+- **A Bot that needs more of an app it holds puts up that app's card.** Asked to recolour events, a
+  Bot that could only read Google Calendar said an admin could give it more, and the admin had to
+  find the Bot's settings and tick the actions by name. The card now says what the Bot can't do yet.
+  An admin, or the Bot's owner where they may give it, gives exactly those actions in one press, and
+  the conversation carries on. Anybody else presses Request access, and the admin's Requests list
+  names the actions asked for.
 - **Connections offers Add server only to an admin.** A server added by its address is added for
   everyone in the organization, so the button shows only for an admin, and for the one person of
   a personal OpenBot. Anybody else who opens the Add server page is told that only an admin can add

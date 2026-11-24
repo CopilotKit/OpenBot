@@ -243,6 +243,61 @@ test("a grant says approving gives the Bot read-only actions, and links to where
   );
 });
 
+test("a request for actions a Bot needs names them, and Approve gives them with no body", async () => {
+  const sent = serving({
+    requests: [
+      request({
+        appKey: "composio-googlecalendar",
+        appTitle: "Google Calendar",
+        botName: "Calendar Bot",
+        actions: [
+          "composio-googlecalendar/GOOGLECALENDAR_PATCH_EVENT",
+          "composio-googlecalendar/GOOGLECALENDAR_UPDATE_EVENT",
+        ],
+      }),
+    ],
+  });
+  const view = draw(() => (
+    <AccessRequestsSection app="composio-googlecalendar" />
+  ));
+  const element = (
+    await view.findByText("Give Calendar Bot 2 more Google Calendar actions")
+  ).closest("[data-request]") as HTMLElement;
+  expect(element.textContent).toContain(
+    "Approving gives Calendar Bot only GOOGLECALENDAR_PATCH_EVENT and GOOGLECALENDAR_UPDATE_EVENT. Choose any others on the Bot's page under Google Calendar.",
+  );
+  expect(element.textContent).not.toContain("read-only");
+  const bodies: unknown[] = [];
+  const answer = global.fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") bodies.push(init.body);
+    return answer(input, init);
+  }) as typeof fetch;
+  fireEvent.click(within(element).getByRole("button", { name: "Approve" }));
+  await waitFor(() =>
+    expect(sent).toContain(`POST ${appAccessRequestPath("req_1")}/approve`),
+  );
+  // The server gives the actions the request names.
+  expect(bodies).toEqual([undefined]);
+});
+
+test("one action asked for reads in the singular", async () => {
+  serving({
+    requests: [
+      request({
+        actions: ["composio-gmail/GMAIL_SEND_EMAIL"],
+      }),
+    ],
+  });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  expect(
+    await view.findByText("Give Expenses 1 more Gmail action"),
+  ).toBeTruthy();
+  expect(
+    view.getByText(/Approving gives Expenses only GMAIL_SEND_EMAIL\./),
+  ).toBeTruthy();
+});
+
 test("switching an app on for a Bot says the same, with no link to a page the app does not have yet", async () => {
   serving({ requests: [request({ kind: "enable" })] });
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
