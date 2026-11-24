@@ -47,6 +47,18 @@ export type Warning =
       size: number;
       /** The sentence, for example `panel <main> is 0 px from the window buttons`. */
       text: string;
+    }
+  | {
+      kind: "spinners";
+      at: number;
+      /** Where each spinner is, for example `2 spinners: "Installing OpenBot", <p class="status-line">`. */
+      label: string;
+      /** How many spinners the window shows at once. Always 2 or more. */
+      count: number;
+      /** Each spinner's box. */
+      boxes: Box[];
+      /** The box around all of them. */
+      box: Box;
     };
 
 const TEXT_INPUTS = new Set([
@@ -718,4 +730,114 @@ export function spacingWarnings(
       text: issue.text,
     }),
   );
+}
+
+// --- One spinner at a time ----------------------------------------------------------------------
+
+/**
+ * The elements that draw a spinner: the setup window's ring (`.step-spinner`, also when reduced
+ * motion holds it still) and the app's spinning icon (`.animate-spin`).
+ */
+export const SPINNER_SELECTOR = ".step-spinner, .animate-spin";
+
+/** The keyframes that turn an element round: the setup window's (`step-spin`) and Tailwind's (`spin`). */
+const SPIN_ANIMATIONS = new Set(["step-spin", "spin"]);
+
+/** True when an element draws a spinner: it has a spinner's class or runs a spin animation. */
+export function isSpinner(element: Element, view: Window): boolean {
+  if (element.matches(SPINNER_SELECTOR)) return true;
+  const names = view.getComputedStyle(element).animationName;
+  return names.split(",").some((name) => SPIN_ANIMATIONS.has(name.trim()));
+}
+
+/**
+ * True when a person sees the element: a box that is not empty, shown (not `hidden`,
+ * `display: none`, `visibility: hidden` or opacity 0, on it or a box around it) and not hidden as text for screen
+ * readers only is. A spinner is `aria-hidden` (it says nothing to a screen reader), so that does not
+ * count here.
+ */
+function seenByEye(
+  element: Element,
+  view: Window,
+  known: Map<Element, boolean>,
+): boolean {
+  const { width, height } = boxOf(element);
+  if (width === 0 || height === 0) return false;
+  const style = view.getComputedStyle(element);
+  if (
+    style.display === "none" ||
+    style.visibility === "hidden" ||
+    style.visibility === "collapse"
+  )
+    return false;
+  for (let at: Element | null = element; at; at = at.parentElement) {
+    const s = at === element ? style : view.getComputedStyle(at);
+    if (
+      at.hasAttribute("hidden") ||
+      s.display === "none" ||
+      Number.parseFloat(s.opacity) === 0
+    )
+      return false;
+  }
+  return !isVisuallyHidden(element, known);
+}
+
+/**
+ * Where a spinner is, in words: the name of the nearest box around it that has one (its
+ * `aria-label`, as a step's row has), or else that box's tag and class.
+ */
+export function spinnerPlace(element: Element): string {
+  for (let at = element.parentElement; at; at = at.parentElement) {
+    const label = collapse(at.getAttribute("aria-label"));
+    if (label) return `"${label}"`;
+    if (at.getAttribute("role")) return boxName(at);
+  }
+  return boxName(element.parentElement ?? element);
+}
+
+/** The spinners a person sees in a window, in document order. */
+export function visibleSpinners(
+  root: Document,
+): { element: Element; box: Box; place: string }[] {
+  const view = root.defaultView;
+  const body = root.body;
+  if (!view || !body) return [];
+  const known = new Map<Element, boolean>();
+  return Array.from(body.querySelectorAll("*")).flatMap((element) => {
+    if (!isSpinner(element, view)) return [];
+    // A spinner inside a spinner (an icon in a spinning wrapper) is one spinner.
+    const outer = element.parentElement?.closest(SPINNER_SELECTOR);
+    if (outer) return [];
+    if (!seenByEye(element, view, known)) return [];
+    return [{ element, box: boxOf(element), place: spinnerPlace(element) }];
+  });
+}
+
+function around(boxes: readonly Box[]): Box {
+  const left = Math.min(...boxes.map((b) => b.x));
+  const top = Math.min(...boxes.map((b) => b.y));
+  const right = Math.max(...boxes.map((b) => b.x + b.width));
+  const bottom = Math.max(...boxes.map((b) => b.y + b.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/**
+ * The One spinner check: a window shows at most one spinner at any moment. Two read as two waits,
+ * and a person cannot tell which one to watch. The step's own wait is the one that spins; anything
+ * else running beside it is marked and held still (`SetupProgress` `quiet`, `.step-current`).
+ */
+export function spinnerWarnings(root: Document, at: number): Warning[] {
+  const spinners = visibleSpinners(root);
+  if (spinners.length < 2) return [];
+  const boxes = spinners.map((s) => s.box);
+  return [
+    {
+      kind: "spinners",
+      at,
+      label: `${spinners.length} spinners: ${spinners.map((s) => s.place).join(", ")}`,
+      count: spinners.length,
+      boxes,
+      box: around(boxes),
+    },
+  ];
 }

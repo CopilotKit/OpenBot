@@ -1618,3 +1618,67 @@ test("the Claude plan's caution is said with the plan sign-in, not under the API
   );
   expect(view.getByText(/separate monthly pool/)).toBeTruthy();
 });
+
+/*
+ * What runs behind the AI step is said at the sidebar's foot, not under the form: nothing in the
+ * step moves as it comes and goes. The step's own line about it stays in the page.
+ */
+test("the background install is at the sidebar's foot, and never in the page", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected command ${command}`);
+  };
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <ProviderPicker
+        chosen={null}
+        held={{}}
+        root="/tmp/openbot-provider-root"
+        onBack={() => {}}
+        onChoose={() => {}}
+        status={<p>Setting up OpenBot meanwhile.</p>}
+        background={<p>Installing OpenBot in the background.</p>}
+      />,
+    );
+  });
+  const page = view
+    .getByRole("heading", { name: "Connect your AI" })
+    .closest(".sheet") as HTMLElement;
+  const behind = view.getByText("Installing OpenBot in the background.");
+  expect(behind.closest("aside.rail > .rail-foot")).not.toBeNull();
+  expect(page.contains(behind)).toBe(false);
+  expect(page.previousElementSibling).toBe(behind.closest("aside.rail"));
+  expect(page.contains(view.getByText("Setting up OpenBot meanwhile."))).toBe(
+    true,
+  );
+  // The sections head the sidebar, with AI the step it is on.
+  expect(
+    view
+      .getByRole("list", { name: "Setup" })
+      .querySelector('[aria-current="step"]')?.textContent,
+  ).toBe("AI");
+});
+
+test("refreshing the AI connection has no sections and no foot, with nothing behind it", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected command ${command}`);
+  };
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <ProviderPicker
+        chosen={null}
+        held={{}}
+        root="/tmp/openbot-provider-root"
+        returning
+        onBack={() => {}}
+        onChoose={() => {}}
+      />,
+    );
+  });
+  await view.findByRole("heading", { name: "Refresh your AI connection" });
+  expect(view.queryByRole("list", { name: "Setup" })).toBeNull();
+  expect(view.container.querySelector(".rail-foot")).toBeNull();
+});

@@ -346,7 +346,7 @@ type Screen =
  * 1. The choice: OpenBot Cloud, recommended and picked to begin with, or keep everything here. With
  *    the space the move frees. Keep is recorded and not asked again at launch, except once after the
  *    next update when it followed a failed move (`onKeep`). Between them,
- *    OpenBot for Business as the first screen draws it, which books a demo (`BusinessBooker`) and
+ *    OpenBot for Business, which books a demo (`BusinessBooker`, stacked for the card) and
  *    moves nothing: while it is picked there is no Continue and no Keep.
  * 2. What moves, from the OpenBot running here (`move_preview`), and the app connections that can't
  *    move, by name, to reconnect in OpenBot Cloud. Settings opens here. Offered at launch, before
@@ -731,7 +731,7 @@ function Choice({
       </fieldset>
       {/* OpenBot for Business books a demo: it moves nothing and keeps nothing, so neither shows. */}
       {picked === "business" ? (
-        <BusinessBooker />
+        <BusinessBooker layout="card" />
       ) : (
         <>
           <div className="row">

@@ -10,7 +10,7 @@ import {
   earlyDownloadsMeasured,
   useEarlyDownloads,
 } from "./EarlyDownloads";
-import { handover } from "./handover";
+import { handover, leaveFor } from "./handover";
 import { currentChoice, DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
@@ -46,10 +46,9 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
-import { Sections } from "./Sections";
+import { Sections, SetupRail } from "./Sections";
 import { SelfContainedNote, UPDATING_SELF_CONTAINED } from "./SelfContained";
 import {
-  BehindSlot,
   engineNow,
   goAheadNow,
   handOffNow,
@@ -60,6 +59,7 @@ import {
   plainInstallSteps,
   SetupProgress,
   StatusLine,
+  spins,
   trayPlace,
 } from "./SetupProgress";
 import { ShuttingDown, useQuitStatus } from "./ShuttingDown";
@@ -1228,6 +1228,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * The window to the OpenBot running here (`show_openbot`), unless the move to OpenBot Cloud is
    * offered first: then its screens show instead, and this answers false. The shell is told whether
    * this build offers OpenBot Cloud, and says the move is due only where it does.
+   *
+   * Setup fades out to the window's ground first, and OpenBot's page fades up from it
+   * (`leaveFor`); a `show_openbot` that fails brings setup back at once, with the failure.
    */
   async function handOver(): Promise<boolean> {
     moveAsked.current ??= askMoveOffer(cloudEnabled());
@@ -1238,7 +1241,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       setMoveShown(offer);
       return false;
     }
-    await invoke("show_openbot");
+    await leaveFor(() => invoke("show_openbot"));
     return true;
   }
 
@@ -1474,6 +1477,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   if (checkingResume || checkingWindows) {
     return (
       <main>
+        <SetupRail>
+          <Sections />
+        </SetupRail>
         <div className="sheet connection-sheet">
           <h1>Getting OpenBot ready</h1>
           <p className="lede" role="status">
@@ -1527,10 +1533,18 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   }
 
   if (!running && step === "install") {
+    const installRows = plainInstallSteps(
+      steps,
+      busy,
+      installSince,
+      !local.stopped && local.running ? local.download : null,
+    );
     return (
       <main>
-        <div className="sheet">
+        <SetupRail>
           <Sections at="Install" />
+        </SetupRail>
+        <div className="sheet">
           <h1>
             {installationReady ? "Installation complete" : "Installing OpenBot"}
           </h1>
@@ -1541,21 +1555,15 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           </p>
           {/* Intelligence sets itself up alongside, once the install has Docker answering. Its
               download is the list's third step, once the second is done. */}
-          <SetupProgress
-            steps={plainInstallSteps(
-              steps,
-              busy,
-              installSince,
-              !local.stopped && local.running ? local.download : null,
-            )}
-          />
+          <SetupProgress steps={installRows} />
           {/* The person closed macOS's password prompt: said, with Try again. */}
           {goAhead && <PodmanGoAhead asking={goAhead} />}
           {pauseCard}
           <LocalStatus sequence={local} download={false} />
           {/* The first screen's downloads, until a row of Install's own shows the one it waits on. */}
           {!steps.some((row) => row.running && row.downloads) && (
-            <EarlyDownloadsLine />
+            // Install's running row is the step's own wait: the line beside it is still.
+            <EarlyDownloadsLine quiet={installRows.some(spins)} />
           )}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {!busy && (
@@ -1675,14 +1683,16 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
             returningToInstallation ? (
               <LocalStatus sequence={local} />
             ) : (
-              <BehindSlot>
-                <BehindRow
-                  row={behind({
-                    done: "OpenBot starts as soon as you connect your AI.",
-                  })}
-                />
-                <LocalStatus sequence={local} download={false} />
-              </BehindSlot>
+              <LocalStatus sequence={local} download={false} />
+            )
+          }
+          background={
+            returningToInstallation ? undefined : (
+              <BehindRow
+                row={behind({
+                  done: "OpenBot starts as soon as you connect your AI.",
+                })}
+              />
             )
           }
           onInstallRequired={(problem, choice) => {
@@ -1916,8 +1926,8 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   if (starting) {
     return (
       <main>
+        <SetupRail>{!returning && <Sections at="Start" />}</SetupRail>
         <div className="sheet connection-sheet">
-          {!returning && <Sections at="Start" />}
           {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
           <h1>Finishing setup</h1>
           <p className="lede">
@@ -2066,7 +2076,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
 
 /** The background install's row, when there is one. */
 function BehindRow({ row }: { row: Progress | null }) {
-  return row && <SetupProgress steps={[row]} label="Background install" />;
+  return (
+    row && <SetupProgress steps={[row]} label="Background install" quiet />
+  );
 }
 
 function settleProgress(steps: Progress[], problem?: Problem): Progress[] {

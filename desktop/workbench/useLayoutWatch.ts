@@ -10,6 +10,7 @@ import {
   screenOf,
   snapshot,
   spacingWarnings,
+  spinnerWarnings,
   type Warning,
 } from "./layoutWatch";
 
@@ -35,7 +36,7 @@ function causeOf(change: Change): string {
   }
 }
 
-/** The key that says a clipped, outside or spacing warning is the same one as before. */
+/** The key that says a clipped, outside, spacing or spinners warning is the same one as before. */
 function stillKey(warning: Warning): string {
   return warning.kind === "spacing"
     ? `${warning.kind}|${warning.rule}|${warning.label}`
@@ -45,7 +46,8 @@ function stillKey(warning: Warning): string {
 /**
  * Watches the layout of a loaded window. After each change of the fake native side or of the
  * clock, one frame later, it compares the window with how it was before, and finds text that is
- * cut off, elements outside the window, and what comes too near the window's buttons (Spacing). While `hold(true)` is in force (a seek walks the
+ * cut off, elements outside the window, what comes too near the window's buttons (Spacing), and
+ * more than one spinner at once (`spinnerWarnings`). While `hold(true)` is in force (a seek walks the
  * clock), it checks only when `flush` is called: at each stop of the walk, where a frame may not
  * come between two moves of the clock, and where the window is the same each time.
  */
@@ -113,6 +115,7 @@ export function useLayoutWatch(
         for (const warning of [
           ...clippedAndOutside(doc, at, size),
           ...spacingWarnings(doc, at, size, buttons),
+          ...spinnerWarnings(doc, at),
         ]) {
           const key = stillKey(warning);
           if (now.has(key)) continue;

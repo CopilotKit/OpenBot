@@ -6,7 +6,7 @@ import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { ButtonMark, Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
-import { Sections } from "./Sections";
+import { Sections, SetupRail } from "./Sections";
 import {
   type Progress,
   SetupProgress,
@@ -203,6 +203,7 @@ export function ProviderPicker({
   returning = false,
   busy: starting = false,
   status,
+  background,
   failure: setupFailure,
   onProviderChange,
 }: {
@@ -227,6 +228,8 @@ export function ProviderPicker({
   busy?: boolean;
   /** One line about work running behind this screen. */
   status?: ReactNode;
+  /** What runs behind this step, at the sidebar's foot: the background install. */
+  background?: ReactNode;
   /** A failure from setup itself (a Start that sent the window back here), shown in this card. */
   failure?: ReactNode;
   /**
@@ -636,451 +639,466 @@ export function ProviderPicker({
   }, [anyChosen]);
 
   return (
-    <div className="sheet">
-      {!returning && <Sections at="AI" />}
-      <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
-      <p className="lede">
-        Choose the AI your Bots use. Sign in with a plan you already have, or
-        use an API key.
-      </p>
+    <>
+      {/* What runs behind this step is said at the sidebar's foot (`background`), not under the
+          form: nothing in the step moves as it comes and goes, and it never spins beside it. */}
+      <SetupRail foot={background}>
+        {!returning && <Sections at="AI" />}
+      </SetupRail>
+      <div className="sheet">
+        <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
+        <p className="lede">
+          Choose the AI your Bots use. Sign in with a plan you already have, or
+          use an API key.
+        </p>
 
-      <fieldset className="picker providers">
-        <legend className="sr-only">Model provider</legend>
-        {/* Once one is chosen it stands alone, with Change to see them all again. */}
-        {(row ? [row] : rows).map((r) => (
-          <label
-            key={r.id}
-            className={`tile wide${open === r.id ? " chosen" : ""}${row ? " beside-change" : ""}`}
-          >
-            <input
-              type="radio"
-              name="provider"
-              className="tile-input"
-              value={r.id}
-              checked={open === r.id}
-              onChange={() => {
-                if (oauthAttempt.current) void cancelOAuth();
-                stopPlanSignIn();
-                signInRunRef.current += 1;
-                setOpen(r.id);
-                // A failure belongs to the row that produced it. Left in place, a refused OpenAI
-                // sign-in stayed on screen under the endpoint row's fields, where it read as a
-                // complaint about the address just typed. The same goes for a failure setup sent
-                // back here: a refused OpenAI key stayed under the Anthropic row.
-                setFailure(null);
-                onProviderChange?.();
-                setSignInUrl(null);
-                setBusy(false);
-                setProgress(null);
-                setDownload(null);
-                // The first way in is the default, which is the plan wherever there is one.
-                setLogin(r.logins[0] ?? null);
-                // Fill from what is already on this machine, if anything.
-                const kept =
-                  r.id === "openai"
-                    ? held.OPENAI_API_KEY
-                    : r.id === "anthropic"
-                      ? held.ANTHROPIC_API_KEY
-                      : undefined;
-                setApiKey(kept ?? "");
-                const nextPreset = endpointPresets[r.id];
-                const restoreEndpoint =
-                  r.id === "openai-compatible" ||
-                  (nextPreset &&
-                    endpointProvider(held.OPENAI_BASE_URL) === r.id);
-                setReuseEndpointKey(
-                  Boolean(restoreEndpoint) &&
-                    held.saved?.modelApiKeys?.compatible === true,
-                );
-                if (restoreEndpoint && held.OPENAI_BASE_URL) {
-                  setBaseUrl(held.OPENAI_BASE_URL);
-                  setContainerBaseUrl(held.OPENAI_CONTAINER_BASE_URL ?? "");
-                  setModel(held.BOT_MODEL ?? nextPreset?.model ?? "");
-                } else {
-                  setBaseUrl(nextPreset?.baseUrl ?? "");
-                  setContainerBaseUrl("");
-                  setModel(nextPreset?.model ?? "");
-                }
-              }}
-            />
-            {r.id === "openai-compatible" ? (
-              <EndpointMark />
-            ) : (
-              <Mark id={r.mark} name={r.name} />
-            )}
-            <span className="tile-name">{r.name}</span>
-            <span className="tile-summary">{r.summary}</span>
-          </label>
-        ))}
+        <fieldset className="picker providers">
+          <legend className="sr-only">Model provider</legend>
+          {/* Once one is chosen it stands alone, with Change to see them all again. */}
+          {(row ? [row] : rows).map((r) => (
+            <label
+              key={r.id}
+              className={`tile wide${open === r.id ? " chosen" : ""}${row ? " beside-change" : ""}`}
+            >
+              <input
+                type="radio"
+                name="provider"
+                className="tile-input"
+                value={r.id}
+                checked={open === r.id}
+                onChange={() => {
+                  if (oauthAttempt.current) void cancelOAuth();
+                  stopPlanSignIn();
+                  signInRunRef.current += 1;
+                  setOpen(r.id);
+                  // A failure belongs to the row that produced it. Left in place, a refused OpenAI
+                  // sign-in stayed on screen under the endpoint row's fields, where it read as a
+                  // complaint about the address just typed. The same goes for a failure setup sent
+                  // back here: a refused OpenAI key stayed under the Anthropic row.
+                  setFailure(null);
+                  onProviderChange?.();
+                  setSignInUrl(null);
+                  setBusy(false);
+                  setProgress(null);
+                  setDownload(null);
+                  // The first way in is the default, which is the plan wherever there is one.
+                  setLogin(r.logins[0] ?? null);
+                  // Fill from what is already on this machine, if anything.
+                  const kept =
+                    r.id === "openai"
+                      ? held.OPENAI_API_KEY
+                      : r.id === "anthropic"
+                        ? held.ANTHROPIC_API_KEY
+                        : undefined;
+                  setApiKey(kept ?? "");
+                  const nextPreset = endpointPresets[r.id];
+                  const restoreEndpoint =
+                    r.id === "openai-compatible" ||
+                    (nextPreset &&
+                      endpointProvider(held.OPENAI_BASE_URL) === r.id);
+                  setReuseEndpointKey(
+                    Boolean(restoreEndpoint) &&
+                      held.saved?.modelApiKeys?.compatible === true,
+                  );
+                  if (restoreEndpoint && held.OPENAI_BASE_URL) {
+                    setBaseUrl(held.OPENAI_BASE_URL);
+                    setContainerBaseUrl(held.OPENAI_CONTAINER_BASE_URL ?? "");
+                    setModel(held.BOT_MODEL ?? nextPreset?.model ?? "");
+                  } else {
+                    setBaseUrl(nextPreset?.baseUrl ?? "");
+                    setContainerBaseUrl("");
+                    setModel(nextPreset?.model ?? "");
+                  }
+                }}
+              />
+              {r.id === "openai-compatible" ? (
+                <EndpointMark />
+              ) : (
+                <Mark id={r.mark} name={r.name} />
+              )}
+              <span className="tile-name">{r.name}</span>
+              <span className="tile-summary">{r.summary}</span>
+            </label>
+          ))}
+          {row && (
+            <button
+              type="button"
+              className="text-link change-provider"
+              aria-label="Choose a different provider"
+              onClick={chooseAnother}
+            >
+              Change
+            </button>
+          )}
+        </fieldset>
+
         {row && (
-          <button
-            type="button"
-            className="text-link change-provider"
-            aria-label="Choose a different provider"
-            onClick={chooseAnother}
-          >
-            Change
-          </button>
-        )}
-      </fieldset>
-
-      {row && (
-        <div className="chosen-provider">
-          {row.logins.length > 1 && (
-            <div className="segmented" role="tablist">
-              {row.logins.map((option) => (
-                <button
-                  type="button"
-                  key={option}
-                  role="tab"
-                  aria-selected={login === option}
-                  className={login === option ? "on" : ""}
-                  onClick={() => {
-                    if (login === "oauth" && option !== login)
-                      void cancelOAuth();
-                    // A refused sign-in says nothing about the API key tab, and the reverse.
-                    if (option !== login) setFailure(null);
-                    setLogin(option);
-                  }}
-                >
-                  {option === "plan"
-                    ? "Sign in with my plan"
-                    : option === "oauth"
-                      ? "Sign in"
-                      : "Use an API key"}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {login === "oauth" && (
-            <>
-              {/* Set as the plan's description is, so its button has the same space above it. */}
-              <p className="lede">{oauthExplanation[row.id]}</p>
-              {oauthSignedIn === row.id ? (
-                <p className="lede">
-                  {confirmed === row.id && <SignedInMark />}
-                  Signed in to {row.name}.
-                </p>
-              ) : signInUrl ? (
-                <>
-                  <StatusLine>
-                    Waiting for you to approve sign-in in your browser.
-                  </StatusLine>
-                  {oauthCode && (
-                    <p>
-                      Verification code: <strong>{oauthCode}</strong>
-                    </p>
-                  )}
-                  <ExternalLink href={signInUrl}>
-                    Open sign-in page
-                  </ExternalLink>
-                  <button type="button" className="quiet" onClick={cancelOAuth}>
-                    Cancel sign-in
-                  </button>
-                </>
-              ) : null}
-              {!busy && (
-                <button
-                  type="button"
-                  className="quiet sign-in-with"
-                  onClick={beginOAuth}
-                >
-                  <ButtonMark id={row.mark} />
-                  {/* Google's guidelines allow only "Sign in with Google" beside its G. The
-                      row above already says Gemini. */}
-                  Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
-                  {row.id === "google" ? "Google" : row.name}
-                </button>
-              )}
-              {busy && !signInUrl && (
-                <StatusLine>Preparing sign-in…</StatusLine>
-              )}
-              <div className="field">
-                <label htmlFor="oauth-model">Model name</label>
-                <input
-                  id="oauth-model"
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  spellCheck={false}
-                />
-              </div>
-            </>
-          )}
-
-          {login === "plan" &&
-            (token || (savedPlan && !signInUrl && !busy) ? (
-              <>
-                <p className="lede">
-                  {token && confirmed === row.id && <SignedInMark />}
-                  {token
-                    ? `Signed in to ${row.name}.`
-                    : `A saved ${row.name} sign-in will be checked when you start.`}{" "}
-                  Your plan will be used.
-                </p>
-                {!token && (
+          <div className="chosen-provider">
+            {row.logins.length > 1 && (
+              <div className="segmented" role="tablist">
+                {row.logins.map((option) => (
                   <button
                     type="button"
-                    className="quiet sign-in-with"
-                    disabled={busy}
-                    onClick={beginSignIn}
-                  >
-                    <ButtonMark id={row.mark} />
-                    Sign in again with {row.name}
-                  </button>
-                )}
-                {/*
-                 * Said here because it changes an answer the person already gave.
-                 *
-                 * A subscription only works through the one Bot that speaks that vendor's
-                 * sign-in, so choosing a plan re-points the Bot. Doing that silently would leave
-                 * somebody looking at a Bot they did not choose with no idea why; see
-                 * `harness::speaking_for` for the failure that came of not saying it at all.
-                 */}
-                <p className="footnote">
-                  Your Bot will use{" "}
-                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangChain"}.
-                  It’s the one that can use this plan.
-                </p>
-              </>
-            ) : signInUrl ? (
-              <>
-                <p className="lede">
-                  Approve the request in your browser. {row.name} will finish
-                  this on its own.
-                </p>
-                {/* Shown as well as opened. On a machine with no registered
-                    browser the open does nothing and says nothing, and a wait
-                    with no link is then a dead end. */}
-                <p className="fallback">
-                  Didn't open?{" "}
-                  <a href={signInUrl} target="_blank" rel="noreferrer">
-                    Open the sign-in page
-                  </a>
-                </p>
-                <StatusLine>Waiting for you to approve it…</StatusLine>
-              </>
-            ) : (
-              <>
-                {/* Says what the flow below asks for: both plans finish in the
-                    browser, with nothing typed here. */}
-                <p className="lede">
-                  {row.name} opens in your browser. You won't type anything here
-                  or need an API key.
-                </p>
-                <div className="provider-sign-in-actions">
-                  <button
-                    type="button"
-                    className="quiet sign-in-with"
-                    disabled={busy}
-                    onClick={beginSignIn}
-                  >
-                    <ButtonMark id={row.mark} />
-                    {busy ? "Starting…" : `Sign in with ${row.name}`}
-                  </button>
-                  {!busy &&
-                    (row.id === "openai" || row.id === "anthropic") &&
-                    held.saved?.modelSessions?.[row.id] !== false && (
-                      <button
-                        type="button"
-                        className="quiet"
-                        onClick={() =>
-                          setReuse({ provider: row.id, login: "plan" })
-                        }
-                      >
-                        Use a saved{" "}
-                        {row.id === "anthropic" ? "Claude" : "ChatGPT"} sign-in
-                      </button>
-                    )}
-                </div>
-                {busy &&
-                  (download ? (
-                    <SetupProgress
-                      label="Sign-in download"
-                      steps={[download]}
-                    />
-                  ) : (
-                    <StatusLine>{progress ?? "Preparing sign-in…"}</StatusLine>
-                  ))}
-              </>
-            ))}
-
-          {login === "api-key" && (
-            <>
-              {savedApiKey && !apiKey ? (
-                <p className="lede">A saved {row.name} API key will be used.</p>
-              ) : null}
-              {!savedApiKey &&
-                (row.id === "openai" || row.id === "anthropic") &&
-                held.saved?.modelApiKeys?.[row.id] !== false && (
-                  <button
-                    type="button"
-                    className="quiet"
+                    key={option}
+                    role="tab"
+                    aria-selected={login === option}
+                    className={login === option ? "on" : ""}
                     onClick={() => {
-                      setApiKey("");
-                      setReuse({ provider: row.id, login: "api-key" });
+                      if (login === "oauth" && option !== login)
+                        void cancelOAuth();
+                      // A refused sign-in says nothing about the API key tab, and the reverse.
+                      if (option !== login) setFailure(null);
+                      setLogin(option);
                     }}
                   >
-                    Use a saved {row.name} API key
+                    {option === "plan"
+                      ? "Sign in with my plan"
+                      : option === "oauth"
+                        ? "Sign in"
+                        : "Use an API key"}
                   </button>
-                )}
-              <div className="field">
-                <label htmlFor="key">{row.name} API key</label>
-                <input
-                  id="key"
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
+                ))}
               </div>
-            </>
-          )}
+            )}
 
-          {login === "endpoint" && (
-            <>
-              {savedEndpointKey && !apiKey && (
-                <p className="lede">
-                  A saved API key for this endpoint will be used.{" "}
-                  {!preset && (
+            {login === "oauth" && (
+              <>
+                {/* Set as the plan's description is, so its button has the same space above it. */}
+                <p className="lede">{oauthExplanation[row.id]}</p>
+                {oauthSignedIn === row.id ? (
+                  <p className="lede">
+                    {confirmed === row.id && <SignedInMark />}
+                    Signed in to {row.name}.
+                  </p>
+                ) : signInUrl ? (
+                  <>
+                    <StatusLine>
+                      Waiting for you to approve sign-in in your browser.
+                    </StatusLine>
+                    {oauthCode && (
+                      <p>
+                        Verification code: <strong>{oauthCode}</strong>
+                      </p>
+                    )}
+                    <ExternalLink href={signInUrl}>
+                      Open sign-in page
+                    </ExternalLink>
                     <button
                       type="button"
                       className="quiet"
-                      onClick={() => setReuseEndpointKey(false)}
+                      onClick={cancelOAuth}
                     >
-                      Continue without the saved key
+                      Cancel sign-in
+                    </button>
+                  </>
+                ) : null}
+                {!busy && (
+                  <button
+                    type="button"
+                    className="quiet sign-in-with"
+                    onClick={beginOAuth}
+                  >
+                    <ButtonMark id={row.mark} />
+                    {/* Google's guidelines allow only "Sign in with Google" beside its G. The
+                      row above already says Gemini. */}
+                    Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
+                    {row.id === "google" ? "Google" : row.name}
+                  </button>
+                )}
+                {busy && !signInUrl && (
+                  <StatusLine>Preparing sign-in…</StatusLine>
+                )}
+                <div className="field">
+                  <label htmlFor="oauth-model">Model name</label>
+                  <input
+                    id="oauth-model"
+                    value={model}
+                    onChange={(event) => setModel(event.target.value)}
+                    spellCheck={false}
+                  />
+                </div>
+              </>
+            )}
+
+            {login === "plan" &&
+              (token || (savedPlan && !signInUrl && !busy) ? (
+                <>
+                  <p className="lede">
+                    {token && confirmed === row.id && <SignedInMark />}
+                    {token
+                      ? `Signed in to ${row.name}.`
+                      : `A saved ${row.name} sign-in will be checked when you start.`}{" "}
+                    Your plan will be used.
+                  </p>
+                  {!token && (
+                    <button
+                      type="button"
+                      className="quiet sign-in-with"
+                      disabled={busy}
+                      onClick={beginSignIn}
+                    >
+                      <ButtonMark id={row.mark} />
+                      Sign in again with {row.name}
                     </button>
                   )}
-                </p>
-              )}
-              {!preset && (
-                <>
-                  <div className="field">
-                    <label htmlFor="base">Base URL</label>
-                    <input
-                      id="base"
-                      value={baseUrl}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setBaseUrl(next);
-                        if (
-                          held.OPENAI_CONTAINER_BASE_URL &&
-                          containerBaseUrl.trim() ===
-                            held.OPENAI_CONTAINER_BASE_URL.trim() &&
-                          next.trim() !== held.OPENAI_BASE_URL?.trim()
-                        ) {
-                          setContainerBaseUrl("");
-                        }
-                      }}
-                      placeholder="https://…/v1"
-                      spellCheck={false}
-                    />
-                  </div>
-                  <details className="field">
-                    <summary>Advanced compatible endpoint options</summary>
-                    <label htmlFor="container-base">
-                      Container Base URL, if different
-                    </label>
-                    <input
-                      id="container-base"
-                      value={containerBaseUrl}
-                      onChange={(e) => setContainerBaseUrl(e.target.value)}
-                      placeholder="http://ollama:11434/v1"
-                      spellCheck={false}
-                    />
-                    <p className="footnote">
-                      Leave this empty unless containers need a different
-                      address for a locally hosted model. Remote endpoints
-                      usually use the same Base URL.
-                    </p>
-                  </details>
+                  {/*
+                   * Said here because it changes an answer the person already gave.
+                   *
+                   * A subscription only works through the one Bot that speaks that vendor's
+                   * sign-in, so choosing a plan re-points the Bot. Doing that silently would leave
+                   * somebody looking at a Bot they did not choose with no idea why; see
+                   * `harness::speaking_for` for the failure that came of not saying it at all.
+                   */}
+                  <p className="footnote">
+                    Your Bot will use{" "}
+                    {row.id === "anthropic" ? "Claude Agent SDK" : "LangChain"}.
+                    It’s the one that can use this plan.
+                  </p>
                 </>
-              )}
-              <div className="field">
-                <label htmlFor="model">Model name</label>
-                <input
-                  id="model"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="the name the endpoint knows it by"
-                  spellCheck={false}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="ekey">
-                  {preset
-                    ? `${row.name} API key`
-                    : "API key, if the endpoint needs one"}
-                </label>
-                <input
-                  id="ekey"
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-              {preset && (
-                <p className="footnote">
-                  <ExternalLink key={preset.keyUrl} href={preset.keyUrl}>
-                    {preset.keyLink}
-                  </ExternalLink>
-                </p>
-              )}
-            </>
-          )}
+              ) : signInUrl ? (
+                <>
+                  <p className="lede">
+                    Approve the request in your browser. {row.name} will finish
+                    this on its own.
+                  </p>
+                  {/* Shown as well as opened. On a machine with no registered
+                    browser the open does nothing and says nothing, and a wait
+                    with no link is then a dead end. */}
+                  <p className="fallback">
+                    Didn't open?{" "}
+                    <a href={signInUrl} target="_blank" rel="noreferrer">
+                      Open the sign-in page
+                    </a>
+                  </p>
+                  <StatusLine>Waiting for you to approve it…</StatusLine>
+                </>
+              ) : (
+                <>
+                  {/* Says what the flow below asks for: both plans finish in the
+                    browser, with nothing typed here. */}
+                  <p className="lede">
+                    {row.name} opens in your browser. You won't type anything
+                    here or need an API key.
+                  </p>
+                  <div className="provider-sign-in-actions">
+                    <button
+                      type="button"
+                      className="quiet sign-in-with"
+                      disabled={busy}
+                      onClick={beginSignIn}
+                    >
+                      <ButtonMark id={row.mark} />
+                      {busy ? "Starting…" : `Sign in with ${row.name}`}
+                    </button>
+                    {!busy &&
+                      (row.id === "openai" || row.id === "anthropic") &&
+                      held.saved?.modelSessions?.[row.id] !== false && (
+                        <button
+                          type="button"
+                          className="quiet"
+                          onClick={() =>
+                            setReuse({ provider: row.id, login: "plan" })
+                          }
+                        >
+                          Use a saved{" "}
+                          {row.id === "anthropic" ? "Claude" : "ChatGPT"}{" "}
+                          sign-in
+                        </button>
+                      )}
+                  </div>
+                  {busy &&
+                    (download ? (
+                      <SetupProgress
+                        label="Sign-in download"
+                        steps={[download]}
+                      />
+                    ) : (
+                      <StatusLine>
+                        {progress ?? "Preparing sign-in…"}
+                      </StatusLine>
+                    ))}
+                </>
+              ))}
 
-          {/* Said before it happens rather than diagnosed after the Bots stop answering. */}
-          {failure && <InlineFailure problem={failure} />}
+            {login === "api-key" && (
+              <>
+                {savedApiKey && !apiKey ? (
+                  <p className="lede">
+                    A saved {row.name} API key will be used.
+                  </p>
+                ) : null}
+                {!savedApiKey &&
+                  (row.id === "openai" || row.id === "anthropic") &&
+                  held.saved?.modelApiKeys?.[row.id] !== false && (
+                    <button
+                      type="button"
+                      className="quiet"
+                      onClick={() => {
+                        setApiKey("");
+                        setReuse({ provider: row.id, login: "api-key" });
+                      }}
+                    >
+                      Use a saved {row.name} API key
+                    </button>
+                  )}
+                <div className="field">
+                  <label htmlFor="key">{row.name} API key</label>
+                  <input
+                    id="key"
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+              </>
+            )}
 
-          {/* About a plan's own pool of use, so said only where the person signs in with one. On
+            {login === "endpoint" && (
+              <>
+                {savedEndpointKey && !apiKey && (
+                  <p className="lede">
+                    A saved API key for this endpoint will be used.{" "}
+                    {!preset && (
+                      <button
+                        type="button"
+                        className="quiet"
+                        onClick={() => setReuseEndpointKey(false)}
+                      >
+                        Continue without the saved key
+                      </button>
+                    )}
+                  </p>
+                )}
+                {!preset && (
+                  <>
+                    <div className="field">
+                      <label htmlFor="base">Base URL</label>
+                      <input
+                        id="base"
+                        value={baseUrl}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setBaseUrl(next);
+                          if (
+                            held.OPENAI_CONTAINER_BASE_URL &&
+                            containerBaseUrl.trim() ===
+                              held.OPENAI_CONTAINER_BASE_URL.trim() &&
+                            next.trim() !== held.OPENAI_BASE_URL?.trim()
+                          ) {
+                            setContainerBaseUrl("");
+                          }
+                        }}
+                        placeholder="https://…/v1"
+                        spellCheck={false}
+                      />
+                    </div>
+                    <details className="field">
+                      <summary>Advanced compatible endpoint options</summary>
+                      <label htmlFor="container-base">
+                        Container Base URL, if different
+                      </label>
+                      <input
+                        id="container-base"
+                        value={containerBaseUrl}
+                        onChange={(e) => setContainerBaseUrl(e.target.value)}
+                        placeholder="http://ollama:11434/v1"
+                        spellCheck={false}
+                      />
+                      <p className="footnote">
+                        Leave this empty unless containers need a different
+                        address for a locally hosted model. Remote endpoints
+                        usually use the same Base URL.
+                      </p>
+                    </details>
+                  </>
+                )}
+                <div className="field">
+                  <label htmlFor="model">Model name</label>
+                  <input
+                    id="model"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="the name the endpoint knows it by"
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="ekey">
+                    {preset
+                      ? `${row.name} API key`
+                      : "API key, if the endpoint needs one"}
+                  </label>
+                  <input
+                    id="ekey"
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                {preset && (
+                  <p className="footnote">
+                    <ExternalLink key={preset.keyUrl} href={preset.keyUrl}>
+                      {preset.keyLink}
+                    </ExternalLink>
+                  </p>
+                )}
+              </>
+            )}
+
+            {/* Said before it happens rather than diagnosed after the Bots stop answering. */}
+            {failure && <InlineFailure problem={failure} />}
+
+            {/* About a plan's own pool of use, so said only where the person signs in with one. On
               Windows G it sat under "Anthropic API key", where it does not apply. */}
-          {row.caution && login === "plan" && (
-            <p className="caution">
-              {row.caution.says}{" "}
-              <a
-                href={row.caution.reads_more_at}
-                target="_blank"
-                rel="noreferrer"
-              >
-                What this means
-              </a>
-            </p>
-          )}
-        </div>
-      )}
+            {row.caution && login === "plan" && (
+              <p className="caution">
+                {row.caution.says}{" "}
+                <a
+                  href={row.caution.reads_more_at}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  What this means
+                </a>
+              </p>
+            )}
+          </div>
+        )}
 
-      {setupFailure}
+        {setupFailure}
 
-      {/* The step's actions and what runs behind it, pinned to the bottom of the card's view
+        {/* The step's actions and what runs behind it, pinned to the bottom of the card's view
           (`StepFooter`): Continue is always there to press, with the choice scrolling above it. */}
-      <StepFooter>
-        <div className="row">
-          {onBack && (
+        <StepFooter>
+          <div className="row">
+            {onBack && (
+              <button
+                type="button"
+                className="quiet"
+                onClick={onBack}
+                disabled={starting}
+              >
+                Back
+              </button>
+            )}
             <button
               type="button"
-              className="quiet"
-              onClick={onBack}
-              disabled={starting}
+              disabled={starting || !row || !login || !ready}
+              onClick={continueWithChoice}
             >
-              Back
+              Continue
             </button>
-          )}
-          <button
-            type="button"
-            disabled={starting || !row || !login || !ready}
-            onClick={continueWithChoice}
-          >
-            Continue
-          </button>
-        </div>
-        {/* Under the form, never above it: what runs behind this step comes and goes while the
+          </div>
+          {/* Under the form, never above it: what runs behind this step comes and goes while the
           person types here, and nothing above the fields may move. See `BehindSlot`. */}
-        {status}
-      </StepFooter>
-    </div>
+          {status}
+        </StepFooter>
+      </div>
+    </>
   );
 }
 

@@ -27,6 +27,11 @@ export type WindowFrameProps = {
   host?: "desktop" | "browser";
   /** The path the browser bar shows, for host "browser". Default "/". */
   address?: string;
+  /**
+   * Whether the Windows title bar says OpenBot. Default true; false for setup, whose window has no
+   * title text (`window_title_shown` in main.rs).
+   */
+  titled?: boolean;
   /** Comment mode: set, the comment layer replaces the inspector. */
   comment?: Omit<CommentLayerProps, "frame"> | null;
   /**
@@ -76,14 +81,15 @@ function MacBar({ active }: { active: boolean }) {
   );
 }
 
-function WindowsBar({ active }: { active: boolean }) {
+/** Windows' own title bar: OpenBot's title in it, except over setup (`window_title_shown`). */
+function WindowsBar({ active, titled }: { active: boolean; titled: boolean }) {
   return (
     <div
       className={`wb-window-bar wb-window-bar-windows bg-muted font-sans text-xs ${active ? "text-foreground" : "text-muted-foreground"}`}
       data-window-bar="windows"
       aria-hidden="true"
     >
-      <span className="wb-window-title">OpenBot</span>
+      <span className="wb-window-title">{titled ? "OpenBot" : ""}</span>
       <span className="wb-window-controls">
         <span className="wb-window-control text-sm">&#x2013;</span>
         <span className="wb-window-control text-sm">&#x25A1;</span>
@@ -129,6 +135,7 @@ export function WindowFrame({
   gridColor,
   host = "desktop",
   address,
+  titled = true,
   comment,
   cover,
   onFrame,
@@ -160,7 +167,9 @@ export function WindowFrame({
       style={{ zoom }}
     >
       {browser && <BrowserBar address={address ?? "/"} />}
-      {!browser && os === "windows" && <WindowsBar active={active} />}
+      {!browser && os === "windows" && (
+        <WindowsBar active={active} titled={titled} />
+      )}
       <div
         className="wb-window-content"
         data-window-content

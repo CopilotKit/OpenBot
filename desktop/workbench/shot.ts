@@ -33,6 +33,7 @@ import {
   type FindingsFile,
   type Occurrence,
   type SceneRef,
+  spinnersText,
   userActions,
   warningMark,
 } from "./findings";
@@ -171,23 +172,25 @@ function resolveScript(skip: readonly string[]): string {
   const frame = document.querySelector("[data-workbench-window] iframe");
   const doc = frame && frame.contentDocument;
   if (!page || !doc) return [];
-  const [{ componentChain }, { visibleElements }, { resolveLines }] = await Promise.all([
+  const [{ componentChain }, { visibleElements, visibleSpinners }, { resolveLines }] = await Promise.all([
     import("/workbench/componentChain.ts"),
     import("/workbench/layoutWatch.ts"),
     import("/workbench/sourceLines.ts"),
   ]);
   window.__findingsMaps = window.__findingsMaps || new Map();
   const elements = visibleElements(doc);
+  // A Spinners warning names no element of its own: its last spinner stands for it.
+  const spinners = visibleSpinners(doc).map((s) => ({ ...s, key: "spinner", label: "spinners" }));
   const result = [];
   for (const w of page.warnings()) {
     // The same text as findings.ts's warningMark.
     const mark = w.kind + "|" + w.at + "|" + (w.kind === "spacing" ? w.rule + "|" : "") + w.label;
     if (skip.includes(mark)) continue;
-    const target = w.kind === "moved" ? w.to : w.box;
+    const target = w.kind === "moved" ? w.to : w.kind === "spinners" ? w.boxes[w.boxes.length - 1] : w.box;
     let best = null;
     let bestOff = Infinity;
-    for (const e of elements) {
-      if (e.label !== w.label) continue;
+    for (const e of w.kind === "spinners" ? spinners : elements) {
+      if (w.kind !== "spinners" && e.label !== w.label) continue;
       const off = Math.abs(e.box.x - target.x) + Math.abs(e.box.y - target.y) +
         Math.abs(e.box.width - target.width) + Math.abs(e.box.height - target.height);
       if (off < bestOff) { best = e; bestOff = off; }
@@ -278,6 +281,13 @@ async function takeShots(
       screens,
     );
     for (const warning of warnings) {
+      // More than one spinner at once fails the check, as a problem of the run does.
+      if (warning.kind === "spinners")
+        problems.push({
+          scene: sceneId,
+          at: warning.at / 1000,
+          message: spinnersText(warning),
+        });
       const found = resolved.get(warningMark(warning));
       occurrences.push({
         scene: ref,

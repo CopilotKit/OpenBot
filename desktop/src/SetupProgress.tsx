@@ -175,14 +175,30 @@ export function trayPlace(userAgent = navigator.userAgent): string {
     : "the system tray";
 }
 
+/**
+ * The row shows a spinner (unless its list is `quiet`): it runs, and is not paused or waiting on
+ * the person. A screen that shows such a row keeps every other wait on it still.
+ */
+export function spins(step: Progress): boolean {
+  return (
+    !step.pending && !step.waiting && !step.paused && (step.running ?? false)
+  );
+}
+
 export function SetupProgress({
   steps,
   label = "Setup progress",
   showElapsed = true,
+  quiet = false,
 }: {
   steps: Progress[];
   label?: string;
   showElapsed?: boolean;
+  /**
+   * A running row is marked without a spinner: something else on the screen is already the one
+   * thing that spins (the step's own wait, or the Start's journey), and two read as two waits.
+   */
+  quiet?: boolean;
 }) {
   if (steps.length === 0) return null;
   return (
@@ -192,6 +208,7 @@ export function SetupProgress({
           key={step.step}
           step={step}
           showElapsed={showElapsed}
+          quiet={quiet}
         />
       ))}
     </ol>
@@ -335,9 +352,11 @@ export function plainInstallSteps(
 function SetupProgressRow({
   step,
   showElapsed,
+  quiet,
 }: {
   step: Progress;
   showElapsed: boolean;
+  quiet: boolean;
 }) {
   if (step.pending)
     return (
@@ -346,15 +365,17 @@ function SetupProgressRow({
         <span className="step-label">{label(step.step)}</span>
       </li>
     );
-  return <StartedRow step={step} showElapsed={showElapsed} />;
+  return <StartedRow step={step} showElapsed={showElapsed} quiet={quiet} />;
 }
 
 function StartedRow({
   step,
   showElapsed,
+  quiet = false,
 }: {
   step: Progress;
   showElapsed: boolean;
+  quiet?: boolean;
 }) {
   const waiting = step.waiting ?? false;
   const paused = !waiting && (step.paused ?? false);
@@ -393,7 +414,7 @@ function StartedRow({
         {waiting || paused ? (
           <span className="step-waiting" />
         ) : running ? (
-          <span className="step-spinner" />
+          <span className={quiet ? "step-current" : "step-spinner"} />
         ) : note ? (
           "–"
         ) : step.ok ? (

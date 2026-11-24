@@ -406,3 +406,53 @@ test("the background row says a setup paused for room calmly, with Try again", a
   await userEvent.click(item.getByRole("button", { name: "Try again" }));
   expect(looked).toBe(1);
 });
+
+/*
+ * At most one spinner on the screen: a quiet list (the background install in the sidebar, the
+ * Start's rows under its journey) marks its running row without one, since something else on the
+ * screen is the wait. Everything else a row says is as it was.
+ */
+test("a quiet list marks its running row without a spinner, and says the rest as before", () => {
+  const steps = [
+    {
+      step: "install",
+      ok: true,
+      running: true,
+      detail: "Setting up OpenBot on this computer.",
+      position: { at: 3, of: 4 },
+      startedAt: Date.now() - 5_000,
+    },
+  ];
+  const loud = render(<SetupProgress steps={steps} label="Loud" />);
+  const spun = loud.getByRole("list", { name: "Loud" });
+  expect(spun.querySelector(".step-spinner")).not.toBeNull();
+  expect(spun.querySelector(".step-current")).toBeNull();
+  const said = spun.querySelector(".step-status")?.textContent;
+  cleanup();
+
+  const quiet = render(<SetupProgress steps={steps} label="Quiet" quiet />);
+  const marked = quiet.getByRole("list", { name: "Quiet" });
+  expect(marked.querySelector(".step-spinner")).toBeNull();
+  expect(marked.querySelector(".step-current")).not.toBeNull();
+  // Marked as the one it is on, not as done or failed.
+  expect(marked.querySelector(".mark")?.className).toBe("mark active");
+  expect(marked.querySelector(".step-status")?.textContent).toBe(said);
+  expect(marked.textContent).toContain("Step 3 of 4");
+  expect(marked.textContent).toContain("Setting up OpenBot on this computer.");
+});
+
+test("a quiet list still shows a finished row's tick and a waiting row's mark", () => {
+  const view = render(
+    <SetupProgress
+      quiet
+      steps={[
+        { step: "prepare", ok: true, running: false, detail: "" },
+        { step: "install", ok: true, running: true, waiting: true, detail: "" },
+      ]}
+    />,
+  );
+  expect(view.container.querySelector(".step-spinner")).toBeNull();
+  expect(view.container.querySelector(".step-current")).toBeNull();
+  expect(view.container.querySelector(".mark.good")?.textContent).toBe("✓");
+  expect(view.container.querySelector(".step-waiting")).not.toBeNull();
+});

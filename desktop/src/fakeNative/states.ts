@@ -358,7 +358,7 @@ function createStates(where: Where): States {
       { kind: "settings", count: 1 },
     ],
     apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
-    // The update adds files before the move measures this installation again.
+    // `#move-first` is measured again once its update has added the new release's files.
     footprintBytes: moveFirst ? 26_600_000_000 : 20_200_000_000,
     modelKeysAvailable: true,
   };
