@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/input-group";
 import { type AuditAnswer, askAuditTrail } from "@/lib/audit/ask";
 import { isComposing } from "@/lib/composing";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 
 /** The longest question the server takes. */
 const QUESTION_LIMIT = 500;
@@ -31,7 +32,7 @@ export function AskTheTrail({
 }) {
   const [text, setText] = useState("");
   const [asking, setAsking] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Failure | null>(null);
   const question = text.trim();
 
   const ask = async () => {
@@ -41,7 +42,7 @@ export function AskTheTrail({
     try {
       onAnswer({ ...(await askAuditTrail(question)), question });
     } catch (thrown) {
-      setProblem((thrown as Error).message);
+      setProblem(failureOf(thrown, String(thrown)));
     } finally {
       setAsking(false);
     }
@@ -89,7 +90,7 @@ export function AskTheTrail({
           data-audit-ask-problem
           role="alert"
         >
-          {problem}
+          {failureSaid(problem)}
         </p>
       ) : null}
     </form>

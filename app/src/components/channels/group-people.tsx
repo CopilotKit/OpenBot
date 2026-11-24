@@ -26,6 +26,7 @@ import {
   groupQueryOptions,
   removeGroupMemberMutationOptions,
 } from "@/lib/groups";
+import { failureSaid } from "@/lib/load-failure";
 import { personName } from "@/lib/organizations/words";
 import type { OrganizationPerson } from "@/lib/teams/queries";
 
@@ -154,7 +155,7 @@ export function GroupPeopleButton({ channelId }: { channelId: string }) {
             />
             {add.error || remove.error ? (
               <p className="text-destructive text-sm" role="alert">
-                {(add.error ?? remove.error)?.message}
+                {failureSaid(add.error ?? remove.error)}
               </p>
             ) : null}
           </DialogBody>

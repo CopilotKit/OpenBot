@@ -19,6 +19,7 @@ import {
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { ClientError } from "@/lib/client";
+import { unavailableSaid } from "@/lib/load-failure";
 import { createProactiveSetting, proactiveKeys } from "@/lib/proactive";
 import {
   createResponsibility,
@@ -114,9 +115,14 @@ async function withConversation<T>(
     });
   } catch (error) {
     // An uncertain create may already have committed. Keep its conversation and prevent a retry,
-    // even with an existing conversation: retrying could duplicate the saved work.
+    // even with an existing conversation: retrying could duplicate the saved work. OpenBot holding
+    // off (a move, or the organization's database out of reach) is a refusal too: it answers
+    // before anything is written, so the form stays open to press again once it is back.
     const refused =
-      error instanceof ClientError && error.status >= 400 && error.status < 500;
+      (error instanceof ClientError &&
+        error.status >= 400 &&
+        error.status < 500) ||
+      unavailableSaid(error) !== undefined;
     if (!kept && !refused)
       throw new SavedButRefused(
         "It may have been saved on the Routines page. Open it there to check before creating another one.",
@@ -219,9 +225,10 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
                * would leave a live routine firing into a paused goal.
                */
               const refused =
-                error instanceof ClientError &&
-                error.status >= 400 &&
-                error.status < 500;
+                (error instanceof ClientError &&
+                  error.status >= 400 &&
+                  error.status < 500) ||
+                unavailableSaid(error) !== undefined;
               if (!refused) {
                 saved();
                 throw new SavedButRefused(
@@ -236,15 +243,19 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
               );
               if (removed) throw error;
               saved();
-              const refusal = error.message;
+              const refusal =
+                error instanceof Error ? error.message : String(error);
               const paused = await responsibilityAction(id, "pause").then(
                 () => true,
                 () => false,
               );
+              // The refusal rides along as the cause: a hold folded into this sentence is still
+              // drawn calmly (lib/load-failure.tsx).
               throw new SavedButRefused(
                 paused
                   ? `It's saved but paused, on the Routines page. Its schedule was refused. ${refusal}`
                   : `It's saved on the Routines page, but it won't run on its own. Its schedule was refused. ${refusal}`,
+                { cause: error },
               );
             }
           }
@@ -264,6 +275,7 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
                     ? "Open it there to run it."
                     : message
                 }`,
+                { cause: error },
               );
             }
           }

@@ -14,6 +14,7 @@ import {
   resumeHandoffTask,
 } from "@/lib/copilot/handoff-resume";
 import { useNoBotComputers } from "@/lib/deployment/queries";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 
 /** SDK reconnect replays human-in-the-loop tools only; ordinary frontend handlers need this action. */
 export function HandoffResumeNotice({
@@ -29,7 +30,7 @@ export function HandoffResumeNotice({
 }) {
   const [pending, setPending] = useState<PendingHandoff | null>(null);
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Failure | null>(null);
   const controller = useRef<AbortController | null>(null);
   /*
    * An OpenBot with no computers for Bots has no wheel to read, and the server refuses the read:
@@ -110,9 +111,7 @@ export function HandoffResumeNotice({
     try {
       await resumeHandoffTask(botId, pending, agent, run, abort.signal);
     } catch (error) {
-      setProblem(
-        error instanceof Error ? error.message : "Couldn't resume the task.",
-      );
+      setProblem(failureOf(error, "Couldn't resume the task."));
     } finally {
       setBusy(false);
       controller.current = null;
@@ -125,7 +124,7 @@ export function HandoffResumeNotice({
       role="status"
     >
       <span>
-        {problem ??
+        {failureSaid(problem) ??
           (busy
             ? "Waiting for this browser handoff to finish."
             : "A browser task is paused in this conversation.")}

@@ -484,6 +484,7 @@ export * from "./routineRunAccepted";
 export * from "./routineRunPage";
 export * from "./routineRunSource";
 export * from "./routineSwitch";
+export * from "./seatRequiredResponse";
 export * from "./sendConversationMessageRequest";
 export * from "./sentConversationMessage";
 export * from "./serverErrorResponse";

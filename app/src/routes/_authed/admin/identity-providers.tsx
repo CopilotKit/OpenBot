@@ -40,7 +40,7 @@ import {
 } from "@/lib/identity-providers/mutations";
 import { identityProviderListQueryOptions } from "@/lib/identity-providers/queries";
 import { identityProviderWords } from "@/lib/identity-providers/words";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { ONLY_ORGANIZATION } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
@@ -164,7 +164,7 @@ function IdentityProvidersPage() {
       <PageSection description={words.registeredDescription} title="Registered">
         {failure ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {failure.message}
+            {failureSaid(failure)}
           </p>
         ) : null}
         {providers.isPending ? null : providers.error ? (

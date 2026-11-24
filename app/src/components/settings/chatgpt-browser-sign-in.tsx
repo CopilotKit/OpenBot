@@ -8,6 +8,7 @@ import { IllustrationFrame } from "@/components/onboarding/illustration-frame";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 
 /**
  * ChatGPT's sign-in in the browser, where the server runs it (a person's own AI on OpenBot Cloud).
@@ -216,7 +217,7 @@ export function ChatGptPaste({
   busy: boolean;
   code: string;
   /** What was wrong with the last paste, said under the box, which stays open for another. */
-  failure: string | null;
+  failure: Failure | null;
   onCode: (code: string) => void;
   /** Send this text, or what is in the box. */
   onFinish: (text?: string) => void;
@@ -276,7 +277,7 @@ export function ChatGptPaste({
     }
   }
 
-  const said = failure ?? clipboardNote;
+  const said = failure ? failureSaid(failure) : clipboardNote;
   return (
     <Field>
       <FieldLabel htmlFor="ai-connection-code">

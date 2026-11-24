@@ -22,6 +22,7 @@ import { appSetupQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { failureSaid } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   type AdminName,
@@ -30,7 +31,6 @@ import {
 } from "@/lib/organizations/admin-names";
 import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
-import { failureSaid } from "@/lib/load-failure";
 
 /**
  * One work app's state for the person looking, and the one thing they can do about it.
@@ -527,12 +527,12 @@ function AdminAction({
     const spoken = disabled
       ? `Turn on ${name} and give it to ${bot}`
       : `Give ${name} to ${bot}`;
-    const error = approve.error?.message ?? tab.error;
+    const error = approve.error ?? tab.error;
     return (
       <div className="flex flex-wrap items-center justify-end gap-2">
         {error ? (
           <p className="text-destructive text-xs" role="alert">
-            {error}
+            {failureSaid(error)}
           </p>
         ) : null}
         {tab.blockedUrl ? (
@@ -699,12 +699,12 @@ function OwnerGiveAction({
       </Button>
     );
 
-  const error = give.error?.message ?? tab.error;
+  const error = give.error ?? tab.error;
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       {error ? (
         <p className="text-destructive text-xs" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
       {tab.blockedUrl ? (
@@ -811,12 +811,12 @@ function PersonalConnectAction({
       </Button>
     );
 
-  const error = approve.error?.message ?? tab.error;
+  const error = approve.error ?? tab.error;
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       {error ? (
         <p className="text-destructive text-xs" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
       {tab.blockedUrl ? (
@@ -944,7 +944,7 @@ function ConnectAction({
     <div className="flex flex-wrap items-center justify-end gap-2">
       {tab.error ? (
         <p className="text-destructive text-xs" role="alert">
-          {tab.error}
+          {failureSaid(tab.error)}
         </p>
       ) : null}
       {tab.blockedUrl ? (

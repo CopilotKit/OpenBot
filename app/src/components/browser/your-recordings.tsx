@@ -18,7 +18,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { loadFailure } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { recordingsQueryOptions } from "@/lib/recorder/queries";
 
 const STOP_REASONS: Record<string, string> = {
@@ -84,7 +84,7 @@ export function YourRecordings({
     <PageSection action={action} title="Your recordings">
       {failure && rows.length === 0 ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {failure.message}
+          {failureSaid(failure)}
         </p>
       ) : rows.length === 0 && !recordings.hasNextPage && !unavailable ? (
         variant === "pane" ? (

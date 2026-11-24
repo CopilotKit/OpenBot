@@ -49,7 +49,14 @@ import {
   useAttachmentLimits,
 } from "@/lib/deployment/queries";
 import { editionOf } from "@/lib/edition-guard";
-import { loadFailure, unavailableSaid } from "@/lib/load-failure";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  isHeld,
+  loadFailure,
+  unavailableSaid,
+} from "@/lib/load-failure";
 import {
   type ConversationModelInput,
   modelCatalogueQueryOptions,
@@ -131,7 +138,7 @@ function RouteComponent() {
   const ask = useSearch({ strict: false }).ask;
   const [asked] = useState(ask);
   const [restores, setRestores] = useState(0);
-  const [error, setError] = useState<string | null>(restored?.error ?? null);
+  const [error, setError] = useState<Failure | null>(restored?.error ?? null);
   /*
    * Whether the person has typed in the box since it was last filled. A start that fails while they
    * are writing something else does not overwrite it: it stays stashed, for the next home page.
@@ -235,10 +242,7 @@ function RouteComponent() {
     } catch (caught) {
       stashFailedStart({
         text: draft.text,
-        error:
-          caught instanceof Error
-            ? caught.message
-            : "Couldn't start the conversation. Try again.",
+        error: failureOf(caught, "Couldn't start the conversation. Try again."),
         files: draft.attachments
           .map(heldFileOf)
           .filter((file) => file !== undefined),
@@ -351,7 +355,7 @@ function RouteComponent() {
               className="mt-2 w-full max-w-2xl text-sm text-destructive"
               role="alert"
             >
-              {error}
+              {failureSaid(error)}
             </p>
           ) : failed && agents === undefined ? (
             // The composer above is `disabled={!fallback}`, and a failed query does not by
@@ -415,7 +419,18 @@ function RouteComponent() {
                 ))}
               </ul>
             </section>
-          ) : personal ? null : failed && agents === undefined ? (
+          ) : personal ? null : failed &&
+            agents === undefined &&
+            isHeld(agentsError) &&
+            !error ? (
+            // OpenBot holding off (a move, a brief outage) is said once, under the composer, and
+            // the list fills in by itself when it is back (lib/load-failure.tsx). Saying the same
+            // sentence here again read as two things wrong.
+            <>
+              <h2 className="font-semibold text-base">Explore Bots</h2>
+              <Skeleton className="mt-4 h-[140px]" />
+            </>
+          ) : failed && agents === undefined ? (
             // `agents === undefined` narrows this to "the query has never once returned
             // successfully" — not merely "the last request errored". `?.length` alone can't
             // tell that apart from a slice that loaded and is genuinely empty: TanStack Query

@@ -37,8 +37,8 @@ import {
   type LinkedAccount,
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
-import { failureSaid, loadFailure } from "@/lib/load-failure";
 
 export function linkedAccountDescription(account: LinkedAccount): string {
   if (account.status === "needs_reconnect") {
@@ -255,7 +255,9 @@ export function LinkedAccountSection({
           )}
         </p>
       ) : null}
-      {state.providersError ? (
+      {/* OpenBot holding off both reads is said once, by the line above. */}
+      {state.providersError &&
+      !(state.error && isHeld(links.error) && isHeld(providers.error)) ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
           {loadFailure(
             providers.error,

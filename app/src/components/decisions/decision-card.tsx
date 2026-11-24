@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { Badge, type Tone } from "@/components/gallery/frame";
 import { Button } from "@/components/ui/button";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 import { EASE_OUT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { useNewestDecision } from "./newest-decision";
@@ -75,7 +76,8 @@ export function DecisionCard({
   onSubmit: (value: string, text: string) => void;
   /** An answer is on its way: everything holds still. */
   submitting?: boolean;
-  error?: string | null;
+  /** Why the last answer didn't go, kept whole so a hold is drawn calmly (lib/load-failure.tsx). */
+  error?: Failure | null;
 }) {
   const id = useId();
   const reduceMotion = useReducedMotion();
@@ -267,7 +269,7 @@ export function DecisionCard({
             </fieldset>
             {error ? (
               <p className="px-4 pt-2 text-destructive text-sm" role="alert">
-                {error}
+                {failureSaid(error)}
               </p>
             ) : null}
             <div className="flex justify-end px-4 py-2.5">

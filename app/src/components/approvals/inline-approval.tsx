@@ -17,6 +17,7 @@ import {
   decideApproval,
 } from "@/lib/approvals";
 import { noteAnswered } from "@/lib/computers/activity";
+import { failureSaid } from "@/lib/load-failure";
 import { EASE_OUT } from "@/lib/motion";
 
 /**
@@ -149,7 +150,7 @@ export function InlineApproval({
                 share?.caption ??
                 (handOff ? "This one is yours to do." : undefined)
               }
-              error={decision.error?.message ?? null}
+              error={decision.error}
               onSubmit={(value) => decision.mutate(value as ApprovalDecision)}
               options={choices.map((choice) => ({
                 value: choice,
@@ -199,7 +200,7 @@ export function InlineApproval({
           data-testid="approval-left"
           role={request.left.done ? "status" : "alert"}
         >
-          {request.left.message}
+          {failureSaid(request.left)}
         </p>
       ) : null}
     </>

@@ -23,8 +23,8 @@ import {
   approvalInboxOptions,
   dismissPersonQuestionMutationOptions,
 } from "@/lib/approvals";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
-import { failureSaid } from "@/lib/load-failure";
 
 export type WaitingQuestion = ApprovalInboxData["questions"][number];
 
@@ -145,7 +145,7 @@ function QuestionParts({
   onAnswered: (answer: string) => Promise<void>;
 }) {
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
   const several = parts.length > 1;
   return (
     <Questionnaire
@@ -160,7 +160,7 @@ function QuestionParts({
         setSending(true);
         setError(null);
         onAnswered(partsAnswer(parts, new FormData(event.currentTarget)))
-          .catch((failure: Error) => setError(failure.message))
+          .catch((failure: Error) => setError(failure))
           .finally(() => setSending(false));
       }}
       shortcuts="numbers"
@@ -212,7 +212,7 @@ function QuestionParts({
       </QuestionnaireActions>
       {error ? (
         <p className="text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
     </Questionnaire>

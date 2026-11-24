@@ -67,6 +67,7 @@ import { shownSubtitle } from "@/lib/agents/subtitle";
 import { isComposing } from "@/lib/composing";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { useOrganizationAudience } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 
@@ -263,7 +264,7 @@ function VisibilityRow({
   onSave: (visibility: AgentProfile["visibility"]) => Promise<unknown>;
 }) {
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
   // Public is everyone in this organization, by name where the app knows it.
   const everyone = publicVisibilityWords(useOrganizationAudience());
   return (
@@ -274,7 +275,7 @@ function VisibilityRow({
       <ItemContent>
         <ItemTitle>Visibility</ItemTitle>
         <ItemDescription>
-          {error ??
+          {failureSaid(error) ??
             (agent.visibility === "private"
               ? agent.isolationActive
                 ? `Only you can see it and start conversations with it. ${ISOLATED_MAKING_PUBLIC}`
@@ -297,11 +298,7 @@ function VisibilityRow({
               try {
                 await onSave(next as AgentProfile["visibility"]);
               } catch (failure) {
-                setError(
-                  failure instanceof Error
-                    ? failure.message
-                    : "Couldn't save. Try again.",
-                );
+                setError(failureOf(failure, "Couldn't save. Try again."));
               } finally {
                 setSaving(false);
               }
@@ -348,7 +345,7 @@ function IsolatedRow({
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
   const available = capabilities?.isolatedBots ?? false;
   // OpenBot Cloud gives each person one computer; the row says so and where a Bot can have its own.
   const cloud = capabilities?.hostedSignIn === true;
@@ -388,7 +385,7 @@ function IsolatedRow({
       <ItemContent>
         <ItemTitle id={`isolated-${agent.id}`}>Isolated</ItemTitle>
         <ItemDescription className="line-clamp-none">
-          {error ?? summary}
+          {failureSaid(error) ?? summary}
         </ItemDescription>
         {cloud && deploymentCant && !agent.systemOwned && !error ? (
           <BusinessComputerLink className="text-xs" />
@@ -406,11 +403,7 @@ function IsolatedRow({
               try {
                 await onSave(next);
               } catch (failure) {
-                setError(
-                  failure instanceof Error
-                    ? failure.message
-                    : "Couldn't save. Try again.",
-                );
+                setError(failureOf(failure, "Couldn't save. Try again."));
               } finally {
                 setSaving(false);
               }
@@ -464,21 +457,23 @@ function EditTextDialog({
 }) {
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // A refused save is kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const [error, setError] = useState<Failure | null>(null);
   const errorId = useId();
   const [field, setField] = useState<
     HTMLInputElement | HTMLTextAreaElement | null
   >(null);
-  const refuse = (message: string) => {
-    setError(message);
+  const refuse = (failure: Failure) => {
+    setError(failure);
     field?.focus();
   };
   const submit = async () => {
     const parsed = schema.safeParse(draft);
     if (!parsed.success) {
-      refuse(
-        parsed.error.issues[0]?.message ?? "Check this field and try again.",
-      );
+      refuse({
+        message:
+          parsed.error.issues[0]?.message ?? "Check this field and try again.",
+      });
       return;
     }
     setSaving(true);
@@ -486,11 +481,7 @@ function EditTextDialog({
       await onSave(parsed.data);
       onClose();
     } catch (failure) {
-      refuse(
-        failure instanceof Error
-          ? failure.message
-          : "Couldn't save. Try again.",
-      );
+      refuse(failureOf(failure, "Couldn't save. Try again."));
     } finally {
       setSaving(false);
     }
@@ -551,7 +542,7 @@ function EditTextDialog({
           )}
           {error ? (
             <p className="text-destructive text-sm" id={errorId} role="alert">
-              {error}
+              {failureSaid(error)}
             </p>
           ) : null}
         </DialogBody>

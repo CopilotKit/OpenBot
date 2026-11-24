@@ -50,7 +50,12 @@ import {
 } from "@/lib/channels/queries";
 import { useOffersMemory } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { loadFailure } from "@/lib/load-failure";
+import {
+  type Failure,
+  failureSaid,
+  isHeld,
+  loadFailure,
+} from "@/lib/load-failure";
 import { memoriesQueryOptions } from "@/lib/memory";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { routinesQueryOptions } from "@/lib/routines/queries";
@@ -303,7 +308,7 @@ function ThreadRow({
   const navigate = useNavigate();
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
-  const [pinProblem, setPinProblem] = useState<string | null>(null);
+  const [pinProblem, setPinProblem] = useState<Failure | null>(null);
   const unread = isUnread(channel, open ? channel.id : undefined);
   const title = channel.summary || untitledLine(channel) || channel.name;
   const link: LinkProps =
@@ -353,7 +358,7 @@ function ThreadRow({
               setPinProblem(null);
               setPinned.mutate(
                 { channelId: channel.id, pinned: !channel.pinned },
-                { onError: (thrown) => setPinProblem(thrown.message) },
+                { onError: (thrown) => setPinProblem(thrown) },
               );
             }}
           >
@@ -371,7 +376,7 @@ function ThreadRow({
       </ContextMenu>
       {pinProblem ? (
         <p className="px-3 pb-1 text-[11px] text-destructive" role="alert">
-          {pinProblem}
+          {failureSaid(pinProblem)}
         </p>
       ) : null}
       <DeleteConversationDialog
@@ -454,12 +459,20 @@ function RecentChats({
         ref={scrollRoot}
       >
         {channels.isPending ? null : channels.error ? (
-          <p className="px-3.5 py-1.5 text-[12px] text-(--opendots-error-ink)">
-            {loadFailure(
-              channels.error,
-              "Couldn't load your conversations. Try again in a moment.",
-            )}
-          </p>
+          /*
+           * OpenBot holding off (a move, a brief outage) is said once in the sidebar: the Bots
+           * section above already says it when its own read is held too.
+           */
+          !agents.isPending &&
+          isHeld(agents.error) &&
+          isHeld(channels.error) ? null : (
+            <p className="px-3.5 py-1.5 text-[12px] text-(--opendots-error-ink)">
+              {loadFailure(
+                channels.error,
+                "Couldn't load your conversations. Try again in a moment.",
+              )}
+            </p>
+          )
         ) : visible.length === 0 ? (
           <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
             {search.trim()

@@ -11,9 +11,11 @@ import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { PageShell } from "@/components/layout/page-shell";
 import { OrganizationBoundary } from "@/components/organizations/organization-boundary";
+import { TeamDetailPage } from "@/components/teams/team-page";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { signedInUser } from "@/lib/auth/queries";
+import { ProposedBotRender } from "@/lib/copilot/bot-tools";
 import { ReportedErrorComponent } from "@/lib/error-reporting";
 import { queryClient } from "@/query-client";
 import { Route as AppRoute } from "@/routes/_authed/_app";
@@ -27,7 +29,8 @@ import { Route as TeamsRoute } from "@/routes/_authed/_app/teams";
  * the signed-in gate's first step (who is signed in, and the organization they work in), the
  * organization boundary `_authed` puts around everything, and the app's real frame (`_authed/_app`:
  * the strip, its panels and every bar over the page). Inside it, Routines is the real page; home is
- * a stand-in heading. Memory and Teams are the real pages too. OpenBot's API is the test's routes.
+ * a stand-in heading. Memory and Teams are the real pages too, and so are a team's page and the card a
+ * Bot proposes a new Bot on (organization-held-actions.test.tsx). OpenBot's API is the test's routes.
  *
  * `window.openbotRouter` lets the test move between pages as a link does, at any window width.
  */
@@ -76,12 +79,49 @@ const teamsRoute = createRoute({
   component: TeamsRoute.options.component as () => ReactNode,
 });
 
+// A press refused while Northwind is held (organization-held-actions.test.tsx): adding somebody to a
+// team on the team's real page, and creating a Bot from the card a Bot puts in a conversation.
+const teamRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/teams/$teamId",
+  component: function Team() {
+    const { teamId } = teamRoute.useParams();
+    return <TeamDetailPage teamId={teamId} />;
+  },
+});
+
+// The card as a conversation draws it, with the run waiting on the person's answer.
+const proposedBotRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/propose-bot",
+  component: () => (
+    <PageShell title="Conversation">
+      <ProposedBotRender
+        args={{
+          name: "Renewal Desk",
+          title: "Accounts Receivable",
+          roleDescription:
+            "Follow up on renewals that are due this month. Say which ones are late.",
+        }}
+        respond={async () => {}}
+      />
+    </PageShell>
+  ),
+});
+
 const router = createRouter({
   history: createBrowserHistory(),
   // The app's own error boundary, as router.tsx gives every route.
   defaultErrorComponent: ReportedErrorComponent,
   routeTree: rootRoute.addChildren([
-    appRoute.addChildren([homeRoute, routinesRoute, memoryRoute, teamsRoute]),
+    appRoute.addChildren([
+      homeRoute,
+      routinesRoute,
+      memoryRoute,
+      teamsRoute,
+      teamRoute,
+      proposedBotRoute,
+    ]),
   ]),
 });
 

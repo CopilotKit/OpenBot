@@ -19,7 +19,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Textarea } from "@/components/ui/textarea";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { saveInstructionsMutationOptions } from "@/lib/settings/mutations";
 import {
   INSTRUCTIONS_LIMIT,
@@ -89,7 +89,7 @@ function StandingInstructionsEditor() {
   const save = useMutation(saveInstructionsMutationOptions(queryClient));
 
   const [draft, setDraft] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Failure | null>(null);
   const [saved, setSaved] = useState(false);
 
   /*
@@ -111,7 +111,7 @@ function StandingInstructionsEditor() {
     setProblem(null);
     setSaved(false);
     save.mutate(text, {
-      onError: (thrown: Error) => setProblem(thrown.message),
+      onError: (thrown: Error) => setProblem(thrown),
       /* The server trims, so the box settles to what was actually stored rather than what was sent. */
       onSuccess: (asStored) => {
         setDraft(asStored);
@@ -156,7 +156,7 @@ function StandingInstructionsEditor() {
                */}
               {problem ? (
                 <span className="text-destructive text-xs" role="alert">
-                  {problem}
+                  {failureSaid(problem)}
                 </span>
               ) : saved ? (
                 <span className="text-muted-foreground text-xs">Saved</span>
