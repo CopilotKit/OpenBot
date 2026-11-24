@@ -295,9 +295,7 @@ impl Fit {
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::{
-        allow, Action, Button, Conversation, Direction, Fit, Screen, MAX_WAIT_SECONDS,
-    };
+    use super::{allow, Action, Button, Conversation, Direction, Fit, Screen, MAX_WAIT_SECONDS};
     use base64::Engine as _;
     use core_graphics::display::CGDisplay;
     use core_graphics::event::{
@@ -410,7 +408,11 @@ mod macos {
             if parent <= 1 {
                 break;
             }
-            if let Some(name) = ask("comm=", parent).as_deref().map(Path::new).and_then(app_bundle_name) {
+            if let Some(name) = ask("comm=", parent)
+                .as_deref()
+                .map(Path::new)
+                .and_then(app_bundle_name)
+            {
                 return format!("{name}, the app that started this test build of OpenBot");
             }
             pid = parent;
@@ -422,7 +424,11 @@ mod macos {
     pub(super) fn app_bundle_name(program: &Path) -> Option<String> {
         program
             .ancestors()
-            .find(|folder| folder.extension().is_some_and(|extension| extension == "app"))
+            .find(|folder| {
+                folder
+                    .extension()
+                    .is_some_and(|extension| extension == "app")
+            })
             .and_then(Path::file_stem)
             .map(|name| name.to_string_lossy().into_owned())
     }
@@ -450,7 +456,9 @@ mod macos {
         match action {
             Action::Screenshot => {}
             Action::Wait { seconds } => {
-                sleep(Duration::from_secs_f64(seconds.clamp(0.0, MAX_WAIT_SECONDS)));
+                sleep(Duration::from_secs_f64(
+                    seconds.clamp(0.0, MAX_WAIT_SECONDS),
+                ));
             }
             Action::Click {
                 x,
@@ -458,7 +466,9 @@ mod macos {
                 button,
                 count,
             } => click(at(*x, *y), *button, *count)?,
-            Action::Move { x, y } => mouse(CGEventType::MouseMoved, at(*x, *y), CGMouseButton::Left, 0)?,
+            Action::Move { x, y } => {
+                mouse(CGEventType::MouseMoved, at(*x, *y), CGMouseButton::Left, 0)?
+            }
             Action::Drag { from, to } => drag(at(from[0], from[1]), at(to[0], to[1]))?,
             Action::Type { text } => type_text(text)?,
             Action::Key { keys } => {
@@ -484,9 +494,14 @@ mod macos {
         CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|()| EVENTS_FAILED.into())
     }
 
-    fn mouse(kind: CGEventType, at: CGPoint, button: CGMouseButton, clicks: i64) -> Result<(), String> {
-        let event =
-            CGEvent::new_mouse_event(source()?, kind, at, button).map_err(|()| EVENTS_FAILED.to_string())?;
+    fn mouse(
+        kind: CGEventType,
+        at: CGPoint,
+        button: CGMouseButton,
+        clicks: i64,
+    ) -> Result<(), String> {
+        let event = CGEvent::new_mouse_event(source()?, kind, at, button)
+            .map_err(|()| EVENTS_FAILED.to_string())?;
         if clicks > 0 {
             event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, clicks);
         }
@@ -496,9 +511,21 @@ mod macos {
 
     fn click(at: CGPoint, button: Button, count: u8) -> Result<(), String> {
         let (down, up, which) = match button {
-            Button::Left => (CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left),
-            Button::Right => (CGEventType::RightMouseDown, CGEventType::RightMouseUp, CGMouseButton::Right),
-            Button::Middle => (CGEventType::OtherMouseDown, CGEventType::OtherMouseUp, CGMouseButton::Center),
+            Button::Left => (
+                CGEventType::LeftMouseDown,
+                CGEventType::LeftMouseUp,
+                CGMouseButton::Left,
+            ),
+            Button::Right => (
+                CGEventType::RightMouseDown,
+                CGEventType::RightMouseUp,
+                CGMouseButton::Right,
+            ),
+            Button::Middle => (
+                CGEventType::OtherMouseDown,
+                CGEventType::OtherMouseUp,
+                CGMouseButton::Center,
+            ),
         };
         mouse(CGEventType::MouseMoved, at, CGMouseButton::Left, 0)?;
         sleep(BETWEEN);
@@ -518,7 +545,10 @@ mod macos {
         sleep(BETWEEN);
         for step in 1..=STEPS {
             let along = f64::from(step) / f64::from(STEPS);
-            let point = CGPoint::new(from.x + (to.x - from.x) * along, from.y + (to.y - from.y) * along);
+            let point = CGPoint::new(
+                from.x + (to.x - from.x) * along,
+                from.y + (to.y - from.y) * along,
+            );
             mouse(CGEventType::LeftMouseDragged, point, CGMouseButton::Left, 0)?;
             sleep(Duration::from_millis(15));
         }
@@ -536,15 +566,22 @@ mod macos {
             Direction::Left => (0, pixels),
             Direction::Right => (0, -pixels),
         };
-        let event = CGEvent::new_scroll_event(source()?, ScrollEventUnit::PIXEL, 2, vertical, horizontal, 0)
-            .map_err(|()| EVENTS_FAILED.to_string())?;
+        let event = CGEvent::new_scroll_event(
+            source()?,
+            ScrollEventUnit::PIXEL,
+            2,
+            vertical,
+            horizontal,
+            0,
+        )
+        .map_err(|()| EVENTS_FAILED.to_string())?;
         event.post(CGEventTapLocation::HID);
         Ok(())
     }
 
     fn key_event(code: CGKeyCode, down: bool, flags: CGEventFlags) -> Result<(), String> {
-        let event =
-            CGEvent::new_keyboard_event(source()?, code, down).map_err(|()| EVENTS_FAILED.to_string())?;
+        let event = CGEvent::new_keyboard_event(source()?, code, down)
+            .map_err(|()| EVENTS_FAILED.to_string())?;
         event.set_flags(flags);
         event.post(CGEventTapLocation::HID);
         Ok(())
@@ -572,8 +609,15 @@ mod macos {
                 '\r' => {}
                 '\n' | '\t' => {
                     flush(&mut chunk)?;
-                    let code = if character == '\n' { KeyCode::RETURN } else { KeyCode::TAB };
-                    press(&Combo { modifiers: Vec::new(), key: Some(code) })?;
+                    let code = if character == '\n' {
+                        KeyCode::RETURN
+                    } else {
+                        KeyCode::TAB
+                    };
+                    press(&Combo {
+                        modifiers: Vec::new(),
+                        key: Some(code),
+                    })?;
                 }
                 _ => {
                     if chunk.encode_utf16().count() + character.len_utf16() > 16 {
@@ -628,7 +672,9 @@ mod macos {
         let mut key = None;
         for part in keys.split('+') {
             if part.is_empty() {
-                return Err(format!("{keys:?} is not a key combination. Write one like cmd+c."));
+                return Err(format!(
+                    "{keys:?} is not a key combination. Write one like cmd+c."
+                ));
             }
             if let Some(held) = modifier(part) {
                 modifiers.push(held);
@@ -639,14 +685,18 @@ mod macos {
                     "{keys:?} presses more than one key at once. Hold only cmd, ctrl, alt and shift with a key."
                 ));
             }
-            key = Some(key_code(part).ok_or_else(|| format!("{part:?} is not a key OpenBot knows."))?);
+            key = Some(
+                key_code(part).ok_or_else(|| format!("{part:?} is not a key OpenBot knows."))?,
+            );
         }
         Ok(Combo { modifiers, key })
     }
 
     fn modifier(name: &str) -> Option<(CGKeyCode, CGEventFlags)> {
         Some(match name.to_ascii_lowercase().as_str() {
-            "cmd" | "command" | "meta" | "super" | "win" => (KeyCode::COMMAND, CGEventFlags::CGEventFlagCommand),
+            "cmd" | "command" | "meta" | "super" | "win" => {
+                (KeyCode::COMMAND, CGEventFlags::CGEventFlagCommand)
+            }
             "ctrl" | "control" => (KeyCode::CONTROL, CGEventFlags::CGEventFlagControl),
             "alt" | "option" | "opt" => (KeyCode::OPTION, CGEventFlags::CGEventFlagAlternate),
             "shift" => (KeyCode::SHIFT, CGEventFlags::CGEventFlagShift),
@@ -770,7 +820,10 @@ mod macos {
             if output.status.success() {
                 Ok(())
             } else {
-                Err(format!("{SCREENSHOT_FAILED}: {}.", quiet::said(&output.stderr)))
+                Err(format!(
+                    "{SCREENSHOT_FAILED}: {}.",
+                    quiet::said(&output.stderr)
+                ))
             }
         };
         let taken = (|| {
@@ -807,7 +860,10 @@ mod tests {
         let fit = Fit::new(1512.0, 982.0);
         assert_eq!((fit.width, fit.height), (1232, 800));
         let (x, y) = fit.points(616.0, 400.0);
-        assert!((x - 756.0).abs() < 1.0 && (y - 491.0).abs() < 1.0, "{x},{y}");
+        assert!(
+            (x - 756.0).abs() < 1.0 && (y - 491.0).abs() < 1.0,
+            "{x},{y}"
+        );
         // A click past the screenshot's edge stays on the display.
         let (x, y) = fit.points(5000.0, -20.0);
         assert!(x <= 1511.0 && y == 0.0, "{x},{y}");
@@ -823,23 +879,38 @@ mod tests {
     #[test]
     fn the_page_asks_with_a_kind_and_its_fields() {
         let click: Action =
-            serde_json::from_value(serde_json::json!({ "kind": "click", "x": 10, "y": 20 })).unwrap();
+            serde_json::from_value(serde_json::json!({ "kind": "click", "x": 10, "y": 20 }))
+                .unwrap();
         assert!(matches!(
             click,
-            Action::Click { button: Button::Left, count: 1, .. }
+            Action::Click {
+                button: Button::Left,
+                count: 1,
+                ..
+            }
         ));
         let drag: Action = serde_json::from_value(
             serde_json::json!({ "kind": "drag", "from": [1, 2], "to": [3, 4] }),
         )
         .unwrap();
-        assert!(matches!(drag, Action::Drag { from: [1.0, 2.0], to: [3.0, 4.0] }));
+        assert!(matches!(
+            drag,
+            Action::Drag {
+                from: [1.0, 2.0],
+                to: [3.0, 4.0]
+            }
+        ));
         let scroll: Action = serde_json::from_value(
             serde_json::json!({ "kind": "scroll", "x": 1, "y": 2, "direction": "down" }),
         )
         .unwrap();
         assert!(matches!(
             scroll,
-            Action::Scroll { direction: Direction::Down, amount: 3, .. }
+            Action::Scroll {
+                direction: Direction::Down,
+                amount: 3,
+                ..
+            }
         ));
         assert!(serde_json::from_value::<Action>(serde_json::json!({ "kind": "shell" })).is_err());
     }
@@ -865,12 +936,22 @@ mod tests {
         let combos = macos::combos("cmd+shift+T Return ctrl+a").unwrap();
         assert_eq!(combos.len(), 3);
         assert_eq!(
-            combos[0].modifiers.iter().map(|(_, flag)| *flag).collect::<Vec<_>>(),
-            [CGEventFlags::CGEventFlagCommand, CGEventFlags::CGEventFlagShift]
+            combos[0]
+                .modifiers
+                .iter()
+                .map(|(_, flag)| *flag)
+                .collect::<Vec<_>>(),
+            [
+                CGEventFlags::CGEventFlagCommand,
+                CGEventFlags::CGEventFlagShift
+            ]
         );
         assert_eq!(combos[0].key, Some(KeyCode::ANSI_T));
         assert_eq!(combos[1].key, Some(KeyCode::RETURN));
-        assert_eq!(macos::combos("Page_Down").unwrap()[0].key, Some(KeyCode::PAGE_DOWN));
+        assert_eq!(
+            macos::combos("Page_Down").unwrap()[0].key,
+            Some(KeyCode::PAGE_DOWN)
+        );
         assert!(macos::combos("cmd+").is_err());
         assert!(macos::combos("a+b").is_err());
         assert!(macos::combos("hyper").is_err());
