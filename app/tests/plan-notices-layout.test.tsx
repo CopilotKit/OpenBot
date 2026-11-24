@@ -35,6 +35,7 @@ type State = {
   plan: string;
   admin: boolean;
   employee?: boolean;
+  pays?: boolean;
 };
 const STATES: State[] = [
   { name: "free", plan: "free", admin: true },
@@ -176,7 +177,7 @@ async function open(
     return route.fulfill({ status: 404 });
   });
   await page.goto(
-    `${ORIGIN}/?scene=${scene}&plan=${state.plan}&admin=${state.admin ? 1 : 0}&employee=${state.employee ? 1 : 0}&width=${width}&theme=${theme}`,
+    `${ORIGIN}/?scene=${scene}&plan=${state.plan}&admin=${state.admin ? 1 : 0}&employee=${state.employee ? 1 : 0}&pays=${state.pays ? 1 : 0}&width=${width}&theme=${theme}`,
   );
   await page.waitForFunction(
     () => (document.getElementById("root")?.textContent?.length ?? 0) > 0,
@@ -473,6 +474,46 @@ describe.skipIf(!asked)(
               page.getByText("Sentry loves you too.").isVisible(),
             ).resolves.toBe(true);
             await shot(page, `dialog-employee-short-${theme}-${width}`);
+            expect(await sideways(page)).toBe(false);
+          } finally {
+            await page.close();
+          }
+        }, 60_000);
+
+        test(`a CopilotKit employee admin's Plan row with Add a card for the others, ${theme}, ${width}px`, async () => {
+          const page = await open(
+            "settings",
+            { ...EMPLOYEE, name: "employee-pays", pays: true },
+            { width, theme, ready: "[role=progressbar]" },
+          );
+          try {
+            await shot(page, `settings-employee-pays-${theme}-${width}`);
+            await expect(
+              page
+                .getByRole("link", { name: "Add a card" })
+                .getAttribute("href"),
+            ).resolves.toBe(ADD_CARD);
+            await expect(
+              page
+                .getByText(
+                  "Everyone else in this organization needs a card added to keep their Bots running.",
+                  { exact: false },
+                )
+                .count(),
+            ).resolves.toBe(1);
+            // Found on the first run: at 390px the line was cut off after two lines. It's whole.
+            const cut = await page
+              .getByText("Everyone else in this organization", { exact: false })
+              .evaluate((line) => line.scrollHeight > line.clientHeight + 1);
+            expect(cut).toBe(false);
+            // The bar keeps its width with the button under it.
+            const track = await page
+              .locator("[data-slot=progress-track]")
+              .boundingBox();
+            expect(track?.width ?? 0).toBeGreaterThan(width < 600 ? 200 : 400);
+            await expect(
+              page.getByRole("complementary", { name: "Plan" }).count(),
+            ).resolves.toBe(0);
             expect(await sideways(page)).toBe(false);
           } finally {
             await page.close();

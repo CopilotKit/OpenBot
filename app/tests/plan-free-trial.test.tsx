@@ -669,6 +669,60 @@ test("a CopilotKit employee in an organization whose payment failed can still se
   await waitFor(() => expect(sent).toEqual(["Summarize this week's signups"]));
 });
 
+/*
+ * Found on the end-to-end run: an employee who is an admin couldn't pay for coworkers who aren't
+ * employees. The server sends them the payment page while their own plan stays free; the Plan row
+ * offers Add a card, and nothing stops their own AI actions.
+ */
+test("a CopilotKit employee admin can add a card for the others from the Plan row, and still sends", async () => {
+  plan = { ...employeeUsedUp(), addCardUrl: ADD_CARD };
+  queryClient.setQueryData(organizationKeys.mine(), {
+    organizations: [
+      {
+        id: ORG,
+        slug: "acme",
+        name: "Acme Research",
+        role: "owner",
+        active: true,
+        personal: false,
+      },
+    ],
+    canCreate: true,
+    currentId: ORG,
+  });
+  // Told once already, so only the page is on screen.
+  rememberTrialUsedUpAnnounced("ana", ORG);
+  const sent: string[] = [];
+  const view = open(
+    <>
+      <PlanBanner />
+      <OrganizationSettingsPage />
+      <Composer
+        compact
+        initialValue="Summarize this week's signups"
+        onSubmit={(draft) => {
+          sent.push(draft.text);
+        }}
+      />
+    </>,
+  );
+
+  const pay = await view.findByRole("link", { name: "Add a card" });
+  expect(pay.getAttribute("href")).toBe(ADD_CARD);
+  expect(view.container.textContent).toContain(
+    "Everyone else in this organization needs a card added to keep their Bots running.",
+  );
+  expect(view.container.textContent).toContain(EMPLOYEE_LINE);
+  expect(document.querySelector('aside[aria-label="Plan"]')).toBeNull();
+
+  await act(async () => {
+    fireEvent.click(view.getByLabelText("Send message"));
+  });
+  await settled();
+  expect(dialog()).toBeNull();
+  await waitFor(() => expect(sent).toEqual(["Summarize this week's signups"]));
+});
+
 test("the Plan row tells a CopilotKit employee past the cap their runs are free", async () => {
   plan = employeeUsedUp();
   queryClient.setQueryData(organizationKeys.mine(), {

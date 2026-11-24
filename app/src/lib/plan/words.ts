@@ -19,6 +19,13 @@ export const PRICE = "$5 a month for each member of this organization";
 export const COPILOTKIT_EMPLOYEE_LINE =
   "Free because you're a CopilotKit employee. Thanks, Uncle Atai!";
 
+/**
+ * On the Plan row, for a CopilotKit employee who is an admin of an organization whose other members
+ * need a card: their own runs are free, everyone else's aren't.
+ */
+export const OTHERS_NEED_A_CARD =
+  "Everyone else in this organization needs a card added to keep their Bots running. It's $5 a month for each member.";
+
 /** Under the photo of Sentry that follows that line, word for word as it was asked for. */
 export const SENTRY_LINE = "Sentry loves you too.";
 

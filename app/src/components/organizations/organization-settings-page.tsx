@@ -73,6 +73,7 @@ import {
 } from "@/lib/organizations/words";
 import { SEARCH_MAX } from "@/lib/people/queries";
 import {
+  employeePaysForOthers,
   employeeTrialUsedUp,
   organizationNeedsCard,
   usePlan,
@@ -80,6 +81,7 @@ import {
 import {
   COPILOTKIT_EMPLOYEE_LINE,
   cardAction,
+  OTHERS_NEED_A_CARD,
   planSummary,
   trialUsed,
 } from "@/lib/plan/words";
@@ -229,9 +231,30 @@ function PlanRow() {
               </ProgressValue>
             </Progress>
             {employeeTrialUsedUp(plan) ? (
-              <ItemDescription className="mt-1.5">
+              <ItemDescription className="mt-1.5 line-clamp-none">
                 {COPILOTKIT_EMPLOYEE_LINE}
               </ItemDescription>
+            ) : null}
+            {/*
+             * An employee admin can pay for the members who aren't employees. Under the bar, not
+             * beside it, so the bar keeps its width in a narrow window.
+             */}
+            {employeePaysForOthers(plan) && plan.addCardUrl ? (
+              <>
+                {/* Whole on a phone too: a row's description stops at two lines. */}
+                <ItemDescription className="mt-1.5 line-clamp-none">
+                  {OTHERS_NEED_A_CARD}
+                </ItemDescription>
+                <a
+                  className={cn(
+                    buttonVariants({ size: "sm", variant: "outline" }),
+                    "mt-2 self-start",
+                  )}
+                  href={plan.addCardUrl}
+                >
+                  {cardAction(plan)}
+                </a>
+              </>
             ) : null}
           </ItemContent>
         </Item>

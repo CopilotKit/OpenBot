@@ -32,7 +32,8 @@ import { queryClient } from "@/query-client";
  * it, and nothing is fetched.
  *
  * `?scene=shell|settings|chat|dialog|signin`, `?plan=<status>`, `?admin=1` for an owner, `?theme=dark`,
- * `?employee=1` for a CopilotKit employee past the free allowance (with `plan=free`).
+ * `?employee=1` for a CopilotKit employee past the free allowance (with `plan=free`), and `?pays=1`
+ * for one who is an admin of an organization whose other members need a card.
  */
 const query = new URLSearchParams(location.search);
 const scene = query.get("scene") ?? "shell";
@@ -40,6 +41,8 @@ const status = query.get("plan") ?? "trialing";
 const admin = query.get("admin") === "1";
 /** A CopilotKit employee past the free allowance: still `free`, the allowance sent, never a card. */
 const employee = query.get("employee") === "1";
+/** With `employee=1`: an admin whose organization needs a card for the members who aren't employees. */
+const paysForOthers = query.get("pays") === "1";
 if (query.get("theme") === "dark")
   document.documentElement.classList.add("dark");
 
@@ -61,7 +64,9 @@ const plan: PlanStatus = {
     status === "active" ? new Date(Date.now() + 12 * DAY).toISOString() : null,
   // Only while a card is needed, and only for an admin: never on the free allowance.
   addCardUrl:
-    admin && (status === "none" || status === "past_due") ? ADD_CARD : null,
+    admin && (status === "none" || status === "past_due" || paysForOthers)
+      ? ADD_CARD
+      : null,
 };
 
 // Nothing else is fetched: every other answer is in the cache, and stays the answer. The plan is

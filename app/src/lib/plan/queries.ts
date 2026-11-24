@@ -97,6 +97,22 @@ export function trialUsedUp(plan: PlanStatus | undefined): boolean {
 }
 
 /**
+ * Whether a CopilotKit employee who is an owner or an admin can pay for the organization's other
+ * members: their own plan reads `free`, but the server sends the payment page (`addCardUrl`) when
+ * members who aren't employees need a card to keep running. Only the Plan row in Settings offers
+ * it; nothing stops the employee's own AI actions.
+ */
+export function employeePaysForOthers(plan: PlanStatus | undefined): boolean {
+  return (
+    plan?.required === true &&
+    plan.copilotKitEmployee === true &&
+    plan.status === "free" &&
+    typeof plan.addCardUrl === "string" &&
+    plan.addCardUrl.length > 0
+  );
+}
+
+/**
  * Whether the person is a CopilotKit employee who has used up the free trial in an organization
  * with no plan. Their own runs are never refused for want of a plan, so where everyone else reads
  * `none` they read `free` (no card, never blocked): the dialog says the trial is used up once, with
