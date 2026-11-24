@@ -1357,6 +1357,8 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
     continueHandoff: () => {},
     cancelHandoff: () => {},
     connect: () => {},
+    connectOnArrival: () => {},
+    keyInstead: false,
     connected: false,
     connecting: false,
     disconnect: () => {},
