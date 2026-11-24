@@ -53,6 +53,8 @@ import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
+import { withAdmins, yourAdmins } from "@/lib/organizations/admin-names";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { useBackAfterConnect } from "@/lib/plugins/connect-return";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import { signsInForDirectory } from "@/lib/plugins/directory-state";
@@ -351,7 +353,35 @@ function AppConnectionPage({
    * Admin draws for the app, so somebody who runs their own organization (OpenBot Cloud's usual case)
    * removes an app where they added it, without opening Admin. A member is never shown it.
    */
-  const role = useQuery(currentUserQueryOptions()).data?.role;
+  const signedIn = useQuery(currentUserQueryOptions());
+  const role = signedIn.data?.role;
+  /*
+   * WHO A MEMBER GOES TO, where this page tells them only an admin can take the step: the app isn't
+   * turned on or set up yet, connecting apps isn't set up, or the server refused a Connect in words
+   * that name an admin. Read only then, and never for an admin, who is never told to ask one.
+   */
+  const member =
+    paths.edition === "team" &&
+    signedIn.isSuccess &&
+    !isOrganizationAdmin(role);
+  const noticeNamesAdmin = notice !== null && /\badmin\b/i.test(notice);
+  const notSetUp =
+    setup.data !== undefined &&
+    !setup.data.directoryAvailable &&
+    server !== undefined &&
+    fromDirectory(server);
+  const notOn =
+    plugins.data !== undefined &&
+    server === undefined &&
+    entry?.auth === "user-oauth";
+  const admins = useOrganizationAdmins(
+    member && (noticeNamesAdmin || notSetUp || notOn),
+  );
+  /* The server's refusal as it said it, and beside it who the admins are where it names one. */
+  const shownNotice =
+    notice !== null && noticeNamesAdmin && yourAdmins(admins)
+      ? `${notice} ${yourAdmins(admins)}`
+      : notice;
   const removable =
     paths.edition === "team" &&
     isOrganizationAdmin(role) &&
@@ -528,7 +558,10 @@ function AppConnectionPage({
     return (
       <PageShell backButton={back} title={server.title}>
         <PageEmpty icon={IconPlugOff} title="Not set up yet">
-          An admin has to turn on {server.title} before anyone can connect it.
+          {withAdmins(
+            `An admin has to turn on ${server.title} before anyone can connect it.`,
+            admins,
+          )}
         </PageEmpty>
       </PageShell>
     );
@@ -640,9 +673,9 @@ function AppConnectionPage({
         description="Bots use this as you, and see only what you can see."
         title={server.title}
       >
-        {notice ? (
+        {shownNotice ? (
           <p className="break-words text-destructive text-sm" role="alert">
-            {notice}
+            {shownNotice}
           </p>
         ) : null}
 
@@ -661,6 +694,7 @@ function AppConnectionPage({
           <PageRows className="mt-0">
             <BrokeredAccountRow
               account={brokeredAccount}
+              admins={admins}
               edition={paths.edition}
               reader="person"
               startConnect={startConnect}
@@ -760,9 +794,9 @@ function AppConnectionPage({
       description={app.summary || undefined}
       title={app.title}
     >
-      {notice ? (
+      {shownNotice ? (
         <p className="break-words text-destructive text-sm" role="alert">
-          {notice}
+          {shownNotice}
         </p>
       ) : null}
 
@@ -776,7 +810,10 @@ function AppConnectionPage({
               <ItemTitle>Your account</ItemTitle>
               <ItemDescription>
                 {!enabled
-                  ? "Not available yet. An admin has to turn this on first."
+                  ? withAdmins(
+                      "Not available yet. An admin has to turn this on first.",
+                      admins,
+                    )
                   : connection
                     ? "Bots you allow use this as you, and see only what you can see."
                     : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}

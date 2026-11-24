@@ -281,6 +281,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   An admin, or the Bot's owner where they may give it, gives exactly those actions in one press, and
   the conversation carries on. Anybody else presses Request access, and the admin's Requests list
   names the actions asked for.
+- **A member told only an admin can do something is told who the admins are.** An app's card, a
+  Bot's Apps row, an app's page under Connections and Reconnect your apps name the organization's
+  owners and admins, by name and email, up to three and then how many more. After Request access,
+  Requested says who it was sent to. An admin never sees the list.
 - **Connections offers Add server only to an admin.** A server added by its address is added for
   everyone in the organization, so the button shows only for an admin, and for the one person of
   a personal OpenBot. Anybody else who opens the Add server page is told that only an admin can add

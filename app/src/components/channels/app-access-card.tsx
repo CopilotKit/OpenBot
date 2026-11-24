@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   AppAccessAction,
   appAccessSentence,
+  namesAnAdmin,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,8 @@ import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useDeclaredBotId } from "@/lib/copilot/active-bot";
 import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { type AdminName, withAdmins } from "@/lib/organizations/admin-names";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { ConnectAppCard } from "./connect-app-card";
 
 /**
@@ -96,8 +99,14 @@ function LiveAppAccessCard({
   const edition =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition ?? "team";
   // An admin is offered the step itself, so the sentence never tells them to ask one.
-  const admin = isOrganizationAdmin(
-    useQuery(currentUserQueryOptions()).data?.role,
+  const me = useQuery(currentUserQueryOptions());
+  const admin = isOrganizationAdmin(me.data?.role);
+  /*
+   * Who a member is told to go to, read only where the sentence says only an admin can do it, and
+   * only once it is known the person is not an admin themselves.
+   */
+  const admins = useOrganizationAdmins(
+    me.isSuccess && access !== null && namesAnAdmin(access, edition, admin),
   );
   const { carried, offer } = useCarryOn({
     place,
@@ -134,12 +143,19 @@ function LiveAppAccessCard({
           {live.isPending ? null : access ? (
             <p className="text-muted-foreground text-sm">
               {access.state !== "ready"
-                ? refusedSentence(access, prompt, bot, edition, admin)
+                ? refusedSentence(access, prompt, bot, edition, admin, admins)
                 : carried || offer
                   ? `${name} is ready now.`
                   : prompt.reason !== "access"
                     ? `${name} is ready now. Ask again and the Bot can use it.`
-                    : refusedSentence(access, prompt, bot, edition, admin)}
+                    : refusedSentence(
+                        access,
+                        prompt,
+                        bot,
+                        edition,
+                        admin,
+                        admins,
+                      )}
             </p>
           ) : (
             <p className="text-muted-foreground text-sm" role="alert">
@@ -211,6 +227,7 @@ function refusedSentence(
   bot: string | undefined,
   edition: "team" | "personal",
   admin: boolean,
+  admins: readonly AdminName[],
 ): string {
   /*
    * Actions the Bot wasn't given, of an app it holds: what it can't do yet, and for a person who
@@ -223,7 +240,7 @@ function refusedSentence(
   ) {
     const gives =
       access.state === "owner_grantable" || admin || edition === "personal";
-    return toolsSentence(access.displayName, prompt.need, bot, gives);
+    return toolsSentence(access.displayName, prompt.need, bot, gives, admins);
   }
   if (
     access.state === "shared_not_connected" &&
@@ -232,27 +249,33 @@ function refusedSentence(
   )
     return admin
       ? `Your organization's ${access.displayName} account needs reconnecting.`
-      : `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`;
-  return appAccessSentence(access, bot, edition, admin);
+      : withAdmins(
+          `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`,
+          admins,
+        );
+  return appAccessSentence(access, bot, edition, admin, admins);
 }
 
 /**
  * "Calendar Bot can't change an event's colour yet.", from the Bot's own few words for what the
  * actions do. Without them, the app is named instead. A person who can't give the actions is told
- * who can.
+ * who can, by name where the admins are known.
  */
 function toolsSentence(
   app: string,
   need: string | undefined,
   bot: string | undefined,
   gives: boolean,
+  admins: readonly AdminName[],
 ): string {
   const who = bot ?? "This Bot";
   const doing = plainNeed(need);
   const first = doing
     ? `${who} can't ${doing} yet.`
     : `${who} needs more of ${app} for this.`;
-  return gives ? first : `${first} Only an admin can give it that.`;
+  return gives
+    ? first
+    : withAdmins(`${first} Only an admin can give it that.`, admins);
 }
 
 /**
