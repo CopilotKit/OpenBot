@@ -596,6 +596,7 @@ for (const downloads of [
   { bytes: 100_000_000, size: 100_000_000, done: 3, total: 5 },
 ]) {
   test(`focus preserves download measurements with ${downloads.size ?? "unknown"} total bytes and ${downloads.done} parts done`, () => {
+    setSystemTime(new Date("2026-11-10T03:05:00Z"));
     const steps = [
       { step: "Prepared", ok: true, detail: "" },
       ...installing(downloads),
