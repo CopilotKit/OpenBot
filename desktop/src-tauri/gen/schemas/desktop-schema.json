@@ -3087,10 +3087,28 @@
           "markdownDescription": "Enables the quit command without any pre-configured scope."
         },
         {
+          "description": "Enables the record_problem command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-record-problem",
+          "markdownDescription": "Enables the record_problem command without any pre-configured scope."
+        },
+        {
           "description": "Enables the restart command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-restart",
           "markdownDescription": "Enables the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-save-logs",
+          "markdownDescription": "Enables the save_logs command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_troubleshooting_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-save-troubleshooting-logs",
+          "markdownDescription": "Enables the save_troubleshooting_logs command without any pre-configured scope."
         },
         {
           "description": "Enables the set_organization command without any pre-configured scope.",
@@ -3315,10 +3333,28 @@
           "markdownDescription": "Denies the quit command without any pre-configured scope."
         },
         {
+          "description": "Denies the record_problem command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-record-problem",
+          "markdownDescription": "Denies the record_problem command without any pre-configured scope."
+        },
+        {
           "description": "Denies the restart command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-restart",
           "markdownDescription": "Denies the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-save-logs",
+          "markdownDescription": "Denies the save_logs command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_troubleshooting_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-save-troubleshooting-logs",
+          "markdownDescription": "Denies the save_troubleshooting_logs command without any pre-configured scope."
         },
         {
           "description": "Denies the set_organization command without any pre-configured scope.",
