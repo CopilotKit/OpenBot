@@ -34,14 +34,15 @@ export function applySidebarOpen(open: boolean, effects: SidebarEffects) {
 
 /**
  * The sidebar's width, one for every shell (app, admin, settings) and remembered across reloads, so
- * going from a conversation to Settings never moves the edge of the page. 340px before anybody drags
- * it: the app's roster needs that for its two-line message previews, and the other shells match it.
+ * going from a conversation to Settings never moves the edge of the page. 360px before anybody drags
+ * it: the app's roster needs that for its two-line message previews beside the strip's labelled
+ * icons, and the other shells match it.
  *
  * Dragged on the sidebar's edge (`SidebarRail`). Never narrower than `SIDEBAR_MIN_WIDTH` (plus the
  * strip beside one); never wider than `SIDEBAR_MAX_WIDTH`, past which a roster stops being a column
  * beside the work and becomes the work, nor than `SIDEBAR_MAX_SHARE` of the window.
  */
-export const SIDEBAR_WIDTH = "340px";
+export const SIDEBAR_WIDTH = "360px";
 export const SIDEBAR_WIDTH_STORAGE_KEY = "openbot-sidebar-width";
 /**
  * Where the app's own width was kept when each shell had one. Read when the shared width was never

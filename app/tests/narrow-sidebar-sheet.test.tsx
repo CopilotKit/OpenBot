@@ -235,7 +235,7 @@ test.each([
     /AI Model and Agent Framework/,
     "/channel/models",
   ],
-  ["Connections", "link", /^Connections/, "/connections"],
+  ["Apps (Connections)", "link", /^Apps/, "/connections"],
   // A link drawn as a button: it still goes somewhere.
   ["New conversation", "button", /^New conversation$/, "/channel/new"],
 ] as const)(

@@ -395,7 +395,7 @@ describe.skipIf(!asked)("the sidebar's edge at any zoom", () => {
       for (const [engine, browser] of engines) {
         const page = await open(browser, shape, ZOOMED);
         try {
-          // 340px by default, which is more than two-fifths of the zoomed window.
+          // 360px by default, which is more than two-fifths of the zoomed window.
           expect(await measured(page)).toMatchObject({
             width: ZOOMED_MOST,
             window: ZOOMED.width,
