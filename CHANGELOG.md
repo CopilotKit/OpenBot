@@ -477,6 +477,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **Product telemetry says which kind of install sent it.** An event's `environment` was read from
+  `NODE_ENV`, which a Compose install and OpenBot Desktop leave empty, so every event said
+  `unknown`. It now comes from the build: a release, a release candidate or an internal build says
+  `production`; a development server or a local image build says `development`. Nothing else in the
+  events changes. `docs/TELEMETRY.md` says how older events are read.
 - **An app's Connect card shows once.** A reply that called two tools of an app you haven't
   connected showed the same card twice. It now shows one card per app. When a later reply asks for
   the same app again, its card moves down to that reply.
