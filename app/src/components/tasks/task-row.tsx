@@ -13,7 +13,6 @@ import type { HeldAnswer } from "@/components/approvals/waiting";
 import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { IconDot } from "@/components/ui/icon-dot";
 import {
   Item,
   ItemContent,
@@ -43,6 +42,7 @@ import {
   type TaskStatus,
   taskStatusLabel,
 } from "@/lib/tasks/queries";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 /** Each status's icon. A status a newer server sends that this app doesn't know has a plain circle. */
@@ -195,10 +195,17 @@ export function TaskRow({
     !settled && (status === "ready_for_review" || status === "needs_input");
   return (
     <Item data-task-state={state} size="sm">
-      <ItemMedia variant="icon">
-        <IconDot dotClassName={dot ?? undefined}>
-          <Icon />
-        </IconDot>
+      <ItemMedia className="relative" variant="icon">
+        <Icon />
+        {dot ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "absolute -top-0.5 -right-0.5 size-2 rounded-full ring-2 ring-card",
+              dot,
+            )}
+          />
+        ) : null}
       </ItemMedia>
       <ItemContent>
         <ItemTitle className="line-clamp-none">{task.title}</ItemTitle>

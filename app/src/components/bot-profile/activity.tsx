@@ -25,7 +25,6 @@ import {
 } from "@/components/suggestions/proactive-panel";
 import { TaskRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
-import { IconDot } from "@/components/ui/icon-dot";
 import {
   Item,
   ItemActions,
@@ -138,16 +137,17 @@ export function ActivityRow({
   ) : null;
   const content = (
     <>
-      <ItemMedia variant="icon">
-        <IconDot
-          dotClassName={
-            live
-              ? cn("animate-pulse", item.needsYou ? "bg-warning" : "bg-success")
-              : undefined
-          }
-        >
-          <Icon />
-        </IconDot>
+      <ItemMedia className="relative" variant="icon">
+        <Icon />
+        {live ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "absolute -top-0.5 -right-0.5 size-2 animate-pulse rounded-full ring-2 ring-card",
+              item.needsYou ? "bg-warning" : "bg-success",
+            )}
+          />
+        ) : null}
       </ItemMedia>
       {/* One line, cut with an ellipsis; the whole title shows on hover. */}
       <ItemContent className="min-w-0">
