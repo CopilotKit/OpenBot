@@ -49,6 +49,8 @@ import {
   RULE_LABELS,
   SPACING_RULE,
   SPACING_WHY,
+  SPINNERS_RULE,
+  SPINNERS_WHY,
   sortFindings,
   warningMark,
 } from "../findings";
@@ -633,11 +635,15 @@ export function FindingsPage() {
           <p className={cn("mt-1 pl-6", MUTED)}>
             Expected moves come after an input, on a new screen or while a
             screen loads. Shown by default: shift under hand, jitter, cut off,
-            outside, spacing and run problems.
+            outside, spacing, spinners and run problems.
           </p>
           <p className={cn("mt-1 pl-6", MUTED)} data-spacing-rule>
             <strong className="font-semibold text-foreground">Spacing</strong>
             {`: ${SPACING_RULE} Why: ${SPACING_WHY}`}
+          </p>
+          <p className={cn("mt-1 pl-6", MUTED)} data-spinners-rule>
+            <strong className="font-semibold text-foreground">Spinners</strong>
+            {`: ${SPINNERS_RULE} Why: ${SPINNERS_WHY}`}
           </p>
         </div>
 
@@ -756,6 +762,14 @@ export function FindingsPage() {
                     {KIND_LABELS.spacing}
                   </strong>
                   {`: ${SPACING_RULE} ${SPACING_WHY}`}
+                </p>
+              )}
+              {selected.kind === "spinners" && (
+                <p className="text-muted-foreground" data-rule="spinners">
+                  <strong className="font-semibold text-foreground">
+                    {KIND_LABELS.spinners}
+                  </strong>
+                  {`: ${SPINNERS_RULE} ${SPINNERS_WHY}`}
                 </p>
               )}
               {movement && (

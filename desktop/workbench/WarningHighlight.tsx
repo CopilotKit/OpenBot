@@ -60,6 +60,8 @@ export function highlightLabel(warning: Warning): string {
       return `${Math.round(warning.overBy)} px outside the window`;
     case "spacing":
       return spacingLabel(warning);
+    case "spinners":
+      return `${warning.count} spinners at once`;
   }
 }
 
@@ -156,6 +158,10 @@ export function highlightShapes(
     frameBox = warning.box;
     // The window's buttons, shaded: what the element is too near.
     shaded = [warning.buttons];
+  } else if (warning.kind === "spinners") {
+    // A box around all of them, and each spinner shaded.
+    frameBox = warning.box;
+    shaded = warning.boxes;
   } else {
     frameBox = warning.box;
     shaded = outsideParts(warning.box, viewport);

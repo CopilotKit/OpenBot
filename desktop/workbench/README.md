@@ -366,8 +366,9 @@ Under the window, the workbench lists layout warnings as the clock moves. The li
 - **cut off**: a box with hidden overflow (the element or a box around it) hides more than 2 px of the element's text. Text cut on purpose does not count: an ellipsis (`text-overflow: ellipsis`, as Tailwind's `truncate`) or a line clamp, on the element or on the box that cuts it. Text that is larger than its box but shows (overflow visible), and text in a box that scrolls, do not count either.
 - **outside the window**: an element goes past the edge of the window, and no scroll brings it into view. An element in a box that scrolls, or past the bottom or the right of a page that scrolls itself, is not outside; an element fixed to the window (`position: fixed`) still is.
 - **spacing**: on a Mac in OpenBot Desktop, the page comes too near the window's close, minimise and zoom buttons, or the buttons do not sit well in the column under them. See [Spacing](#spacing).
+- **spinners**: the window shows more than one spinner at the same time. The step's own wait is the one spinner. Anything else that runs beside it is marked and held still (`SetupProgress` `quiet`). A spinner is an element with the class `step-spinner` (also when reduced motion holds it still) or `animate-spin`, or an element that runs the `step-spin` or `spin` animation. A spinner that a person does not see (hidden, no size, opacity 0, or for screen readers only) does not count. A spinner has `aria-hidden`, but that does not hide it from this check. The warning names where each spinner is: the `aria-label` of the nearest box around it, or else that box's tag and class.
 
-Each move gets a class by the same rules as the findings (see [Which moves are findings](#which-moves-are-findings)), and its row names it. The list shows shift under hand, jitter, cut off, outside and spacing. The expected moves (after an input, a new screen, a load, a late load shift) are behind **Show expected moves (N)**, as on the Findings page. The heading counts the rows shown without the expected moves.
+Each move gets a class by the same rules as the findings (see [Which moves are findings](#which-moves-are-findings)), and its row names it. The list shows shift under hand, jitter, cut off, outside, spacing and spinners. The expected moves (after an input, a new screen, a load, a late load shift) are behind **Show expected moves (N)**, as on the Findings page. The heading counts the rows shown without the expected moves.
 
 The workbench checks after each native call and event. In an app scene, it also checks after each request, stream event and socket message. Elements that are hidden from view, such as labels for screen readers only, do not get warnings.
 
@@ -377,6 +378,7 @@ Hold the pointer on a warning for 250 ms to jump to its time. The row says "Jump
 - For **cut off**: a box around the element, with a shaded strip for the hidden part. A label says "cut off by N px".
 - For **outside the window**: the part past the edge is shaded. A label says "N px outside the window".
 - For **spacing**: a box around the element (or the column), with the window's buttons shaded. A label on the buttons says what is wrong, for example "0 px from the window buttons".
+- For **spinners**: a box around all the spinners, with each spinner shaded. A label says "2 spinners at once".
 
 ### Spacing
 
@@ -472,10 +474,11 @@ In the JSON:
 - A run that stalls.
 - For an app scene: an `/api` request that has no answer.
 - For an app scene: an uncaught error in the app.
+- More than one spinner at the same time (a **spinners** warning). It is the one layout warning that fails the check.
 
 Exit codes:
 
-- `0`: the shots are saved. Warnings do not change this. Read `warnings` in the JSON.
+- `0`: the shots are saved. Warnings other than spinners do not change this. Read `warnings` in the JSON.
 - `1`: `--check` found a problem. Each problem is one line on stderr, with the scene and the time.
 - `2`: the scene is unknown or a flag is bad. For an unknown scene, the CLI lists the scene ids.
 
@@ -485,7 +488,7 @@ The Findings page puts every finding of the last check in one list. Open it with
 
 ### What a finding is
 
-`bun run workbench:check` also writes `workbench-shots/check/findings.json`. It holds every layout warning (moved, cut off, outside the window) and every problem of the runs (a request with no answer, an error in the app, a run that stalls, a run step that finds nothing) of every committed scene.
+`bun run workbench:check` also writes `workbench-shots/check/findings.json`. It holds every layout warning (moved, cut off, outside the window, spacing, spinners) and every problem of the runs (a request with no answer, an error in the app, a run that stalls, a run step that finds nothing) of every committed scene.
 
 For each warning, the check finds its element in the window while the run is at a step, and reads the element's component chain and source file. When the element is gone by then, it takes them from another warning of the same kind and label.
 
@@ -495,7 +498,7 @@ The same problem can show in many scenes. One finding holds all of them. Warning
 | --- | --- |
 | `id` | A short id made from the finding's key. The same key gives the same id in every check |
 | `title` | For example `span "Opening OpenBot" moves 245 px up` |
-| `kind` | `moved`, `clipped`, `outside`, `spacing`, `no-answer`, `app-error`, `stalled` or `step` |
+| `kind` | `moved`, `clipped`, `outside`, `spacing`, `spinners`, `no-answer`, `app-error`, `stalled` or `step` |
 | `severity` | How bad it is: how far it moved, how many px are cut off or outside, or for spacing how far inside the 8 px, off the middle or short of room. A problem of a run is always 10000 |
 | `component` | The nearest component with a source file, and the line |
 | `movement` | For a move: its class, the rule it hit and why (see below) |
@@ -637,6 +640,7 @@ OPENBOT_APP_BROWSER=1 bun test workbench/critique.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/motion.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/findings.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/stateSteps.browser.test.ts
+OPENBOT_APP_BROWSER=1 bun test workbench/oneSpinner.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/appUi.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/popups.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/keys.browser.test.ts
@@ -651,9 +655,10 @@ OPENBOT_APP_BROWSER=1 bun test workbench/keys.browser.test.ts
 - `popups.browser.test.ts` checks that a popup of the page (a list, a box) over the window shows above the window. The inspector does not measure it, and in Comment mode a click in it does not start a comment.
 - `keys.browser.test.ts` checks that the page's keys (`C`, `.`, `/`, Space) do nothing while the focus is in a list, the Time slider or a popup, so a typed comment is not lost. Space and Enter still open a list, and the slider keeps its arrow keys.
 - `stateSteps.browser.test.ts` opens each state scene and checks that the window shows the setup step that the state names.
+- `oneSpinner.browser.test.ts` walks each install run to each of its run steps and to its end, and opens each state scene that shows a setup step. It names each frame that shows more than one spinner at the same time.
 - `findings.browser.test.ts` runs the check on one scene, then opens the Findings page. It checks that the page lists the findings, that a finding opens its scene at its time with the warning marked, and that the next time works.
 
-You can also run all fourteen files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
+You can also run all fifteen files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
 
 `desktop/workbench/shippedBuild.test.ts` runs a full build. It takes up to three minutes. To run the full build check of the app, run this in the repository root:
 
