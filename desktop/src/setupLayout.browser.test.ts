@@ -54,6 +54,7 @@ type Page = {
   evaluate<T, A = undefined>(run: (arg: A) => T, arg?: A): Promise<T>;
   waitForTimeout(ms: number): Promise<void>;
   screenshot(options: { path: string }): Promise<unknown>;
+  keyboard: { press(key: string): Promise<void> };
   mouse: {
     click(x: number, y: number): Promise<void>;
     move(x: number, y: number): Promise<void>;
@@ -3947,4 +3948,294 @@ describe.skipIf(!asked)("a screen that fails to draw", () => {
         await page.close();
       }
     });
+});
+
+/** Approved account study: fixed heading, centered interaction and a top-safe scroll body. */
+describe.skipIf(!asked)("approved layout: account", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    for (const colorScheme of ["light", "dark"] as const) {
+      test(`${width}x${height} ${colorScheme}: checking, code, engine wait and recovery remain reachable`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        const shot = async (state: string) => {
+          await settled(page);
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/account-${state}-${width}x${height}-${colorScheme}.png`,
+            });
+        };
+        const geometry = () =>
+          page.evaluate(() => {
+            const sheet =
+              document.querySelector<HTMLElement>(".account-layout")!;
+            const header = sheet
+              .querySelector<HTMLElement>(".setup-header-block")!
+              .getBoundingClientRect();
+            const title = sheet
+              .querySelector<HTMLElement>("h1")!
+              .getBoundingClientRect();
+            const body = sheet.querySelector<HTMLElement>(".setup-body")!;
+            const content = sheet
+              .querySelector<HTMLElement>(".setup-content")!
+              .getBoundingClientRect();
+            const box = body.getBoundingClientRect();
+            const rail = document
+              .querySelector<HTMLElement>(".rail-title")!
+              .getBoundingClientRect();
+            return {
+              titleY: title.y,
+              railY: rail.y,
+              headerBottom: header.bottom,
+              bodyTop: box.top,
+              bodyBottom: box.bottom,
+              bodyHeight: box.height,
+              contentTop: content.top,
+              contentBottom: content.bottom,
+              contentHeight: content.height,
+              centerOffset:
+                (content.top + content.bottom - box.top - box.bottom) / 2,
+              contentWidth: content.width,
+              bodyScroll: body.scrollHeight,
+              bodyClient: body.clientHeight,
+              pageHeight: document.documentElement.scrollHeight,
+              pageWidth: document.documentElement.scrollWidth,
+              horizontalOverflow: [
+                ...sheet.querySelectorAll<HTMLElement>(
+                  ".setup-body, .setup-content, .setup-panel, .sign-in-wait, .sign-in-code-row",
+                ),
+              ].some(
+                (element) => element.scrollWidth > element.clientWidth + 1,
+              ),
+            };
+          });
+        // Scroll through the real body and check each action's center is unobstructed and focusable.
+        const reachable = async (selector: string) => {
+          const action = await page.evaluate((selector) => {
+            const element = document.querySelector<HTMLElement>(selector)!;
+            element.scrollIntoView({ block: "nearest" });
+            element.focus();
+            const box = element.getBoundingClientRect();
+            const body = element
+              .closest(".setup-body")!
+              .getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              box.x + box.width / 2,
+              box.y + box.height / 2,
+            );
+            return {
+              focused: document.activeElement === element,
+              hit: element === hit || element.contains(hit),
+              top: box.top,
+              bottom: box.bottom,
+              left: box.left,
+              right: box.right,
+              bodyTop: body.top,
+              bodyBottom: body.bottom,
+            };
+          }, selector);
+          expect(action.focused).toBe(true);
+          expect(action.hit).toBe(true);
+          expect(action.top).toBeGreaterThanOrEqual(action.bodyTop - 1);
+          expect(action.bottom).toBeLessThanOrEqual(action.bodyBottom + 1);
+          expect(action.left).toBeGreaterThanOrEqual(0);
+          expect(action.right).toBeLessThanOrEqual(width);
+        };
+        const check = async (titleY?: number) => {
+          const now = await geometry();
+          expect(now.pageHeight).toBeLessThanOrEqual(height);
+          expect(now.pageWidth).toBeLessThanOrEqual(width);
+          expect(now.horizontalOverflow).toBe(false);
+          expect(Math.abs(now.titleY - now.railY)).toBeLessThanOrEqual(1);
+          if (titleY !== undefined) expect(now.titleY).toBe(titleY);
+          expect(now.bodyTop).toBeGreaterThanOrEqual(now.headerBottom - 1);
+          expect(now.bodyBottom).toBeLessThanOrEqual(height);
+          expect(now.contentWidth).toBeLessThanOrEqual(480);
+          if (
+            now.contentHeight + (width === 1000 ? 60 : 36) <=
+            now.bodyHeight
+          ) {
+            expect(Math.abs(now.centerOffset)).toBeLessThanOrEqual(1);
+            expect(now.contentTop - now.headerBottom).toBeGreaterThan(29);
+          } else {
+            expect(now.bodyScroll).toBeGreaterThan(now.bodyClient);
+          }
+          return now;
+        };
+        try {
+          await open(page, "#signin");
+          await page
+            .getByRole("button", { name: "Install", exact: true })
+            .waitFor();
+          await page.evaluate(() => {
+            globalThis.__workbench!.setAnswer("sign_in_to_copilotkit", {
+              mode: "never",
+            });
+            globalThis.__workbench!.setAnswer("copilotkit_sign_in_page", {
+              mode: "value",
+              value: null,
+            });
+          });
+          await page
+            .getByRole("button", { name: "Install", exact: true })
+            .click();
+          await page
+            .getByText("Checking your OpenBot account…", { exact: true })
+            .waitFor();
+          await shot("checking");
+          const initial = await check();
+          await reachable(".sign-in-wait button");
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("copilotkit_sign_in_page", {
+              mode: "value",
+              value: {
+                url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
+                userCode: "WXYZ-2345",
+              },
+            }),
+          );
+          await page.getByText("WXYZ-2345", { exact: true }).waitFor();
+          await page.evaluate(() => {
+            document.querySelector<HTMLElement>(".setup-body")!.scrollTop = 0;
+          });
+          await shot("code");
+          await check(initial.titleY);
+          const code = await page.evaluate(() => {
+            const element =
+              document.querySelector<HTMLElement>(".sign-in-code")!;
+            const box = element.getBoundingClientRect();
+            const row = element.parentElement!.getBoundingClientRect();
+            const group = element.closest(".sign-in-wait")!;
+            return {
+              left: box.left,
+              right: box.right,
+              rowLeft: row.left,
+              rowRight: row.right,
+              width: element.scrollWidth,
+              client: element.clientWidth,
+              help: group.textContent?.includes("open the sign-in page again"),
+              actions: [...group.querySelectorAll("button, a")].map(
+                (el) => el.textContent,
+              ),
+            };
+          });
+          expect(code.left).toBeGreaterThanOrEqual(code.rowLeft);
+          expect(code.right).toBeLessThanOrEqual(code.rowRight);
+          expect(code.width).toBeLessThanOrEqual(code.client + 1);
+          expect(code.help).toBe(true);
+          expect(code.actions).toEqual(["Open the sign-in page", "Cancel"]);
+          await reachable(".sign-in-wait a");
+          await page
+            .getByRole("link", { name: "Open the sign-in page" })
+            .click();
+          expect(await page.evaluate(() => globalThis.__fake!.opened)).toEqual([
+            "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
+          ]);
+          await page.keyboard.press("Tab");
+          expect(
+            await page.evaluate(() => document.activeElement?.textContent),
+          ).toBe("Cancel");
+          await reachable(".sign-in-wait button");
+          // A failed browser approval retains a reachable retry, then starts a fresh attempt.
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("sign_in_to_copilotkit", {
+              mode: "fail",
+              problem: { said: "Sign-in was interrupted." },
+            }),
+          );
+          await page
+            .getByText("Sign-in didn’t finish. Try again.", { exact: true })
+            .waitFor();
+          await shot("sign-in-failure");
+          await check(initial.titleY);
+          await reachable(".setup-panel .row button");
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("sign_in_to_copilotkit", {
+              mode: "never",
+            }),
+          );
+          await page
+            .getByRole("button", { name: "Try again", exact: true })
+            .click();
+          await page.getByText("WXYZ-2345", { exact: true }).waitFor();
+          await page
+            .getByRole("button", { name: "Cancel", exact: true })
+            .click();
+          await page
+            .getByRole("button", {
+              name: "Sign in for a free local license key",
+            })
+            .waitFor();
+          expect(
+            await page.evaluate(() =>
+              globalThis.__fake!.calls?.includes("cancel_local_eval"),
+            ),
+          ).toBe(true);
+          await page
+            .getByRole("button", {
+              name: "Sign in for a free local license key",
+            })
+            .click();
+          await page.getByText("WXYZ-2345", { exact: true }).waitFor();
+          await page.evaluate(() => {
+            globalThis.__workbench!.setAnswer("local_eval_terms", {
+              mode: "value",
+              value: { status: "engine-not-ready" },
+            });
+            globalThis.__workbench!.setAnswer("sign_in_to_copilotkit", {
+              mode: "value",
+              value: { signedIn: true },
+            });
+          });
+          await page
+            .getByRole("heading", { name: "Setting up this computer" })
+            .waitFor();
+          await shot("engine-wait");
+          await check(initial.titleY);
+          expect(await page.locator(".sign-in-code").count()).toBe(0);
+          await page.evaluate(() => {
+            globalThis.__workbench!.setAnswer("connect_copilotkit_apps", {
+              mode: "fail",
+              problem: {
+                said:
+                  "OpenBot couldn't connect your apps. " +
+                  "Check the internet connection and the organization's sign-in settings before trying again. ".repeat(
+                    12,
+                  ),
+                detail: "The connection was reset while connecting apps.",
+              },
+            });
+            globalThis.__workbench!.setAnswer("local_eval_terms", {
+              mode: "value",
+              value: { status: "not-required" },
+            });
+          });
+          await page
+            .getByRole("heading", { name: "Connect your apps" })
+            .waitFor();
+          await shot("long-failure");
+          await check(initial.titleY);
+          await reachable(".setup-panel .row button");
+          await page.keyboard.press("Tab");
+          expect(
+            await page.evaluate(() => document.activeElement?.textContent),
+          ).toBe("Continue");
+          await reachable(".setup-panel .row button.quiet");
+          await shot("failure-recovery");
+          await page
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Connect your AI" })
+            .waitFor();
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
+    }
+  }
 });
