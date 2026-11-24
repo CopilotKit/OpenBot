@@ -846,7 +846,14 @@ test("picking OpenBot for Business shows its way, what it adds and Book a demo, 
   );
   expect(src.searchParams.get("embed_type")).toBe("Inline");
   expect(src.searchParams.get("embed_domain")).toBe(window.location.host);
-  expect(view.getByText("Loading the calendar")).toBeTruthy();
+  expect(view.getByText("Loading available times…")).toBeTruthy();
+  const surface = calendar.closest(".setup-booking-surface");
+  expect(surface).not.toBeNull();
+  expect(surface?.parentElement?.classList.contains("setup-body")).toBe(true);
+  expect(
+    surface?.firstElementChild?.classList.contains("booking-calendar"),
+  ).toBe(true);
+  expect(calendar.style.height).toBe("");
   // Calendly says it is there: the spinner goes.
   await act(async () => {
     window.dispatchEvent(
@@ -857,8 +864,9 @@ test("picking OpenBot for Business shows its way, what it adds and Book a demo, 
       }),
     );
   });
-  expect(view.queryByText("Loading the calendar")).toBeNull();
-  expect(calendar.style.height).toBe("640px");
+  expect(view.queryByText("Loading available times…")).toBeNull();
+  expect(calendar.closest(".setup-booking-surface")).toBe(surface);
+  expect(calendar.style.height).toBe("");
   expectPlain(view);
   // Back: the features again, with Book a demo focused, and no calendar.
   await userEvent.click(view.getByRole("button", { name: "Back" }));
@@ -895,6 +903,11 @@ test("a calendar that can't load gives way to Book a demo, which opens the OpenB
   const view = await renderApp();
   await userEvent.click(view.getByRole("radio", { name: /^Cloud/ }));
   await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
+  const calendar = view.getByTitle("Booking calendar");
+  const surface = calendar.closest(".setup-booking-surface");
+  expect(surface).not.toBeNull();
+  const back = view.getByRole("button", { name: "Back" });
+  expect(back.closest(".setup-footer")).not.toBeNull();
   // Blocked: the frame errors.
   await act(async () => {
     view.getByTitle("Booking calendar").dispatchEvent(new Event("error"));
@@ -906,6 +919,8 @@ test("a calendar that can't load gives way to Book a demo, which opens the OpenB
     ),
   ).toBeTruthy();
   const demo = view.getByRole("link", { name: "Book a demo" });
+  expect(demo.closest(".setup-booking-surface")).toBe(surface);
+  expect(view.getByRole("button", { name: "Back" })).toBe(back);
   expect(demo.getAttribute("href")).toBe("https://open.bot/business");
   await userEvent.click(demo);
   expect(invokeCalls).toContainEqual({

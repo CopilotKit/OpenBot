@@ -17,6 +17,7 @@ main > .rail + .sheet.setup-layout > * {
   max-width: none;
 }
 
+.booking-step.setup-layout > .setup-header-block,
 main > .rail + .sheet.setup-layout > .setup-header-block {
   flex: none;
 }
@@ -26,6 +27,7 @@ main > .rail + .sheet.setup-layout > .setup-header-block {
 }
 
 /* Safe centering starts at the top when the content is taller than the available space. */
+.booking-step.setup-layout > .setup-body,
 main > .rail + .sheet.setup-layout > .setup-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -70,6 +72,7 @@ main > .rail + .sheet.setup-layout > .setup-body {
   color: var(--text-secondary);
 }
 
+.booking-step.setup-layout > .setup-footer,
 main > .rail + .sheet.setup-layout > .setup-footer {
   flex: none;
   position: static;
@@ -78,10 +81,12 @@ main > .rail + .sheet.setup-layout > .setup-footer {
   padding: 20px 0 0;
 }
 
+.booking-step.setup-layout > .setup-footer::before,
 main > .rail + .sheet.setup-layout > .setup-footer::before {
   content: none;
 }
 
+.booking-step.setup-layout > .setup-footer > .row,
 main > .rail + .sheet.setup-layout > .setup-footer > .row,
 main
   > .rail
@@ -99,7 +104,8 @@ main
     padding-bottom: 24px;
   }
 
-  main > .rail + .sheet.setup-layout > .setup-body {
+  main > .rail + .sheet.setup-layout > .setup-body,
+  .booking-step.setup-layout > .setup-body {
     padding-block: 18px;
   }
 

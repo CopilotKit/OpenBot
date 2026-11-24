@@ -14,15 +14,7 @@ import {
   IconUsers,
   IconUsersGroup,
 } from "@tabler/icons-react";
-import {
-  type ReactNode,
-  type Ref,
-  type RefObject,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 import {
   BOOK_A_DEMO_LINE,
   BOOKING_CALENDAR_ORIGIN,
@@ -156,8 +148,8 @@ export function BusinessBooker({
 
 /**
  * Book a demo: its heading, what booking is for, and the calendar, or the way to book in the
- * browser when the calendar can't load. As its own step (`page`), with Back to the features above
- * the heading, which takes the focus as it shows.
+ * browser when the calendar can't load. Its own step (`page`) keeps Back in the footer and
+ * focuses the heading as it shows.
  */
 function BookADemo({
   page = false,
@@ -173,37 +165,58 @@ function BookADemo({
   useEffect(() => {
     if (page) own.current?.focus({ preventScroll: true });
   }, [page]);
-  return (
-    <section
-      className={page ? "book-a-demo booking-step" : "book-a-demo"}
-      aria-labelledby="book-a-demo-title"
-    >
-      {onBack && (
-        <button
-          type="button"
-          className="text-link booking-back"
-          onClick={onBack}
-        >
-          <IconChevronLeft aria-hidden="true" stroke={1.75} />
-          Back
-        </button>
-      )}
+  const header = (
+    <>
       <h2 id="book-a-demo-title" ref={page ? own : heading} tabIndex={-1}>
         Book a demo
       </h2>
-      <p className="book-a-demo-line">{BOOK_A_DEMO_LINE}</p>
-      {failed ? (
-        <div className="book-a-demo-fallback">
-          <p role="status">
-            Couldn't load the calendar. Book a demo opens it in your browser.
-          </p>
-          <ExternalLink className="button-link primary" href={BUSINESS_URL}>
-            Book a demo
-            <IconArrowUpRight aria-hidden="true" stroke={1.75} />
-          </ExternalLink>
-        </div>
+      <p className={page ? "book-a-demo-line lede" : "book-a-demo-line"}>
+        {BOOK_A_DEMO_LINE}
+      </p>
+    </>
+  );
+  const calendar = failed ? (
+    <div className="book-a-demo-fallback">
+      <p role="status">
+        Couldn't load the calendar. Book a demo opens it in your browser.
+      </p>
+      <ExternalLink className="button-link primary" href={BUSINESS_URL}>
+        Book a demo
+        <IconArrowUpRight aria-hidden="true" stroke={1.75} />
+      </ExternalLink>
+    </div>
+  ) : (
+    <BookingCalendar fit={page} onFailed={() => setFailed(true)} />
+  );
+  return (
+    <section
+      className={page ? "book-a-demo booking-step setup-layout" : "book-a-demo"}
+      aria-labelledby="book-a-demo-title"
+    >
+      {page ? (
+        <>
+          <header className="setup-header-block">{header}</header>
+          <div className="setup-body">
+            <div className="setup-booking-surface">{calendar}</div>
+          </div>
+          <footer className="setup-footer">
+            {onBack && (
+              <button
+                type="button"
+                className="text-link booking-back"
+                onClick={onBack}
+              >
+                <IconChevronLeft aria-hidden="true" stroke={1.75} />
+                Back
+              </button>
+            )}
+          </footer>
+        </>
       ) : (
-        <BookingCalendar fit={page} onFailed={() => setFailed(true)} />
+        <>
+          {header}
+          {calendar}
+        </>
       )}
     </section>
   );
@@ -263,13 +276,6 @@ const DEFAULT_HEIGHT = 700;
 const MIN_HEIGHT = 320;
 /** Above this a reported height is not believed, so a bad message can't stretch the card forever. */
 const MAX_HEIGHT = 1400;
-/**
- * The least room the booking step holds the calendar to. Calendly's month, with its details hidden,
- * is drawn in about 480 px of the 602 it reports, and a six-week month in about 530; the rest is
- * its own blank space. With less room than this, the calendar takes the height it reports and the
- * page scrolls, as any tall step does.
- */
-const MIN_ROOM = 530;
 /** How long the calendar has to say it is there before the card offers the browser instead. */
 export const BOOKING_CALENDAR_TIMEOUT_MS = 20_000;
 
@@ -328,21 +334,18 @@ type CalendlyMessage = {
  * spinner stands in its place. Offline, an `error` from the frame, or no word from it in
  * {@link BOOKING_CALENDAR_TIMEOUT_MS} on screen, and `onFailed` hands back to Book a demo. Its height
  * follows what it reports, so it never scrolls inside the card. As the booking step (`fit`) it is
- * held to the room left in the page, so the step fits without a scrollbar: Calendly's month is
- * drawn well inside the height it reports, and a taller view of its own (a day's times, the form)
- * scrolls in its frame.
+ * held to the reserved page surface throughout loading and fallback; a taller view of its own
+ * (a day's times, the form) scrolls in its frame.
  */
 function BookingCalendar({
   fit = false,
   onFailed,
 }: {
-  /** Held to the room left in the page under it, where that is room enough (`MIN_ROOM`). */
+  /** Fill the reserved page surface; card embeds retain Calendly’s reported height. */
   fit?: boolean;
   onFailed: () => void;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
-  const box = useRef<HTMLDivElement>(null);
-  const room = useRoomBelow(box, fit);
   const [src] = useState(() =>
     bookingCalendarSrc(window.location.host, windowColors()),
   );
@@ -414,11 +417,7 @@ function BookingCalendar({
   }, []);
 
   return (
-    <div
-      className="booking-calendar"
-      data-ready={ready ? "" : undefined}
-      ref={box}
-    >
+    <div className="booking-calendar" data-ready={ready ? "" : undefined}>
       <iframe
         ref={frame}
         referrerPolicy="strict-origin-when-cross-origin"
@@ -432,57 +431,16 @@ function BookingCalendar({
          */
         style={{
           colorScheme: "light",
-          height:
-            room != null && room >= MIN_ROOM ? Math.min(height, room) : height,
+          height: fit ? undefined : height,
         }}
         title="Booking calendar"
       />
       {ready ? null : (
         <div className="booking-calendar-loading" role="status">
           <span className="step-spinner" aria-hidden="true" />
-          <span className="sr-only">Loading the calendar</span>
+          <span>Loading available times…</span>
         </div>
       )}
     </div>
   );
-}
-
-/**
- * The height left for `box` in the page it is in: from its top to the page's bottom edge, less the
- * page's padding and the box's own border. Measured again as the window changes size. Null until
- * measured, and when `on` is false or the box is not in a page.
- */
-function useRoomBelow(
-  box: RefObject<HTMLElement | null>,
-  on: boolean,
-): number | null {
-  const [room, setRoom] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const element = box.current;
-    const page = element?.closest<HTMLElement>(".sheet");
-    if (!on || !element || !page) return;
-    const measure = () => {
-      const style = getComputedStyle(page);
-      const own = getComputedStyle(element);
-      const top =
-        element.getBoundingClientRect().top -
-        page.getBoundingClientRect().top +
-        page.scrollTop;
-      setRoom(
-        Math.floor(
-          page.clientHeight -
-            top -
-            Number.parseFloat(style.paddingBottom || "0") -
-            Number.parseFloat(own.borderTopWidth || "0") -
-            Number.parseFloat(own.borderBottomWidth || "0"),
-        ),
-      );
-    };
-    measure();
-    if (typeof ResizeObserver !== "function") return;
-    const watch = new ResizeObserver(measure);
-    watch.observe(page);
-    return () => watch.disconnect();
-  }, [box, on]);
-  return room;
 }

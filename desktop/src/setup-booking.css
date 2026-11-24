@@ -1,3 +1,31 @@
+/* The nested booking section owns setup geometry; other Welcome views keep their layout. */
+main > .rail + .sheet.welcome:has(> .booking-step.setup-layout) {
+  overflow: hidden;
+  scrollbar-gutter: auto;
+  padding-right: var(--page-inline);
+  padding-top: calc(var(--head-top) - 11px);
+}
+
+main > .rail + .sheet.welcome > .booking-step.setup-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.booking-step.setup-layout h2 {
+  font-size: var(--text-2xl);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
 /* Page booking reserves its frame before Calendly arrives; card embeds keep their own sizing. */
 .setup-layout .setup-booking-surface {
   position: relative;
@@ -54,6 +82,12 @@
 }
 
 @media (max-width: 860px) {
+  main > .rail + .sheet.welcome:has(> .booking-step.setup-layout) {
+    --sheet-pad: 24px;
+    padding-inline: 24px;
+    padding-bottom: 24px;
+  }
+
   .setup-layout .setup-booking-surface {
     flex-basis: 300px;
     min-height: 300px;
