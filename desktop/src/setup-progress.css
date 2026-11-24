@@ -100,9 +100,9 @@ main
   overflow: visible;
 }
 
-/* Reserve the full hand-off at the current 1.4 line-height, including shorter directions. */
+/* The full Docker directions take four lines at both window sizes; shorter prompts keep them. */
 .setup-layout.finishing-layout .journey.handing-off .journey-said {
-  min-height: 4.2em;
+  min-height: 5.6em;
 }
 
 /* Byte counts describe the download, including the returning Start screen. */
@@ -129,10 +129,6 @@ main
 }
 
 @media (max-width: 860px) {
-  .setup-layout.finishing-layout .journey.handing-off .journey-said {
-    min-height: 5.6em;
-  }
-
   .setup-layout
     .setup-progress-focus
     > .step:first-child:has(> .mark:is(.active, .waiting, .bad)),
