@@ -4,7 +4,7 @@
 import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
-import type { SavedLoginPage } from "../model";
+import type { SavedLoginPage, SavedLoginsPurged } from "../model";
 
 export const getListSavedLoginsResponseMock = (): SavedLoginPage => ({
   savedLogins: [
@@ -19,6 +19,10 @@ export const getListSavedLoginsResponseMock = (): SavedLoginPage => ({
   ],
   passwordManager: true,
   nextCursor: null,
+});
+
+export const getPurgeSavedLoginsResponseMock = (): SavedLoginsPurged => ({
+  deleted: { switchedOff: 12, removed: 3 },
 });
 
 export const getListSavedLoginsMockHandler = (
@@ -89,7 +93,34 @@ export const getDeleteSavedLoginMockHandler = (
     options,
   );
 };
+
+export const getPurgeSavedLoginsMockHandler = (
+  overrideResponse?:
+    | SavedLoginsPurged
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<SavedLoginsPurged> | SavedLoginsPurged),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/saved-logins/purge",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getPurgeSavedLoginsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getSavedLoginsMock = () => [
   getListSavedLoginsMockHandler(),
   getDeleteSavedLoginMockHandler(),
+  getPurgeSavedLoginsMockHandler(),
 ];
