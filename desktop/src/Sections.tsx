@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 /** One part of setup, named for what it is about rather than counted. */
 export type Section = "Account" | "Install" | "AI" | "Start";
 
@@ -29,41 +31,68 @@ export function Lockup({ byCopilotKit = false }: { byCopilotKit?: boolean }) {
 }
 
 /**
- * Where you are in setup, and what is left: every section by name, the current one marked.
- *
- * Beside OpenBot's mark and name, so every step says which product is being set up, including the
- * step that signs in.
+ * Where you are in setup, and what is left: every section by name, down the setup window's
+ * sidebar, the current one marked as the app marks a selected row and the ones done ticked.
  */
-export function Sections({
-  at,
-  byCopilotKit = false,
-}: {
-  at: Section;
-  /** "by CopilotKit" beside OpenBot's name, on the step that asks for a sign-in. */
-  byCopilotKit?: boolean;
-}) {
+export function Sections({ at }: { at: Section }) {
   const names = SECTIONS;
   const current = names.indexOf(at);
   return (
-    <div className="setup-header">
+    <ol className="sections" aria-label="Setup">
+      {names.map((name, index) => (
+        <li
+          key={name}
+          aria-current={index === current ? "step" : undefined}
+          className={
+            index === current ? "current" : index < current ? "done" : undefined
+          }
+        >
+          <span className="section-mark" aria-hidden="true" />
+          {name}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * The setup window's sidebar, beside every setup step, as OpenBot draws its own sidebar after
+ * setup: OpenBot's mark and name, "Set up OpenBot", what the step lists (the sections, or on the
+ * first screen the ways to run OpenBot), and at its foot whatever runs behind the step.
+ *
+ * The step itself is the inset page beside it (`main > .rail + .sheet`). What runs behind a step,
+ * the background install, is said here and only here: in the step it was a second spinner beside
+ * the step's own, and it moved what the person was about to click as it came and went.
+ *
+ * "Set up OpenBot" is the window's heading on the first screen, which has no other; a step that
+ * has its own heading says it as a line, so each screen has one `h1`.
+ */
+export function SetupRail({
+  heading = false,
+  byCopilotKit = false,
+  label = "Setup",
+  children,
+  foot,
+}: {
+  /** "Set up OpenBot" is this screen's heading. */
+  heading?: boolean;
+  /** "by CopilotKit" beside OpenBot's name, on the step that asks for a sign-in. */
+  byCopilotKit?: boolean;
+  label?: string;
+  children?: ReactNode;
+  /** At the sidebar's foot: what runs behind the step, or the way to another choice. */
+  foot?: ReactNode;
+}) {
+  return (
+    <aside className="rail" aria-label={label}>
       <Lockup byCopilotKit={byCopilotKit} />
-      <ol className="steps-of sections" aria-label="Setup">
-        {names.map((name, index) => (
-          <li
-            key={name}
-            aria-current={index === current ? "step" : undefined}
-            className={
-              index === current
-                ? "current"
-                : index < current
-                  ? "done"
-                  : undefined
-            }
-          >
-            {name}
-          </li>
-        ))}
-      </ol>
-    </div>
+      {heading ? (
+        <h1 className="rail-title">Set up OpenBot</h1>
+      ) : (
+        <p className="rail-title">Set up OpenBot</p>
+      )}
+      {children}
+      {foot && <div className="rail-foot">{foot}</div>}
+    </aside>
   );
 }

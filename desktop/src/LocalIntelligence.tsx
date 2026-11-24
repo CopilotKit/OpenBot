@@ -1294,6 +1294,9 @@ export function LocalIntelligence({
           ? {
               ...row,
               downloads: undefined,
+              // The journey says how far along the whole Start is: a row's own "Step 1 of 4"
+              // beside it counted something else, and read as the Start starting over.
+              position: undefined,
               detail: at === "start" && releasing ? RELEASE_SAID : row.detail,
             }
           : row,
@@ -1325,7 +1328,13 @@ export function LocalIntelligence({
           releaseDue={releaseDue}
         />
       )}
-      <SetupProgress steps={rows} showElapsed={!journeying} />
+      {/* While the journey runs, its bar is the one thing that spins: the row it is on is marked,
+          not spun. Two spinners on Finishing setup read as two waits. */}
+      <SetupProgress
+        steps={rows}
+        showElapsed={!journeying}
+        quiet={journeying}
+      />
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && !waitingOn && !room && (

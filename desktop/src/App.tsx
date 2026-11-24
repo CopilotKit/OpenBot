@@ -46,10 +46,9 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
-import { Sections } from "./Sections";
+import { SetupRail, Sections } from "./Sections";
 import { SelfContainedNote, UPDATING_SELF_CONTAINED } from "./SelfContained";
 import {
-  BehindSlot,
   engineNow,
   goAheadNow,
   handOffNow,
@@ -1474,6 +1473,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   if (checkingResume || checkingWindows) {
     return (
       <main>
+        <SetupRail />
         <div className="sheet connection-sheet">
           <h1>Getting OpenBot ready</h1>
           <p className="lede" role="status">
@@ -1529,8 +1529,10 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   if (!running && step === "install") {
     return (
       <main>
-        <div className="sheet">
+        <SetupRail>
           <Sections at="Install" />
+        </SetupRail>
+        <div className="sheet">
           <h1>
             {installationReady ? "Installation complete" : "Installing OpenBot"}
           </h1>
@@ -1675,14 +1677,16 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
             returningToInstallation ? (
               <LocalStatus sequence={local} />
             ) : (
-              <BehindSlot>
-                <BehindRow
-                  row={behind({
-                    done: "OpenBot starts as soon as you connect your AI.",
-                  })}
-                />
-                <LocalStatus sequence={local} download={false} />
-              </BehindSlot>
+              <LocalStatus sequence={local} download={false} />
+            )
+          }
+          background={
+            returningToInstallation ? undefined : (
+              <BehindRow
+                row={behind({
+                  done: "OpenBot starts as soon as you connect your AI.",
+                })}
+              />
             )
           }
           onInstallRequired={(problem, choice) => {
@@ -1916,8 +1920,8 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   if (starting) {
     return (
       <main>
+        <SetupRail>{!returning && <Sections at="Start" />}</SetupRail>
         <div className="sheet connection-sheet">
-          {!returning && <Sections at="Start" />}
           {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
           <h1>Finishing setup</h1>
           <p className="lede">
@@ -2066,7 +2070,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
 
 /** The background install's row, when there is one. */
 function BehindRow({ row }: { row: Progress | null }) {
-  return row && <SetupProgress steps={[row]} label="Background install" />;
+  return (
+    row && <SetupProgress steps={[row]} label="Background install" quiet />
+  );
 }
 
 function settleProgress(steps: Progress[], problem?: Problem): Progress[] {

@@ -47,6 +47,7 @@
   --text-base: 0.9375rem; /* 15px */
   --text-lg: 1.0546875rem; /* 16.875px */
   --text-2xl: 1.40625rem; /* 22.5px */
+  --text-3xl: 1.7578125rem; /* 28.125px */
 
   /* Tailwind's shadows, which the app's cards and popovers use. */
   --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
@@ -184,12 +185,15 @@ main {
 
 /* The one focal surface per screen: a white card on the frame, as OpenBot draws its panels. */
 .sheet {
+  /* The page's padding and its ground, which its pinned foot shares (`.step-footer`). */
+  --sheet-pad: 32px;
+  --sheet-ground: var(--card);
   width: 100%;
   max-width: 36rem;
   display: flex;
   flex-direction: column;
-  padding: 32px;
-  background: var(--card);
+  padding: var(--sheet-pad);
+  background: var(--sheet-ground);
   border: 1px solid var(--border);
   border-radius: var(--r-sheet);
   box-shadow: var(--elevation-md);
@@ -236,39 +240,79 @@ main {
   margin: 0;
 }
 
+/*
+ * Where you are in setup, down the sidebar: every section by name, the current one as the app marks
+ * a selected row, the ones done ticked in the success colour, the ones to come in the quieter ink.
+ */
 .sections {
   list-style: none;
+  margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .sections li {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
-  border-radius: var(--r-full);
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
   color: var(--text-disabled);
-  white-space: nowrap;
 }
 
 .sections li.done {
   color: var(--text-secondary);
 }
 
-/* Done is ticked, in the success colour; the tick is drawn, so the name reads as before. */
-.sections li.done::before {
-  content: "";
-  width: 6px;
-  height: 10px;
-  margin: -3px 2px 0 0;
-  border: solid var(--good);
-  border-width: 0 1.5px 1.5px 0;
-  transform: rotate(45deg);
-}
-
 .sections li.current {
   color: var(--text-primary);
   background: var(--active-tint);
+}
+
+/* A ring for every section, filled for the one you are on, a tick for the ones done. */
+.section-mark {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  opacity: 0.7;
+}
+
+.sections li.current .section-mark {
+  border-color: var(--ring);
+  opacity: 1;
+}
+
+.sections li.current .section-mark::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ring);
+}
+
+.sections li.done .section-mark {
+  border: 0;
+  opacity: 1;
+}
+
+.sections li.done .section-mark::after {
+  content: "";
+  width: 5px;
+  height: 9px;
+  margin-top: -3px;
+  border: solid var(--good);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
 }
 
 h1 {
@@ -1998,7 +2042,7 @@ main > .sheet:has(.journey.handing-off) .self-contained-why {
 
 @media (max-width: 580px) {
   .sheet {
-    padding: 24px;
+    --sheet-pad: 24px;
   }
 
   .setup-header {
@@ -2454,7 +2498,7 @@ main > .sheet {
  */
 main > .sheet:has(> .step-footer) {
   scrollbar-gutter: stable;
-  padding-right: calc(32px - var(--gutter, 0px));
+  padding-right: calc(var(--sheet-pad) - var(--gutter, 0px));
 }
 
 main > .sheet > * {
@@ -2469,11 +2513,11 @@ main > .sheet > * {
  */
 main > .sheet > .step-footer {
   position: sticky;
-  bottom: -32px;
+  bottom: calc(-1 * var(--sheet-pad));
   z-index: 1;
-  margin-bottom: -32px;
-  padding-bottom: 32px;
-  background: var(--card);
+  margin-bottom: calc(-1 * var(--sheet-pad));
+  padding-bottom: var(--sheet-pad);
+  background: var(--sheet-ground);
 }
 
 /* Its actions' gap above them is inside it, so what scrolls under it does not show through. */
@@ -2491,8 +2535,8 @@ main > .sheet > .step-footer.more-below::before {
   height: 56px;
   background: linear-gradient(
     to bottom,
-    color-mix(in srgb, var(--card) 0%, transparent),
-    var(--card)
+    color-mix(in srgb, var(--sheet-ground) 0%, transparent),
+    var(--sheet-ground)
   );
   pointer-events: none;
 }
@@ -2514,17 +2558,7 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
   padding-top: 24px;
 }
 
-@media (max-width: 580px) {
-  main > .sheet:has(> .step-footer) {
-    padding-right: calc(24px - var(--gutter, 0px));
-  }
 
-  main > .sheet > .step-footer {
-    bottom: -24px;
-    margin-bottom: -24px;
-    padding-bottom: 24px;
-  }
-}
 
 /*
  * Usage data, on the last screen of setup: a small checkbox and a line or two beside it, in the
@@ -2852,4 +2886,254 @@ p.move-key-none {
 /* A move that stopped: the reassurance first, then where it stopped. */
 .move-sheet > .move-safe {
   margin: 0 0 16px;
+}
+
+/*
+ * The setup window as OpenBot draws itself after setup: a sidebar on the window's ground, and the
+ * step as an inset page beside it (`SetupRail`). The sidebar says what is being set up and where
+ * you are in it, and holds what runs behind the step; the page holds the step and nothing else.
+ *
+ * The page is still `main > .sheet`, so a step taller than the window scrolls in it and its foot
+ * stays pinned (`StepFooter`), as before. It fills the window's height, so nothing below it moves
+ * as a step grows, and its content keeps the card's old measure, left-aligned.
+ */
+main:has(> .rail) {
+  --rail-width: 320px;
+  display: grid;
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  align-items: stretch;
+  padding: 0;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  /* Under the window's buttons (`TRAFFIC_LIGHTS`, 26 to 39 px down), with room to spare. */
+  padding: 64px 14px 20px;
+}
+
+.rail > .lockup {
+  margin: 0 12px 24px;
+}
+
+.rail-title {
+  margin: 0 12px 16px;
+  font-size: var(--text-2xl);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+/* At the foot of the sidebar, whatever else it holds: what runs behind the step. */
+.rail-foot {
+  margin-top: auto;
+  padding: 14px 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.rail-foot > :first-child {
+  margin-top: 0;
+}
+
+main > .rail + .sheet {
+  --sheet-pad: 48px;
+  --sheet-ground: var(--background);
+  max-width: none;
+  max-height: none;
+  min-height: 0;
+  margin: 10px 10px 10px 0;
+  padding-top: 56px;
+  border-radius: calc(var(--radius) * 1.4);
+  box-shadow: none;
+}
+
+main > .rail + .sheet > * {
+  max-width: 36rem;
+}
+
+/*
+ * The background install, in the sidebar: its row without a box, as a list in the sidebar is
+ * drawn. Its mark never spins (`SetupProgress` `quiet`); the step's own wait is the one that does.
+ */
+.rail-foot .steps {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  overflow: visible;
+}
+
+/* The sidebar's narrow measure: the row's status and time under its name, as a narrow window sets
+   every row, so the name is never cut. */
+.rail-foot .step {
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-areas:
+    "mark label"
+    ". status"
+    ". detail";
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.rail-foot .step-status {
+  justify-self: start;
+}
+
+/* A running row whose spinner is elsewhere on the screen: a filled ring, held still. */
+.step-current {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--ring) 35%, transparent);
+  background: radial-gradient(circle, var(--ring) 0 3px, transparent 3.5px);
+}
+
+/*
+ * The first screen's sidebar: the ways to run OpenBot as the sidebar's rows, each its icon, name
+ * and line, the picked one tinted as the app marks a selected row. Rows, not the card's tiles.
+ */
+.rail fieldset.picker.hosting {
+  margin: 0;
+  gap: 2px;
+}
+
+.rail fieldset.picker.hosting .tile,
+.rail .tile-group {
+  grid-template-columns: 18px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+}
+
+.rail fieldset.picker.hosting .tile:hover {
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.rail fieldset.picker.hosting .tile.chosen,
+.rail fieldset.picker.hosting .tile.chosen:hover {
+  background: var(--active-tint);
+}
+
+.rail .mark-tile {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-secondary);
+}
+
+.rail .mark-tile svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rail .tile-name {
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.rail .tile-group {
+  margin-top: 6px;
+}
+
+.rail .tile-options {
+  gap: 2px;
+  margin: 6px 0 0 -28px;
+}
+
+.rail .tile-option {
+  min-height: 34px;
+  padding: 7px 12px 7px 28px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+}
+
+.rail .tile-option:hover {
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.rail .tile-option.chosen,
+.rail .tile-option.chosen:hover {
+  background: var(--active-tint);
+}
+
+.rail .tile-option-summary {
+  display: none;
+}
+
+/* A tint shows the chosen row; the ring still shows where the keyboard is. */
+.rail .tile:has(.tile-input:focus-visible),
+.rail .tile-option:has(.tile-input:focus-visible) {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+/* The page of the picked way: its name as the page's heading, its line under it. */
+.choice-head {
+  margin-bottom: 28px;
+}
+
+.choice-head h2 {
+  margin: 0 0 6px;
+  font-size: var(--text-3xl);
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.choice-head p {
+  margin: 0;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+/* What this computer needs, as four facts in a grid, each under a hairline. */
+.rail + .sheet .needs-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 28px;
+  margin: 16px 0 24px;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+
+.rail + .sheet .needs-list li {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.rail + .sheet .business-booker {
+  margin-top: 0;
+}
+
+/* Narrower windows (the window's least is 720 px): a narrower sidebar, its rows' lines left out. */
+@media (max-width: 860px) {
+  main:has(> .rail) {
+    --rail-width: 248px;
+  }
+
+  main > .rail + .sheet {
+    --sheet-pad: 32px;
+    padding-top: 40px;
+  }
+
+  .rail .tile-summary,
+  .rail .cloud-marks {
+    display: none;
+  }
 }
