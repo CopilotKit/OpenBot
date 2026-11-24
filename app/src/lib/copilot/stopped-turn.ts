@@ -1,6 +1,7 @@
 import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
 import { botNoLongerUsable } from "@/lib/agents/queries";
+import { problemRequestId, recordProblem } from "@/lib/desktop/problems";
 import { isPlanRequired, showCardNeeded } from "@/lib/plan/card-needed";
 
 /**
@@ -355,30 +356,83 @@ export function useStoppedTurn(agentId: string): string | null {
   const { agent } = useAgent({ agentId });
   const [stopped, setStopped] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Which run a sentence is about, so one that arrives after the next run began is dropped.
-    let run = 0;
-    const subscription = agent.subscribe?.({
-      onRunInitialized: () => {
-        run += 1;
-        setStopped(null);
-      },
-      onRunErrorEvent: ({ event }) => setStopped(stoppedReason(event?.message)),
-      onRunFailed: ({ error }) => {
-        if (!requestNotMade(error)) return setStopped(stoppedReason(error));
-        // Said once the server has answered whether the Bot is still theirs, so the wrong sentence
-        // is never drawn first.
-        const failed = run;
-        void failedRunReason(error, agentId).then((reason) => {
-          if (failed === run) setStopped(reason);
-        });
-      },
-    });
-    return () => {
-      run += 1;
-      subscription?.unsubscribe();
-    };
-  }, [agent, agentId]);
+  useEffect(
+    () => watchStoppedTurn(agent, agentId, setStopped),
+    [agent, agentId],
+  );
 
   return stopped;
+}
+
+/** The request id the problem body of a failed run carries (`REST run request failed: {…}`), if any. */
+export function failureRequestId(reported: unknown): string | undefined {
+  const said =
+    reported instanceof Error
+      ? reported.message
+      : typeof reported === "string"
+        ? reported
+        : "";
+  return problemRequestId(refusedBody(said));
+}
+
+/**
+ * Inside OpenBot Desktop, a run that failed is handed to the desktop app's log as the sentence the
+ * person was shown, with the server's request id when the failure carried one. The runtime's own
+ * requests do not go through `lib/client.ts`, so this is how a broken reply reaches the log.
+ *
+ * Recorded whenever the sentence is shown. Opening a conversation replays how its last run ended,
+ * with nothing that tells the replay from a run failing now, so a failure shown again is recorded
+ * again, at the time it was shown.
+ */
+function recordFailedRun(sentence: string, reported: unknown): void {
+  const requestId = failureRequestId(reported);
+  recordProblem({
+    kind: "run",
+    message: sentence,
+    ...(requestId ? { requestId } : {}),
+  });
+}
+
+/**
+ * What `useStoppedTurn` does with one agent: tells `setStopped` the sentence for each run that ends
+ * badly, and null as the next one starts. Returns the function that stops watching.
+ */
+export function watchStoppedTurn(
+  agent: Pick<AbstractAgent, "subscribe">,
+  agentId: string,
+  setStopped: (sentence: string | null) => void,
+  noLongerUsable?: (botId: string) => Promise<boolean>,
+): () => void {
+  // Which run a sentence is about, so one that arrives after the next run began is dropped.
+  let run = 0;
+  const subscription = agent.subscribe?.({
+    onRunInitialized: () => {
+      run += 1;
+      setStopped(null);
+    },
+    onRunErrorEvent: ({ event }) => {
+      const sentence = stoppedReason(event?.message);
+      setStopped(sentence);
+      recordFailedRun(sentence, event?.message);
+    },
+    onRunFailed: ({ error }) => {
+      if (!requestNotMade(error)) {
+        const sentence = stoppedReason(error);
+        setStopped(sentence);
+        recordFailedRun(sentence, error);
+        return;
+      }
+      // Said once the server has answered whether the Bot is still theirs, so the wrong sentence
+      // is never drawn first.
+      const failed = run;
+      void failedRunReason(error, agentId, noLongerUsable).then((reason) => {
+        recordFailedRun(reason, error);
+        if (failed === run) setStopped(reason);
+      });
+    },
+  });
+  return () => {
+    run += 1;
+    subscription?.unsubscribe();
+  };
 }
