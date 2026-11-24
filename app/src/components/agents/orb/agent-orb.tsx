@@ -1,6 +1,7 @@
 import {
   AGENT_ORB_COLORS,
   AGENT_ORB_CSS,
+  AGENT_ORB_GLOW,
   AGENT_ORB_LOOP_SECONDS,
   agentOrbDriftSeconds,
   agentOrbSizing,
@@ -29,10 +30,11 @@ const AMPLITUDE_SCALE_GAIN = 0.12;
 const ERROR_SHAKE_KEYFRAMES = [0, -3, 3, 0];
 const ERROR_SHAKE_DURATION = 0.18;
 const EASE_IN_OUT = [0.645, 0.045, 0.355, 1] as const;
-const GLOW_BLUR_RATIO = 0.28;
-/** The bloom's box reaches this far past the orb's on every side, as a fraction of the orb size. */
-const GLOW_INSET_RATIO = 0.12;
-const GLOW_MAX_OPACITY = 0.7;
+const {
+  blurRatio: GLOW_BLUR_RATIO,
+  insetRatio: GLOW_INSET_RATIO,
+  maxOpacity: GLOW_MAX_OPACITY,
+} = AGENT_ORB_GLOW;
 
 /**
  * How far past its own box the orb paints, as a fraction of its size: the bloom's box, blurred

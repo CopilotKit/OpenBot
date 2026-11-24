@@ -68,16 +68,50 @@ const DRIFT_BASE_SECONDS = 12;
 /** The mesh's rotation period in seconds, before a state's speed divides it. */
 export const AGENT_ORB_LOOP_SECONDS = 20;
 
-/**
- * The orb at rest, as the app's `idle` state draws it (`AI_STATE_MOTION.idle` in
- * app/src/components/agents/orb/ai-core.tsx): the speed that divides the loops and the
- * saturation over the disc. For an orb drawn without the app's states, such as the Desktop setup
- * window's mark. app/tests/agent-orb-shared.test.ts keeps it in step with `idle`.
- */
-export const AGENT_ORB_AT_REST: {
+/** How an orb in one of the app's states moves: the part of a state the orb's CSS can draw. */
+export type AgentOrbMood = {
+  /** Bloom strength, 0–1, before {@link AGENT_ORB_GLOW}'s `maxOpacity`. */
+  readonly glow: number;
+  /** Saturation over the disc. */
   readonly saturation: number;
+  /** The disc's scale. */
+  readonly scale: number;
+  /** Divides the loops: 1 is the base tempo. */
   readonly speed: number;
-} = { saturation: 0.75, speed: 0.6 };
+};
+
+/*
+ * The app's `idle` and `listening` states (`AI_STATE_MOTION` in
+ * app/src/components/agents/orb/ai-core.tsx), for an orb drawn without the app's states, such as
+ * the Desktop setup window's mark. app/tests/agent-orb-shared.test.ts keeps them equal to the app's.
+ */
+
+/** The orb at rest: the app's `idle`. */
+export const AGENT_ORB_AT_REST: AgentOrbMood = {
+  glow: 0.15,
+  saturation: 0.75,
+  scale: 0.94,
+  speed: 0.6,
+};
+
+/** The orb hearing someone: the app's `listening`. */
+export const AGENT_ORB_LISTENING: AgentOrbMood = {
+  glow: 0.6,
+  saturation: 1.05,
+  scale: 1.06,
+  speed: 1,
+};
+
+/**
+ * The bloom behind the disc, in the orb's own `--c2`: its box reaches `insetRatio` of the orb's size
+ * past the orb's on every side, it is blurred by `blurRatio` of the size, and a state's `glow` is a
+ * fraction of `maxOpacity`.
+ */
+export const AGENT_ORB_GLOW = {
+  blurRatio: 0.28,
+  insetRatio: 0.12,
+  maxOpacity: 0.7,
+} as const;
 
 /** What the orb's size sets: how soft the mesh is, its contrast, the dots, the mask and the rim. */
 export type AgentOrbSizing = {

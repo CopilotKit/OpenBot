@@ -2106,12 +2106,26 @@ main > .sheet:has(.journey.handing-off) .self-contained-why {
  * turns on its `@property` angle and the sheen drifts as they do in the app. An earlier still copy
  * left the spin out as too much for a small mark; the app draws the same orb, turning, at 24 to
  * 26px beside its own name, and it reads as OpenBot's. It holds still under reduced motion. This
- * is only the box it sits in: its size is set by `Lockup`, 32px or the smaller lockup's 22px.
+ * is only the box it sits in, with the bloom behind the disc: its size is set by `Lockup`, 32px
+ * or the smaller lockup's 22px. A click makes it notice you (`orbNotice.ts`), through the
+ * `--orb-glow`, `--orb-saturation` and `--orb-scale` it sets on this box.
  */
 .orb {
   position: relative;
   flex: none;
   border-radius: 50%;
+}
+
+/* AgentOrb's bloom, in the orb's own blue, as strong as its state's glow. */
+.orb::before {
+  content: "";
+  position: absolute;
+  inset: var(--orb-glow-inset);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, var(--c2) 0%, transparent 64%);
+  filter: blur(var(--orb-glow-blur));
+  opacity: calc(var(--orb-glow) * var(--orb-glow-max));
+  pointer-events: none;
 }
 
 /* The app's name beside its mark, set as the app's sidebar sets it. */

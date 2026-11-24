@@ -1,12 +1,14 @@
-import type { CSSProperties, ReactNode } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useRef } from "react";
 import {
   AGENT_ORB_AT_REST,
   AGENT_ORB_COLORS,
   AGENT_ORB_CSS,
+  AGENT_ORB_GLOW,
   AGENT_ORB_LOOP_SECONDS,
   agentOrbDriftSeconds,
   agentOrbSizing,
 } from "../../shared/agent-orb";
+import { noticeOnClick, restingLook } from "./orbNotice";
 
 /** One part of setup, named for what it is about rather than counted. */
 export type Section = "Account" | "Install" | "AI" | "Start";
@@ -19,35 +21,49 @@ export type Section = "Account" | "Install" | "AI" | "Start";
 const SECTIONS: Section[] = ["Account", "Install", "AI", "Start"];
 
 /**
- * OpenBot's mark: the app's own orb (`AgentOrb`), drawn from the same stylesheet, palette and
- * size values in `shared/agent-orb`, at rest as the app draws it beside its name. Its mesh turns
+ * OpenBot's mark: the app's own orb (`AgentOrb`), drawn from the same stylesheet, palette, size
+ * values and bloom in `shared/agent-orb`, at rest as the app draws it beside its name. Its mesh turns
  * and its sheen drifts with CSS alone, so this window needs no motion library; both hold still
  * under reduced motion. The stylesheet goes to the document's head once (React's `<style href>`),
  * so it is not text inside the lockup.
+ *
+ * A click makes it notice you for half a second (`orbNotice.ts`). It stays decoration: no role, no
+ * focus stop, and the normal pointer, since nothing depends on the click.
  */
 function Orb({ size }: { size: number }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => (box.current ? noticeOnClick(box.current) : undefined), []);
   const sizing = agentOrbSizing(size);
-  const style = {
-    "--animation-duration": `${AGENT_ORB_LOOP_SECONDS / AGENT_ORB_AT_REST.speed}s`,
+  const boxStyle = {
     "--bg": AGENT_ORB_COLORS.bg,
-    "--blur-amount": `${sizing.blur}px`,
     "--c1": AGENT_ORB_COLORS.c1,
     "--c2": AGENT_ORB_COLORS.c2,
     "--c3": AGENT_ORB_COLORS.c3,
     "--c4": AGENT_ORB_COLORS.c4,
+    "--orb-glow-blur": `${size * AGENT_ORB_GLOW.blurRatio}px`,
+    "--orb-glow-inset": `${-size * AGENT_ORB_GLOW.insetRatio}px`,
+    "--orb-glow-max": AGENT_ORB_GLOW.maxOpacity,
+    ...restingLook(),
+    width: size,
+    height: size,
+  } as CSSProperties;
+  const discStyle = {
+    "--animation-duration": `${AGENT_ORB_LOOP_SECONDS / AGENT_ORB_AT_REST.speed}s`,
+    "--blur-amount": `${sizing.blur}px`,
     "--contrast-amount": sizing.contrast,
     "--dot-size": `${sizing.dotSize}px`,
     "--drift-duration": `${agentOrbDriftSeconds(AGENT_ORB_AT_REST.speed)}s`,
     "--mask-radius": sizing.maskRadius,
     "--rim": `${sizing.rim}px`,
     "--shadow-spread": `${sizing.shadowSpread}px`,
-    filter: `saturate(${AGENT_ORB_AT_REST.saturation})`,
+    filter: "saturate(var(--orb-saturation))",
+    scale: "var(--orb-scale)",
     width: "100%",
     height: "100%",
   } as CSSProperties;
   return (
-    <div className="orb" style={{ width: size, height: size }}>
-      <div className="agent-orb" style={style}>
+    <div className="orb" ref={box} style={boxStyle}>
+      <div className="agent-orb" style={discStyle}>
         <span className="agent-orb-layer agent-orb-sheen" />
         <span className="agent-orb-layer agent-orb-rim" />
       </div>
