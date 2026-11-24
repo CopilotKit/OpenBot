@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import { ConsentHandoffDialog } from "@/components/plugins/consent-handoff";
 import { desktopShell } from "@/lib/desktop/shell";
+import { markConnectReturn } from "@/lib/plugins/connect-return";
 import {
   brokeredConsentFor,
   type ConsentHandoff,
@@ -128,6 +129,14 @@ export function useConnectInNewTab() {
     return tab;
   };
 
+  /*
+   * WHERE THE PRESS WAS MADE goes with the tab, so the page the sign-in comes back to can close it,
+   * or send it back here, once the account is connected (lib/plugins/connect-return.ts). Written
+   * before the tab leaves OpenBot, while it is still this site's blank page.
+   */
+  const here = () =>
+    `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
   /**
    * `first` runs between claiming the tab and asking for the consent, for a press that has to turn
    * the app on before it can be connected (the personal edition's chat card). The tab is claimed
@@ -141,23 +150,35 @@ export function useConnectInNewTab() {
     }
     const tab = claimTab();
     handle.current = tab;
+    markConnectReturn(tab, serverId, here());
     void ask(serverId, tab);
   };
 
   /**
    * The same, for a press whose `first` is what names the app: adding an app from Browse apps
    * answers the id of the row it made, and that row is what the sign-in is for.
+   *
+   * `first` may answer null: the press turned out to need no sign-in (the chat card's Connect on an
+   * app that did not say how it connects until it was on, and then took a key). The claimed tab is
+   * closed unused. Settles once the tab is closed or the sign-in asked for, so the caller can go on
+   * to whatever replaced the sign-in.
    */
-  const openAfter = (first: () => Promise<string>) => {
+  const openAfter = (first: () => Promise<string | null>): Promise<void> => {
     const tab = claimTab();
     handle.current = tab;
-    first().then(
-      (serverId) => void ask(serverId, tab),
-      () => {
-        tab?.close();
-        handle.current = null;
-      },
-    );
+    const from = here();
+    const unused = () => {
+      tab?.close();
+      handle.current = null;
+    };
+    return first().then((serverId) => {
+      if (serverId === null) {
+        unused();
+        return;
+      }
+      markConnectReturn(tab, serverId, from);
+      void ask(serverId, tab);
+    }, unused);
   };
 
   /*

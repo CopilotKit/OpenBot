@@ -1211,7 +1211,7 @@ export function PluginPage({
                           {/* Decorative: the word beside it already says which. */}
                           <span
                             aria-hidden="true"
-                            className="size-1.5 rounded-full bg-emerald-500"
+                            className="size-1.5 rounded-full bg-success"
                           />
                           <span className="text-muted-foreground text-xs">
                             Connected
@@ -1458,7 +1458,7 @@ export function PluginPage({
                       <span
                         className={
                           tool.effect === "write"
-                            ? "text-amber-600 text-xs dark:text-amber-500"
+                            ? "text-warning text-xs"
                             : "text-muted-foreground text-xs"
                         }
                       >
@@ -1674,7 +1674,7 @@ export function PluginPage({
 
       {/*
        * Who first, then what: the decision arrives as "set this Bot up", not as a list of tools
-       * looking for an owner. Both groups get a select-all; the amber heading and the footer's
+       * looking for an owner. Both groups get a select-all; the warning-coloured heading and the footer's
        * "N of which change things" are what keep a bulk write grant a read decision, not a blind one.
        */}
       {server ? (
@@ -1787,7 +1787,7 @@ export function PluginPage({
                   >
                     <div className="mb-1 flex items-center justify-between">
                       <p
-                        className="font-medium text-amber-600 text-sm dark:text-amber-500"
+                        className="font-medium text-warning text-sm"
                         id="grant-writes-heading"
                       >
                         Changes things

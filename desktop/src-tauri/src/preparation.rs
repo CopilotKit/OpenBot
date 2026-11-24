@@ -484,14 +484,36 @@ fn require_with(
     }
     // A deployment laid out by an app that copied less still matches its own fingerprint. Install
     // lays it out again; Start cannot.
-    if deployment::installed(root)
-        .is_some_and(|found| deployment::needs_fetch(root, &found.version))
-    {
-        return Err(required(
-            "The deployment was laid out by an earlier OpenBot and is missing files this version runs.",
-        ));
+    if let Some(problem) = incomplete_deployment(root) {
+        return Err(problem);
     }
     verify(&record.images)
+}
+
+/// An installed deployment Install has to lay out again before it can start, as the problem that
+/// sends the window back to Install: one whose image list is gone, or that an earlier app laid out
+/// with less than this one runs ([`deployment::needs_fetch`]). None for anything else, a folder
+/// nothing was installed in included.
+///
+/// Start asks this before it reads the Bot's image from the list. A list something outside OpenBot
+/// deleted was read as a release without the Bot: the window said to choose another Bot, never ran
+/// Install, and every Retry failed the same way, while Repair, which re-downloads only the list,
+/// fixed it.
+pub fn incomplete_deployment(root: &Path) -> Option<Problem> {
+    let found = deployment::installed(root)?;
+    if !deployment::needs_fetch(root, &found.version) {
+        return None;
+    }
+    let images = deployment::images_path(root);
+    Some(required(if images.exists() {
+        "The deployment was laid out by an earlier OpenBot and is missing files this version runs."
+            .to_string()
+    } else {
+        format!(
+            "The image list {} is missing. Install downloads it again.",
+            images.display()
+        )
+    }))
 }
 
 /// Every image Install pulls for the release laid out in `release`, run as `root`'s project: the
@@ -635,6 +657,65 @@ mod tests {
         let problem = require_with(&f.root, None, |_| Ok(()))
             .expect_err("a deployment missing folders this app copies cannot start");
         assert!(problem.said.contains("Finish installing"));
+    }
+
+    /// An image list something outside OpenBot deleted, from a finished install: Start sends it
+    /// back to Install, Install's lay-out step downloads the list and nothing else (never the
+    /// release's archive), and the install check passes after, as Repair did by hand.
+    #[test]
+    fn a_deleted_image_list_is_downloaded_again_alone_and_the_install_check_passes() {
+        let f = Fixture::new();
+        let list = serde_json::json!({
+            "version": "v-test",
+            "images": {
+                "server": { "reference": "ghcr.io/copilotkit/openbot-server@sha256:00" },
+                "supervisor": { "reference": "ghcr.io/copilotkit/openbot-supervisor@sha256:00" },
+                "agent-computer": { "reference": "ghcr.io/copilotkit/openbot-agent-computer@sha256:00" },
+            },
+        })
+        .to_string();
+        std::fs::write(deployment::images_path(&f.root), &list).unwrap();
+        f.prepared(None);
+        require_with(&f.root, Some(&None), |_| Ok(())).expect("installed");
+
+        std::fs::remove_file(deployment::images_path(&f.root)).unwrap();
+        let refused = incomplete_deployment(&f.root).expect("Start sends it back to Install");
+        assert_eq!(refused.said, REQUIRED);
+        assert_eq!(
+            refused.connection,
+            Some(crate::problem::Connection::Installation)
+        );
+        assert!(
+            refused
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("container-images.json")),
+            "{refused:?}"
+        );
+        assert!(require_with(&f.root, Some(&None), |_| Ok(())).is_err());
+
+        let asked = std::sync::Mutex::new(Vec::<String>::new());
+        let get = |url: &str| -> Result<Vec<u8>, String> {
+            asked.lock().unwrap().push(url.to_string());
+            if url.ends_with("/releases/download/v-test/container-images.json") {
+                Ok(list.clone().into_bytes())
+            } else {
+                Err(format!("unexpected download {url}"))
+            }
+        };
+        deployment::fetch_with(&f.root, "v-test", &get).expect("Install puts the list back");
+
+        assert_eq!(
+            asked.into_inner().unwrap().len(),
+            1,
+            "only the image list is downloaded"
+        );
+        assert_eq!(
+            std::fs::read_to_string(deployment::images_path(&f.root)).unwrap(),
+            list
+        );
+        assert!(incomplete_deployment(&f.root).is_none());
+        require_with(&f.root, Some(&None), |_| Ok(())).expect("the install check passes again");
     }
 
     /// Installing is pulling images, so a clean machine completes it with nothing on the host but

@@ -14,9 +14,8 @@ import { compile } from "tailwindcss";
  * 1.4.11 (Non-text Contrast) asks for 3:1 between what identifies a control and the colours next to
  * it, and an unticked tickbox is identified by its edge alone.
  *
- * Measured on what the browser paints, not on the tokens: the app's own Agents section
- * (`BotDelegation`) and the tickbox on the page, a card, a menu or dialog, and a `bg-muted/50` row,
- * all from checkbox-contrast.fixture.tsx, styled by the app's stylesheet. Each unticked tickbox is
+ * Measured on what the browser paints, not on the tokens: the tickbox on the page, a card, a menu or
+ * dialog, and a `bg-muted/50` row, all from checkbox-contrast.fixture.tsx, styled by the app's stylesheet. Each unticked tickbox is
  * screenshotted with a few pixels of what is round it, and the edge's colour is held against the
  * colour beside it, by WCAG's relative luminance and contrast ratio.
  *
@@ -185,7 +184,7 @@ async function open(
     });
   });
   await page.goto(`${ORIGIN}/`, { waitUntil: "domcontentloaded" });
-  await page.getByText("Agents it may use").first().waitFor();
+  await page.locator("[data-surface]").first().waitFor({ state: "attached" });
   const classes = await page.evaluate(() =>
     [...document.querySelectorAll("[class]")].flatMap((element) => [
       ...element.classList,
@@ -302,8 +301,8 @@ describe.skipIf(!asked)("an unticked tickbox", () => {
           console.log(
             `  ${each.ratio.toFixed(2)}:1  ${each.what}  edge ${each.edge} beside ${each.beside}`,
           );
-        // The Agents page's two agents not yet chosen, and the four surfaces.
-        expect(found.length).toBe(6);
+        // The four surfaces.
+        expect(found.length).toBe(4);
         expect(found.filter((each) => each.ratio < NON_TEXT_CONTRAST)).toEqual(
           [],
         );

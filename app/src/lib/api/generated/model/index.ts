@@ -33,6 +33,7 @@ export * from "./aiConnectionFixedResponse";
 export * from "./aiConnectionInput";
 export * from "./aiConnectionLogin";
 export * from "./aiConnectionProvider";
+export * from "./aiConnectionProviderAnswer";
 export * from "./aiConnectionRefusedResponse";
 export * from "./aiConnectionSaved";
 export * from "./aiConnectionSharedSignIn";

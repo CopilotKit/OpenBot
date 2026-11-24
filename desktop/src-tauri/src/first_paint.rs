@@ -31,6 +31,12 @@ white (`drawsBackground`) and sets the colour behind its page ([`underPageBackgr
 wry 0.54.2 and later), so the ground shows through until the page paints. No cover is needed there:
 the wait is a fraction of a second, not Windows' minute.
 
+That ground is all a page that never draws leaves on screen, and on a Mac after an update (1.2.0-rc.3)
+it stayed so across two launches. So on every platform the setup page's heartbeat is watched as well
+(`stall::PageWatch`, `desktop_stall`): a setup page that hasn't answered with something drawn ten
+seconds after it loaded, or goes quiet, is reloaded once, and if it is still quiet OpenBot says so in
+a native alert with Restart and Get logs. The cover here is left as it was.
+
 [background]: https://learn.microsoft.com/microsoft-edge/webview2/reference/win32/icorewebview2controller2#put_defaultbackgroundcolor
 [tauri]: https://docs.rs/tauri/2/tauri/webview/struct.WebviewWindowBuilder.html#method.background_color
 [hook]: https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setwineventhook
@@ -56,24 +62,26 @@ pub struct Palette {
     pub soft: (u8, u8, u8),
 }
 
-/// Light: `oklch(0.948 0.011 286.2)`, `oklch(1 0 0)`, `oklch(0.894 0.014 286.1)`,
-/// `oklch(0.108 0.015 220.9)`, `oklch(0.506 0.013 285.9)`.
+/// Light: the scheme's sidebar, card, border, foreground and muted-foreground, in sRGB.
 pub const LIGHT: Palette = Palette {
+    // tokens/src/scheme.ts, light: ground=sidebar card=card border=border ink=foreground soft=muted-foreground (bun run tokens:generate)
     ground: (0xed, 0xed, 0xf5),
     card: (0xff, 0xff, 0xff),
     border: (0xdb, 0xdb, 0xe5),
     ink: (0x01, 0x05, 0x07),
     soft: (0x64, 0x64, 0x6c),
+    // end of tokens/src/scheme.ts
 };
 
-/// Dark: `oklch(0.156 0.017 295.8)`, `oklch(0.212 0.028 297.1)`, `oklch(0.28 0.035 298.6)`,
-/// `oklch(0.956 0.005 286.3)`, `oklch(0.69 0.017 285.9)`.
+/// Dark: the same five, in sRGB.
 pub const DARK: Palette = Palette {
+    // tokens/src/scheme.ts, dark: ground=sidebar card=card border=border ink=foreground soft=muted-foreground (bun run tokens:generate)
     ground: (0x0d, 0x0b, 0x13),
     card: (0x1a, 0x16, 0x24),
     border: (0x2b, 0x25, 0x38),
     ink: (0xf0, 0xf0, 0xf4),
     soft: (0x9a, 0x9a, 0xa6),
+    // end of tokens/src/scheme.ts
 };
 
 /**

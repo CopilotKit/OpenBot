@@ -16,7 +16,7 @@
  * never moves while the person points at it or it has the keyboard, and never for nothing: it stays where it is while
  * it covers nothing there, or while no spot covers less.
  *
- * Drawn like the notice: OpenBot's colours copied from app/src/theme.css (notice.ts), marked `data-copilotkit-ignore` so
+ * Drawn like the notice: OpenBot's colours, from its scheme (notice.ts), marked `data-copilotkit-ignore` so
  * a click on it is never one of the person's steps, and acting only on trusted events, so a page script cannot press its
  * button.
  *

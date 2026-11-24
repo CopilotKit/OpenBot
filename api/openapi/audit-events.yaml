@@ -17,8 +17,10 @@ paths:
         happens to the organization itself is on its trail too:
         organization.created, organization.renamed,
         organization.member_invited, organization.invitation_canceled,
-        organization.member_joined, organization.member_removed and
-        organization.member_role_changed.
+        organization.member_joined, organization.member_removed,
+        organization.member_role_changed and organization.deleted, and its
+        teams: team.created, team.updated, team.deleted, team.member_added,
+        team.member_role_changed and team.member_removed.
         Each filter narrows the events, and a filter that takes
         several values separated by commas matches any of them. A value that
         names nothing in the trail matches no event rather than being refused.

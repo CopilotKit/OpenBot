@@ -362,7 +362,7 @@ export function PluginBotPage({
                * claim of safety — so an absence stays an absence here rather than becoming a green
                * word that says more than anybody knows.
                *
-               * The destructive colour rather than the amber this app's tool list gives writes: the
+               * The destructive colour rather than the warning colour this app's tool list gives writes: the
                * heading over these rows already says they change things, and the one thing left to
                * say about this row is that what it changes does not come back.
                */}

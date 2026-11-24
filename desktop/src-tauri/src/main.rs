@@ -4,11 +4,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod desktop_about;
 mod desktop_connected;
 mod desktop_connection;
 mod desktop_host_access;
 mod desktop_move;
 mod desktop_page;
+mod desktop_reload;
 mod desktop_stall;
 mod desktop_status;
 mod desktop_telemetry;
@@ -989,10 +991,17 @@ fn emit_progress<R: tauri::Runtime>(app: &tauri::AppHandle<R>, progress: Progres
 }
 
 /// The setup page's heartbeat, every few seconds while its setup, start or update screens show and
-/// as soon as a row's progress reaches it: the highest progress number it has taken, and whether it
-/// has just loaded. Off the main thread, and it waits on nothing.
+/// as soon as a row's progress reaches it: the highest progress number it has taken, whether it
+/// has just loaded, the heading of the screen it shows, and whether it has drawn anything at all
+/// (`desktop_stall::Shown`). Off the main thread, and it waits on nothing.
 #[tauri::command]
-async fn setup_heartbeat(app: tauri::AppHandle, seen: u64, fresh: bool) {
+async fn setup_heartbeat(
+    app: tauri::AppHandle,
+    seen: u64,
+    fresh: bool,
+    screen: Option<String>,
+    drawn: Option<bool>,
+) {
     // The setup page has painted: "Getting OpenBot ready" comes off the window (`first_paint`).
     if let Some(up) = first_paint::page_painted() {
         log::info!(
@@ -1001,8 +1010,71 @@ async fn setup_heartbeat(app: tauri::AppHandle, seen: u64, fresh: bool) {
             up.as_secs_f64()
         );
     }
-    desktop_stall::heartbeat(&app, seen, fresh);
+    desktop_stall::heartbeat(
+        &app,
+        seen,
+        fresh,
+        desktop_stall::Shown::from_page(screen, drawn),
+    );
 }
+
+/// The most of a page error's message and of its stack that goes in the log.
+const PAGE_ERROR_MESSAGE: usize = 2_000;
+const PAGE_ERROR_STACK: usize = 6_000;
+
+/**
+An error in the setup window's page, for the Desktop log: a screen that failed to draw (caught by
+the page's error boundary, which shows "OpenBot hit a problem" in its place), an uncaught error, or
+a promise rejected with nothing to catch it. Before this, a page that broke left a plain window and
+nothing in the log. `kind` is which of the three; the log's own scrub takes out keys and the like.
+*/
+#[tauri::command]
+async fn page_error(kind: String, message: String, stack: Option<String>) {
+    let bounded = |text: &str, most: usize| text.chars().take(most).collect::<String>();
+    let kind = bounded(&kind, 40);
+    let message = bounded(&message, PAGE_ERROR_MESSAGE);
+    match stack.filter(|stack| !stack.trim().is_empty()) {
+        Some(stack) => log::error!(
+            "[page] {kind}: {message}\n{}",
+            bounded(&stack, PAGE_ERROR_STACK)
+        ),
+        None => log::error!("[page] {kind}: {message}"),
+    }
+}
+
+/**
+The setup page was reloaded and is still stuck (`desktop_stall`): OpenBot says so in a native
+alert, since the page can't, with Restart and Get logs. Restart starts this app again and leaves
+OpenBot running, as the restart after an update does; Get logs saves the troubleshooting logs and
+shows the file, as the menu's Get Troubleshooting Logs… does.
+*/
+fn setup_page_stuck(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    show_prompt(app, setup_stuck_prompt(), move |restart| {
+        if restart {
+            log::info!("[ui] restarting OpenBot from the stuck window's alert");
+            restart_into_update(&handle);
+        }
+        log::info!("[ui] getting the troubleshooting logs from the stuck window's alert");
+        save_troubleshooting_logs_from_menu(handle);
+    });
+}
+
+/**
+The stuck window's alert. Its words hold for both ways a page gets stuck: a blank page, and one
+frozen on its last screen, which still shows that screen. Before, it said "it still isn't showing
+anything", which is false of a frozen page.
+*/
+pub(crate) fn setup_stuck_prompt() -> app_update::Prompt {
+    app_update::Prompt {
+        title: SETUP_STUCK_TITLE.to_owned(),
+        message: SETUP_STUCK_MESSAGE.to_owned(),
+        buttons: Some(("Restart", "Get logs")),
+    }
+}
+
+const SETUP_STUCK_TITLE: &str = "OpenBot's window isn't responding";
+const SETUP_STUCK_MESSAGE: &str = "OpenBot tried reloading it, and it still isn't updating. Restart OpenBot to try again. Get logs saves what happened to a file you can share.";
 
 /// The running step last written to the log, so a step that says the same thing on every poll
 /// (an engine that is still starting) is one entry rather than one a second.
@@ -1819,7 +1891,6 @@ async fn windows_blocker_from<R: tauri::Runtime>(
         let outcome = match &result {
             Ok(None) => Outcome::Ready,
             Ok(Some(win::Blocker::WslAbsent)) => Outcome::WslAbsent,
-            Ok(Some(win::Blocker::WslOne)) => Outcome::WslOne,
             Ok(Some(win::Blocker::WslNoKernel)) => Outcome::WslNoKernel,
             Ok(Some(win::Blocker::VirtualMachinePlatformDisabled)) => {
                 Outcome::VirtualMachinePlatformDisabled
@@ -5178,16 +5249,29 @@ async fn start_stack_inner<R: tauri::Runtime>(
      */
     let requested_harness = harness.clone();
     let harness = harness::for_credential(&credential, harness);
-    let picked = harness::picked(harness.as_ref(), &root).map_err(|error| {
+    /*
+     * A deployment missing its image list is an unfinished install, said as one, so the window
+     * runs Install (which downloads only the list again) and starts. Asked before the Bot's image is
+     * read from that list: a list something outside OpenBot deleted read as "This version of
+     * OpenBot does not include the Bot you picked", the window never offered Install, and every
+     * Retry failed at once.
+     */
+    if let Some(problem) = preparation::incomplete_deployment(&root) {
+        log::warn!("[start] {}", logging::Failure::described(&problem));
+        return Err(problem);
+    }
+    let picked = harness::pick(harness.as_ref(), &root).map_err(|error| match error {
+        // A list there but not readable is the same unfinished install.
+        harness::PickError::ImageList(detail) => preparation::required(detail),
         // Two registers, because one of these refusals is about a release and the other is
         // about a pick. "OpenBot v0.0.8 does not include agent-langgraph-agui" is the
         // evidence, not the sentence: it names a published image, which is not a thing the
         // person chose or can change.
-        Problem::with(
+        harness::PickError::Refused(detail) => Problem::with(
             "This version of OpenBot does not include the Bot you picked. Go back and choose \
                  another, or update OpenBot.",
-            error,
-        )
+            detail,
+        ),
     })?;
 
     // The installation's own engine, brought up when it is stopped: here, before startup is held,
@@ -8848,6 +8932,75 @@ mod app_page_tests {
             "if cfg!(target_os = \"windows\") && page != WindowPage::Other {\n                let _ = window.eval(desktop_page::QUIT_SHORTCUT_PAGE);"
         ));
         assert!(desktop_page::QUIT_SHORTCUT_PAGE.contains("\"plugin:openbot-desktop|quit\""));
+    }
+
+    /**
+    Found in dogfooding: the app had no reload, and Command-R did nothing. View → Reload, with
+    Command-R, loads OpenBot's page again: on this computer (OpenBot (Self-Contained)) and through
+    the relay (OpenBot Cloud). Never the setup screens, which a reload would throw back mid-install,
+    and never another page the window shows. The page keeps itself when a field holds what the person
+    typed (`reload-page.js`, tested in `reloadPage.test.ts`).
+    */
+    #[test]
+    fn view_reload_reloads_openbots_page_and_never_setup() {
+        use desktop_reload::Reloaded;
+        let (app, window) = app();
+        let setup = if cfg!(windows) {
+            "http://tauri.localhost/"
+        } else {
+            "tauri://localhost/"
+        };
+        *app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let on = |url: &str| {
+            window.navigate(url.parse().unwrap()).unwrap();
+            let reloaded = desktop_reload::reload(app.handle());
+            assert_eq!(
+                window.url().unwrap().as_str(),
+                url,
+                "Reload never moves the window"
+            );
+            reloaded
+        };
+
+        // Mid-setup: left as it is.
+        assert_eq!(on(setup), Reloaded::NotOpenBot);
+        // A page on another loopback port: left as it is.
+        assert_eq!(on("http://127.0.0.1:3011/"), Reloaded::NotOpenBot);
+        // OpenBot (Self-Contained), the OpenBot this computer runs.
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        assert_eq!(on("http://127.0.0.1:3010/channel/c1"), Reloaded::Asked);
+        // OpenBot Cloud, through the relay.
+        desktop_connected::showing_for_test(app.handle(), "http://127.0.0.1:4410");
+        assert_eq!(on("http://127.0.0.1:4410/"), Reloaded::Asked);
+
+        // The page is told what Reload asks, as it loads (read as text: the real webview and
+        // AppKit's menus can't be built here).
+        let main = include_str!("main.rs");
+        let at = |pieces: &[&str]| main.find(&pieces.concat()).unwrap();
+        let page_load = &main[at(&[".on_page_load(", "|window, payload| {"])..];
+        let page_load = &page_load[..page_load.find("\n        })").unwrap()];
+        assert!(page_load.contains("let _ = window.eval(desktop_reload::PAGE);"));
+        assert!(desktop_reload::PAGE.contains("window.__openbotReload = "));
+        // In the View menu, first, with Command-R, and chosen there it reloads.
+        let menus = &main[at(&["\nfn install", "_menus"])..];
+        let view = &menus[menus.find("\"View\",").expect("a View menu")..];
+        let first = &view[view.find("&MenuItem::with_id(").unwrap()..];
+        let first = &first[..first.find(")?").unwrap()];
+        assert!(
+            first.contains("desktop_reload::MENU_ID")
+                && first.contains("desktop_reload::MENU_LABEL")
+                && first.contains("Some(desktop_reload::MENU_ACCELERATOR)"),
+            "{first}"
+        );
+        assert_eq!(desktop_reload::MENU_LABEL, "Reload");
+        assert_eq!(desktop_reload::MENU_ACCELERATOR, "CmdOrCtrl+R");
+        assert!(main.contains(
+            &[
+                "        desktop_reload::MENU_ID => {\n",
+                "            desktop_reload::reload(app);"
+            ]
+            .concat()
+        ));
     }
 
     /// "The text is too small and you can't zoom in." The window now zooms as a browser does: the
@@ -12572,6 +12725,24 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
         Err(std::sync::TryLockError::WouldBlock) => None,
         Err(std::sync::TryLockError::Poisoned(error)) => panic!("{error}"),
     };
+    // The move to OpenBot Cloud is at work on setup's screens, and is about to remove the OpenBot
+    // here: the window comes forward as it is, and the move decides where it goes when it ends
+    // (`setup_again_after_move`).
+    let moving = desktop_move::moving(app);
+    if moving {
+        log::info!("[window] a move to OpenBot Cloud is running; the window stays where it is");
+    }
+    // Its screens waiting for an answer hold the window too, while it is on them: showing the
+    // OpenBot here in their place left the move unstarted with nothing to say so (1.2.0-rc.3).
+    let offered = !moving
+        && desktop_move::offered_on_screen(app)
+        && window.url().is_ok_and(|url| on_setup_page(app, &url));
+    if offered {
+        log::info!(
+            "[window] the move to OpenBot Cloud is waiting for an answer; the window stays on it"
+        );
+    }
+    let startup = startup.filter(|_| !moving && !offered);
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
     // The page the window belongs on, and the address it loads it at: for the owned app, through its
@@ -12607,6 +12778,30 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     let _ = window.show();
     let _ = window.unminimize();
     focus(&window, "OpenBot is showing");
+}
+
+/**
+A move to OpenBot Cloud ended, moved or not. Its screens are setup's, so the window should still be
+on setup. If anything took it elsewhere meanwhile, it goes back to setup, which opens the OpenBot now
+chosen: OpenBot Cloud after a move, whose own gate asks for its terms before anything else, and the
+OpenBot here after a move that didn't happen. Never left on an app the move just removed.
+*/
+fn setup_again_after_move<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if window.url().is_ok_and(|url| on_setup_page(app, &url)) {
+        return;
+    }
+    log::info!("[move] the window left setup during the move; it goes back to setup");
+    let navigated = setup_destination(app).and_then(|setup| {
+        window
+            .navigate(setup)
+            .map_err(|error| format!("could not go back to setup: {error}"))
+    });
+    if let Err(error) = navigated {
+        log::warn!("[move] {error}");
+    }
 }
 
 fn schedule_second_instance_restore<T, F>(
@@ -13230,6 +13425,9 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         "quit" => {
             app.exit(0);
         }
+        desktop_reload::MENU_ID => {
+            desktop_reload::reload(app);
+        }
         other => {
             if let Some(step) = zoom::Step::of_menu(other) {
                 zoom_windows(app, step);
@@ -13382,26 +13580,39 @@ fn desktop_version<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
 }
 
 /**
-What About OpenBot says: the version, and which build this is.
+What About OpenBot says: the version, where OpenBot runs and as whom (`desktop_about`), and which
+build this is.
 
 The build is the commit it was built from, marked `-dirty` when the tree had uncommitted changes,
 and when; see `build_identity` in build.rs. macOS shows the version and the build on one line and
-the credits under them; Windows and Linux show the comments.
+the credits under them; Windows and Linux show the comments. Where OpenBot runs goes first in both.
 */
-fn about_openbot(version: String) -> tauri::menu::AboutMetadata<'static> {
+fn about_openbot(version: String, runs: &[String]) -> tauri::menu::AboutMetadata<'static> {
     let built = build_description(
         env!("OPENBOT_BUILD_COMMIT"),
         env!("OPENBOT_BUILD_BRANCH"),
         env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
     );
+    let said = if runs.is_empty() {
+        built
+    } else {
+        format!("{}\n\n{built}", runs.join("\n"))
+    };
     tauri::menu::AboutMetadata {
         name: Some("OpenBot".into()),
         short_version: Some(version),
         version: Some(env!("OPENBOT_BUILD_COMMIT").into()),
-        credits: Some(built.clone()),
-        comments: Some(built),
+        credits: Some(said.clone()),
+        comments: Some(said),
         ..Default::default()
     }
+}
+
+/// About OpenBot for this app now: its version, and where OpenBot runs and as whom.
+fn about_openbot_now<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> tauri::menu::AboutMetadata<'static> {
+    about_openbot(desktop_version(app), &desktop_about::lines_now(app))
 }
 
 /// The first entry of each launch in the log file: which build, on what, where the log's UTC times
@@ -13563,7 +13774,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
                 MenuEntry::Native(PredefinedMenuItem::about(
                     app,
                     Some("About"),
-                    Some(about_openbot(desktop_version(app))),
+                    Some(about_openbot_now(app)),
                 )?),
             ];
             // The app itself still updates.
@@ -13621,7 +13832,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         entries.push(MenuEntry::Native(PredefinedMenuItem::about(
             app,
             Some("About"),
-            Some(about_openbot(desktop_version(app))),
+            Some(about_openbot_now(app)),
         )?));
         if updates {
             entries.push(check_for_updates()?);
@@ -13646,7 +13857,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         let mut entries = vec![MenuEntry::Native(PredefinedMenuItem::about(
             app,
             Some("About OpenBot"),
-            Some(about_openbot(desktop_version(app))),
+            Some(about_openbot_now(app)),
         )?)];
         // Where every Mac app keeps it: under About.
         if updates {
@@ -13767,13 +13978,22 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
      *
      * The page zooms as a browser's does, in the order and with the keys a Mac's View menu has
      * them. Items of our own, not the predefined zoom items: those ask the first responder, and a
-     * web view has no zoom of its own to answer them. See `zoom`.
+     * web view has no zoom of its own to answer them. See `zoom`. Reload first, as a browser's View
+     * menu has it: OpenBot's page loaded again, never the setup screens (`desktop_reload`).
      */
     let view = Submenu::with_items(
         app,
         "View",
         true,
         &[
+            &MenuItem::with_id(
+                app,
+                desktop_reload::MENU_ID,
+                desktop_reload::MENU_LABEL,
+                true,
+                Some(desktop_reload::MENU_ACCELERATOR),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(
                 app,
                 zoom::MENU_ACTUAL_SIZE,
@@ -14293,6 +14513,7 @@ fn main() {
             local_eval_steps,
             local_eval_update_step,
             setup_heartbeat,
+            page_error,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,
@@ -14317,6 +14538,7 @@ fn main() {
             desktop_connected::take_connection_notice,
             // The move from OpenBot (Self-Contained) to OpenBot Cloud. See `desktop_move`.
             desktop_move::move_offer,
+            desktop_move::move_footprint,
             desktop_move::keep_self_contained,
             desktop_move::move_preview,
             desktop_move::move_to_cloud,
@@ -14330,14 +14552,22 @@ fn main() {
         // no such setting, and Tauri has no configuration option for it either, so the page is
         // asked to refuse. Every navigation, because the window navigates to OpenBot and back.
         .on_page_load(|window, payload| {
-            // A new page in the main window is not the setup page until it sends a heartbeat.
-            if window.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
-            {
-                desktop_stall::page_loaded(window);
+            let page = window_page(window.app_handle(), payload.url());
+            // A new page in the main window is not taking progress until it sends a heartbeat. The
+            // setup page has to send one, or it is reloaded once (`desktop_stall`).
+            if window.label() == "main" {
+                match payload.event() {
+                    tauri::webview::PageLoadEvent::Started => {
+                        desktop_stall::page_loaded(window, page == WindowPage::Setup);
+                    }
+                    tauri::webview::PageLoadEvent::Finished if page == WindowPage::Setup => {
+                        desktop_stall::setup_page_finished(window.app_handle());
+                    }
+                    tauri::webview::PageLoadEvent::Finished => {}
+                }
             }
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
-            let page = window_page(window.app_handle(), payload.url());
             // "Getting OpenBot ready" covers the main window until the setup page's first
             // heartbeat (`first_paint`). Any other page sends none, so it goes as that page starts;
             // and a setup page that loaded but never says it painted is shown after ten seconds.
@@ -14372,6 +14602,8 @@ fn main() {
                     window.app_handle(),
                     payload.url(),
                 )));
+                // What View → Reload would lose, and the reload (`desktop_reload`).
+                let _ = window.eval(desktop_reload::PAGE);
             }
             // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
             if cfg!(target_os = "windows") && page != WindowPage::Other {
@@ -14477,7 +14709,7 @@ fn main() {
             watch_for_app_updates(app.handle());
             get_updates_ready(app.handle());
             desktop_telemetry::initialize(app.handle());
-            desktop_stall::initialize(app.handle());
+            desktop_stall::initialize(app.handle(), setup_page_stuck);
             // Connected to an OpenBot that runs elsewhere, no installation here is looked for.
             let connected = desktop_connected::is_connected(app.handle());
             if connected {
@@ -20574,13 +20806,104 @@ mod tests {
             build_description("397d98a", "", 0),
             "Built 1970-01-01 00:00 UTC from 397d98a"
         );
-        let about = about_openbot("0.3.4-internal.892.g0c140734ecf0".into());
+        let about = about_openbot("0.3.4-internal.892.g0c140734ecf0".into(), &[]);
         assert_eq!(
             about.short_version.as_deref(),
             Some("0.3.4-internal.892.g0c140734ecf0")
         );
         assert_eq!(about.version.as_deref(), Some(env!("OPENBOT_BUILD_COMMIT")));
         assert!(about.credits.unwrap().starts_with("Built "));
+    }
+
+    /*
+    Found in dogfooding: nothing in OpenBot Desktop said whether it ran OpenBot (Self-Contained) or
+    OpenBot Cloud, or which account it used there. About OpenBot said only the version and the
+    build. It now says where OpenBot runs, and on OpenBot Cloud as whom, above the build, on macOS
+    (the credits) and on Windows (the comments) alike, beside the version it already showed.
+    */
+    #[test]
+    fn about_openbot_says_self_contained_or_openbot_cloud_and_as_whom() {
+        use openbot_desktop_lib::connected::choice;
+        let base = temp_root("about-openbot-mode");
+        let root = base.join("OpenBot");
+        let config = base.join("config");
+        let said = |app: &tauri::App<tauri::test::MockRuntime>| {
+            let about = about_openbot_now(app.handle());
+            assert_eq!(about.short_version.as_deref(), Some("1.2.0"));
+            assert_eq!(
+                about.credits, about.comments,
+                "macOS and Windows say the same"
+            );
+            about.credits.unwrap()
+        };
+
+        // Nothing set up yet: About says nothing about where OpenBot runs.
+        let app = launched_at(&root, &config, "1.2.0");
+        assert!(said(&app).starts_with("Built "));
+
+        // OpenBot (Self-Contained): installed on this computer, no connection on record.
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+        let app = launched_at(&root, &config, "1.2.0");
+        let credits = said(&app);
+        assert!(
+            credits.starts_with("OpenBot (Self-Contained)\n\nBuilt "),
+            "{credits}"
+        );
+        assert!(!credits.contains("OpenBot Cloud"));
+
+        // OpenBot Cloud, before it has said which account: the mode alone.
+        choice::write(
+            &config,
+            &choice::Choice {
+                mode: choice::Mode::Connected,
+                address: Some("https://api.open.bot".into()),
+                organization_id: Some("org_mine".into()),
+            },
+        )
+        .unwrap();
+        let app = launched_at(&root, &config, "1.2.0");
+        let credits = said(&app);
+        assert!(credits.starts_with("OpenBot Cloud\n\nBuilt "), "{credits}");
+        assert!(!credits.contains("Self-Contained"));
+
+        // Once it has said: the account too.
+        desktop_connected::remember_account(
+            app.handle(),
+            "https://api.open.bot",
+            "sam@example.com",
+        );
+        let credits = said(&app);
+        assert!(
+            credits.starts_with("OpenBot Cloud\nSigned in as sam@example.com\n\nBuilt "),
+            "{credits}"
+        );
+
+        // The sign-in ended: no account named.
+        desktop_connected::session_ended(app.handle(), "api.open.bot");
+        assert!(said(&app).starts_with("OpenBot Cloud\n\nBuilt "));
+
+        // An account from another address than the one on record is never named here.
+        desktop_connected::remember_account(
+            app.handle(),
+            "https://openbot.example.com",
+            "sam@example.com",
+        );
+        assert!(!said(&app).contains("sam@example.com"));
+
+        // Back on this computer: OpenBot (Self-Contained) again.
+        choice::write(
+            &config,
+            &choice::Choice {
+                mode: choice::Mode::Local,
+                address: Some("https://api.open.bot".into()),
+                organization_id: None,
+            },
+        )
+        .unwrap();
+        assert!(said(&app).starts_with("OpenBot (Self-Contained)\n\nBuilt "));
+        let _ = std::fs::remove_dir_all(base);
     }
 
     /// An internal build after 0.3.3 is packaged as `0.3.4-internal.892.g0c140734ecf0`, and the
@@ -20611,7 +20934,7 @@ mod tests {
             // The fake engine answered, so nothing on this machine was asked.
             assert_eq!(status["engine"], "docker");
             assert!(status["build"].as_str().unwrap().starts_with("Built "));
-            let about = about_openbot(desktop_version(app.handle()));
+            let about = about_openbot_now(app.handle());
             assert_eq!(about.short_version.as_deref(), Some(packaged));
             status["version"].as_str().unwrap().to_owned()
         };
@@ -24711,6 +25034,152 @@ fn main() {
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
     }
 
+    /// Start, on the fake engine, of an installed deployment with `bot` picked.
+    fn start_with_picked_bot(root: &Path, label: &str, bot: &str) -> Problem {
+        let record = temp_root(&format!("{label}-record")).join("commands.log");
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        let _path = SerializedPath::set_only_with("docker", "dead-service");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let problem = tauri::async_runtime::block_on(start_stack_inner(
+            app.handle().clone(),
+            root.to_path_buf(),
+            "https://intelligence.example.test".into(),
+            "wss://gateway.example.test".into(),
+            ChosenModel {
+                provider: "openai".into(),
+                login: "api-key".into(),
+                api_key: Some("synthetic-openai-key".into()),
+                base_url: None,
+                container_base_url: None,
+                model: None,
+                token: None,
+                saved: Some(false),
+            },
+            Some(harness::HarnessChoice {
+                id: bot.into(),
+                agent_url: None,
+            }),
+        ))
+        .expect_err("this Start is refused");
+        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+        problem
+    }
+
+    /// An image list something outside OpenBot deleted is an unfinished install, so the window
+    /// runs Install (which downloads only the list again) and starts. It was read as a release
+    /// without the picked Bot: "This version of OpenBot does not include the Bot you picked", no
+    /// Install, and every Retry failed at once, until Repair put the list back.
+    #[test]
+    fn start_with_its_image_list_deleted_asks_for_install_rather_than_blaming_the_bot() {
+        if crate::test_support::isolated_process(
+            "tests::start_with_its_image_list_deleted_asks_for_install_rather_than_blaming_the_bot",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-image-list-deleted-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+        std::fs::remove_file(deployment::images_path(&root)).unwrap();
+
+        let problem = start_with_picked_bot(
+            &root,
+            "openbot-image-list-deleted",
+            harness::DEFAULT_HARNESS,
+        );
+
+        assert_eq!(
+            problem.connection,
+            Some(openbot_desktop_lib::problem::Connection::Installation),
+            "the window runs Install only for an installation problem: {problem:?}"
+        );
+        assert_eq!(problem.said, preparation::REQUIRED, "{problem:?}");
+        assert!(!problem.said.contains("does not include"), "{problem:?}");
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("container-images.json"), "{detail}");
+        assert!(!detail.contains("does not include"), "{detail}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A list that is there and is not a list is the same unfinished install.
+    #[test]
+    fn start_with_an_unreadable_image_list_asks_for_install_rather_than_blaming_the_bot() {
+        if crate::test_support::isolated_process(
+            "tests::start_with_an_unreadable_image_list_asks_for_install_rather_than_blaming_the_bot",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-image-list-unreadable-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+        std::fs::write(deployment::images_path(&root), "not a list").unwrap();
+
+        let problem = start_with_picked_bot(
+            &root,
+            "openbot-image-list-unreadable",
+            harness::DEFAULT_HARNESS,
+        );
+
+        assert_eq!(
+            problem.connection,
+            Some(openbot_desktop_lib::problem::Connection::Installation),
+            "{problem:?}"
+        );
+        assert_eq!(problem.said, preparation::REQUIRED, "{problem:?}");
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("is not readable")),
+            "{problem:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A Bot the release laid out here really does not publish is still said as that, and is not
+    /// sent to Install, which could not change it.
+    #[test]
+    fn start_of_a_bot_the_release_does_not_publish_still_says_so() {
+        if crate::test_support::isolated_process(
+            "tests::start_of_a_bot_the_release_does_not_publish_still_says_so",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-bot-not-in-release-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+
+        // The fixture's list names no harness image, so the default Bot is not in this release.
+        let problem = start_with_picked_bot(
+            &root,
+            "openbot-bot-not-in-release",
+            harness::DEFAULT_HARNESS,
+        );
+
+        assert_eq!(
+            problem.said,
+            "This version of OpenBot does not include the Bot you picked. Go back and choose \
+             another, or update OpenBot.",
+            "{problem:?}"
+        );
+        assert_ne!(
+            problem.connection,
+            Some(openbot_desktop_lib::problem::Connection::Installation),
+            "{problem:?}"
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.starts_with("OpenBot v0.0.8 does not include ")),
+            "{problem:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// Start never waits for account attribution. A CLI that takes longer than the handshake's
     /// eight-second budget to answer `telemetry link` must not show in how long Start takes: the
     /// runtime is handed the identity as it stands, and the link runs after Start, in the
@@ -27609,6 +28078,340 @@ fn main() {
                 .as_str(),
             format!("http://127.0.0.1:{}/", f.ports.app)
         );
+    }
+
+    /*
+    FOUND MOVING TO OPENBOT CLOUD: the person signed in to OpenBot Cloud in the browser and came back
+    to the window with a Dock click while the move was still running. The click sent the window to
+    the OpenBot on this computer, which was up, in place of the move's screens; the move then removed
+    it, and "hello world" sent from its home got no answer ("Load failed").
+    */
+    #[test]
+    fn a_dock_click_during_a_move_leaves_the_window_on_the_move() {
+        let f = RestoreFixture::new();
+        let setup = "tauri://localhost/";
+        let app = f.app(&f.owned, setup);
+        let window = app.get_webview_window("main").unwrap();
+        window.navigate(setup.parse().unwrap()).unwrap();
+        window.hide().unwrap();
+        desktop_move::set_moving_for_test(app.handle(), true);
+
+        restore_window_on(app.handle(), &f.ports);
+
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            setup,
+            "a restore during the move must not replace its screens with the OpenBot it removes"
+        );
+        assert!(
+            window.is_visible().unwrap(),
+            "the window still comes forward"
+        );
+
+        // Once the move is over, a restore decides again, as it always has.
+        desktop_move::set_moving_for_test(app.handle(), false);
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            format!("http://127.0.0.1:{}/", f.ports.app)
+        );
+    }
+
+    /*
+    Seen on 1.2.0-rc.3: the person picked OpenBot Cloud, and while the OpenBot here started and
+    updated for the move, came back to the window from the Dock. The restore showed that OpenBot, now
+    up, in place of the move's screens, so the move was never started and nothing said so. While the
+    move's screens wait for an answer, a restore leaves the window on them; once the person keeps
+    OpenBot here, a restore decides as it always has.
+    */
+    #[test]
+    fn a_dock_click_while_the_move_waits_for_an_answer_leaves_the_window_on_it() {
+        let f = RestoreFixture::new();
+        let setup = "tauri://localhost/";
+        let app = f.app(&f.owned, setup);
+        let config = f.base.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        desktop_connected::use_for_test(
+            app.handle(),
+            config,
+            openbot_desktop_lib::connected::credentials::Store::of(
+                keyring_core::mock::Store::new().unwrap(),
+            ),
+        );
+        let window = app.get_webview_window("main").unwrap();
+        window.navigate(setup.parse().unwrap()).unwrap();
+        window.hide().unwrap();
+        desktop_move::set_offered_on_screen_for_test(app.handle(), true);
+
+        restore_window_on(app.handle(), &f.ports);
+
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            setup,
+            "a restore must not replace the move's screens with the OpenBot here before it is answered"
+        );
+        assert!(
+            window.is_visible().unwrap(),
+            "the window still comes forward"
+        );
+
+        // Kept here: answered, and a restore shows the OpenBot here, as it always has.
+        tauri::async_runtime::block_on(desktop_move::keep_self_contained(app.handle().clone()))
+            .unwrap();
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            format!("http://127.0.0.1:{}/", f.ports.app)
+        );
+    }
+
+    /*
+    The safety net under the above: a move that ends with the window somewhere other than setup
+    (here the OpenBot on this computer, as the Dock click left it) sends it back to setup, which opens
+    the OpenBot now chosen. After a move that is OpenBot Cloud, whose gate asks for its terms first.
+    The move here ends at once: the app is already connected to an OpenBot elsewhere.
+    */
+    #[test]
+    fn a_move_that_ends_sends_the_window_back_to_setup() {
+        use openbot_desktop_lib::connected::{choice, credentials};
+        let f = RestoreFixture::new();
+        let setup = "tauri://localhost/";
+        let app = f.app(&f.owned, setup);
+        let config = f.base.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        desktop_connected::use_for_test(
+            app.handle(),
+            config.clone(),
+            credentials::Store::of(keyring_core::mock::Store::new().unwrap()),
+        );
+        choice::write(
+            &config,
+            &choice::Choice {
+                mode: choice::Mode::Connected,
+                address: Some("https://cloud.openbot.example".into()),
+                organization_id: None,
+            },
+        )
+        .unwrap();
+        let window = app.get_webview_window("main").unwrap();
+        let local = format!("http://127.0.0.1:{}/", f.ports.app);
+        window.navigate(local.parse().unwrap()).unwrap();
+
+        let ended = tauri::async_runtime::block_on(desktop_move::move_to_cloud(
+            app.handle().clone(),
+            "https://cloud.openbot.example".into(),
+            None,
+        ));
+
+        assert!(ended.is_err(), "the move ends without moving: {ended:?}");
+        assert!(!desktop_move::moving(app.handle()));
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            setup,
+            "a move that ends must not leave the window on the OpenBot it was moving from"
+        );
+
+        // On setup already, as a move's own screens are, the window stays where it is.
+        let ended = tauri::async_runtime::block_on(desktop_move::move_to_cloud(
+            app.handle().clone(),
+            "https://cloud.openbot.example".into(),
+            None,
+        ));
+        assert!(ended.is_err());
+        assert_eq!(window.url().unwrap().as_str(), setup);
+    }
+
+    /// OpenBot Desktop at `release`, launched on the OpenBot installed at `root`, its answers in
+    /// `config`: a later launch of the same computer is another app over the same folders.
+    fn launched_at(
+        root: &Path,
+        config: &Path,
+        release: &str,
+    ) -> tauri::App<tauri::test::MockRuntime> {
+        use openbot_desktop_lib::connected::credentials;
+        let shell = Shell::default();
+        remember_selected_root(&shell, root);
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context.package_info_mut().version = release.parse().unwrap();
+        let app = tauri::test::mock_builder()
+            .manage(shell)
+            .build(context)
+            .unwrap();
+        desktop_connected::use_for_test(
+            app.handle(),
+            config.to_path_buf(),
+            credentials::Store::of(keyring_core::mock::Store::new().unwrap()),
+        );
+        app
+    }
+
+    /// Whether the setup window, asking as it does at launch in a build that offers OpenBot Cloud,
+    /// is told the move is due.
+    fn move_due(app: &tauri::App<tauri::test::MockRuntime>) -> bool {
+        let offer = tauri::async_runtime::block_on(desktop_move::move_offer(
+            app.handle().clone(),
+            Some(true),
+        ));
+        serde_json::to_value(offer).unwrap()["due"] == serde_json::json!(true)
+    }
+
+    fn keep(app: &tauri::App<tauri::test::MockRuntime>) {
+        tauri::async_runtime::block_on(desktop_move::keep_self_contained(app.handle().clone()))
+            .unwrap();
+    }
+
+    /// A move that ended with a problem of `kind`, as `move_to_cloud` ends.
+    fn move_ended(app: &tauri::App<tauri::test::MockRuntime>, kind: &'static str) {
+        let mut problem = Problem::with("The move didn't finish.", "for the log".to_owned());
+        problem.kind = Some(kind);
+        desktop_move::note_outcome(app.handle(), &Err(problem));
+    }
+
+    /// The move's screens hold the window from the offer until the person answers it: offered at
+    /// launch, they are on screen; kept here, they are not, and a launch that isn't offered it never is.
+    #[test]
+    fn the_move_holds_the_window_from_its_offer_until_it_is_answered() {
+        let base = temp_root("move-offer-on-screen");
+        let root = base.join("OpenBot");
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+        let config = base.join("config");
+        let app = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+        assert!(move_due(&app));
+        assert!(desktop_move::offered_on_screen(app.handle()));
+        keep(&app);
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+
+        // The next launch isn't offered it: nothing holds the window.
+        let next = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!move_due(&next));
+        assert!(!desktop_move::offered_on_screen(next.handle()));
+    }
+
+    /*
+    FOUND ON 1.2.0-rc.3, a Mac with two older installs of OpenBot on its disk: the shell answered
+    "Move to OpenBot Cloud?" 15.3 seconds after launch (0.25 seconds on another computer), because
+    it walked every one of OpenBot's folders to say how much the move frees before it answered at
+    all, and the window held every start and update for that answer. The question is answered at
+    once; the size is measured on its own and follows.
+    */
+    #[test]
+    fn the_move_question_is_answered_at_once_however_long_sizing_takes() {
+        let base = temp_root("move-offer-at-once");
+        let root = base.join("OpenBot");
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+        let app = launched_at(&root, &base.join("config"), "1.2.0-rc.3");
+        desktop_move::slow_sizing_for_test(app.handle(), std::time::Duration::from_secs(3));
+
+        let asked = std::time::Instant::now();
+        let offer = tauri::async_runtime::block_on(desktop_move::move_offer(
+            app.handle().clone(),
+            Some(true),
+        ));
+        let took = asked.elapsed();
+        let offer = serde_json::to_value(offer).unwrap();
+        assert_eq!(offer["due"], serde_json::json!(true), "{offer}");
+        assert!(
+            took < std::time::Duration::from_secs(1),
+            "the move question took {took:?} to answer: it waited for the size"
+        );
+        // Not known yet: the screen says the move without it.
+        assert_eq!(offer["footprintBytes"], serde_json::Value::Null, "{offer}");
+
+        // The size follows, once it is measured.
+        let size =
+            tauri::async_runtime::block_on(desktop_move::move_footprint(app.handle().clone()));
+        assert!(
+            size.is_some_and(|bytes| bytes > 0),
+            "the installation's files weren't sized: {size:?}"
+        );
+        assert!(asked.elapsed() >= std::time::Duration::from_secs(3));
+        // Measured once a run: asked again, the answer carries it at once.
+        let again = tauri::async_runtime::block_on(desktop_move::move_offer(
+            app.handle().clone(),
+            Some(true),
+        ));
+        assert_eq!(
+            serde_json::to_value(again).unwrap()["footprintBytes"],
+            serde_json::json!(size)
+        );
+    }
+
+    /*
+    FOUND ON 1.2.0-rc.2: the person's move failed its last check five times ("messages: 1331 of
+    1369"). They quit, the move was offered again at the next launch, and they chose Keep to get back
+    to work. 1.2.0-rc.3 fixed the move and said "offer: due false": Keep was on record, so it never
+    offered the move again, and they couldn't find it. A Keep that followed a failed move is offered
+    again at the first launch after an update, once. A plain Keep is not, a finished move never is,
+    and Settings offers the move as it did.
+    */
+    #[test]
+    fn a_keep_after_a_failed_move_is_offered_again_after_an_update() {
+        let base = temp_root("move-offer-again");
+        let root = base.join("OpenBot");
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+
+        // rc.2: offered, the move fails its check, then Keep.
+        let config = base.join("after-failure");
+        let rc2 = launched_at(&root, &config, "1.2.0-rc.2");
+        assert!(move_due(&rc2), "offered at first");
+        move_ended(&rc2, "move-mismatch");
+        assert!(move_due(&rc2), "a failed move is no answer");
+        keep(&rc2);
+        assert!(!move_due(&rc2), "not again in the same release");
+        assert!(desktop_move::offered_in_settings(rc2.handle()));
+        drop(rc2);
+        // rc.3, after the update: offered again.
+        let rc3 = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(move_due(&rc3), "offered again after the update");
+        assert!(move_due(&rc3), "until it is answered");
+        // Keep again: it sticks, in the next release too.
+        keep(&rc3);
+        assert!(!move_due(&rc3));
+        drop(rc3);
+        let released = launched_at(&root, &config, "1.2.0");
+        assert!(!move_due(&released), "offered again once, not every update");
+        assert!(desktop_move::offered_in_settings(released.handle()));
+        drop(released);
+
+        // A plain Keep, or one after a sign-in that didn't finish: never offered again at launch.
+        for (name, ended) in [("plain", None), ("sign-in", Some("sign-in"))] {
+            let config = base.join(name);
+            let rc2 = launched_at(&root, &config, "1.2.0-rc.2");
+            if let Some(kind) = ended {
+                move_ended(&rc2, kind);
+            }
+            keep(&rc2);
+            drop(rc2);
+            let rc3 = launched_at(&root, &config, "1.2.0-rc.3");
+            assert!(
+                !move_due(&rc3),
+                "{name}: a Keep with no failed move before it sticks"
+            );
+            assert!(desktop_move::offered_in_settings(rc3.handle()));
+        }
+
+        // A finished move, after failed ones: never offered again, at launch or in Settings.
+        let config = base.join("moved");
+        let rc2 = launched_at(&root, &config, "1.2.0-rc.2");
+        move_ended(&rc2, "move-mismatch");
+        keep(&rc2);
+        move_ended(&rc2, "move-failed");
+        openbot_desktop_lib::move_to_cloud::record_moved(&config).unwrap();
+        drop(rc2);
+        let rc3 = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!move_due(&rc3), "a finished move is never offered again");
+        assert!(!desktop_move::offered_in_settings(rc3.handle()));
+        drop(rc3);
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
 

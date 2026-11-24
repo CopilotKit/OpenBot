@@ -38,32 +38,104 @@ pub const FILE: &str = "move-to-cloud.json";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Answer {
-    /// "Keep OpenBot (Self-Contained)": never offered again at launch. Settings still offers it.
+    /// "Keep OpenBot (Self-Contained)": not offered again at launch, unless it followed a move
+    /// that failed (`Recorded::kept_after_failed_move_in`). Settings still offers it.
     Kept,
     /// Moved, and checked on Cloud. Never offered again anywhere.
     Moved,
 }
 
-#[derive(Serialize, Deserialize)]
-struct Recorded {
-    answer: Answer,
+/**
+What `FILE` keeps. Every field is optional, so a file an older release wrote (`{"answer":"kept"}`)
+reads as it did, and an older release reads this one's answer and passes over the rest.
+
+FOUND ON 1.2.0-rc.2: a person tried the move five times and each failed its last check. They quit,
+the offer came back at the next launch, and they chose Keep to get back to work. Keep was the end of
+the offer at launch, so the release that fixed the move (rc.3) never offered it again, and they
+couldn't find it. A Keep chosen after a failed move is "not like this", not "not now": the move is
+offered once more after the next update.
+*/
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recorded {
+    /// What the person answered, if anything yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<Answer>,
+    /// A move was tried and didn't finish since the person last answered.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub failed_move: bool,
+    /// Keep was chosen while a failed move was on record, in this release of the app: the move is
+    /// offered again at a launch of any other release, once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_after_failed_move_in: Option<String>,
+}
+
+/// What is on record in `config_dir`. A file that can't be read is nothing on record.
+pub fn on_record(config_dir: &Path) -> Recorded {
+    std::fs::read(config_dir.join(FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Recorded>(&bytes).ok())
+        .unwrap_or_default()
 }
 
 /// The answer on record in `config_dir`, if any. A file that can't be read is no answer.
 pub fn answered(config_dir: &Path) -> Option<Answer> {
-    let bytes = std::fs::read(config_dir.join(FILE)).ok()?;
-    serde_json::from_slice::<Recorded>(&bytes)
-        .ok()
-        .map(|recorded| recorded.answer)
+    on_record(config_dir).answer
 }
 
-/// Keep `answer` in `config_dir`, written whole or not at all.
-pub fn record(config_dir: &Path, answer: Answer) -> std::io::Result<()> {
+/// Keep `recorded` in `config_dir`, written whole or not at all.
+fn write(config_dir: &Path, recorded: &Recorded) -> std::io::Result<()> {
     std::fs::create_dir_all(config_dir)?;
     let path = config_dir.join(FILE);
     let partial = config_dir.join(format!("{FILE}.partial"));
-    std::fs::write(&partial, serde_json::to_vec(&Recorded { answer })?)?;
+    std::fs::write(&partial, serde_json::to_vec(recorded)?)?;
     std::fs::rename(&partial, &path)
+}
+
+/// A move that was tried and didn't finish: kept beside whatever the person answered before, until
+/// they answer again. After a finished move there is nothing to add.
+pub fn record_failed_move(config_dir: &Path) -> std::io::Result<()> {
+    let mut recorded = on_record(config_dir);
+    if recorded.answer == Some(Answer::Moved) {
+        return Ok(());
+    }
+    recorded.failed_move = true;
+    write(config_dir, &recorded)
+}
+
+/**
+"Keep OpenBot (Self-Contained)", chosen in `release` of this app. Returns what is now on record.
+
+- After a failed move: offered again once, at the first launch of another release.
+- Answering that offer again with Keep: final, like a Keep with no failed move before it. A move
+  that failed again meanwhile doesn't bring another offer.
+- Chosen again in the same release, before any update: still offered again once.
+*/
+pub fn record_kept(config_dir: &Path, release: &str) -> std::io::Result<Recorded> {
+    let before = on_record(config_dir);
+    let pending = before
+        .kept_after_failed_move_in
+        .filter(|_| before.answer == Some(Answer::Kept));
+    let offered_again = pending.as_deref().is_some_and(|kept_in| kept_in != release);
+    let recorded = Recorded {
+        answer: Some(Answer::Kept),
+        failed_move: false,
+        kept_after_failed_move_in: (!offered_again && (before.failed_move || pending.is_some()))
+            .then(|| release.to_owned()),
+    };
+    write(config_dir, &recorded)?;
+    Ok(recorded)
+}
+
+/// Moved, and checked on Cloud: the end of every offer, and of any failed move on record.
+pub fn record_moved(config_dir: &Path) -> std::io::Result<()> {
+    write(
+        config_dir,
+        &Recorded {
+            answer: Some(Answer::Moved),
+            ..Recorded::default()
+        },
+    )
 }
 
 /**
@@ -74,10 +146,30 @@ the update, for OpenBot (Self-Contained) only.
 - `connected`: the app is connected to an OpenBot that runs elsewhere (OpenBot Cloud, or a
   company's): there is nothing here to move.
 - `installed_here`: an OpenBot is set up on this computer.
-- `answer`: what the person said before. Any answer ends the offer at launch.
+- `recorded`: what the person said before. Any answer ends the offer at launch, except a Keep that
+  followed a failed move, which is offered again in a release other than the one it was chosen in.
+- `release`: this app's own version.
 */
-pub fn due(cloud: bool, connected: bool, installed_here: bool, answer: Option<Answer>) -> bool {
-    cloud && !connected && installed_here && answer.is_none()
+pub fn due(
+    cloud: bool,
+    connected: bool,
+    installed_here: bool,
+    recorded: &Recorded,
+    release: &str,
+) -> bool {
+    cloud && !connected && installed_here && offer_stands(recorded, release)
+}
+
+/// Whether what is on record leaves the offer at launch standing, in `release`.
+fn offer_stands(recorded: &Recorded, release: &str) -> bool {
+    match recorded.answer {
+        None => true,
+        Some(Answer::Moved) => false,
+        Some(Answer::Kept) => recorded
+            .kept_after_failed_move_in
+            .as_deref()
+            .is_some_and(|kept_in| kept_in != release),
+    }
 }
 
 /// Whether Settings may offer the move: as `due`, but a person who kept Self-Contained may still.
@@ -378,6 +470,20 @@ pub struct Moved {
     /// Whether OpenBot Cloud still needs the person's AI before their Bots can run
     /// (`Api::needs_ai_connection`), asked once the move is done. None when it couldn't be asked.
     pub connect_ai: Option<bool>,
+    /// The OpenBot Cloud account the move went into (`Api::account`), asked once the move is done,
+    /// so the result can say where everything is and as whom to sign in there. None when it
+    /// couldn't be asked.
+    pub account: Option<CloudAccount>,
+}
+
+/// The OpenBot Cloud account and organization a move went into, as the result says them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudAccount {
+    /// The email address the person signed in with, which is how they sign in there again.
+    pub email: String,
+    /// The organization the move went into, by its name, when Cloud names it.
+    pub organization: Option<String>,
 }
 
 /// How long the move waits on each side, and how often it asks.
@@ -498,6 +604,7 @@ pub fn run(
             .collect(),
         left_behind,
         connect_ai: None,
+        account: None,
     })
 }
 
@@ -679,6 +786,8 @@ pub trait Credentials: Send + Sync {
 pub struct Api {
     base: String,
     organization: String,
+    /// The organization's name, from the caller's list, when the API was opened by it (`open`).
+    organization_name: Option<String>,
     credentials: Box<dyn Credentials>,
     client: reqwest::blocking::Client,
 }
@@ -712,6 +821,7 @@ impl Api {
         Ok(Api {
             base: base.trim_end_matches('/').to_owned(),
             organization: organization.to_owned(),
+            organization_name: None,
             credentials,
             client,
         })
@@ -731,11 +841,47 @@ impl Api {
         )?;
         api.organization = pick(&page.organizations)
             .ok_or_else(|| "the caller belongs to no organization there".to_owned())?;
+        api.organization_name = page
+            .organizations
+            .iter()
+            .find(|organization| organization.id == api.organization)
+            .and_then(|organization| organization.name.clone())
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty());
         Ok(api)
     }
 
     pub fn organization(&self) -> &str {
         &self.organization
+    }
+
+    /**
+    The account the person signed in with, in the organization this API works in: their email
+    (`getPerson`, `me`) and the organization's name from their list. The move's
+    result says it, so the person knows where everything went and as whom to sign in there.
+    */
+    pub fn account(&self) -> Result<CloudAccount, String> {
+        #[derive(Deserialize)]
+        struct Answer {
+            person: Person,
+        }
+        #[derive(Deserialize)]
+        struct Person {
+            email: String,
+        }
+        let answer: Answer = self.json(
+            reqwest::Method::GET,
+            &self.in_organization("/people/me"),
+            None,
+        )?;
+        let email = answer.person.email.trim().to_owned();
+        if email.is_empty() {
+            return Err("OpenBot Cloud named no email address for the person".to_owned());
+        }
+        Ok(CloudAccount {
+            email,
+            organization: self.organization_name.clone(),
+        })
     }
 
     fn in_organization(&self, path: &str) -> String {
@@ -891,6 +1037,8 @@ impl PersonalAi {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Organization {
     pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(default)]
     pub active: bool,
     #[serde(default)]

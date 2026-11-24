@@ -19,6 +19,7 @@ const PRESET_HOSTS: Record<string, string> = {
   "generativelanguage.googleapis.com": "Google Gemini",
   "api.x.ai": "xAI",
   "api.unbiased.ai": "Unbiased AI",
+  "api.trustedrouter.com": "TrustedRouter",
 };
 
 function signedIn(

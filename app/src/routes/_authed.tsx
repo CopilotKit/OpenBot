@@ -88,8 +88,8 @@ export const Route = createFileRoute("/_authed")({
   /*
    * A browser opened at the address of OpenBot on one computer is refused on the first question,
    * who is signed in: OpenBot answers only its own app there. It is told to open the app instead.
-   * Every other failure is the router's own error screen, as it was, and is told to OpenBot
-   * (lib/error-reporting.tsx). The refusal is OpenBot answering as it should, and is not.
+   * Every other failure is the app's error screen, and is told to OpenBot (lib/error-reporting.tsx).
+   * The refusal is OpenBot answering as it should, and is not.
    */
   errorComponent: (props) =>
     refusedForNotBeingItsApp(props.error) ? (

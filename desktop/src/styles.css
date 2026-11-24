@@ -1,7 +1,8 @@
 /*
  * OpenBot Desktop: the setup window, in OpenBot's own visual system.
  *
- * The values are OpenBot's tokens from `app/src/theme.css`, copied rather than approximated, so the
+ * The values are OpenBot's tokens, written here from `tokens/src/scheme.ts` by
+ * `bun run tokens:generate` rather than approximated, so the
  * window someone sets up in looks like the product it turns into: Inter, OpenBot's lavender frame
  * with a white card on it, its near-black primary button, its periwinkle focus ring, its 10px radius
  * and its type scale (on a 15px base, as the app sets text). The app's shadcn names are kept as
@@ -16,7 +17,11 @@
  * macOS title bar takes this ground (see `SETUP_BACKGROUND` and `match_title_bar`).
  */
 :root {
-  /* OpenBot's tokens, light (app/src/theme.css `:root`). */
+  /*
+   * OpenBot's tokens, light. The sidebar is the frame: the sidebar's tint, which the window edge
+   * (and here the whole ground) shares.
+   */
+  /* tokens/src/scheme.ts, light: background foreground card primary primary-foreground secondary muted muted-foreground destructive success border input ring sidebar sidebar-accent (bun run tokens:generate) */
   --background: oklch(0.983 0.003 286.4);
   --foreground: oklch(0.108 0.015 220.9);
   --card: oklch(1 0 0);
@@ -30,9 +35,9 @@
   --border: oklch(0.894 0.014 286.1);
   --input: oklch(0.894 0.014 286.1);
   --ring: oklch(0.644 0.167 276.1);
-  /* The frame: the sidebar's tint, which the window edge (and here the whole ground) shares. */
   --sidebar: oklch(0.948 0.011 286.2);
   --sidebar-accent: oklch(0.832 0.085 281.4 / 30%);
+  /* end of tokens/src/scheme.ts */
   --radius: 0.625rem;
 
   /* OpenBot's radius scale (theme.css `@theme`). */
@@ -2363,6 +2368,7 @@ main > .sheet:has(.journey.handing-off) .self-contained-why {
  */
 @media (prefers-color-scheme: dark) {
   :root {
+    /* tokens/src/scheme.ts, dark: background foreground card primary primary-foreground secondary muted muted-foreground destructive success border input ring sidebar sidebar-accent (bun run tokens:generate) */
     --background: oklch(0.182 0.023 296.6);
     --foreground: oklch(0.956 0.005 286.3);
     --card: oklch(0.212 0.028 297.1);
@@ -2378,6 +2384,7 @@ main > .sheet:has(.journey.handing-off) .self-contained-why {
     --ring: oklch(0.713 0.151 277.7);
     --sidebar: oklch(0.156 0.017 295.8);
     --sidebar-accent: oklch(0.832 0.085 281.4 / 12%);
+    /* end of tokens/src/scheme.ts */
 
     --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
     --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);

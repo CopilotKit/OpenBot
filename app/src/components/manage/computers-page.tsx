@@ -722,7 +722,7 @@ function HostFoldersSection({
       ) : null}
 
       {desktop && !connected && !loading ? (
-        <p className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+        <p className="mb-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
           The desktop app is offline. Open it to approve folders or run
           commands.
         </p>
@@ -847,7 +847,7 @@ function FolderGrantList({
       ))}
       {botPending.map((request) => (
         <div
-          className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
+          className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm"
           key={request.operationId}
         >
           {pendingSentence(request, personal)}

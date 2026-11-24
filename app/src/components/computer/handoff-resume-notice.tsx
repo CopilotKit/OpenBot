@@ -121,7 +121,7 @@ export function HandoffResumeNotice({
   if (!pending && !busy && !problem) return null;
   return (
     <div
-      className="mb-3 flex flex-wrap items-center gap-2 rounded-md border bg-amber-500/10 p-3 text-sm"
+      className="mb-3 flex flex-wrap items-center gap-2 rounded-md border bg-warning/10 p-3 text-sm"
       role="status"
     >
       <span>

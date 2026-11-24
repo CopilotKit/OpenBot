@@ -268,8 +268,8 @@ test("the rows for routines, reach, memory and approvals say what this Bot has a
 });
 
 /*
- * Agents are hidden for now: a Bot's page has no Agents row, and its Agents address leads back to
- * the Bot (routes/_authed/_app/bots.$agentId.agents.tsx).
+ * A person has Bots, and nothing called an agent: a Bot's page has no Agents row, and its old Agents
+ * address leads back to the Bot (agents-addresses.test.ts).
  */
 test("a Bot's page has no Agents row, whatever the Bot is set to", async () => {
   delegationMode = "orchestrate";

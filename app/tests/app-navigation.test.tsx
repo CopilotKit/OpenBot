@@ -258,9 +258,7 @@ test.each([
 test("Admin is in the list for admins only", () => {
   const ids = (role: string | undefined) =>
     navigationFor(role).map((item) => item.id);
-  expect(ids("admin")).toEqual(
-    NAVIGATION.filter((item) => item.id !== "agents").map((item) => item.id),
-  );
+  expect(ids("admin")).toEqual(NAVIGATION.map((item) => item.id));
   expect(ids("user")).not.toContain("admin");
   expect(ids(undefined)).not.toContain("admin");
   expect(ids("user")).toEqual([
@@ -275,11 +273,10 @@ test("Admin is in the list for admins only", () => {
 });
 
 /*
- * Agents are what a Bot hands work to, which most people never turn on, and the word reads as
- * another name for a Bot. Hidden for now: not in the menu for anybody, and its page sends people
- * home (agents-page.test.tsx). A Bot's own Agents page, where handing work out is switched on, stays.
+ * A person has Bots, and nothing called an agent: there is no Agents page, and its old address goes
+ * to the Bots (agents-addresses.test.ts).
  */
-test("Agents is hidden from the menu in every edition, for every role", () => {
+test("there is no Agents entry in the menu, in any edition, for any role", () => {
   for (const edition of ["team", "personal"] as const)
     for (const role of ["user", "admin", undefined])
       expect(navigationFor(role, edition).map((item) => item.id)).not.toContain(
