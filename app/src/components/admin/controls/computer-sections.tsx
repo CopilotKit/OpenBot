@@ -57,7 +57,7 @@ import {
   type NetworkPolicy,
   type NetworkScopeKind,
 } from "@/lib/enterprise/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { MISSING_TEAM, teamName } from "@/lib/teams/names";
 import { type TeamSummary, teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
@@ -319,7 +319,7 @@ function SweepNow() {
       ) : null}
       {sweep.error ? (
         <span className="text-destructive text-sm" role="alert">
-          {sweep.error.message}
+          {failureSaid(sweep.error)}
         </span>
       ) : null}
     </div>

@@ -39,7 +39,7 @@ import { Switch } from "@/components/ui/switch";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { terminateMemberComputersMutationOptions } from "@/lib/enterprise/mutations";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import {
@@ -400,7 +400,7 @@ function RemovePersonDialog({
         </DialogHeader>
         {remove.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {remove.error.message}
+            {failureSaid(remove.error)}
           </p>
         ) : null}
         <DialogFooter>

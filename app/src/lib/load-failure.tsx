@@ -62,6 +62,19 @@ export function loadFailure(
 }
 
 /**
+ * What a place that says a failure in the error's own words (`{error.message}`) draws instead: the
+ * same words for a real failure, in the place's own look, and the server's sentence drawn calm for a
+ * 503 that says when to come back, as {@link loadFailure} does. Every failure the app draws in its
+ * own words goes through here, so no page can draw a move or a brief outage as a failure
+ * (failure-said.test.ts holds the app to it). Nothing when there is no error.
+ */
+export function failureSaid(
+  error: { readonly message: string } | null | undefined,
+): ReactNode {
+  return error ? loadFailure(error, error.message) : null;
+}
+
+/**
  * The same choice as {@link loadFailure}, as plain words, for a place that takes a string (a title,
  * a prop typed `string`). A place that draws it should draw a held 503 calmly too.
  */

@@ -36,6 +36,7 @@ import {
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   type DirectoryAppState,
@@ -239,7 +240,10 @@ export function BrokerDirectory({
              * the single thing an operator who reached this URL needs to read; the derived line
              * stays as the fallback for a failure that arrived carrying no message of its own.
              */}
-            {apps.error.message || directoryReadFailure(provider)}
+            {loadFailure(
+              apps.error,
+              apps.error.message || directoryReadFailure(provider),
+            )}
           </p>
         ) : listed.length === 0 ? (
           <PageEmpty

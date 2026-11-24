@@ -232,7 +232,10 @@ function SearchResults({
     return (
       <div className="px-2 py-3 text-center">
         <p role="alert" className="mb-2 text-xs text-muted-foreground">
-          {results.error?.message || "Couldn't search your conversations."}
+          {loadFailure(
+            results.error,
+            results.error?.message || "Couldn't search your conversations.",
+          )}
         </p>
         <Button
           variant="ghost"

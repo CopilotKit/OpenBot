@@ -44,7 +44,7 @@ import type {
   CapabilitySetting,
   EnterpriseOverview,
 } from "@/lib/enterprise/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { MISSING_TEAM } from "@/lib/teams/names";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
@@ -353,7 +353,7 @@ function OverridesDialog({
             : null}
           {setCapability.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {setCapability.error.message}
+              {failureSaid(setCapability.error)}
             </p>
           ) : null}
         </DialogBody>

@@ -19,7 +19,7 @@ import {
   translateCapabilityChanges,
 } from "@/lib/capability-changes/translate";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
 
@@ -181,7 +181,7 @@ function DescribePermissionsPage() {
           </FieldGroup>
           {save.error ? (
             <p className="mt-5 text-destructive text-sm" role="alert">
-              {save.error.message}
+              {failureSaid(save.error)}
             </p>
           ) : null}
         </PageCard>

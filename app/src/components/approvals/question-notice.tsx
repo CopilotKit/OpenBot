@@ -24,6 +24,7 @@ import {
   dismissPersonQuestionMutationOptions,
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 export type WaitingQuestion = ApprovalInboxData["questions"][number];
 
@@ -264,7 +265,7 @@ export function QuestionNotice({
         {parts ? <QuestionParts onAnswered={onAnswered} parts={parts} /> : null}
         {dismiss.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {dismiss.error.message}
+            {failureSaid(dismiss.error)}
           </p>
         ) : null}
       </div>

@@ -30,7 +30,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { markFor } from "@/lib/marks";
 import { effortLabel } from "@/lib/models/effort";
 import { modelNamer } from "@/lib/models/names";
@@ -127,7 +127,7 @@ export function TeamModelsRow({ team }: { team: TeamSummary }) {
   const summary = saved.isPending
     ? null
     : saved.error
-      ? saved.error.message
+      ? failureSaid(saved.error)
       : `${teamModelsSummary(models, nameOf)}${
           notAllowed > 0
             ? `. ${notAllowed === 1 ? "One is" : `${notAllowed} are`} no longer allowed.`

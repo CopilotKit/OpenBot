@@ -20,6 +20,7 @@ import {
   useExpandedBots,
 } from "@/lib/bots/panel";
 import { untitledLine } from "@/lib/channels/label";
+import { loadFailure } from "@/lib/load-failure";
 import {
   botConversationsInfiniteQueryOptions,
   channelListQueryOptions,
@@ -58,8 +59,11 @@ function BotConversations({ botId }: { botId: string }) {
           role="alert"
           className="min-w-0 flex-1 text-muted-foreground text-xs"
         >
-          {conversations.error?.message ||
-            "Couldn't load this Bot's conversations."}
+          {loadFailure(
+            conversations.error,
+            conversations.error?.message ||
+              "Couldn't load this Bot's conversations.",
+          )}
         </p>
         <Button
           disabled={conversations.isFetching}
@@ -249,7 +253,10 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
         ) : !bots.data ? (
           <div className="px-2.5 py-2">
             <p role="alert" className="mb-1 text-muted-foreground text-xs">
-              {bots.error?.message || "Couldn't load your Bots."}
+              {loadFailure(
+                bots.error,
+                bots.error?.message || "Couldn't load your Bots.",
+              )}
             </p>
             <Button
               disabled={bots.isFetching}

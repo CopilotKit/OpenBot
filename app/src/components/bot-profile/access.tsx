@@ -43,7 +43,7 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
@@ -176,7 +176,7 @@ function YourApps({ agent }: { agent: AgentProfile }) {
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {giveable.error ? (
@@ -277,7 +277,7 @@ function YourSkills({ agentId }: { agentId: string }) {
     >
       {grant.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {grant.error.message}
+          {failureSaid(grant.error)}
         </p>
       ) : null}
       {page.isPending || held.isPending ? null : page.error || held.error ? (

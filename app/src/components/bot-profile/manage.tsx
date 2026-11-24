@@ -45,7 +45,7 @@ import {
   deploymentCapabilitiesQueryOptions,
   useOffersMemory,
 } from "@/lib/deployment/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /**
@@ -145,7 +145,7 @@ function ResetDialog({
           )}
           {reset.error ? (
             <p className="mt-2 text-destructive text-sm" role="alert">
-              {reset.error.message}
+              {failureSaid(reset.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -209,7 +209,7 @@ export function ManageSection({
     <PageSection title="Manage">
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       <PageRows>
@@ -351,7 +351,7 @@ export function ManageSection({
           {remove.error ? (
             <DialogBody className="mt-4">
               <p className="text-destructive text-sm" role="alert">
-                {remove.error.message}
+                {failureSaid(remove.error)}
               </p>
             </DialogBody>
           ) : null}

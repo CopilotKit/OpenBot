@@ -136,6 +136,7 @@ import {
 import { useVoiceCall } from "@/lib/voice/use-voice-call";
 import { queryClient } from "@/query-client";
 import { newId } from "../../lib/new-id";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * How long a stalled thread join is worth waiting for before it is ended.
@@ -2220,7 +2221,7 @@ export function ChannelChat({
                 ) : null}
                 {answer.error ? (
                   <p className="pb-2 text-sm text-destructive" role="alert">
-                    {answer.error.message}
+                    {failureSaid(answer.error)}
                   </p>
                 ) : null}
                 {channel.active ? null : (

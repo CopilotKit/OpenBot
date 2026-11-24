@@ -19,7 +19,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Textarea } from "@/components/ui/textarea";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { saveInstructionsMutationOptions } from "@/lib/settings/mutations";
 import {
   INSTRUCTIONS_LIMIT,
@@ -124,7 +124,7 @@ function StandingInstructionsEditor() {
     <>
       {stored.isPending ? null : stored.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {stored.error.message}
+          {failureSaid(stored.error)}
         </p>
       ) : (
         <div className="flex flex-col gap-2">

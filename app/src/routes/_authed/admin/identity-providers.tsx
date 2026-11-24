@@ -40,7 +40,7 @@ import {
 } from "@/lib/identity-providers/mutations";
 import { identityProviderListQueryOptions } from "@/lib/identity-providers/queries";
 import { identityProviderWords } from "@/lib/identity-providers/words";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { ONLY_ORGANIZATION } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
@@ -413,7 +413,7 @@ function IdentityProvidersPage() {
               */}
             {register.error ? (
               <p className="text-destructive text-sm" role="alert">
-                {register.error.message}
+                {failureSaid(register.error)}
               </p>
             ) : null}
           </DialogBody>

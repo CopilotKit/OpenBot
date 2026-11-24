@@ -93,6 +93,7 @@ import {
   teamPaths,
 } from "./team-paths";
 import { ROLE_WORDS, TEAMS_DESCRIPTION } from "./team-words";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * One team: what it is called and for, the team it is under, and its people.
@@ -112,7 +113,7 @@ function Team({ teamId, paths }: { teamId: string; paths: TeamPaths }) {
     return (
       <PageShell backButton={backToTeams(paths)} title="Team">
         <p className="text-destructive text-sm" role="alert">
-          {team.error.message}
+          {failureSaid(team.error)}
         </p>
       </PageShell>
     );
@@ -309,7 +310,7 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
       ) : null}
       {members.isPending ? null : members.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {members.error.message}
+          {failureSaid(members.error)}
         </p>
       ) : rows.length === 0 && query ? (
         <PageEmpty icon={IconSearch} title="No matches">
@@ -521,7 +522,7 @@ function DetailsDialog({
           </form>
           {update.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {update.error.message}
+              {failureSaid(update.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -613,7 +614,7 @@ function ParentDialog({
           </form>
           {update.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {update.error.message}
+              {failureSaid(update.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -798,7 +799,7 @@ function LeaveDialog({
         </DialogHeader>
         {leave.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {leave.error.message}
+            {failureSaid(leave.error)}
           </p>
         ) : null}
         <DialogFooter>
@@ -848,7 +849,7 @@ function DeleteDialog({
         </DialogHeader>
         {remove.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {remove.error.message}
+            {failureSaid(remove.error)}
           </p>
         ) : null}
         <DialogFooter>

@@ -10,7 +10,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
-import { unavailableSaid } from "@/lib/load-failure";
+import { unavailableSaid, failureSaid } from "@/lib/load-failure";
 import { proactiveAllowedQueryOptions } from "@/lib/proactive";
 import {
   saveUserPreferencesMutationOptions,
@@ -80,7 +80,7 @@ export function CheckInsSection() {
       )}
       {save.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {save.error.message}
+          {failureSaid(save.error)}
         </p>
       ) : null}
     </PageSection>

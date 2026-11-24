@@ -36,7 +36,7 @@ import {
 import { type ApiKey, apiKeyListQueryOptions } from "@/lib/api-keys/queries";
 import { desktopConnectionQueryOptions } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import {
   ONLY_ORGANIZATION,
   useOrganizationChoices,
@@ -268,7 +268,7 @@ function ApiKeyRow({ apiKey }: { apiKey: ApiKey }) {
             </p>
             {revoke.error ? (
               <p className="mt-2 text-destructive" role="alert">
-                {revoke.error.message}
+                {failureSaid(revoke.error)}
               </p>
             ) : null}
           </DialogBody>
@@ -365,7 +365,7 @@ function CreateApiKeyDialog({
             </Field>
             {create.error ? (
               <p className="mt-3 text-destructive text-sm" role="alert">
-                {create.error.message}
+                {failureSaid(create.error)}
               </p>
             ) : null}
           </DialogBody>

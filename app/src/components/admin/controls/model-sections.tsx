@@ -57,7 +57,7 @@ import {
   enterpriseOverviewQueryOptions,
   modelUsageQueryOptions,
 } from "@/lib/enterprise/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { markFor } from "@/lib/marks";
 import { effortLabel } from "@/lib/models/effort";
 import { modelLabel, modelNamer } from "@/lib/models/names";
@@ -734,7 +734,7 @@ export function AllowedModelsDialog({
             </p>
           ) : available.isPending ? null : available.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {available.error.message}
+              {failureSaid(available.error)}
             </p>
           ) : !available.data.listed ? (
             <p className="text-muted-foreground text-sm">

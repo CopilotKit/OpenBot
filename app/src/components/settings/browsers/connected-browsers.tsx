@@ -25,7 +25,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { revokeRecorderConnectionMutationOptions } from "@/lib/recorder/mutations";
 import { recorderConnectionsQueryOptions } from "@/lib/recorder/queries";
 import { relativeTime } from "@/lib/relative-time";
@@ -158,7 +158,7 @@ function ConnectedBrowserRow({
             </p>
             {revoke.error ? (
               <p className="mt-2 text-destructive" role="alert">
-                {revoke.error.message}
+                {failureSaid(revoke.error)}
               </p>
             ) : null}
           </DialogBody>

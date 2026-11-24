@@ -49,7 +49,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { deleteQuestion } from "@/lib/delete-question";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { routineDoes } from "@/lib/routines/merged";
@@ -510,7 +510,7 @@ export function RoutinePage({
         </PageRows>
         {setEnabled.error || runNow.error ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
-            {setEnabled.error?.message ?? runNow.error?.message}
+            {failureSaid(setEnabled.error ?? runNow.error)}
           </p>
         ) : null}
       </PageSection>
@@ -572,7 +572,7 @@ export function RoutinePage({
           {remove.error ? (
             <DialogBody className="mt-4">
               <p className="text-destructive text-sm" role="alert">
-                {remove.error.message}
+                {failureSaid(remove.error)}
               </p>
             </DialogBody>
           ) : null}

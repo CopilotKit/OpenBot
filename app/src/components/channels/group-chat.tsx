@@ -25,7 +25,7 @@ import {
   groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import {
   BotMarkdown,
   markdownComponents,
@@ -207,12 +207,12 @@ export function GroupChat({ channelId }: { channelId: string }) {
       <div className="mx-auto w-full max-w-2xl shrink-0 pb-4">
         {send.error ? (
           <p className="pb-2 text-sm text-destructive" role="alert">
-            {send.error.message}
+            {failureSaid(send.error)}
           </p>
         ) : null}
         {answer.error ? (
           <p className="pb-2 text-sm text-destructive" role="alert">
-            {answer.error.message}
+            {failureSaid(answer.error)}
           </p>
         ) : null}
         {/* The same drawer a conversation with one Bot draws its question in. */}

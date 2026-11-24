@@ -61,7 +61,7 @@ import {
   deploymentCapabilitiesQueryOptions,
   useNoBotComputers,
 } from "@/lib/deployment/queries";
-import { loadFailure, unavailableSaid } from "@/lib/load-failure";
+import { loadFailure, unavailableSaid, failureSaid } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   RestoreComputerDialog,
@@ -211,15 +211,12 @@ export function ComputersPage({
     : null;
   // OpenBot holding off for now: said calmly, and not as a list that failed (lib/load-failure.tsx).
   const held = unavailableSaid(fleet.error) !== undefined;
-  const hostProblem = hostAccess.error
-    ? hostAccess.error.message
-    : requestGrant.error
-      ? requestGrant.error.message
-      : revokeGrant.error
-        ? revokeGrant.error.message
-        : stopHostAccess.error
-          ? stopHostAccess.error.message
-          : null;
+  const hostProblem = failureSaid(
+    hostAccess.error ??
+      requestGrant.error ??
+      revokeGrant.error ??
+      stopHostAccess.error,
+  );
 
   const run = (
     computer: ComputerProfile,
@@ -384,7 +381,7 @@ export function ComputersPage({
               className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
               role="alert"
             >
-              {setState.error.message}
+              {failureSaid(setState.error)}
             </p>
           ) : null}
           {noComputers ? (
@@ -684,7 +681,7 @@ type HostFoldersSectionProps = {
    * edition the desktop's owner may be somebody else, so a waiting request names them instead.
    */
   personal: boolean;
-  problem: string | null;
+  problem: ReactNode;
   requestingBotId: string | null;
   revokingGrantId: string | null;
   stopping: boolean;

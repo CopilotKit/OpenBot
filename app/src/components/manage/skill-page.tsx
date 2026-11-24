@@ -38,7 +38,7 @@ import { toast } from "@/components/ui/toast";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
@@ -258,7 +258,7 @@ export function SkillPage({ slug }: { slug: string }) {
           </DialogHeader>
           {removeSkill.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {removeSkill.error.message}
+              {failureSaid(removeSkill.error)}
             </p>
           ) : null}
           <DialogFooter>

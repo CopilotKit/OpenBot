@@ -40,6 +40,7 @@ import {
   actionPolicyQueryOptions,
   policyDryRunQueryOptions,
 } from "@/lib/computers/queries";
+import { failureSaid } from "@/lib/load-failure";
 
 /** How long the rule has to rest before it is replayed, as on Add rule. */
 const PREVIEW_DELAY_MS = 400;
@@ -70,7 +71,7 @@ function RulePage() {
       <PageShell backButton={BACK} title="Rule">
         {stored.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {stored.error.message}
+            {failureSaid(stored.error)}
           </p>
         ) : null}
       </PageShell>
@@ -131,7 +132,7 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
       <PageSection title="Recently stopped">
         {reach.isPending ? null : reach.error ? (
           <p className="mt-4 text-muted-foreground text-sm">
-            {reach.error.message}
+            {failureSaid(reach.error)}
           </p>
         ) : reach.data.scanned === 0 ? (
           <p className="mt-4 text-muted-foreground text-sm">
@@ -179,7 +180,7 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
           </DialogHeader>
           {savePolicy.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {savePolicy.error.message}
+              {failureSaid(savePolicy.error)}
             </p>
           ) : null}
           <DialogFooter>

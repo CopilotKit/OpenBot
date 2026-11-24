@@ -63,6 +63,7 @@ import {
   lastCheckInLine,
   useCheckInsBlocked,
 } from "./proactive-panel";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * A check-in's page at `/routines/check-ins/$checkInId`, reached from its row on a Routines list,
@@ -294,7 +295,7 @@ export function CheckInPage({
         </PageRows>
         {change.error && !confirming ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
-            {change.error.message}
+            {failureSaid(change.error)}
           </p>
         ) : null}
       </PageSection>
@@ -310,7 +311,7 @@ export function CheckInPage({
           {change.error ? (
             <DialogBody className="mt-4">
               <p className="text-destructive text-sm" role="alert">
-                {change.error.message}
+                {failureSaid(change.error)}
               </p>
             </DialogBody>
           ) : null}

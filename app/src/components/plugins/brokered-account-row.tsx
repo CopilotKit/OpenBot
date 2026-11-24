@@ -1,6 +1,6 @@
 import { IconArrowUpRight, IconUser } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ConnectionFields } from "@/components/plugins/connection-fields";
 import { ConsentHandoffDialog } from "@/components/plugins/consent-handoff";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { vendorNameOf } from "@/lib/apps/vendor-name";
+import { failureSaid } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import {
@@ -253,7 +254,7 @@ export type BrokeredAccount = {
    * broker key at all, which is an administrator's to set. A dialog saying "that app could not be
    * asked what it needs" is true of all four and useful about none.
    */
-  fieldsError: string | null;
+  fieldsError: ReactNode;
   /**
    * Finish the connection with what the person typed.
    *
@@ -818,7 +819,7 @@ export function useBrokeredAccount(input: {
       fieldsRequest.mutate(serverId);
     },
     requestingFields: fieldsRequest.isPending,
-    fieldsError: fieldsRequest.error?.message ?? null,
+    fieldsError: failureSaid(fieldsRequest.error),
     submitFields: (values: Record<string, string>) => {
       report(null);
       submission.mutate({ serverId, values });

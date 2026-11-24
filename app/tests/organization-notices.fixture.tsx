@@ -17,7 +17,9 @@ import { signedInUser } from "@/lib/auth/queries";
 import { ReportedErrorComponent } from "@/lib/error-reporting";
 import { queryClient } from "@/query-client";
 import { Route as AppRoute } from "@/routes/_authed/_app";
+import { Route as MemoryRoute } from "@/routes/_authed/_app/memory";
 import { Route as RoutinesRoute } from "@/routes/_authed/_app/routines";
+import { Route as TeamsRoute } from "@/routes/_authed/_app/teams";
 
 /**
  * The app as organization-moving.test.tsx, organization-removed.test.tsx and
@@ -25,7 +27,7 @@ import { Route as RoutinesRoute } from "@/routes/_authed/_app/routines";
  * the signed-in gate's first step (who is signed in, and the organization they work in), the
  * organization boundary `_authed` puts around everything, and the app's real frame (`_authed/_app`:
  * the strip, its panels and every bar over the page). Inside it, Routines is the real page; home is
- * a stand-in heading. OpenBot's API is the test's routes.
+ * a stand-in heading. Memory and Teams are the real pages too. OpenBot's API is the test's routes.
  *
  * `window.openbotRouter` lets the test move between pages as a link does, at any window width.
  */
@@ -60,12 +62,26 @@ const routinesRoute = createRoute({
   component: RoutinesRoute.options.component as () => ReactNode,
 });
 
+// Memory and Teams draw a failed read in the error's own words (organization-unavailable-pages.test.tsx).
+// Memory's page without its route's edition check: the test's deployment offers memory.
+const memoryRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/memory",
+  component: MemoryRoute.options.component as () => ReactNode,
+});
+
+const teamsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/teams",
+  component: TeamsRoute.options.component as () => ReactNode,
+});
+
 const router = createRouter({
   history: createBrowserHistory(),
   // The app's own error boundary, as router.tsx gives every route.
   defaultErrorComponent: ReportedErrorComponent,
   routeTree: rootRoute.addChildren([
-    appRoute.addChildren([homeRoute, routinesRoute]),
+    appRoute.addChildren([homeRoute, routinesRoute, memoryRoute, teamsRoute]),
   ]),
 });
 
