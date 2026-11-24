@@ -29,7 +29,11 @@ import {
 import { connectionName } from "@/lib/ai-connection/describe";
 import { providerById } from "@/lib/ai-connection/providers";
 import { markFor } from "@/lib/marks";
-import { connectionOf, pickerGroups } from "@/lib/models/connections";
+import {
+  canChoose,
+  connectionOf,
+  pickerGroups,
+} from "@/lib/models/connections";
 import {
   effortLabel,
   type ModelPick,
@@ -186,7 +190,7 @@ export function ModelPicker({
   stopped?: boolean;
   className?: string;
 }) {
-  if (!catalogue || (!catalogue.choosable && !allowSingle)) return null;
+  if (!catalogue || (!canChoose(catalogue) && !allowSingle)) return null;
   const groups = pickerGroups(catalogue);
   if (groups.length > 0) {
     // Several connections: the pick's own, and nothing selected while there is no default.

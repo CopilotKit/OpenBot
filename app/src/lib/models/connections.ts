@@ -34,6 +34,15 @@ export function pickerGroups(
 }
 
 /**
+ * Whether there is anything to pick. With several connections the catalogue's own fields describe
+ * the default, so its `choosable` says nothing about the others: when the default can't be read, or
+ * there is none, the picker still offers the rest, and a stopped one says why and how to fix it.
+ */
+export function canChoose(catalogue: ModelCatalogue | undefined): boolean {
+  return catalogue?.choosable === true || pickerGroups(catalogue).length > 0;
+}
+
+/**
  * The connection a pick names, or the default one for null or absent. Undefined when it is not in
  * the catalogue: it was removed, or there is no default.
  */

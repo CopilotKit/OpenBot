@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { canChoose } from "@/lib/models/connections";
 import { type ModelPick, requestFor, shownPick } from "@/lib/models/effort";
 import type { CatalogueConnection, ModelCatalogue } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
@@ -250,6 +251,71 @@ test("a stopped connection's group shows its sentence and offers no model", asyn
   await showProvider(user, popup, /^Claude plan/);
   expect(within(popup).getByText(sentence)).toBeTruthy();
   expect(within(popup).queryByRole("option", { name: /Claude/ })).toBeNull();
+});
+
+test("the default connection can't be read: the picker stays, and offers the others", async () => {
+  const sentence = "Your ChatGPT plan sign-in ended. Sign in again to use it.";
+  // The catalogue's own fields describe the default, which lists nothing while it is stopped.
+  const defaultStopped: ModelCatalogue = {
+    ...catalogueOf([
+      {
+        ...CHATGPT,
+        ready: false,
+        models: [],
+        problem: { code: "sign-in-ended", detail: sentence },
+      },
+      CLAUDE,
+    ]),
+    models: [],
+    choosable: false,
+  };
+  expect(canChoose(defaultStopped)).toBe(true);
+  const picks: ModelPick[] = [];
+  const view = render(
+    <ModelPicker
+      catalogue={defaultStopped}
+      onChange={(pick) => picks.push(pick)}
+      stopped
+      value={{ model: SOL.id, effort: null, connection: "openai" }}
+    />,
+  );
+  const { user, popup } = await open(view, /^Model: gpt-6.2-sol/);
+  expect(within(popup).getByText(sentence)).toBeTruthy();
+  await showProvider(user, popup, /^Claude plan/);
+  await user.click(within(popup).getByRole("option", { name: /Sonnet/ }));
+  expect(picks[0]).toEqual({
+    model: SONNET.id,
+    effort: null,
+    connection: "anthropic",
+  });
+
+  // No default at all: the same, the trigger asking to choose.
+  cleanup();
+  const noDefault: ModelCatalogue = {
+    ...catalogueOf([{ ...CHATGPT, isDefault: false }, CLAUDE]),
+    choosable: false,
+  };
+  const none = render(
+    <ModelPicker
+      catalogue={noDefault}
+      onChange={() => {}}
+      value={shownPick({ model: null, effort: null }, noDefault)}
+    />,
+  );
+  expect(none.getByRole("combobox", { name: /Choose a model/ })).toBeTruthy();
+
+  // One connection that can't be chosen from is still no picker, as before.
+  cleanup();
+  const one = { ...catalogueOf([CHATGPT]), choosable: false };
+  expect(canChoose(one)).toBe(false);
+  const single = render(
+    <ModelPicker
+      catalogue={one}
+      onChange={() => {}}
+      value={{ model: SOL.id, effort: null }}
+    />,
+  );
+  expect(single.queryByRole("combobox")).toBeNull();
 });
 
 test("a pick whose connection left the catalogue shows the default and sends nothing", () => {

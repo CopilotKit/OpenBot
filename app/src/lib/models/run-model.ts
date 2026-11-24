@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { queryClient } from "@/query-client";
-import { everyModel } from "./connections";
+import { canChoose, everyModel } from "./connections";
 import {
   type ModelPick,
   offeredBotDefault,
@@ -66,7 +66,7 @@ export function useConversationModel(
   channelId: string,
   catalogue: ModelCatalogue | undefined,
 ) {
-  const choosable = catalogue?.choosable === true;
+  const choosable = canChoose(catalogue);
   const saved = useQuery({
     ...conversationModelQueryOptions(channelId),
     enabled: choosable,
