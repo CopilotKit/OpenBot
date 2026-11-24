@@ -305,7 +305,7 @@ test("the Browse apps tile and the directory it opens speak to you in personal, 
     );
   }
   expect(directoryDescriptions()).toEqual({
-    page: "Add an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
+    page: "Connect an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
     search: "Search by name. Nobody here has reviewed these apps.",
   });
 });

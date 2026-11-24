@@ -413,11 +413,11 @@ test("an app turned off since the Bot asked: the card's own sentence and button 
   );
   const drawn = await card(view);
   await waitFor(() =>
-    expect(drawn.textContent).toContain("Google Calendar isn't turned on yet."),
+    expect(drawn.textContent).toContain("Google Calendar isn't connected yet."),
   );
   expect(
     await view.findByRole("button", {
-      name: "Turn on Google Calendar and give it to Calendar Bot",
+      name: "Connect Google Calendar and give it to Calendar Bot",
     }),
   ).toBeTruthy();
 });

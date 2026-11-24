@@ -528,8 +528,8 @@ test("the focus follows the press: Request access hands it to Withdraw, and With
 test.each([
   [
     "disabled",
-    "Turn on and give it to Expenses",
-    "Turn on Gmail and give it to Expenses",
+    "Connect and give it to Expenses",
+    "Connect Gmail and give it to Expenses",
   ],
   ["not_granted", "Give it to Expenses", "Give Gmail to Expenses"],
 ] as const)(
@@ -698,7 +698,7 @@ test.each([
   [
     "disabled, never switched on",
     { state: "disabled", unavailable: "absent" },
-    "Gmail isn't turned on yet.",
+    "Gmail isn't connected yet.",
   ],
   [
     "disabled, with no directory set up",
@@ -1034,7 +1034,7 @@ test.each(
 
   fireEvent.click(
     await view.findByRole("button", {
-      name: "Turn on The app and give it to Expenses",
+      name: "Connect The app and give it to Expenses",
     }),
   );
 

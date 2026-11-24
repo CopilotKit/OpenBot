@@ -2235,7 +2235,9 @@ test("the administrator's connector screen keeps the rest of the page when the c
   // AND THE PAGE IS STILL THERE. The switch is how a server is removed from this deployment, and
   // its absence was the whole cost of collapsing the page.
   expect(
-    view.getByRole("switch", { name: "Enable Gmail for this organization" }),
+    view.getByRole("switch", {
+      name: "Gmail on for everyone in the organization",
+    }),
   ).toBeTruthy();
   expect(view.getByRole("button", { name: "Refresh tools" })).toBeTruthy();
 });

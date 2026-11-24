@@ -75,7 +75,7 @@ beforeAll(() => {
  * EMPTIED BEFORE EACH CASE, NOT ONLY AFTER. The app's one query client is a module, and `bun test`
  * runs every file in one process, so it reaches this file holding whatever an earlier file left on
  * it. A cached `deployment` answer never goes stale, and a team one drew the card as the team
- * edition: an admin's "Turn on and give it", never Connect.
+ * edition: an admin's "Connect and give it", never the personal edition's Connect.
  */
 beforeEach(() => queryClient.clear());
 const originalFetch = global.fetch;
@@ -491,7 +491,7 @@ test("one Connect turns on an app that needs nothing more, and the card says it 
   );
 });
 
-test("an admin's Turn on and give it goes on to the key form for an app that takes a key", async () => {
+test("an admin's Connect and give it goes on to the key form for an app that takes a key", async () => {
   const browser = aBrowser();
   const writes = servingApp(
     fireflies({
@@ -506,9 +506,9 @@ test("an admin's Turn on and give it goes on to the key form for an app that tak
   );
   const view = drawFirefliesCard();
   const button = await view.findByRole("button", {
-    name: "Turn on Fireflies and give it to Personal Assistant",
+    name: "Connect Fireflies and give it to Personal Assistant",
   });
-  expect(button.textContent).toBe("Turn on and give it to Personal Assistant");
+  expect(button.textContent).toBe("Connect and give it to Personal Assistant");
   browser.click(button);
   await view.findByText(`${FIREFLIES}'s page, with the key form open`, {
     exact: true,
@@ -587,11 +587,11 @@ test.each([
     const view = drawFirefliesCard(key, title);
 
     // Said to the admin as what is missing: the button beside it is theirs to press.
-    await view.findByText(`${title} isn't turned on yet.`);
+    await view.findByText(`${title} isn't connected yet.`);
     expect(view.queryByText(/Only an admin/)).toBeNull();
     browser.click(
       await view.findByRole("button", {
-        name: `Turn on ${title} and give it to General Assistant`,
+        name: `Connect ${title} and give it to General Assistant`,
       }),
     );
     await waitFor(() => expect(browser.tabs[0]?.to).toHaveLength(1), {
@@ -615,7 +615,7 @@ test.each([
   15_000,
 );
 
-test("an admin's Turn on and give it goes on to the sign-in for an app that signs in", async () => {
+test("an admin's Connect and give it goes on to the sign-in for an app that signs in", async () => {
   const browser = aBrowser();
   servingApp(
     fireflies({
@@ -631,7 +631,7 @@ test("an admin's Turn on and give it goes on to the sign-in for an app that sign
   const view = drawFirefliesCard();
   browser.click(
     await view.findByRole("button", {
-      name: "Turn on Fireflies and give it to Personal Assistant",
+      name: "Connect Fireflies and give it to Personal Assistant",
     }),
   );
   await waitFor(() => expect(browser.tabs[0]?.to).toEqual([CONSENT]), {

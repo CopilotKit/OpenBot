@@ -266,11 +266,9 @@ describe.skipIf(!asked)("Connections on OpenBot Cloud", () => {
           await row.waitFor({ timeout: 15_000 });
           await style(page);
           await shoot(page, "admin-app-page", name);
+          expect(await row.innerText()).toContain("On for everyone");
           expect(await row.innerText()).toContain(
-            "Enable for this organization",
-          );
-          expect(await row.innerText()).toContain(
-            "Turning this off removes it and every Bot's access to its tools.",
+            "Turning this off removes it for everyone, along with every Bot's access to its tools.",
           );
           await row.getByRole("switch").click();
           await page.waitForURL(`${ORIGIN}/connections`, { timeout: 15_000 });
