@@ -3,22 +3,13 @@ import { readFileSync } from "node:fs";
 
 /*
  * The two theme values the web app's look changes (docs/app-guidelines.md, "The look"): corners
- * from an 8px radius, and the default icon line at 1.75. Nothing else in theme.css moves, and the
- * scheme's generated block least of all.
+ * from an 8px radius, and the default icon line at 1.75. The scheme's generated block is held to
+ * tokens/src/scheme.ts by tokens/tests/generated.test.ts, not here.
  */
 
 const THEME = new URL("../src/theme.css", import.meta.url);
 const theme = readFileSync(THEME, "utf8");
 const withoutComments = theme.replace(/\/\*[\s\S]*?\*\//g, "");
-
-/** The text between the scheme's markers, light then dark. */
-function schemeBlocks(css: string) {
-  return [
-    ...css.matchAll(
-      /\/\* tokens\/src\/scheme\.ts, [^*]*\*\/([\s\S]*?)\/\* end of tokens\/src\/scheme\.ts \*\//g,
-    ),
-  ].map((match) => match[1]);
-}
 
 describe("the look's theme values", () => {
   test(":root's --radius is 0.5rem", () => {
@@ -39,15 +30,5 @@ describe("the look's theme values", () => {
         body: "stroke-width: 1.75;",
       },
     ]);
-  });
-
-  test("the scheme's generated block is untouched", () => {
-    const main = Bun.spawnSync([
-      "git",
-      "show",
-      "origin/main:app/src/theme.css",
-    ]).stdout.toString();
-    expect(schemeBlocks(main)).toHaveLength(2);
-    expect(schemeBlocks(theme)).toEqual(schemeBlocks(main));
   });
 });
