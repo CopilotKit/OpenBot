@@ -51,6 +51,7 @@ import {
   heldAttachmentsConfig,
   heldFileOf,
   previewUrlOf,
+  restoringFile,
   stagedRowId,
 } from "./attachments";
 import {
@@ -70,6 +71,16 @@ import {
 import { MESSAGE_BOX_FRAME } from "./frame";
 import { screenPickedFiles } from "./picked-files";
 import { type RejectedFile, RejectedFiles } from "./rejected-files";
+import {
+  loadHeldFiles,
+  readSavedDraft,
+  type SavedStagedFile,
+  savedDraftKey,
+  saveHeldFiles,
+  stillHeld,
+  toSavedStagedFile,
+  writeSavedDraft,
+} from "./saved-draft";
 import { type AgentOption, buildTriggers } from "./triggers";
 import { useDictation } from "./use-dictation";
 
@@ -312,6 +323,13 @@ export type ComposerProps = {
    * routine to post. Drawn by the compact layout, the one a conversation uses.
    */
   routine?: { agentId: string; channelId: string };
+  /**
+   * Which conversation's unsent message this box holds, so it is kept in this browser and put back
+   * when the box opens again (`saved-draft.ts`): after switching conversations and back, or a
+   * reload. A conversation's id, or a name for a screen with no conversation yet. Absent keeps
+   * nothing, as before.
+   */
+  draftKey?: string;
 };
 
 /**
@@ -385,6 +403,10 @@ const UNACCEPTED_DROP_REASON = {
 const UNREADABLE_DROP_REASON =
   "couldn't be attached. Attach it with + instead.";
 
+/** A file a saved draft had staged more than a day ago: OpenBot holds an unsent file for a day. */
+const LAPSED_REASON =
+  "was removed after a day without being sent. Attach it again.";
+
 export function Composer({
   className,
   editorClassName,
@@ -410,9 +432,25 @@ export function Composer({
   // Nothing parked is the right answer for every caller without a queue, which is most of them.
   queuedAttachmentCount = 0,
   routine,
+  draftKey,
 }: ComposerProps) {
-  const [value, setValue] = useState<Segment[]>(
-    initialValue ? [{ type: "text", text: initialValue }] : [],
+  /*
+   * Where this composer keeps its unsent message, and what it had kept, read once as it mounts.
+   * Words handed in by the caller (`initialValue`, `initialFiles`) are a message being put back on
+   * purpose, so they take the place of a saved one, and become the saved one from then on.
+   */
+  const [savedKey] = useState(() =>
+    draftKey ? savedDraftKey(draftKey) : undefined,
+  );
+  const [saved] = useState(() =>
+    savedKey && !initialValue && !initialFiles?.length
+      ? readSavedDraft(savedKey)
+      : undefined,
+  );
+  const [value, setValue] = useState<Segment[]>(() =>
+    initialValue
+      ? [{ type: "text", text: initialValue }]
+      : (saved?.segments ?? []),
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submitInFlight = useRef(false);
@@ -510,9 +548,9 @@ export function Composer({
    * channel until the sweeper's 24-hour window expired. Grouping the rows by the composer that
    * staged them is what makes both sides count the same set.
    *
-   * NOT A DRAFT ID. Nothing about the message is saved anywhere by this, and nothing survives a
-   * reload: a remount mints a new key and the rows the old one staged become somebody else's
-   * problem, which is to say the sweeper's.
+   * NOT A DRAFT ID, but kept with the draft (`saved-draft.ts`): a composer putting back the files a
+   * saved draft staged goes on in the group they were staged in, so the server still counts the set
+   * this composer can see. A composer with nothing to put back mints a new one.
    *
    * `newId()` rather than `crypto.randomUUID()`, which does not exist outside a secure context —
    * on a deployment reached at plain `http://<address>` the call is not merely wrong, it throws,
@@ -523,7 +561,7 @@ export function Composer({
    * render to be thrown away — cheap, but it would also mean the id nobody keeps is minted
    * hundreds of times per composer.
    */
-  const [uploadGroup] = useState(newId);
+  const [uploadGroup] = useState(() => saved?.uploadGroup ?? newId());
 
   /**
    * EVERY SERVER ROW THIS COMPOSER HAS CREATED AND NOT YET ACCOUNTED FOR.
@@ -537,8 +575,16 @@ export function Composer({
    */
   const uploadedRows = useRef<Set<string>>(new Set());
 
+  /** When each row was uploaded, kept with a saved draft so a stale one is not put back. */
+  const stagedAt = useRef<Map<string, number>>(
+    new Map(saved?.staged.map((file) => [file.attachmentId, file.stagedAt])),
+  );
+
   const recordUpload = useCallback((attachmentId: string) => {
     uploadedRows.current.add(attachmentId);
+    if (!stagedAt.current.has(attachmentId)) {
+      stagedAt.current.set(attachmentId, Date.now());
+    }
   }, []);
 
   /**
@@ -897,6 +943,135 @@ export function Composer({
     restoredFiles.current = true;
     void stageFiles(initialFiles);
   }, [canAttach, initialFiles, stageFiles]);
+
+  /*
+   * THE SAVED DRAFT'S FILES, PUT BACK ON THE STRIP ONCE THE STRIP CAN TAKE THEM.
+   *
+   * Until they are back, the draft that is written below still lists them, so a composer that
+   * cannot take files right now (a conversation whose Bot was deleted) does not forget them by
+   * saving an empty strip over them.
+   */
+  const pendingStaged = useRef<SavedStagedFile[]>(saved?.staged ?? []);
+  const pendingHeld = useRef(Boolean(saved && saved.heldFiles > 0 && savedKey));
+  const [draftRestored, setDraftRestored] = useState(false);
+  const restoringDraft = useRef(false);
+  useEffect(() => {
+    if (restoringDraft.current || !savedKey || !canAttach) {
+      return;
+    }
+    restoringDraft.current = true;
+    const now = Date.now();
+    // A file staged on a conversation is put back only there, and only while the server holds it.
+    const restorable = channelId
+      ? pendingStaged.current.filter((file) => stillHeld(file, now))
+      : [];
+    const lapsed = channelId
+      ? pendingStaged.current.filter((file) => !stillHeld(file, now))
+      : [];
+    if (lapsed.length > 0) {
+      setRejected((current) => [
+        ...current,
+        ...lapsed.map((file) => ({
+          id: newId(),
+          name: file.filename ?? "Attachment",
+          reason: LAPSED_REASON,
+        })),
+      ]);
+    }
+    const heldWanted = pendingHeld.current && !channelId && holdsFilesUntilSent;
+    void (async () => {
+      try {
+        if (restorable.length > 0) {
+          // Counted as a pick is, so a file dropped while these come back is screened against them.
+          stagedCount.current += restorable.length;
+          staging.current += restorable.length;
+          try {
+            await processFiles(restorable.map(restoringFile));
+          } finally {
+            staging.current -= restorable.length;
+          }
+        }
+        if (heldWanted) {
+          const files = await loadHeldFiles(savedKey);
+          if (files.length > 0) await stageFiles(files);
+        }
+      } finally {
+        pendingStaged.current = [];
+        pendingHeld.current = false;
+        setDraftRestored(true);
+      }
+    })();
+  }, [
+    canAttach,
+    channelId,
+    holdsFilesUntilSent,
+    processFiles,
+    savedKey,
+    stageFiles,
+  ]);
+
+  /*
+   * KEEP THE MESSAGE AS IT STANDS, on every change: the words, and every file on the strip that has
+   * finished uploading. What a send in flight is carrying is not on `staged`, so pressing Send is
+   * what clears it, and a send that fails puts the words and the files back, which saves them again.
+   * A parked message leaves the strip the same way, and the queue owns it from then on.
+   */
+  // Undefined until the first save, which so forgets any files a draft no longer lists.
+  const savedHeld = useRef<readonly File[] | undefined>(undefined);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `draftRestored` is the trigger to save once the saved files are back.
+  useEffect(() => {
+    if (!savedKey) {
+      return;
+    }
+    const current = staged.flatMap((attachment) => {
+      const rowId = stagedRowId(attachment);
+      if (rowId === undefined) return [];
+      const file = toSavedStagedFile(
+        attachment,
+        stagedAt.current.get(rowId) ?? Date.now(),
+      );
+      return file ? [file] : [];
+    });
+    const shown = new Set(current.map((file) => file.attachmentId));
+    const held = staged
+      .filter((attachment) => attachment.status === "ready")
+      .map(heldFileOf)
+      .filter((file): file is File => file !== undefined);
+    writeSavedDraft(savedKey, {
+      segments: value,
+      uploadGroup,
+      staged: [
+        ...pendingStaged.current.filter(
+          (file) => !shown.has(file.attachmentId),
+        ),
+        ...current,
+      ],
+      heldFiles: pendingHeld.current
+        ? Math.max(saved?.heldFiles ?? 0, held.length)
+        : held.length,
+      savedAt: Date.now(),
+    });
+    const before = savedHeld.current;
+    if (
+      holdsFilesUntilSent &&
+      !channelId &&
+      !pendingHeld.current &&
+      (before === undefined ||
+        held.length !== before.length ||
+        held.some((file, index) => file !== before[index]))
+    ) {
+      savedHeld.current = held;
+      saveHeldFiles(savedKey, held);
+    }
+  }, [
+    savedKey,
+    value,
+    staged,
+    uploadGroup,
+    draftRestored,
+    holdsFilesUntilSent,
+    channelId,
+  ]);
 
   /**
    * The image half of a paste that our own listener let through.

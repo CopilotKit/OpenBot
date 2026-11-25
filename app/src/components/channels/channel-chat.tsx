@@ -2126,6 +2126,8 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            // An unsent reply stays with this conversation when somebody looks at another one.
+            draftKey={`conversation:${channel.id}`}
             attachmentLimits={attachmentLimits}
             starterSuggestions={
               channel.agentIds.length === 1 ? (
