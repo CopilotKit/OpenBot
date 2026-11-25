@@ -1,7 +1,14 @@
 import * as Crypto from "expo-crypto";
-import { Redirect, router, Stack, useLocalSearchParams } from "expo-router";
+import * as Notifications from "expo-notifications";
+import {
+  Redirect,
+  router,
+  Stack,
+  useFocusEffect,
+  useLocalSearchParams,
+} from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, Pressable, View } from "react-native";
+import { AppState, FlatList, Pressable, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -12,6 +19,7 @@ import {
 import {
   getConversation,
   listConversationMessages,
+  markConversationRead,
   sendConversationMessage,
 } from "../src/api/generated/conversations/conversations";
 import { authClient } from "../src/auth";
@@ -29,6 +37,7 @@ import {
   Text,
 } from "../src/components";
 import { IconSettings, IconTool } from "../src/icons";
+import { conversationOf, showConversation } from "../src/on-screen";
 import { useLoad } from "../src/use-load";
 import { dayAndTime } from "../src/when";
 
@@ -87,6 +96,40 @@ export default function ConversationScreen() {
     [channelId, agentId],
   );
   const history = useLoad(loadHistory, Boolean(session && agentId));
+  /*
+   * In front of the person: a notification about this conversation shows nothing and brings what it
+   * says in at once, and what the Bot said is marked read, as the web app marks the conversation it
+   * shows. Read only while the app is open on this screen, so a reply that lands with the phone
+   * locked is still unread, and still told about, until they come back to it.
+   */
+  const [inFront, setInFront] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!channelId) return;
+      const leave = showConversation(channelId);
+      setInFront(AppState.currentState === "active");
+      const appState = AppState.addEventListener("change", (state) =>
+        setInFront(state === "active"),
+      );
+      const arrived = Notifications.addNotificationReceivedListener(
+        (notification) => {
+          if (conversationOf(notification.request.content.data) === channelId)
+            void history.refresh();
+        },
+      );
+      return () => {
+        leave();
+        setInFront(false);
+        appState.remove();
+        arrived.remove();
+      };
+    }, [channelId, history.refresh]),
+  );
+  const newest = history.data?.messages[0]?.id;
+  useEffect(() => {
+    if (inFront && channelId && newest)
+      void markConversationRead(ORGANIZATION_ID, channelId).catch(() => {});
+  }, [inFront, channelId, newest]);
   const botsHere = (conversation?.botIds ?? []).map((id) => {
     const bot = bots.data?.find((item) => item.id === id);
     return { id, name: bot?.name ?? "Bot", seed: bot?.avatarSeed || id };

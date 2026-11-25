@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
 import { chooseOrganization, organizationChoices } from "../src/api";
 import { authClient, serverUrl } from "../src/auth";
@@ -14,7 +14,11 @@ import {
   Text,
 } from "../src/components";
 import { IconBell, IconBuilding, IconCheck, IconLogout } from "../src/icons";
-import { registerPush, unregisterPush } from "../src/notifications";
+import {
+  pushTurnedOn,
+  registerPush,
+  unregisterPush,
+} from "../src/notifications";
 import { useLoad } from "../src/use-load";
 
 /**
@@ -26,6 +30,12 @@ export default function Account() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [pushRegistered, setPushRegistered] = useState(false);
+  // Said as it is on this phone, not as it was before the app last started.
+  useEffect(() => {
+    void pushTurnedOn()
+      .then(setPushRegistered)
+      .catch(() => {});
+  }, []);
   const loadOrganizations = useCallback(() => organizationChoices(), []);
   const organizations = useLoad(loadOrganizations, Boolean(session));
   async function act(name: string, work: () => Promise<unknown>) {
@@ -97,8 +107,8 @@ export default function Account() {
             title="Notifications"
             description={
               pushRegistered
-                ? "On. Bots can tell you when they need you."
-                : "Get told when a Bot needs you."
+                ? "On. Bots can tell you when they finish or need you."
+                : "Get told when a Bot finishes or needs you."
             }
             trailing={
               pushRegistered ? <Icon icon={IconCheck} size={18} /> : undefined

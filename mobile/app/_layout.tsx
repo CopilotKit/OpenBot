@@ -20,16 +20,22 @@ import { DrawerProvider, useDrawer } from "../src/drawer";
 import { withSecurityFloor } from "../src/floor-gate";
 import { MenuButton } from "../src/header";
 import { notificationDestination } from "../src/links";
+import { renewPush } from "../src/notifications";
+import { aboutShownConversation } from "../src/on-screen";
 import { onSessionRefused } from "../src/session-refused";
 import { useVersionVerdict, VersionGate } from "../src/version-gate";
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  // One about the conversation on screen shows nothing: the screen has it, and refreshes to show it.
+  handleNotification: async (notification) => {
+    const show = !aboutShownConversation(notification.request.content.data);
+    return {
+      shouldShowBanner: show,
+      shouldShowList: show,
+      shouldPlaySound: show,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 /** The native header in the scheme's colors and Inter, for every screen. */
@@ -67,6 +73,10 @@ function Layout() {
   // Asked before sign-in: whether this app and its OpenBot can work together. When they can't, one sentence covers
   // the app, so no screen behind it is seen failing.
   const { verdict, check } = useVersionVerdict(Boolean(session), isPending);
+  // A phone that gets notifications sends its current push token each time the app starts signed in.
+  useEffect(() => {
+    if (session) void renewPush().catch(() => {});
+  }, [session]);
   const pending = useRef<unknown>(null);
   const handled = useRef<string | null>(null);
   useEffect(() => {
