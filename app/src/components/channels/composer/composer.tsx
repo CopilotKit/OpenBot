@@ -146,10 +146,9 @@ function stagedMimeType(attachment: Attachment): string {
 
 const MAX_HEIGHT_PX = 220;
 /**
- * Two `text-sm` lines: the compact composer's message box sits on its own row above the controls,
- * so it opens two lines tall and grows from there.
+ * Two 24px lines: the compact composer's message box opens two lines tall and grows from there.
  */
-const COMPACT_MIN_HEIGHT_PX = 38;
+const COMPACT_MIN_HEIGHT_PX = 48;
 const COMPACT_MAX_HEIGHT_PX = 160;
 
 export type ComposerProps = {
@@ -1707,6 +1706,13 @@ export function Composer({
     </p>
   ) : null;
 
+  // Match the transcript. At fractional zoom, WebKit can report a pixel of horizontal overflow
+  // even when the text wraps. Keep PromptArea's vertical scrolling for long drafts.
+  const inputClassName = cn(
+    "w-full border-0 bg-transparent p-0 text-(length:--text-conversation)/(--text-conversation--line-height) shadow-none [&_.prompt-area-editor]:overflow-x-hidden",
+    editorClassName,
+  );
+
   if (compact) {
     return (
       /*
@@ -1759,10 +1765,7 @@ export function Composer({
             <div className="min-w-0" data-slot="composer-input">
               <PromptArea
                 aria-label="Message"
-                className={cn(
-                  "w-full border-0 bg-transparent p-0 text-sm shadow-none",
-                  editorClassName,
-                )}
+                className={inputClassName}
                 disabled={disabled}
                 maxHeight={COMPACT_MAX_HEIGHT_PX}
                 minHeight={COMPACT_MIN_HEIGHT_PX}
@@ -1855,10 +1858,7 @@ export function Composer({
               <PromptArea
                 aria-label="Message"
                 autoGrow
-                className={cn(
-                  "w-full border-0 bg-transparent p-0 text-sm shadow-none",
-                  editorClassName,
-                )}
+                className={inputClassName}
                 disabled={disabled}
                 maxHeight={MAX_HEIGHT_PX}
                 onChange={handleChange}

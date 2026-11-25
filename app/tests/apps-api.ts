@@ -62,6 +62,7 @@ export type TodayServer = {
   sharedOnly?: boolean;
   ownerGrants?: "any" | "admin";
   ownerGrantsChosen?: "any" | "admin" | null;
+  everyBot?: boolean;
   tools?: {
     name: string;
     ref?: string;
@@ -205,6 +206,7 @@ export function appBody(server: TodayServer): App {
     sharedOnly: server.sharedOnly ?? false,
     ownerGrants: server.ownerGrants ?? "admin",
     ownerGrantsChosen: server.ownerGrantsChosen ?? null,
+    everyBot: server.everyBot ?? false,
     addedBy: server.addedBy ?? null,
     toolsRefreshedAt: server.toolsRefreshedAt ?? null,
     lastError: server.lastError ?? null,

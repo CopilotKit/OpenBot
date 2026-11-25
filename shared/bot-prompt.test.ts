@@ -15,7 +15,6 @@ import {
   runModeGuidance,
   workingGuidance,
 } from "./bot-prompt";
-import { RESEARCH_APP_NAMES } from "./research";
 
 const WITH_SEARCH = computerGuidance({ search: true });
 const WITHOUT_SEARCH = computerGuidance({ search: false });
@@ -88,12 +87,22 @@ describe("computerGuidance", () => {
     expect(guidance).not.toContain("cannot search");
   });
 
-  test("without a search tool, the browser is never a search engine", () => {
+  /*
+   * FOUND IN DOGFOODING. A Bot with no search app said "I could technically load Google or Bing in
+   * that browser, but I'm set up not to" and that "an admin can add a search app". OpenBot is open
+   * by default: without a search tool, the Bot searches with its own browser.
+   */
+  test("without a search tool, it searches with its own browser and never refuses", () => {
     const guidance = flat(WITHOUT_SEARCH);
-    expect(guidance).toContain("opening a page is not a web search");
-    expect(guidance).toContain("never drive your browser to a search engine");
+    expect(guidance).toContain("search with your own browser");
     for (const engine of ["google", "bing", "duckduckgo"])
       expect(guidance).toContain(engine);
+    expect(guidance).toContain("never refuse to search");
+    expect(guidance).toContain("try another search engine");
+    expect(guidance).not.toContain(
+      "never drive your browser to a search engine",
+    );
+    expect(guidance).not.toContain("cannot search");
     expect(guidance).not.toContain("use your search tool");
     // Conditional, not a claim: a search tool from Composio or a server added by URL is not
     // recognised by role, and a Bot holding one must not be told it holds none.
@@ -101,19 +110,16 @@ describe("computerGuidance", () => {
     expect(guidance).not.toContain("you do not hold a search tool");
   });
 
-  test("without a search tool, it answers marked as unchecked and offers a search app", () => {
-    const guidance = flat(WITHOUT_SEARCH);
-    expect(guidance).toContain("answer from what you already know");
-    expect(guidance).toContain("you have not checked it against a source");
-    expect(guidance).toContain("call it once in the conversation");
-    expect(guidance).toContain("show_app_access");
-    for (const name of RESEARCH_APP_NAMES)
-      expect(guidance).toContain(name.toLowerCase());
-    expect(guidance).toContain(
-      "otherwise say an administrator can add a search app",
+  test("without a search tool, it never tells anybody an administrator has to add search", () => {
+    for (const personal of [false, true]) {
+      const guidance = flat(computerGuidance({ search: false, personal }));
+      expect(guidance).not.toContain("an administrator can add a search app");
+      expect(guidance).not.toContain("ask an administrator to add it");
+      expect(guidance).not.toContain("answer from what you already know");
+    }
+    expect(flat(WITHOUT_SEARCH)).toContain(
+      "never tell the person that an administrator has to add a search app",
     );
-    // Asked "can you search the web?", a Bot with only a browser once said yes.
-    expect(guidance).toContain("cannot search");
   });
 
   test("says what it is doing with its first computer action, in the same reply", () => {
