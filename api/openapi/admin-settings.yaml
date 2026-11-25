@@ -1063,7 +1063,11 @@ paths:
         Return what this OpenBot has set up and what it still needs, each row
         with its fix. An administrator, or somebody running OpenBot on their
         own, reads it as the one who sets it up; anybody else reads which
-        parts work, and that an administrator sets the rest up.
+        parts work, and that an administrator sets the rest up. On OpenBot
+        Cloud, where each person can connect their own AI, the model row is
+        the reader's: ready when the AI their runs use, their own or else the
+        organization's, can answer, and needing setup only when neither can.
+        No model key in this OpenBot's configuration is needed there.
       x-openbot-singleton: true
       security:
         - webSession: []
