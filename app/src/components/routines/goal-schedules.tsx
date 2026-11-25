@@ -1,4 +1,4 @@
-import { IconClock, IconHistory, IconTrash } from "@tabler/icons-react";
+import { IconClock, IconHistory, IconTrash } from "@/components/icons";
 import { useMutation } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";

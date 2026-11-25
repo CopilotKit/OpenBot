@@ -3,7 +3,7 @@ import {
   IconSparkles,
   IconToggleRight,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";

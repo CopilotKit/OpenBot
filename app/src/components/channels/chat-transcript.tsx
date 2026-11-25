@@ -28,7 +28,7 @@ import {
   IconClock,
   IconDownload,
   IconPhoto,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { QueryClientContext, useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import {

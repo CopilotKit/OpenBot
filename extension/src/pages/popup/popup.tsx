@@ -1,6 +1,6 @@
 import { installOnDeviceSpeech } from "@openbot/shared/on-device-speech";
 import type { LearningSpaceState } from "@openbot/shared/recorder-api";
-import { IconAlertTriangle } from "@tabler/icons-react";
+import { IconAlertTriangle } from "@/components/icons";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type {

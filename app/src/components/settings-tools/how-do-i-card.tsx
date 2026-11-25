@@ -1,4 +1,4 @@
-import { IconListNumbers, IconLock, IconRobot } from "@tabler/icons-react";
+import { IconListNumbers, IconLock, IconRobot } from "@/components/icons";
 import type { ReactNode } from "react";
 import type { SettingsToolCardProps } from "./registry";
 import { ScreenLink } from "./screen-link";

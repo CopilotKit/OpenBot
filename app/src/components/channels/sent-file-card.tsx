@@ -1,4 +1,4 @@
-import { IconAlertTriangle, IconDownload } from "@tabler/icons-react";
+import { IconAlertTriangle, IconDownload } from "@/components/icons";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { attachmentAddress } from "@/lib/channels/attachments";

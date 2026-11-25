@@ -1,4 +1,4 @@
-import { IconPlugConnected } from "@tabler/icons-react";
+import { IconPlugConnected } from "@/components/icons";
 import { Link, useLocation } from "@tanstack/react-router";
 import { PageRows } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";

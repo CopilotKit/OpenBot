@@ -6,7 +6,7 @@ import {
   IconCircleCheck,
   IconPlug,
   IconPlus,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
@@ -71,7 +71,7 @@ import { toolsListError } from "@/lib/plugins/tools-error";
  */
 
 /**
- * A vendor's own mark where Tabler ships one. Everything else draws the server's logo, or its
+ * A vendor's own mark where the icon set ships one. Everything else draws the server's logo, or its
  * initial: a server an administrator added by URL has no catalogue entry and so no mark of its own,
  * and a column of identical plugs would tell one vendor from another no better than no icon at all.
  */

@@ -1,4 +1,4 @@
-import { IconDeviceLaptop } from "@tabler/icons-react";
+import { IconDeviceLaptop } from "./icons";
 import { BUSINESS_URL } from "../../shared/openbot-for-business";
 import { ExternalLink } from "./ExternalLink";
 
@@ -22,7 +22,7 @@ export function SelfContainedNote() {
       aria-labelledby="self-contained-heading"
     >
       <div className="mark-tile mark-icon" aria-hidden="true">
-        <IconDeviceLaptop stroke={1.75} />
+        <IconDeviceLaptop />
       </div>
       <div className="self-contained-words">
         <h2 id="self-contained-heading">Everything runs on this computer</h2>

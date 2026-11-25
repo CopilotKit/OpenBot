@@ -3,7 +3,7 @@ import {
   IconUser,
   IconUserMinus,
   IconUserPlus,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useState } from "react";
 import { copyText } from "@/components/settings/linked-accounts";
 import { Button } from "@/components/ui/button";

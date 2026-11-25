@@ -1,4 +1,4 @@
-import { IconChevronRight, IconPlus } from "@tabler/icons-react";
+import { IconChevronRight, IconPlus } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
 import { PageRows } from "@/components/layout/page-shell";

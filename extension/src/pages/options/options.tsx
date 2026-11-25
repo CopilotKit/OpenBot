@@ -7,7 +7,7 @@ import {
   IconPlugConnectedX,
   IconUser,
   IconWorldOff,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { Fragment, useEffect, useState } from "react";
 import {
   PageEmpty,

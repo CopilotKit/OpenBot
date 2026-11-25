@@ -2,7 +2,7 @@ import {
   IconDeviceDesktop,
   IconDeviceDesktopOff,
   IconTerminal2,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { PageEmpty } from "@/components/layout/page-parts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";

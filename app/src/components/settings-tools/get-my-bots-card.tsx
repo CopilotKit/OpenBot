@@ -3,7 +3,7 @@ import {
   IconLock,
   IconRobot,
   IconUsers,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Badge } from "@/components/gallery/frame";

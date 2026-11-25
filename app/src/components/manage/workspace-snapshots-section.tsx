@@ -4,7 +4,7 @@ import {
   IconCircleCheck,
   IconHistory,
   IconLoader2,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
 import {

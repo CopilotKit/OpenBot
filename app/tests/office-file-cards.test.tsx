@@ -46,7 +46,7 @@ const OFFICE = [
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     sizeBytes: 14_336,
     label: "Excel workbook · 14 KB",
-    icon: "tabler-icon-file-type-xls",
+    icon: "icon-file-type-xls",
   },
   {
     name: "launch memo.docx",
@@ -54,7 +54,7 @@ const OFFICE = [
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     sizeBytes: 48_128,
     label: "Word document · 47 KB",
-    icon: "tabler-icon-file-type-docx",
+    icon: "icon-file-type-docx",
   },
   {
     name: "board deck.pptx",
@@ -62,7 +62,7 @@ const OFFICE = [
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     sizeBytes: 3_250_586,
     label: "PowerPoint presentation · 3.1 MB",
-    icon: "tabler-icon-file-type-ppt",
+    icon: "icon-file-type-ppt",
   },
 ] as const;
 

@@ -1,4 +1,4 @@
-import { IconBuilding, IconChevronRight } from "@tabler/icons-react";
+import { IconBuilding, IconChevronRight } from "@/components/icons";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useSignOut } from "@/components/app-sidebar/use-sign-out";

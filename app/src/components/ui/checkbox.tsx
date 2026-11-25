@@ -1,5 +1,5 @@
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox";
-import { IconCheck } from "@tabler/icons-react";
+import { IconCheck } from "@/components/icons";
 
 import { cn } from "@/lib/utils";
 

@@ -2,7 +2,7 @@ import {
   IconCheck,
   IconChevronDown,
   IconChevronLeft,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { createContext, type ReactNode, useContext, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BrandName } from "@/components/edition/brand-name";

@@ -7,7 +7,7 @@ import {
   IconArrowUp,
   IconPlayerStopFilled,
   IconPlus,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { PromptArea, type PromptAreaHandle } from "prompt-area";
 import {
   isSegmentsEmpty,

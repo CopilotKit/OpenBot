@@ -6,7 +6,7 @@ import {
   IconUsers,
   IconUsersGroup,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
 import {

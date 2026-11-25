@@ -7,7 +7,7 @@ import {
   IconSquareCheck,
   IconTable,
   IconTriangleSquareCircle,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";

@@ -4,7 +4,7 @@ import {
   IconChevronRight,
   IconDots,
   IconPlus,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";

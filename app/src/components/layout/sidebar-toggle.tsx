@@ -1,4 +1,4 @@
-import { IconLayoutSidebar } from "@tabler/icons-react";
+import { IconLayoutSidebar } from "@/components/icons";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";

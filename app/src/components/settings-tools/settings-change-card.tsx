@@ -2,8 +2,8 @@ import {
   IconArrowDown,
   IconSettings,
   IconUsers,
-  type TablerIcon,
-} from "@tabler/icons-react";
+  type Icon,
+} from "@/components/icons";
 import type { ReactNode } from "react";
 import { Badge, type Tone } from "@/components/gallery/frame";
 import { cn } from "@/lib/utils";
@@ -299,7 +299,7 @@ export function SettingsChangeCard({
 }: {
   /** What was changed, as its screen is titled: "Your settings", "Organization settings". */
   title: string;
-  icon?: TablerIcon;
+  icon?: Icon;
   /** What the rows are about, drawn over them: the app a Bot's actions are in. */
   lead?: ReactNode;
   /** Null while it runs, or when it was refused before a change was worked out. */

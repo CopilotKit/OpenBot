@@ -25,7 +25,7 @@ import {
   IconSend,
   IconTerminal2,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useSyncExternalStore } from "react";
 import {
   type AllowedDecision,

@@ -4,7 +4,7 @@ import {
   IconNetwork,
   IconUsersGroup,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";

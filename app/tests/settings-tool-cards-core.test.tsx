@@ -460,7 +460,7 @@ describe.skipIf(!asked)("the settings read cards", () => {
                 ].map(
                   (row) =>
                     row.lastElementChild?.classList.contains(
-                      "tabler-icon-chevron-right",
+                      "icon-chevron-right",
                     ) ?? false,
                 ),
               ),

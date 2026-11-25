@@ -961,6 +961,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   with rings of dots that brighten as you type, and the page rises in on the first Home of a visit.
   Nothing moves when your system asks for less motion. Skins keep their own look. OpenBot
   Desktop's setup window and the phone app take the same grays.
+- **New icons, the same in every app.** The web app, the browser extension and OpenBot Desktop draw
+  their icons from Hugeicons' free set instead of Tabler: rounder, with a slightly lighter line, at
+  the same sizes and in the same places. Each icon keeps its meaning, and the skins take them too.
 - **Product telemetry says which kind of install sent it.** An event's `environment` was read from
   `NODE_ENV`, which a Compose install and OpenBot Desktop leave empty, so every event said
   `unknown`. It now comes from the build: a release, a release candidate or an internal build says

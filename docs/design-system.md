@@ -133,9 +133,9 @@ icons a screen draws with. What it leaves to this page:
 - **No pixel value copied from a design** (`w-[91px]`, `h-[43px]`). Use the nearest step of the
   scale, never a smaller one. Sizes stay: a new look changes how things are drawn, not how big they
   are.
-- **One typeface and one icon set, in every app.** Inter and Tabler today, in the web app, OpenBot
-  Desktop and the extension. Changing either is a change for all three at once, agreed first. It
-  never lands in one app.
+- **One typeface and one icon set, in every app.** Inter and Hugeicons' free set today, in the web
+  app, OpenBot Desktop and the extension. Changing either is a change for all three at once, agreed
+  first. It never lands in one app.
 - **Draw with tokens, not with pictures.** A picture has one set of colors: it can't follow dark
   mode, a skin or a customer's theme. Draw interface parts in CSS or as an SVG that takes
   `currentColor`. A picture that is content, such as a screenshot or a photo, is a dependency like
@@ -194,6 +194,7 @@ A change to a token or a primitive changes every screen, so it lands differently
 | [`app/tests/ui-look-guard.test.ts`](../app/tests/ui-look-guard.test.ts) | No corner, shadow, text size, `dark:` color or hand-drawn card of a screen's own. |
 | [`app/tests/ui-primitives-look.test.ts`](../app/tests/ui-primitives-look.test.ts) | Every primitive keeps the look's corner and shadow steps, a copied shadcn one included. |
 | [`app/tests/ui-look-theme.test.ts`](../app/tests/ui-look-theme.test.ts) | The one radius, the icons' line, and every line at one strength. |
+| [`app/tests/icon-set.test.ts`](../app/tests/icon-set.test.ts) | One icon set in the web app, the extension and OpenBot Desktop, taken from its module. |
 | [`tokens/tests/slate.test.ts`](../tokens/tests/slate.test.ts) | The grays are one family, in light and in dark. |
 | [`app/tests/skins.test.ts`](../app/tests/skins.test.ts) | A skin sets every light token for dark too. |
 | [`app/tests/checkbox-contrast.test.tsx`](../app/tests/checkbox-contrast.test.tsx) | A checkbox's edge can be seen. |

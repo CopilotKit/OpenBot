@@ -4,7 +4,7 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconTerminal2,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { type ReactNode, useState } from "react";
 import { ToolLine } from "@/components/channels/tool-line";
 import { Badge, type Tone } from "@/components/gallery/frame";

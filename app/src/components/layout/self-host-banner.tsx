@@ -1,4 +1,4 @@
-import { IconX } from "@tabler/icons-react";
+import { IconX } from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openTeamFeatures } from "@/components/edition/team-features-dialog";
 import { Button } from "@/components/ui/button";

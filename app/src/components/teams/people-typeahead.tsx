@@ -1,4 +1,4 @@
-import { IconCornerDownLeft, IconSearch } from "@tabler/icons-react";
+import { IconCornerDownLeft, IconSearch } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   type KeyboardEvent,

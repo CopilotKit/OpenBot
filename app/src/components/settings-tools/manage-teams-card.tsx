@@ -3,7 +3,7 @@ import {
   IconUserMinus,
   IconUserPlus,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   type AdminCardState,
   AdminChangeCard,

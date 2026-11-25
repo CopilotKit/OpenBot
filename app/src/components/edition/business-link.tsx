@@ -1,4 +1,4 @@
-import { IconX } from "@tabler/icons-react";
+import { IconX } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Trademark } from "@/components/edition/brand-name";

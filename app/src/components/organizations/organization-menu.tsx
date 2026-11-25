@@ -4,7 +4,7 @@ import {
   IconPlus,
   IconSettings,
   IconUserCircle,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import {
   DropdownMenuGroup,

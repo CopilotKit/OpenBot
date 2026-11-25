@@ -3,7 +3,7 @@ import {
   IconCloud,
   IconDeviceLaptop,
   IconServer2,
-} from "@tabler/icons-react";
+} from "./icons";
 import { type ReactNode, useEffect, useState } from "react";
 import { BusinessBooker } from "./BusinessBooker";
 import { CloudSignIn, cloudAddress, cloudEnabled } from "./CloudSignIn";
@@ -274,7 +274,7 @@ export function Welcome({
               onChange={pickThisComputer}
             />
             <HostingMark>
-              <IconDeviceLaptop stroke={1.75} />
+              <IconDeviceLaptop />
             </HostingMark>
             <span className="tile-name">OpenBot (Self-Contained)</span>
             <span className="tile-summary">{SELF_CONTAINED_SUMMARY}</span>
@@ -293,7 +293,7 @@ export function Welcome({
                 onChange={() => pick("cloud")}
               />
               <HostingMark>
-                <IconCloud stroke={1.75} />
+                <IconCloud />
               </HostingMark>
               <span className="tile-name">OpenBot Cloud</span>
               <span className="tile-summary">{CLOUD_SUMMARY}</span>
@@ -311,7 +311,7 @@ export function Welcome({
                 onChange={() => pick("business")}
               />
               <HostingMark>
-                <IconBuilding stroke={1.75} />
+                <IconBuilding />
               </HostingMark>
               <span className="tile-name">OpenBot for Business</span>
               <span className="tile-summary">{BUSINESS_SUMMARY}</span>
@@ -326,7 +326,7 @@ export function Welcome({
             aria-labelledby="business-name"
           >
             <HostingMark>
-              <IconBuilding stroke={1.75} />
+              <IconBuilding />
             </HostingMark>
             <span className="tile-name" id="business-name">
               OpenBot for Business
@@ -355,7 +355,6 @@ export function Welcome({
                   <choice.icon
                     className="tile-option-icon"
                     aria-hidden="true"
-                    stroke={1.75}
                   />
                   <span className="tile-option-text">
                     <span className="tile-option-name">{choice.name}</span>

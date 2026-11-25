@@ -1,4 +1,4 @@
-import { IconShare } from "@tabler/icons-react";
+import { IconShare } from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";

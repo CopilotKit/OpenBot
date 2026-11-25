@@ -1,4 +1,4 @@
-import { IconLock, IconLockOpen } from "@tabler/icons-react";
+import { IconLock, IconLockOpen } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useEdition } from "@/components/edition/for-a-team";

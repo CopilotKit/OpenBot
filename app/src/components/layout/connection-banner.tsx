@@ -1,4 +1,4 @@
-import { IconCloudOff } from "@tabler/icons-react";
+import { IconCloudOff } from "@/components/icons";
 import { useEffect } from "react";
 import { askWhetherOpenBotAnswers } from "@/lib/deployment/queries";
 import { useConnectionLost } from "@/lib/desktop/connection-lost";

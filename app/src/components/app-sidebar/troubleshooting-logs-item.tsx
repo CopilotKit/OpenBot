@@ -1,4 +1,4 @@
-import { IconLifebuoy } from "@tabler/icons-react";
+import { IconLifebuoy } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";

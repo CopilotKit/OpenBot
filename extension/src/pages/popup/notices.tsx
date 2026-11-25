@@ -1,4 +1,4 @@
-import { IconInfoCircle } from "@tabler/icons-react";
+import { IconInfoCircle } from "@/components/icons";
 import { PageRows } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
 import {

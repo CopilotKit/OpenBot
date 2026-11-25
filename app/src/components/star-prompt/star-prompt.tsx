@@ -1,5 +1,5 @@
 import { STAR_ON_GITHUB } from "@openbot/shared/notices";
-import { IconStar } from "@tabler/icons-react";
+import { IconStar } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";

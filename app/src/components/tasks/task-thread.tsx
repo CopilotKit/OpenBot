@@ -9,7 +9,7 @@ import {
   IconHandStop,
   IconPlayerStop,
   IconProgress,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   QueryClientContext,
   useMutation,

@@ -3,7 +3,7 @@ import {
   IconMessagePlus,
   IconPlus,
   IconSearch,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   useInfiniteQuery,
   useQuery,

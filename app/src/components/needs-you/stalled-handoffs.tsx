@@ -1,4 +1,4 @@
-import { IconArrowsExchange } from "@tabler/icons-react";
+import { IconArrowsExchange } from "@/components/icons";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { BoardRow } from "@/components/needs-you/board-row";

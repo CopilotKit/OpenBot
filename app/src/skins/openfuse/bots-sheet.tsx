@@ -3,7 +3,7 @@ import {
   IconCheck,
   IconPlus,
   IconUserCircle,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";

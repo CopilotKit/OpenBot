@@ -1,5 +1,5 @@
 import { Questionnaire as QuestionnairePrimitive } from "@shadcn/react/questionnaire";
-import { IconCheck } from "@tabler/icons-react";
+import { IconCheck } from "@/components/icons";
 import type * as React from "react";
 import { type Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";

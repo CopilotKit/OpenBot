@@ -1,4 +1,4 @@
-import { IconChevronRight, IconCompass } from "@tabler/icons-react";
+import { IconChevronRight, IconCompass } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import type { SettingsToolCardProps } from "./registry";
 import { SettingsReadCard } from "./settings-read-card";

@@ -1,4 +1,4 @@
-import { IconChevronRight, IconCpu } from "@tabler/icons-react";
+import { IconChevronRight, IconCpu } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { ModelPicker } from "@/components/channels/composer/model-picker";

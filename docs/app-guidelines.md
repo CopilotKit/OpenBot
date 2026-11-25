@@ -241,8 +241,9 @@ things are drawn, not how big they are.
    glyph in `muted-foreground` on a 32px tile with a hairline ring.
 8. **The message box** is a flat card at rest. While someone types in it, it glows in `ring`. It
    is the only control that glows.
-9. **Icons.** Tabler, at their usual sizes. The default line is 1.75, set once in `theme.css`. An
-   icon that needs another line says why in a comment.
+9. **Icons.** Hugeicons' free set, at their usual sizes, imported from `components/icons` and never
+   from the set itself. The line is the set's own 1.5, which every glyph carries. An icon that
+   needs another line says why in a comment.
 10. **Widths** come from `PageShell`. A screen sets no `max-w-*` of its own without a comment.
 11. **Cards.** A card is `PageRows`, `PageCard` or `Card` (`components/ui/card.tsx`). No screen
     draws a bordered `bg-card` box by hand.

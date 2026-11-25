@@ -8,7 +8,7 @@ import {
   IconPlug,
   IconPlus,
   IconSearch,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   createFileRoute,

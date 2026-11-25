@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { IconBolt, IconMessages } from "@tabler/icons-react";
+import { IconBolt, IconMessages } from "@/components/icons";
 import { cleanup, render, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SectionPanel } from "@/components/layout/section-panel";

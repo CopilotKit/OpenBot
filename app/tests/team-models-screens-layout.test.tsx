@@ -750,9 +750,7 @@ describe.skipIf(!asked)("a team's models", () => {
               await modelsRow(page).evaluate((row) => row.tagName),
             ).not.toBe("BUTTON");
             expect(
-              await modelsRow(page)
-                .locator("svg.tabler-icon-chevron-right")
-                .count(),
+              await modelsRow(page).locator("svg.icon-chevron-right").count(),
             ).toBe(0);
             await look(page, `team-page-member-${tag}`);
           } finally {

@@ -1,6 +1,6 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
-import type { Icon } from "@tabler/icons-react";
+import type { Icon } from "@/components/icons";
 import type * as React from "react";
 import type { ReactNode } from "react";
 import { Sidebar } from "@/components/ui/sidebar";
@@ -128,7 +128,7 @@ export function StripItem({
               className="relative flex size-9 items-center justify-center rounded-lg transition-colors group-hover/strip-item:bg-foreground/5 group-data-active/strip-item:bg-foreground/[0.07] [&_svg]:size-5 [&_svg]:shrink-0"
               data-slot="strip-icon"
             >
-              <ItemIcon aria-hidden="true" stroke={1.75} />
+              <ItemIcon aria-hidden="true" />
             </span>
             <span
               className="max-w-full truncate font-medium text-xs leading-none tracking-tight"

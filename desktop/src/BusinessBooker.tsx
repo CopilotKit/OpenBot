@@ -14,7 +14,7 @@ import {
   IconSparkles,
   IconUsers,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "./icons";
 import { useEffect, useRef, useState } from "react";
 import {
   BOOK_A_DEMO_LINE,
@@ -86,7 +86,7 @@ export function BusinessBooker() {
               return (
                 <li key={feature.title}>
                   <span className="business-icon" aria-hidden="true">
-                    <FeatureIcon stroke={1.75} />
+                    <FeatureIcon />
                   </span>
                   {feature.title}
                 </li>
@@ -108,7 +108,7 @@ export function BusinessBooker() {
             </p>
             <ExternalLink className="button-link primary" href={BUSINESS_URL}>
               Book a demo
-              <IconArrowUpRight aria-hidden="true" stroke={1.75} />
+              <IconArrowUpRight aria-hidden="true" />
             </ExternalLink>
           </div>
         ) : (

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import * as icons from "../src/components/icons";
 
 /*
  * The two theme values the web app's look changes (docs/app-guidelines.md, "The look"): corners
- * from an 8px radius, and the default icon line at 1.75. The scheme's generated block is held to
+ * from an 8px radius, and every icon at the icon set's 1.5 line. The scheme's generated block is held to
  * tokens/src/scheme.ts by tokens/tests/generated.test.ts, not here.
  */
 
@@ -17,19 +20,32 @@ describe("the look's theme values", () => {
     expect(root?.[1]).toMatch(/--radius:\s*0\.5rem;/);
   });
 
-  test("the default icon stroke is 1.75, and only the default", () => {
-    const rules = [
-      ...withoutComments.matchAll(/([^{}]*\.tabler-icon[^{}]*)\{([^}]*)\}/g),
-    ].map((match) => ({
-      selector: match[1].trim(),
-      body: match[2].trim(),
-    }));
-    expect(rules).toEqual([
-      {
-        selector: '.tabler-icon[stroke-width="2"]',
-        body: "stroke-width: 1.75;",
-      },
-    ]);
+  /*
+   * Hugeicons' glyphs carry their line on each element, at 1.5 on a 24-unit grid. Every icon draws
+   * that line unless it is given its own `stroke`, and no rule in the theme draws it otherwise.
+   */
+  test("every icon draws the set's 1.5 line, and its own when given one", () => {
+    const drawn = Object.entries(icons).filter(([name]) =>
+      /^Icon[A-Z]/.test(name),
+    ) as [string, icons.Icon][];
+    expect(drawn.length).toBeGreaterThan(200);
+    const lines = (icon: icons.Icon, stroke?: number) => [
+      ...new Set(
+        [
+          ...renderToStaticMarkup(createElement(icon, { stroke })).matchAll(
+            /stroke-width="([^"]+)"/g,
+          ),
+        ].map((match) => match[1]),
+      ),
+    ];
+    for (const [name, icon] of drawn) {
+      expect({ name, lines: lines(icon) }).toEqual({ name, lines: ["1.5"] });
+      expect({ name, lines: lines(icon, 2) }).toEqual({ name, lines: ["2"] });
+    }
+  });
+
+  test("no rule in the theme sets an icon's line", () => {
+    expect(withoutComments).not.toContain("stroke-width");
   });
 
   /*
