@@ -13,6 +13,7 @@ import {
   IconPlug,
   IconRobot,
   IconTarget,
+  IconUser,
 } from "@tabler/icons-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -122,6 +123,49 @@ export type MovedAccount = {
   email: string;
   organization?: string | null;
 };
+
+/**
+ * One organization the person belongs to on OpenBot Cloud, which their Bots can move into
+ * (`move_destinations`). `canMoveIn`: OpenBot Cloud lets them use Bots there. False, the move is
+ * refused before anything moves, so the window shows it and can't pick it.
+ */
+export type MoveDestination = {
+  id: string;
+  name: string;
+  personal: boolean;
+  canMoveIn: boolean;
+};
+
+/** Said on an organization the person can't move their Bots into. */
+export const NOT_ALLOWED_HERE =
+  "An admin of this organization hasn't let you use Bots here.";
+
+/** The person's own organization first, then the others, in the order OpenBot Cloud lists them. */
+export function destinationsInOrder(
+  destinations: MoveDestination[],
+): MoveDestination[] {
+  return [
+    ...destinations.filter((destination) => destination.personal),
+    ...destinations.filter((destination) => !destination.personal),
+  ];
+}
+
+/**
+ * The organization picked to begin with: the one chosen before (Try again), or the person's own,
+ * which is where the move went before they could choose, or else the first they can move into.
+ */
+export function firstPick(
+  destinations: MoveDestination[],
+  before: string | null,
+): string | null {
+  const open = destinations.filter((destination) => destination.canMoveIn);
+  return (
+    open.find((destination) => destination.id === before)?.id ??
+    open.find((destination) => destination.personal)?.id ??
+    open[0]?.id ??
+    null
+  );
+}
 
 /** "You're signed in as sam@example.com, in Sam's organization." Said under the result's heading. */
 export function signedInAsSaid(account: MovedAccount): string {
@@ -382,6 +426,7 @@ type Screen =
   | { at: "choice" }
   | { at: "confirm" }
   | { at: "moving" }
+  | { at: "where"; destinations: MoveDestination[] }
   | { at: "failed"; problem: Problem }
   | { at: "done"; moved: Moved };
 
@@ -512,7 +557,14 @@ export function MoveToCloud({
   const [stages, setStages] = useState<Stages>(freshStages);
   const cancelled = useRef(false);
   const [cancelling, setCancelling] = useState(false);
-  const move = async () => {
+  // The organization the person chose last, picked again when Try again asks once more.
+  const chose = useRef<string | null>(null);
+  /*
+   * Move pressed (or Try again): sign in, and the organizations the person belongs to on OpenBot
+   * Cloud. One: the move goes straight on into it. More: they choose where their Bots go, and
+   * Continue moves them there (`into`).
+   */
+  const move = async (into?: MoveDestination) => {
     cancelled.current = false;
     setCancelling(false);
     setStages(freshStages());
@@ -521,9 +573,28 @@ export function MoveToCloud({
       if (alive.current) setStages((now) => advance(now, event.payload));
     }).catch(() => null);
     try {
+      let organization = into?.id;
+      if (!into) {
+        const destinations = await invoke<MoveDestination[] | null>(
+          "move_destinations",
+          { address: cloudAddress() },
+        );
+        if (!alive.current) return;
+        if (Array.isArray(destinations) && destinations.length > 1) {
+          setScreen({
+            at: "where",
+            destinations: destinationsInOrder(destinations),
+          });
+          return;
+        }
+        organization = Array.isArray(destinations)
+          ? destinations[0]?.id
+          : undefined;
+      }
       const moved = await invoke<Moved>("move_to_cloud", {
         address: cloudAddress(),
         includeModelKeys: Boolean(preview?.modelKeysAvailable && includeKeys),
+        ...(organization ? { organization } : {}),
       });
       if (alive.current) setScreen({ at: "done", moved });
     } catch (error) {
@@ -534,7 +605,8 @@ export function MoveToCloud({
         setScreen({ at: "confirm" });
         return;
       }
-      setStages((now) => stopped(now));
+      // Refused before anything was packed up: no step of the move failed, none had begun.
+      if (problem.kind !== "move-not-allowed") setStages((now) => stopped(now));
       setScreen({ at: "failed", problem });
     } finally {
       stop?.();
@@ -602,6 +674,17 @@ export function MoveToCloud({
       </Sheet>
     );
   }
+  if (screen.at === "where")
+    return (
+      <Where
+        destinations={screen.destinations}
+        picked={firstPick(screen.destinations, chose.current)}
+        onContinue={(destination) => {
+          chose.current = destination.id;
+          void move(destination);
+        }}
+      />
+    );
   if (screen.at === "failed") {
     const { problem } = screen;
     return (
@@ -611,7 +694,9 @@ export function MoveToCloud({
             ? "Signing in didn't finish"
             : problem.kind === "move-mismatch"
               ? "Not everything arrived"
-              : "The move didn't finish"}
+              : problem.kind === "move-not-allowed"
+                ? "Your Bots can't move there"
+                : "The move didn't finish"}
         </h1>
         <p className="lede">{problem.said}</p>
         <div className="local-alert needs move-safe" role="status">
@@ -805,6 +890,79 @@ function Choice({
           )}
         </>
       )}
+    </Sheet>
+  );
+}
+
+/**
+ * Where the Bots go, for a person in more than one organization on OpenBot Cloud: the choice
+ * screen's own rows, one per organization, their own first. One that doesn't let them use Bots is
+ * shown, held, saying so. Continue moves them into the one picked.
+ */
+function Where({
+  destinations,
+  picked: first,
+  onContinue,
+}: {
+  destinations: MoveDestination[];
+  picked: string | null;
+  onContinue: (destination: MoveDestination) => void;
+}) {
+  const [picked, setPicked] = useState(first);
+  const chosen = destinations.find(
+    (destination) => destination.id === picked && destination.canMoveIn,
+  );
+  return (
+    <Sheet>
+      <h1>Where should your Bots go?</h1>
+      <p className="lede">
+        You belong to more than one organization in OpenBot Cloud. Choose the
+        one your Bots move to.
+      </p>
+      <fieldset className="picker hosting">
+        <legend className="sr-only">Organization</legend>
+        {destinations.map((destination) => (
+          <label
+            key={destination.id}
+            className={
+              !destination.canMoveIn
+                ? "tile held"
+                : destination.id === picked
+                  ? "tile chosen"
+                  : "tile"
+            }
+          >
+            <input
+              type="radio"
+              name="destination"
+              className="tile-input"
+              value={destination.id}
+              checked={destination.id === picked}
+              disabled={!destination.canMoveIn}
+              onChange={() => setPicked(destination.id)}
+            />
+            <Mark icon={destination.personal ? IconUser : IconBuilding} />
+            <span className="tile-name">{destination.name}</span>
+            <span className="tile-summary">
+              {!destination.canMoveIn
+                ? NOT_ALLOWED_HERE
+                : destination.personal
+                  ? "Your own organization."
+                  : "An organization you belong to."}
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <div className="row">
+        <button
+          type="button"
+          disabled={!chosen}
+          onClick={() => chosen && onContinue(chosen)}
+        >
+          Continue
+        </button>
+      </div>
+      <p className="footnote">{NOTHING_REMOVED_UNTIL_CHECKED}</p>
     </Sheet>
   );
 }

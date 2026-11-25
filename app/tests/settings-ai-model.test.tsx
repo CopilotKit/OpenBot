@@ -1,10 +1,10 @@
 /**
- * Settings → General's AI model, from the report: somebody on OpenBot Desktop 1.0.0 could not find
+ * Settings → Providers inside OpenBot Desktop, from the report: somebody on OpenBot Desktop 1.0.0 could not find
  * which AI provider they had signed in with, or change it.
  *
  * These tests stand in for the IPC Tauri injects into the Desktop window, answering as the shell's
  * `openbot-desktop` plugin does (desktop/src-tauri/src/desktop_page.rs: `ai_connection` and
- * `change_ai_connection`). The General page, its queries and its mutation are the real ones.
+ * `change_ai_connection`). The Providers page, its queries and its mutation are the real ones.
  */
 import {
   afterAll,
@@ -22,7 +22,7 @@ import type { ComponentType } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
 import type { DesktopAiConnection } from "@/lib/desktop/queries";
 import { queryClient } from "@/query-client";
-import { Route as GeneralRoute } from "@/routes/_authed/settings/index";
+import { Route as ProvidersRoute } from "@/routes/_authed/settings/providers";
 import { settleReactWork } from "./settle-react-work";
 
 let connection: DesktopAiConnection;
@@ -66,8 +66,8 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-function renderGeneral() {
-  const Page = GeneralRoute.options.component as ComponentType;
+function renderProviders() {
+  const Page = ProvidersRoute.options.component as ComponentType;
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
@@ -77,13 +77,13 @@ function renderGeneral() {
   );
 }
 
-async function aiModelRow(view: ReturnType<typeof renderGeneral>) {
-  await view.findByRole("heading", { name: "AI model" });
-  return view.getByRole("button", { name: /Signed in|Uses your|Connected/ });
+async function aiModelRow(view: ReturnType<typeof renderProviders>) {
+  await view.findByRole("heading", { name: "Providers" });
+  return view.findByRole("button", { name: /Signed in|Uses your|Connected/ });
 }
 
 test("a Claude plan shows as Anthropic, signed in with the Claude plan", async () => {
-  const view = renderGeneral();
+  const view = renderProviders();
   const row = await aiModelRow(view);
   expect(row.textContent).toBe("AnthropicSigned in with your Claude plan.");
   await userEvent.click(row);
@@ -98,7 +98,7 @@ test("a Claude plan shows as Anthropic, signed in with the Claude plan", async (
 
 test("an OpenAI API key shows as OpenAI with an API key, never the key", async () => {
   connection = { kind: "open-ai-api-key", model: null, endpointHost: null };
-  const view = renderGeneral();
+  const view = renderProviders();
   const row = await aiModelRow(view);
   expect(row.textContent).toBe("OpenAIUses your OpenAI API key.");
   await userEvent.click(row);
@@ -113,7 +113,7 @@ test("a provider's own address shows by name, with the model named in setup", as
     model: "gemini-3.8-flash",
     endpointHost: "generativelanguage.googleapis.com",
   };
-  const view = renderGeneral();
+  const view = renderProviders();
   const row = await aiModelRow(view);
   expect(row.textContent).toBe(
     "Google GeminiUses your Google Gemini API key. Model: gemini-3.8-flash",
@@ -121,7 +121,7 @@ test("a provider's own address shows by name, with the model named in setup", as
 });
 
 test("Change asks the desktop app to change the AI connection", async () => {
-  const view = renderGeneral();
+  const view = renderProviders();
   await userEvent.click(await aiModelRow(view));
   const dialog = await view.findByRole("dialog");
   await userEvent.click(
@@ -140,11 +140,12 @@ test("Change asks the desktop app to change the AI connection", async () => {
   ).toBe(true);
 });
 
-test("outside the desktop app there is no AI model section", async () => {
+test("outside the desktop app, against a server without it, Providers has nothing to change", async () => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
-  const view = renderGeneral();
-  await view.findByRole("heading", { name: "About you" });
-  await settleReactWork();
-  expect(view.queryByRole("heading", { name: "AI model" })).toBeNull();
+  const view = renderProviders();
+  await view.findByText("Set by your organization");
+  expect(
+    view.queryByRole("button", { name: /Signed in|Uses your/ }),
+  ).toBeNull();
   expect(calls).toEqual([]);
 });

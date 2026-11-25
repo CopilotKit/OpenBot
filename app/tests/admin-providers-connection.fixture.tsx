@@ -18,11 +18,11 @@ import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as ProvidersRoute } from "@/routes/_authed/admin/providers";
 import { Route as AdminRoute } from "@/routes/_authed/admin/route";
-import { Route as GeneralRoute } from "@/routes/_authed/settings/index";
+import { Route as SettingsProvidersRoute } from "@/routes/_authed/settings/providers";
 
 /**
  * Admin → Providers in Admin's real frame and behind Admin's own gate (`admin/route.tsx`), and
- * Settings → General beside it, for admin-providers-connection.test.tsx to bundle and load in a
+ * Settings → Providers beside it, for admin-providers-connection.test.tsx to bundle and load in a
  * browser. Anyone the gate turns away lands on a page that says Home. What the server answers
  * comes from the test's routes.
  *
@@ -78,8 +78,8 @@ const router = createRouter({
     settingsRoute.addChildren([
       createRoute({
         getParentRoute: () => settingsRoute,
-        path: "/settings",
-        component: component(GeneralRoute),
+        path: "/settings/providers",
+        component: component(SettingsProvidersRoute),
       }),
     ]),
     createRoute({
