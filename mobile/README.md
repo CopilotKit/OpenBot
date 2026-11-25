@@ -106,7 +106,6 @@ Expo holds what an upload needs. This repository holds none of it.
 Add or replace a key with `eas credentials`, from a terminal. Expo takes no new key from a run
 that cannot ask questions, so the workflow cannot do it.
 
-Until `ascAppId` is in `eas.json`, an upload for iOS stops before the build starts and says so.
 An upload for Android needs the app to exist in the Play Console, and the service account key to
 be on Expo.
 
@@ -152,14 +151,18 @@ npx expo-updates runtimeversion:resolve --platform ios
 To publish an update to the `preview` channel:
 
 ```sh
-eas update --channel preview --message "What changed"
+eas update --channel preview --environment preview --message "What changed"
 ```
+
+`--environment` names the Expo environment the update is bundled with. On this Expo SDK the
+command needs it. The bundle takes its variables from that environment on Expo, and it does not
+read your `.env`. Expo holds `EXPO_PUBLIC_SERVER_URL` for every environment, with the address that
+`eas.json` gives a build. Change the two together: the app does not start without the address.
 
 Try every update on a real phone with a `preview` build before it goes further.
 
-Do not publish to `production` from your machine. An update is bundled on the machine that
-publishes it, so it takes `EXPO_PUBLIC_SERVER_URL` from that machine's `.env`. The workflow that
-publishes to `production` is not set up yet.
+Do not publish to `production` from your machine. An update reaches every installed app the next
+time it starts. The workflow that publishes to `production`, with a reviewer, is not set up yet.
 
 A `development` build takes no updates. It loads its JavaScript from your machine.
 
