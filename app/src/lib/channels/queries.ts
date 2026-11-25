@@ -16,6 +16,7 @@ import type {
   ConversationSummary,
 } from "@/lib/api/generated/model";
 import { organizationId } from "@/lib/api/request";
+import { keepHeldBusy } from "./held-busy";
 
 /**
  * A channel as the browser sees it.
@@ -108,10 +109,12 @@ export type ChannelSummary = AgentChannel & {
   /**
    * Whether a turn is running in this channel right now.
    *
-   * Mostly socket-only and transient: a person's own run is announced and never stored, so a
-   * refetch drops it. The roster returns it true for a channel with `work`, which is stored, so a
-   * conversation a Bot is still answering in stays lit across a reload. A headless turn — a handoff
-   * hop, a relay — sets it, which is how the roster shows work the browser never streamed.
+   * Mostly socket-only and transient: a person's own run is announced and never stored, so the
+   * server's read never says it. A read keeps what the socket said instead (`held-busy.ts`), so a
+   * roster read again mid-turn does not put the row out. The roster returns it true for a channel
+   * with `work`, which is stored, so a conversation a Bot is still answering in stays lit across a
+   * reload. A headless turn — a handoff hop, a relay — sets it, which is how the roster shows work
+   * the browser never streamed.
    */
   busy?: boolean;
   /**
@@ -349,12 +352,16 @@ function channelSummaryOf({
   };
 }
 
+/**
+ * A page of the roster as the server answered it, with the turns the server can't see kept: a row it
+ * says nothing of busy in stays busy while a turn is known to be running there (`held-busy.ts`).
+ */
 function channelPageOf(page: {
   conversations: ConversationSummary[];
   nextCursor: string | null;
 }): ChannelPage {
-  return {
+  return keepHeldBusy({
     channels: page.conversations.map(channelSummaryOf),
     nextCursor: page.nextCursor,
-  };
+  });
 }

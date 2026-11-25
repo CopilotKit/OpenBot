@@ -128,6 +128,15 @@ beforeAll(() => {
   globalThis.IntersectionObserver = ScrollObserver;
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
+      /*
+       * The panel reads the person's tasks too, for a conversation whose Bot handed work to one
+       * (`delegatingConversationsQueryOptions`). None here, and not one of the roster's requests.
+       */
+      if (
+        new URL(String(input), "http://localhost:3010").pathname ===
+        "/api/v2/organizations/default/tasks"
+      )
+        return Response.json({ tasks: [], nextCursor: null });
       requests.push(String(input));
       signals.push(init?.signal ?? undefined);
       return respond(String(input));
