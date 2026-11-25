@@ -67,6 +67,7 @@ export function ConversationView({
   voiceCall,
   modelPicker,
   routine,
+  draftKey,
 }: {
   messages: readonly Message[];
   threadId?: string;
@@ -158,6 +159,8 @@ export function ConversationView({
   modelPicker?: ReactNode;
   /** The Bot and conversation for the composer's routine clock. See `Composer`. */
   routine?: { agentId: string; channelId: string };
+  /** Which conversation's unsent message the composer keeps. See `Composer`. */
+  draftKey?: string;
 }) {
   /*
    * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
@@ -630,6 +633,7 @@ export function ConversationView({
         <Composer
           modelPicker={modelPicker}
           {...(routine ? { routine } : {})}
+          {...(draftKey ? { draftKey } : {})}
           agents={agents}
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}

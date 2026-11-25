@@ -239,6 +239,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
           disabled={bots.length === 0}
           pending={send.isPending || answer.isPending || working}
           autoFocus
+          draftKey={`conversation:${channelId}`}
           onSubmit={async (draft) => {
             if (!draft.text) return;
             if (question && (!draft.agentId || draft.agentId === askerId)) {

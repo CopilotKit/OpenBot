@@ -473,6 +473,8 @@ function NewConversation({ composition }: { composition: string }) {
          * for a group: its messages carry words only, so its composer offers no `+`.
          */
         holdsFilesUntilSent={!group}
+        // This new conversation's unsent message, kept with it as its Bots are (`composition`).
+        draftKey={`new:${composition}`}
         attachmentLimits={attachmentLimits}
         modelPicker={
           <ModelPicker
