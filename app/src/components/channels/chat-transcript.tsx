@@ -7,6 +7,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import {
+  readAnotherAccountPrompt,
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
@@ -149,6 +150,7 @@ import {
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
+import { AnotherAccountCard } from "./another-account-card";
 import { AppAccessCard } from "./app-access-card";
 import {
   AttachmentLightbox,
@@ -1933,6 +1935,12 @@ export function ServerToolLine({
       ? readConnectPrompt(answer)
       : null;
   if (card) return <AppAccessCard place={place} prompt={card} />;
+  // Asked to connect one more account at an app: its sign-in, started from the card.
+  const another =
+    !refused && name === SHOW_APP_ACCESS_TOOL
+      ? readAnotherAccountPrompt(answer)
+      : null;
+  if (another) return <AnotherAccountCard prompt={another} />;
   /*
    * THAT TOOL'S OTHER ANSWERS ARE FOR THE MODEL. An app nobody can name comes back as plain text
    * telling the Bot to say so plainly and not to browse to it — an instruction, which read by the
