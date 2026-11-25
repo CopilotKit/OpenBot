@@ -22,7 +22,7 @@ import {
 import { useLoad } from "../src/use-load";
 
 /**
- * Your account, opened from the menu's footer: who is signed in, the organization they work in
+ * Your account, opened from the initials at the top of each tab and from More: who is signed in, the organization they work in
  * (and the others they can switch to), notifications on this phone, and signing out.
  */
 export default function Account() {

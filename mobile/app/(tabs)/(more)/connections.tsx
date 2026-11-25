@@ -1,5 +1,5 @@
-import { EmptyState, Screen } from "../src/components";
-import { IconPlug } from "../src/icons";
+import { EmptyState, Screen } from "../../../src/components";
+import { IconPlug } from "../../../src/icons";
 
 /**
  * Connections: the apps and accounts every Bot uses as you. The phone shows where they are made

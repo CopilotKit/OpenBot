@@ -1,14 +1,15 @@
 import * as Crypto from "expo-crypto";
 import { router } from "expo-router";
-import { Linking, Pressable, Text, View } from "react-native";
+import { Button } from "heroui-native/button";
+import { Linking, Pressable, View } from "react-native";
 import { type CheckInItem, ORGANIZATION_ID, type Task } from "./api";
 import {
   dismissCheckInItem,
   workOnCheckInItem,
 } from "./api/generated/check-ins/check-ins";
 import { sendConversationMessage } from "./api/generated/conversations/conversations";
+import { Text } from "./components";
 import { taskLine } from "./tasks";
-import { card, colors, muted } from "./ui";
 
 /*
  * What a Bot's check-in found, on the phone: the Needs you list a ping opens, and the same rows on
@@ -54,45 +55,6 @@ function webLink(link: string | null) {
 }
 
 /**
- * One choice on a card, drawn the way this app draws something to tap: link-coloured text, as the
- * Bots list and a Bot's Customize rows are, never a system button. A system button is a filled,
- * upper-cased bar on Android and on the web, so three of them stacked on every item outweighed the
- * item itself and looked like no other screen. `primary` is the one choice the card leads with.
- */
-function CardAction({
-  label,
-  onPress,
-  disabled,
-  primary,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  primary?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled: Boolean(disabled) }}
-      disabled={disabled}
-      hitSlop={8}
-      onPress={onPress}
-      style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
-    >
-      <Text
-        style={{
-          color: disabled ? colors.muted : colors.link,
-          fontSize: 16,
-          fontWeight: primary ? "600" : "400",
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-/**
  * One item: what it is, why, which Bot found it and where it read that, with Start, Hide and, when
  * the Bot gave a link, Open. `busy` is the action in flight on this screen, so no second tap lands.
  */
@@ -111,40 +73,38 @@ export function ItemCard({
 }) {
   const link = webLink(item.sourceLink);
   return (
-    <View style={card}>
-      <Text style={{ fontSize: 17, fontWeight: "600" }}>{item.title}</Text>
+    <View className="gap-2 rounded-lg border border-border bg-surface p-4">
+      <Text variant="label" className="font-semibold">
+        {item.title}
+      </Text>
       {item.detail ? <Text>{item.detail}</Text> : null}
-      <Text style={muted}>
+      <Text variant="caption" tone="muted">
         {[botName, item.sourceApp ? `From ${item.sourceApp}` : null]
           .filter(Boolean)
           .join(" · ")}
       </Text>
-      <View
-        style={{
-          flexDirection: "row",
-          flexWrap: "wrap",
-          columnGap: 20,
-          rowGap: 8,
-        }}
-      >
-        <CardAction
-          label={busy === `start:${item.id}` ? "Starting…" : "Start"}
-          disabled={Boolean(busy)}
-          onPress={onStart}
-          primary
-        />
-        <CardAction
-          label={busy === `hide:${item.id}` ? "Hiding…" : "Hide"}
-          disabled={Boolean(busy)}
+      <View className="mt-1 flex-row flex-wrap gap-2">
+        <Button size="sm" isDisabled={Boolean(busy)} onPress={onStart}>
+          {busy === `start:${item.id}` ? "Starting…" : "Start"}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          isDisabled={Boolean(busy)}
           onPress={onHide}
-        />
+        >
+          {busy === `hide:${item.id}` ? "Hiding…" : "Hide"}
+        </Button>
         {link ? (
-          <CardAction
-            label={`Open ${link.hostname.replace(/^www\./, "")}`}
+          <Button
+            size="sm"
+            variant="ghost"
             onPress={() => {
               void Linking.openURL(link.href);
             }}
-          />
+          >
+            {`Open ${link.hostname.replace(/^www\./, "")}`}
+          </Button>
         ) : null}
       </View>
     </View>
@@ -153,8 +113,7 @@ export function ItemCard({
 
 /**
  * One task that waits on the person. The whole card opens its conversation, where they read and
- * reply, the way a row on the Bots list opens its Bot: its title in the link colour, nothing else to
- * press.
+ * reply, the way a row on the Bots list opens its Bot: nothing else to press.
  */
 export function TaskCard({ task, botName }: { task: Task; botName: string }) {
   const next =
@@ -173,19 +132,22 @@ export function TaskCard({ task, botName }: { task: Task; botName: string }) {
           params: { channelId: task.conversationId, agentId: task.botId },
         })
       }
-      style={card}
+      className="gap-1.5 rounded-lg border border-border bg-surface p-4 active:bg-fill"
     >
-      <Text style={{ fontSize: 17, fontWeight: "600", color: colors.link }}>
+      <Text variant="label" className="font-semibold">
         {task.title}
       </Text>
       <Text
-        style={{
-          color: task.status === "failed" ? colors.error : colors.warning,
-        }}
+        variant="caption"
+        tone={task.status === "failed" ? "danger" : "warning"}
       >
         {taskLine(botName, task.status)}
       </Text>
-      {next ? <Text numberOfLines={3}>{next}</Text> : null}
+      {next ? (
+        <Text tone="muted" numberOfLines={3}>
+          {next}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }

@@ -152,18 +152,18 @@ The platform draws everything around a screen. HeroUI Native draws what is insid
 | What | Drawn by |
 | --- | --- |
 | Stacks, headers, titles, back buttons | Expo Router's native `Stack`, set in the route's layout or the screen's options. |
-| Tabs | Expo Router's native tabs. |
-| Header buttons (menu, back, a Bot's computer and settings) | `IconButton`s placed with `plainHeaderLeft` and `plainHeaderRight` (`mobile/src/header.tsx`), as plain icons the way the web app's header draws them. On iOS 26 they would otherwise sit in a gray glass bubble, and the system's back button can't lose its bubble, so iOS gets a plain chevron in its place; swiping back works the same. |
+| Tabs | The dock (`mobile/src/dock.tsx`), on Expo Router's JS tabs. The one piece of chrome the app draws itself: iOS 26's native tab bar is a floating glass pill, and the dock is flat, as the web app's sidebar is. |
+| Header buttons (your account, back, new, a Bot's computer and settings) | `IconButton`s placed with `plainHeaderLeft` and `plainHeaderRight` (`mobile/src/header.tsx`), as plain icons the way the web app's header draws them. On iOS 26 they would otherwise sit in a gray glass bubble, and the system's back button can't lose its bubble, so iOS gets a plain chevron in its place; swiping back works the same. |
 | Header menus, search in the header, a bottom toolbar | The native `Stack` toolbar and search bar. |
 | Sheets and modals | Expo Router's native presentations (`formSheet`, `modal`). |
 | Pickers, switches, sliders, system menus | `@expo/ui`, so they look and behave as the platform's own. |
 | Buttons, fields, cards, chips, alerts, and the rest of a screen's content | HeroUI Native. |
 | Long lists: conversations, messages, runs | A virtualized list (`FlatList`, or one built for chat). Never a `ScrollView` with a `map` inside. |
 | A page or form with fields | `ScrollScreen` (`react-native-keyboard-controller`'s `KeyboardAwareScrollView`): the field being typed in stays above the keyboard, and the form's button can be scrolled to while it is up. |
-| A bar at the bottom with a field (search, the message box) | `KeyboardBar`, inside a `KeyboardAvoidingView` around the screen, so the bar rides on the keyboard. |
+| A bar at the bottom with a field (the message box) | `KeyboardBar`, inside a `KeyboardAvoidingView` around the screen, so the bar rides on the keyboard. |
 
 - **Native chrome stays native.** Don't draw a header, a tab bar or a sheet yourself, even when
-  HeroUI Native could make one that looks the same. The native one gets each platform's look for
+  HeroUI Native could make one that looks the same. The dock is the one exception (below). The native one gets each platform's look for
   free, including iOS's glass material and Android's Material behavior, and keeps it as the
   platforms change.
 - **Don't imitate glass.** No blur, gradient or translucent card to look like the system's
@@ -229,9 +229,13 @@ Native's, and builds its own only when neither fits. The development build shows
   security floor, the session and the version check have answered, and then the orb glides into
   Welcome, or swells and fades into a signed-in screen. Nothing else draws a loading screen of its
   own while the app opens.
-- **The menu** slides in from the left over the native stack (`react-native-drawer-layout`), so
-  every screen keeps the native header. A section's screen (Conversations, Bots, Routines, Memory,
-  Skills, Connections) has the menu button where a back button would be.
+- **The dock** is the signed-in app's five tabs along the bottom: Conversations, Bots, Routines,
+  Needs you (with a count of what waits) and More (Memory, Skills, Connections, the approval inbox
+  and your account). Each tab is a stack of its own with the native header and a large title, and
+  the person's initials where a back button would be, which open their account. A conversation, a
+  Bot and everything else opened from a tab open in the app's stack over the tabs, so the dock
+  steps aside and the message box has the bottom to itself; what opens from More stays in More.
+  Search sits in the header, under the title.
 
 ## The web app and OpenBot Desktop
 

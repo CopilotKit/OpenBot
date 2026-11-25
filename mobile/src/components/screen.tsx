@@ -41,22 +41,25 @@ export function ScrollScreen({
   onRefresh?: () => void;
   className?: string;
 }) {
+  // Inside a View: as the screen's own first child, the scroll view leaves an iOS 26 large title blank.
   return (
-    <AwareScrollView
-      className="flex-1 bg-background"
-      contentContainerClassName={cn("gap-6 px-4 pt-4 pb-12", className)}
-      contentInsetAdjustmentBehavior="automatic"
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="interactive"
-      bottomOffset={ABOVE_KEYBOARD}
-      refreshControl={
-        onRefresh ? (
-          <Refresh refreshing={Boolean(refreshing)} onRefresh={onRefresh} />
-        ) : undefined
-      }
-    >
-      {children}
-    </AwareScrollView>
+    <View className="flex-1 bg-background">
+      <AwareScrollView
+        className="flex-1"
+        contentContainerClassName={cn("gap-6 px-4 pt-4 pb-12", className)}
+        contentInsetAdjustmentBehavior="automatic"
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        bottomOffset={ABOVE_KEYBOARD}
+        refreshControl={
+          onRefresh ? (
+            <Refresh refreshing={Boolean(refreshing)} onRefresh={onRefresh} />
+          ) : undefined
+        }
+      >
+        {children}
+      </AwareScrollView>
+    </View>
   );
 }
 

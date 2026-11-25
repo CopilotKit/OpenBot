@@ -1,24 +1,23 @@
-import { router } from "expo-router";
-import { Button } from "heroui-native/button";
+import { router, Stack } from "expo-router";
 import { useCallback } from "react";
 import { FlatList, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { everyBot } from "../src/api";
-import { authClient } from "../src/auth";
+import { everyBot } from "../../../src/api";
+import { authClient } from "../../../src/auth";
 import {
   BotTile,
   EmptyState,
+  IconButton,
   Notice,
   Refresh,
   Screen,
-} from "../src/components";
-import { IconRobot } from "../src/icons";
-import { useLoad } from "../src/use-load";
-import { usePull } from "../src/use-pull";
+} from "../../../src/components";
+import { plainHeaderRight } from "../../../src/header";
+import { IconPlus, IconRobot } from "../../../src/icons";
+import { useLoad } from "../../../src/use-load";
+import { usePull } from "../../../src/use-pull";
 
-/** Your Bots: every Bot this person can use, two to a row, each opening its page. */
+/** Your Bots: every Bot this person can use, two to a row, each opening its page. A new Bot is the + in the header. */
 export default function Bots() {
-  const insets = useSafeAreaInsets();
   const { data: session } = authClient.useSession();
   const load = useCallback(() => everyBot(), []);
   const bots = useLoad(load, Boolean(session));
@@ -26,6 +25,15 @@ export default function Bots() {
   const listed = (bots.data ?? []).filter((bot) => !bot.hidden);
   return (
     <Screen>
+      <Stack.Screen
+        options={plainHeaderRight(() => (
+          <IconButton
+            icon={IconPlus}
+            label="New Bot"
+            onPress={() => router.push("/new-bot")}
+          />
+        ))}
+      />
       <FlatList
         className="flex-1"
         data={listed}
@@ -65,17 +73,11 @@ export default function Bots() {
             <EmptyState
               icon={IconRobot}
               title="No Bots yet"
-              description="Make your first Bot with New Bot."
+              description="Make your first Bot with the + button."
             />
           ) : undefined
         }
       />
-      <View
-        className="border-t border-border bg-background px-4 pt-3"
-        style={{ paddingBottom: Math.max(insets.bottom, 12) }}
-      >
-        <Button onPress={() => router.push("/new-bot")}>New Bot</Button>
-      </View>
     </Screen>
   );
 }

@@ -1,14 +1,26 @@
 import { Redirect } from "expo-router";
-import { useCallback } from "react";
-import { Text } from "react-native";
-import { everyBot, everyPage, ORGANIZATION_ID } from "../src/api";
-import { listCheckInItems } from "../src/api/generated/check-ins/check-ins";
-import { listTasks } from "../src/api/generated/tasks/tasks";
-import { authClient } from "../src/auth";
-import { hideItem, ItemCard, startItem, TaskCard } from "../src/check-ins";
-import { waitingTasks } from "../src/tasks";
-import { heading, muted, Problem, Screen, Section, useAction } from "../src/ui";
-import { useLoad } from "../src/use-load";
+import { useCallback, useEffect } from "react";
+import { everyBot, everyPage, ORGANIZATION_ID } from "../../../src/api";
+import { listCheckInItems } from "../../../src/api/generated/check-ins/check-ins";
+import { listTasks } from "../../../src/api/generated/tasks/tasks";
+import { authClient } from "../../../src/auth";
+import {
+  hideItem,
+  ItemCard,
+  startItem,
+  TaskCard,
+} from "../../../src/check-ins";
+import {
+  EmptyState,
+  Notice,
+  ScrollScreen,
+  Section,
+} from "../../../src/components";
+import { IconBell } from "../../../src/icons";
+import { showNeedsYouCount } from "../../../src/needs-you-count";
+import { waitingTasks } from "../../../src/tasks";
+import { useAction } from "../../../src/ui";
+import { useLoad } from "../../../src/use-load";
 
 /**
  * Needs you: what every Bot's check-ins found that the person hasn't started or hidden, and the
@@ -39,23 +51,31 @@ export default function NeedsYouScreen() {
   const tasks = useLoad(loadTasks, Boolean(session));
   const loadBots = useCallback(() => everyBot(), []);
   const bots = useLoad(loadBots, Boolean(session));
+  const waiting = waitingTasks(tasks.data?.tasks ?? []);
+  const found = items.data ?? [];
+  // The dock's badge follows what this list shows, once both halves of it have been read.
+  const count =
+    items.data && tasks.data ? found.length + waiting.length : undefined;
+  useEffect(() => {
+    if (count !== undefined) showNeedsYouCount(count);
+  }, [count]);
   if (!session && !isPending) return <Redirect href="/" />;
   const nameOf = (agentId: string) =>
     bots.data?.find((bot) => bot.id === agentId)?.name ?? "A Bot";
-  const waiting = waitingTasks(tasks.data?.tasks ?? []);
-  const found = items.data ?? [];
 
   return (
-    <Screen
+    <ScrollScreen
+      className="gap-3"
       refreshing={items.pending || tasks.pending}
       onRefresh={() => {
         void items.refresh();
         void tasks.refresh();
       }}
     >
-      <Text style={heading}>Needs you</Text>
-      <Problem
-        message={action.error || items.error || tasks.error || bots.error}
+      <Notice
+        message={
+          action.error || items.error || tasks.error || bots.error || undefined
+        }
       />
       {found.map((item) => (
         <ItemCard
@@ -79,10 +99,11 @@ export default function NeedsYouScreen() {
         />
       ))}
       {items.data && found.length === 0 && waiting.length === 0 ? (
-        <Text style={muted}>
-          Nothing needs you right now. When a Bot's check-in finds something for
-          you, it shows up here.
-        </Text>
+        <EmptyState
+          icon={IconBell}
+          title="Nothing needs you"
+          description="When a Bot's check-in finds something for you, it shows up here."
+        />
       ) : null}
       {waiting.length > 0 ? (
         <Section title="Tasks">
@@ -91,6 +112,6 @@ export default function NeedsYouScreen() {
           ))}
         </Section>
       ) : null}
-    </Screen>
+    </ScrollScreen>
   );
 }

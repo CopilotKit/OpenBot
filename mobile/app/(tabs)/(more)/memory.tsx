@@ -1,15 +1,15 @@
 import { Redirect } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, Button, Switch, Text, TextInput, View } from "react-native";
-import { everyPage, ME, type Memory, ORGANIZATION_ID } from "../src/api";
+import { everyPage, ME, type Memory, ORGANIZATION_ID } from "../../../src/api";
 import {
   createMemory,
   deleteMemory,
   listMemories,
   updateMemory,
-} from "../src/api/generated/memory/memory";
-import type { UpdateMemoryRequest } from "../src/api/generated/model";
-import { authClient } from "../src/auth";
+} from "../../../src/api/generated/memory/memory";
+import type { UpdateMemoryRequest } from "../../../src/api/generated/model";
+import { authClient } from "../../../src/auth";
 import {
   card,
   heading,
@@ -18,8 +18,8 @@ import {
   Problem,
   Screen,
   useAction,
-} from "../src/ui";
-import { useLoad } from "../src/use-load";
+} from "../../../src/ui";
+import { useLoad } from "../../../src/use-load";
 
 const ORIGIN: Record<Memory["formedBy"], string> = {
   person: "You wrote this",

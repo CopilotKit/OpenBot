@@ -1,12 +1,17 @@
 import { router } from "expo-router";
 import { useCallback, useMemo } from "react";
-import { everyBot, everyPage, ORGANIZATION_ID, type Routine } from "../src/api";
+import {
+  everyBot,
+  everyPage,
+  ORGANIZATION_ID,
+  type Routine,
+} from "../../../src/api";
 import {
   listRoutines,
   pauseRoutine,
   resumeRoutine,
-} from "../src/api/generated/routines/routines";
-import { authClient } from "../src/auth";
+} from "../../../src/api/generated/routines/routines";
+import { authClient } from "../../../src/auth";
 import {
   BotOrb,
   EmptyState,
@@ -16,12 +21,12 @@ import {
   ScrollScreen,
   Section,
   Toggle,
-} from "../src/components";
-import { IconClock } from "../src/icons";
-import { lastRunLine, when } from "../src/routines";
-import { useAction } from "../src/ui";
-import { useLoad } from "../src/use-load";
-import { usePull } from "../src/use-pull";
+} from "../../../src/components";
+import { IconClock } from "../../../src/icons";
+import { lastRunLine, when } from "../../../src/routines";
+import { useAction } from "../../../src/ui";
+import { useLoad } from "../../../src/use-load";
+import { usePull } from "../../../src/use-pull";
 
 /** Routines: the work every Bot starts by itself for you, under the Bot that does it. */
 export default function Routines() {

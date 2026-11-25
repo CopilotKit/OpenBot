@@ -1,9 +1,44 @@
 import { router } from "expo-router";
 import type { ReactElement } from "react";
-import { Platform } from "react-native";
-import { IconButton } from "./components";
-import { useDrawer } from "./drawer";
-import { IconChevronLeft, IconMenu2 } from "./icons";
+import { Platform, Pressable, useColorScheme } from "react-native";
+import { useCSSVariable } from "uniwind";
+import { authClient } from "./auth";
+import { IconButton, PersonAvatar } from "./components";
+import { IconChevronLeft } from "./icons";
+
+/** The native header in the scheme's colors and Inter, for every stack: the app's and each tab's. */
+export function useHeaderOptions() {
+  const [background, foreground] = useCSSVariable([
+    "--color-background",
+    "--color-foreground",
+  ]) as (string | undefined)[];
+  const scheme = useColorScheme();
+  return {
+    /*
+     * The header's own light or dark, for what the system draws in it: the search field, its
+     * keyboard, a menu. Left alone it follows React Navigation's theme, which is always light here.
+     */
+    headerUserInterfaceStyle: scheme === "dark" ? "dark" : "light",
+    headerBackTitle: "Back",
+    headerShadowVisible: false,
+    headerTintColor: foreground,
+    headerStyle: { backgroundColor: background },
+    headerTitleStyle: { fontFamily: "Inter_600SemiBold", color: foreground },
+    headerLargeTitleStyle: { fontFamily: "Inter_700Bold", color: foreground },
+    headerLargeTitleShadowVisible: false,
+    contentStyle: { backgroundColor: background },
+    // A pushed screen's way back, as a plain chevron.
+    ...plainBackButton(),
+  } as const;
+}
+
+/** A tab's own screen: a large title, and the person's account where a back button would be. */
+export const tabRoot = (title: string) =>
+  ({
+    title,
+    headerLargeTitle: true,
+    ...plainHeaderLeft(() => <AccountButton />),
+  }) as const;
 
 /**
  * Header buttons drawn as plain icons, as the web app's header draws them. On iOS 26 a custom
@@ -38,15 +73,20 @@ export function plainHeaderRight(render: () => ReactElement) {
   } as const;
 }
 
-/** The header's menu button on a section's screen, which opens the app's menu. */
-export function MenuButton() {
-  const { setOpen } = useDrawer();
+/** The signed-in person's initials at the top of each tab, which open their account. */
+export function AccountButton() {
+  const { data: session } = authClient.useSession();
+  const person = session?.user.name || session?.user.email || "";
   return (
-    <IconButton
-      icon={IconMenu2}
-      label="Open menu"
-      onPress={() => setOpen(true)}
-    />
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Your account"
+      hitSlop={8}
+      onPress={() => router.push("/account")}
+      className="active:opacity-70"
+    >
+      <PersonAvatar name={person} size={32} />
+    </Pressable>
   );
 }
 
