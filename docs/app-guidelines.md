@@ -115,6 +115,7 @@ What `mobile/` has today, which stays:
 | Sign-in | OAuth 2.1 with PKCE, as the server's `openbot-mobile` client (`mobile/src/oauth.ts`), in the system browser's sign-in session. The refresh token is kept in `expo-secure-store`. It works on every OpenBot, OpenBot Cloud included, where the server has `EXPO_PROJECT_ID`. |
 | Notifications | `expo-notifications`. |
 | Builds | EAS. In development it runs as a development client (`expo-dev-client`), not in Expo Go. |
+| Updates | EAS Update (`expo-updates`): new JavaScript for installed apps, without a store release. The runtime version is a fingerprint of the native side. See [mobile/README.md](../mobile/README.md). |
 | Packages | npm, with `mobile/package-lock.json`. The rest of the repository uses Bun. |
 
 What the template adds:

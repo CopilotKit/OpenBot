@@ -82,6 +82,11 @@ const config: ExpoConfig = {
     // Back from linking the company account after the process died mid-sign-in: no Custom Tab left below Home.
     "./plugins/linked-cold-start",
   ],
+  // Updates without a store release (EAS Update). An installed app takes an update only when its native code is the
+  // same as the update's: the runtime version is a fingerprint of the native side (fingerprint.config.js), so nobody
+  // has to remember to raise it.
+  updates: { url: `https://u.expo.dev/${projectId}` },
+  runtimeVersion: { policy: "fingerprint" },
   extra: { openbotRelease, eas: { projectId } },
 };
 export default config;
