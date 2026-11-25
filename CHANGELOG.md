@@ -370,6 +370,24 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `startPersonalAiSignIn` also takes an optional `loopbackPort` (1024 to 65535): for Claude, the
   server then sends the browser to `http://localhost:{loopbackPort}/callback`, where OpenBot Desktop
   listens, instead of Claude's page with a code to copy. Every other provider ignores it.
+- **Several AI connections at once.** One per provider, for the organization (admin only) and
+  for a person (own only), on the existing scopes. `listAiConnections`, `connectAiConnection`,
+  `removeAiConnection` and `makeAiConnectionDefault` under `ai-connections`, and
+  `listPersonalAiConnections`, `connectPersonalAiConnection`, `removePersonalAiConnection` and
+  `makePersonalAiConnectionDefault` under `people/{personId}/ai-connections`. Connecting a
+  provider that already has a connection replaces it and keeps its id; the first one is the
+  default; the server moves the default only when a removal leaves exactly one connection, and
+  otherwise a removed default leaves none until another is made default (`AI_CONNECTION_NOT_READY`
+  refuses one that can't run; a run with no pick then gets a `stopped` choice with `no-default`). `startAiSignIn`,
+  `getAiSignIn` and `finishAiSignIn` under `ai-connection-sign-ins` sign the organization in to a
+  provider the way a person's sign-in does, on OpenBot Cloud and a self-hosted OpenBot. The single-connection operations keep their meaning
+  and describe the default connection: replacing it makes the connection saved the default and
+  keeps the old default beside it, the organization's disconnect leaves the others connected, and
+  a person's removes all of theirs. A turn refused because its connection can't run, or there is
+  no default, is kept as a refused turn with `AI_CONNECTION_STOPPED`. `ModelCatalogue` gains `connections` (each connection's own
+  models, `owner`, `source`, `ready` and `problem`), `ModelChoice` gains `connection` and
+  `stopped`, `ModelChoiceInput` gains `connection`, and a Bot's `defaultModel` input gains
+  `source`. All optional: an older client sends and reads what it did.
 - **Disconnect the organization's AI.** `deleteAiConnection`
   (`DELETE /api/v2/organizations/{organizationId}/ai-connection`), admin only, refused with
   `AI_CONNECTION_FIXED` where whoever runs OpenBot sets the provider, and recorded on the trail.

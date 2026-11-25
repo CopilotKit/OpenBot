@@ -16,10 +16,10 @@ import { SidebarInset } from "@/components/ui/sidebar";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import { Route as ApiKeysRoute } from "@/routes/_authed/settings/api-keys";
-import { Route as GeneralRoute } from "@/routes/_authed/settings/index";
+import { Route as SettingsProvidersRoute } from "@/routes/_authed/settings/providers";
 
 /**
- * Settings, General, in the app's real settings frame (its sidebar and inset panel, as
+ * Settings, Providers, in the app's real settings frame (its sidebar and inset panel, as
  * `routes/_authed/settings/route.tsx` draws them), for ai-connection-dialog.test.tsx to bundle and
  * load in a browser. API keys is beside it, a Settings page from before with a dialog of its own, to
  * look at next to the AI connection dialog. What the server answers comes from the test's routes.
@@ -53,7 +53,7 @@ const router = createRouter({
   history: createBrowserHistory(),
   routeTree: rootRoute.addChildren([
     settingsRoute.addChildren([
-      settings("/settings", component(GeneralRoute)),
+      settings("/settings/providers", component(SettingsProvidersRoute)),
       settings("/settings/api-keys", component(ApiKeysRoute)),
     ]),
     createRoute({

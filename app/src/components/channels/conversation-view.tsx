@@ -55,6 +55,7 @@ export function ConversationView({
   autoFocus = false,
   stopped,
   refusals,
+  stoppedNotice,
   onCarryOn,
   working,
   stoppable,
@@ -116,6 +117,8 @@ export function ConversationView({
   stopped?: Failure;
   /** Turns the server refused, each under its own message; see the transcript's `refusals`. */
   refusals?: ReadonlyMap<string, string>;
+  /** Drawn under `stopped`, or else the latest refusal (the transcript's `stoppedNotice`). */
+  stoppedNotice?: ReactNode;
   /** Carry on with a turn that was cut off part way; a button beside `stopped`. */
   onCarryOn?: () => void;
   /** Work the conversation waits on that is not this tab's run. Drawn at the end of the transcript. */
@@ -556,6 +559,7 @@ export function ConversationView({
           restoring={restoring}
           {...(stopped ? { stopped } : {})}
           {...(refusals ? { refusals } : {})}
+          {...((stopped || refusals) && stoppedNotice ? { stoppedNotice } : {})}
           {...(stopped && onCarryOn && !disabled ? { onCarryOn } : {})}
           working={working}
         />
