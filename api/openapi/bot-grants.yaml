@@ -608,9 +608,12 @@ paths:
         down), or confirm the app's shared account is connected. With actions,
         the Bot is given those actions of the app instead, including to a Bot
         that already has some of the app. The audit trail reads as a request
-        filed and approved by the same administrator. When it can't be done
-        here, nothing is left waiting and the answer says what is missing.
-        Only an administrator may do it.
+        filed and approved by the same person. When it can't be done here,
+        nothing is left waiting and the answer says what is missing. An
+        administrator may do it for any Bot. While the organization's apps
+        are open (getAppsSetting), so may anybody who may give that Bot its
+        apps, as with giveBotApp; connecting a shared account stays an
+        administrator's.
       security:
         - webSession: []
         - appOAuth: [bot-grants:write]
@@ -877,7 +880,10 @@ paths:
         answers the same request while it is waiting, with any new actions
         added to it. A person may have 20 requests waiting at once. Recorded
         on the audit trail. Anybody who can use the Bot may ask, and anybody
-        signed in may ask for an app alone.
+        signed in may ask for an app alone. Asking is how a person gets an
+        app while the organization's apps are locked down (getAppsSetting);
+        while they're open a person adds and connects an app themselves
+        (createApp, approveBotApp), so there is nothing to ask for.
       security:
         - webSession: []
         - appOAuth: [app-access-requests:write]
@@ -1569,7 +1575,8 @@ components:
             account the person connects (see accountHolder).
             shared_not_connected: waiting on the shared account.
             shared_not_approved: an administrator hasn't approved who may use
-            the shared account through this Bot. disabled: turned off (see
+            the shared account through this Bot, which happens only where the
+            organization's apps are locked down. disabled: turned off (see
             unavailable). not_granted: the Bot wasn't given it.
             owner_grantable: the same, and the person may give it themselves.
           enum:
@@ -1635,7 +1642,8 @@ components:
           description: >-
             What a request would ask an administrator for in this state
             (createAppAccessRequest), or null where the next step is the
-            person's own.
+            person's own. While the organization's apps are open, adding and
+            giving an app are the person's own steps.
           oneOf:
             - $ref: '#/components/schemas/AppAccessRequestKind'
             - type: 'null'
