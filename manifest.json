@@ -1,10 +1,10 @@
 {
   "pr": 2189,
-  "latestSourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+  "latestSourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
   "captures": [
     {
       "name": "01-cloud-sign-in",
-      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "sourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
       "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
       "theme": "dark"
@@ -51,14 +51,14 @@
     },
     {
       "name": "04-self-contained",
-      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "sourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
       "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
       "theme": "dark"
     },
     {
       "name": "05-connect-to-work",
-      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "sourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
       "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
       "theme": "dark"
@@ -113,7 +113,7 @@
     },
     {
       "name": "10-update-progress-rail",
-      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "sourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
       "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
       "theme": "dark"
@@ -173,7 +173,7 @@
     },
     {
       "name": "15-cloud-light",
-      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "sourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
       "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
       "theme": "light"
@@ -192,7 +192,7 @@
     },
     {
       "name": "17-update-light",
-      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "sourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
       "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
       "theme": "light"
@@ -211,7 +211,7 @@
     },
     {
       "name": "19-update-compact",
-      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "sourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
       "captureMethod": "Standalone real-main browser fixture",
       "size": "720x560",
       "theme": "dark"
@@ -242,21 +242,21 @@
     },
     {
       "name": "22-cloud-compact",
-      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "sourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
       "captureMethod": "Standalone real-main browser fixture",
       "size": "720x560",
       "theme": "dark"
     },
     {
       "name": "23-connect-compact",
-      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "sourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
       "captureMethod": "Standalone real-main browser fixture",
       "size": "720x560",
       "theme": "dark"
     },
     {
       "name": "24-self-contained-compact",
-      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "sourceCommit": "e91b56f215e3146dfb46ca9d3477b3ab4e5ca893",
       "captureMethod": "Standalone real-main browser fixture",
       "size": "720x560",
       "theme": "dark"
