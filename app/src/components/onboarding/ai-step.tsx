@@ -24,6 +24,7 @@ import {
   personalAiConnectionInQueryOptions,
   personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
+import type { AiConnection } from "@/lib/api/generated/model";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { StepIntro } from "./onboarding-frame";
@@ -196,7 +197,8 @@ function WayOut() {
 function AiChooserPane({ personal }: { personal: PersonalAiConnection }) {
   const list = useQuery(aiConnectionsQueryOptions("personal"));
   if (list.isPending) return null;
-  if (list.isError)
+  // Keep an open form mounted if refreshing its cached list fails.
+  if (list.isLoadingError)
     return (
       <div className="mx-auto w-full max-w-lg">
         <ChooserCard>
@@ -232,29 +234,35 @@ function AiChooserPane({ personal }: { personal: PersonalAiConnection }) {
  * a line only a screen reader hears says what was connected, since the form it was in is gone.
  */
 function SeveralPane({ list }: { list: AiConnections }) {
-  const [round, setRound] = useState(0);
-  const [said, setSaid] = useState("");
+  const [lastConnected, setLastConnected] = useState<{
+    provider: AiConnection["provider"];
+    round: number;
+  }>();
+  const name = lastConnected
+    ? (providerById(lastConnected.provider)?.name ?? "Your AI")
+    : null;
   return (
     <div className="mx-auto w-full max-w-lg">
       <ChooserCard>
         <ChooseConnection
-          key={round}
+          key={lastConnected?.round ?? 0}
+          initialFocusProvider={lastConnected?.provider ?? undefined}
           mode={{
             kind: "adding",
             scope: "personal",
             signIns: list.signIns,
             connected: list.connections,
           }}
-          onConnected={(next) => {
-            const name =
-              providerById(next.connection.provider)?.name ?? "Your AI";
-            setSaid(`${name} is connected.`);
-            setRound((at) => at + 1);
-          }}
+          onConnected={({ connection }) =>
+            setLastConnected((previous) => ({
+              provider: connection.provider,
+              round: (previous?.round ?? 0) + 1,
+            }))
+          }
         />
       </ChooserCard>
       <p aria-live="polite" className="sr-only" role="status">
-        {said}
+        {name ? `${name} is connected.` : ""}
       </p>
     </div>
   );

@@ -15,6 +15,7 @@ import { useSwitchOrganization } from "@/components/organizations/use-switch-org
 import { SettingsSidebar } from "@/components/settings/settings-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarInset } from "@/components/ui/sidebar";
+import { aiConnectionKeys } from "@/lib/ai-connection/queries";
 import {
   setCurrentOrganization,
   useCurrentOrganizationId,
@@ -34,6 +35,13 @@ import { Route as SettingsProvidersRoute } from "@/routes/_authed/settings/provi
  * Started in `default`, the organization those routes answer for, as every test does.
  */
 setCurrentOrganization("default");
+
+window.addEventListener("refresh-ai-connections", async () => {
+  await queryClient.invalidateQueries({
+    queryKey: aiConnectionKeys.list("personal"),
+  });
+  window.dispatchEvent(new Event("ai-connections-refreshed"));
+});
 
 const component = (route: { options: { component?: unknown } }) =>
   route.options.component as () => ReactNode;

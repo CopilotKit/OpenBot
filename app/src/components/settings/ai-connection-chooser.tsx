@@ -12,6 +12,7 @@ import {
   type ReactNode,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -372,17 +373,25 @@ const wait = (seconds: number) =>
 
 export function ChooseConnection({
   connection,
+  initialFocusProvider,
   mode,
   onBack,
   onConnected,
 }: {
   /** The connection in use, for its kept keys. Absent when adding one more beside it. */
   connection?: AiConnection;
+  /** Restore focus to this provider when the list remounts after a connection. */
+  initialFocusProvider?: AiConnectionProviderAnswer;
   mode: ChooserMode;
   /** Back from a chosen provider, or Cancel from the list. Absent: the list has no way back. */
   onBack?: () => void;
   onConnected: (connected: ConnectedResult) => void;
 }) {
+  const initialFocusRow = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    initialFocusRow.current?.focus();
+  }, []);
+
   const personal = mode.kind === "personal";
   const adding = mode.kind === "adding" ? mode : null;
   // A person's own, or one more in a list: the server runs sign-ins, keys elsewhere, Back to the list.
@@ -938,6 +947,11 @@ export function ChooseConnection({
                     <button
                       disabled={busy}
                       onClick={() => choose(provider ? null : row)}
+                      ref={
+                        row.id === initialFocusProvider
+                          ? initialFocusRow
+                          : undefined
+                      }
                       type="button"
                     />
                   )

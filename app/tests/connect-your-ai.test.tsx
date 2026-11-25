@@ -1182,6 +1182,9 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         expect(await anthropic.textContent()).toContain(
           "Uses your Anthropic API key.",
         );
+        expect(
+          await anthropic.evaluate((row) => row === document.activeElement),
+        ).toBe(true);
         // One connection: no Default to tell it apart.
         expect(await anthropic.textContent()).not.toContain("Default");
         expect(await chooser.textContent()).not.toContain(GOOD_KEY);
@@ -1233,6 +1236,46 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await primary(page).click();
         await page.waitForURL((url) => url.pathname !== "/onboarding");
         expect(server.completes).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`a failed connections refresh preserves the key form in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      server.list = [];
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
+        const key = chooser.getByLabel("Anthropic API key");
+        await key.fill(GOOD_KEY);
+
+        await page.route(
+          (url) => url.pathname === CONNECTIONS,
+          (route) => route.fulfill({ status: 503, json: {} }),
+        );
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              window.addEventListener(
+                "ai-connections-refreshed",
+                () => resolve(),
+                { once: true },
+              );
+              window.dispatchEvent(new Event("refresh-ai-connections"));
+            }),
+        );
+
+        expect(await key.inputValue({ timeout: 2_000 })).toBe(GOOD_KEY);
       } finally {
         await page.close();
       }
