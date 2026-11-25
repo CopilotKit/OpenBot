@@ -118,7 +118,7 @@ two things from it:
 - `google-services.json`, the Android app's Firebase settings, in the EAS file variable
   `GOOGLE_SERVICES_JSON`. `app.config.ts` reads it there. To build on your machine with
   notifications, download the file from the Firebase console (Project settings, then the Android
-  app `ai.openbot.mobile`) into `mobile/`. Git ignores it.
+  app `ai.open.bot.mobile`) into `mobile/`. Git ignores it.
 - The Firebase service account key, in the project's Android credentials (FCM V1), so that Expo's
   push service can reach Android phones. Never commit it.
 
