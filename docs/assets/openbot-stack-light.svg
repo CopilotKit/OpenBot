@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="88 -18 955 835" width="1146" height="1002" fill="none" role="img" aria-labelledby="stack-title stack-desc">
   <title id="stack-title">OpenBot: your workspace, your stack</title>
-  <desc id="stack-desc">An exploded stack with an OpenBot workspace, Built-in Bots or any agent connected through AG-UI or A2A, your models, MCP tools, modular lanes for MCP hubs (Composio, Arcade, AgentCore), sandboxes (Daytona, E2B, Modal, your Kubernetes), agent runtimes, vaults, and more, and your infrastructure or OpenBot Cloud. Deploy on a laptop or Kubernetes with Helm. The workspace provides enterprise governance and controls.</desc>
+  <desc id="stack-desc">An exploded stack with an OpenBot workspace, Built-in Bots or any agent connected through AG-UI and A2A, your models, MCP tools, modular lanes for MCP hubs (Composio, Arcade, AgentCore), sandboxes (Daytona, E2B, Modal, your Kubernetes), agent runtimes, vaults, and more, and your infrastructure or OpenBot Cloud. Deploy on a laptop or Kubernetes with Helm. The workspace provides enterprise governance and controls.</desc>
   <!-- Adapted from CopilotKit/openbot.co src/components/composable-stack.tsx. Self-contained SVG; lane logos are embedded, no external assets or fonts. -->
   <rect x="88" y="-18" width="955" height="835" rx="12" fill="#ffffff" />
   <defs><filter id="laneInk" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feFlood flood-color="#21172f"></feFlood><feComposite in2="SourceAlpha" operator="in"></feComposite></filter>
@@ -269,7 +269,7 @@
     <text x="592" y="207" fill="#21172f" stroke="none" font-size="26" font-weight="600" letter-spacing="-.4">Your agents</text>
     <text x="592" y="236" fill="#5d566b" stroke="none" font-size="20">Built-in Bots in OpenBot, or</text>
     <text x="592" y="263" fill="#5d566b" stroke="none" font-size="20">any agent execution platform</text>
-    <text x="592" y="290" fill="#5d566b" stroke="none" font-size="20">connected through AG-UI or A2A.</text>
+    <text x="592" y="290" fill="#5d566b" stroke="none" font-size="20">connected through AG-UI and A2A.</text>
     <path d="M432 301 h112 L578 357 H580" />
     <circle cx="432" cy="301" r="3" fill="#7d62c6" stroke="none" />
     <text x="592" y="366" fill="#21172f" stroke="none" font-size="26" font-weight="600" letter-spacing="-.4">Your models</text>
