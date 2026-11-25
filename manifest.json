@@ -1,18 +1,13 @@
 {
-  "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c",
   "pr": 2189,
+  "latestSourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
   "captures": [
     {
       "name": "01-cloud-sign-in",
-      "scene": "state-first-run",
-      "at": 1,
-      "theme": "dark",
+      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
-      "headings": [
-        "Set up OpenBot",
-        "OpenBot Cloud"
-      ],
-      "errors": []
+      "theme": "dark"
     },
     {
       "name": "02-business-self-hosted",
@@ -24,7 +19,8 @@
         "Set up OpenBot",
         "OpenBot for Business"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "03-booking-calendar",
@@ -36,7 +32,8 @@
         "Set up OpenBot",
         "Book a demo"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "03a-booking-calendar-day",
@@ -49,31 +46,22 @@
         "Book a demo"
       ],
       "errors": [],
-      "state": "Live calendar before choosing an available day"
+      "state": "Live calendar before choosing an available day",
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "04-self-contained",
-      "scene": "state-first-run",
-      "at": 1,
-      "theme": "dark",
+      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
-      "headings": [
-        "Set up OpenBot",
-        "OpenBot (Self-Contained)"
-      ],
-      "errors": []
+      "theme": "dark"
     },
     {
       "name": "05-connect-to-work",
-      "scene": "state-first-run",
-      "at": 1,
-      "theme": "dark",
+      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
-      "headings": [
-        "Set up OpenBot",
-        "Already have OpenBot at work?"
-      ],
-      "errors": []
+      "theme": "dark"
     },
     {
       "name": "06-account-sign-in",
@@ -84,7 +72,8 @@
       "headings": [
         "Get your free license key"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "07-agreement",
@@ -95,7 +84,8 @@
       "headings": [
         "Accept the license agreement"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "08-ai-provider",
@@ -106,7 +96,8 @@
       "headings": [
         "Connect your AI"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "09-finishing-setup",
@@ -117,18 +108,15 @@
       "headings": [
         "Finishing setup"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "10-update-progress-rail",
-      "scene": "relaunch-update-progress",
-      "at": 35,
-      "theme": "dark",
+      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
-      "headings": [
-        "Updating OpenBot"
-      ],
-      "errors": []
+      "theme": "dark"
     },
     {
       "name": "11-shutdown-progress-rail",
@@ -139,7 +127,8 @@
       "headings": [
         "Shutting down OpenBot"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "12-recovery-disk-space",
@@ -150,7 +139,8 @@
       "headings": [
         "OpenBot needs more free space to update"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "13-running-status",
@@ -164,7 +154,8 @@
         "OpenBot's services",
         "Software OpenBot runs on"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "14-app-shared-orb",
@@ -177,19 +168,15 @@
         "Start a conversation",
         "Explore Bots"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "15-cloud-light",
-      "scene": "state-first-run",
-      "at": 1,
-      "theme": "light",
+      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
-      "headings": [
-        "Set up OpenBot",
-        "OpenBot Cloud"
-      ],
-      "errors": []
+      "theme": "light"
     },
     {
       "name": "16-provider-light",
@@ -200,18 +187,15 @@
       "headings": [
         "Connect your AI"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "17-update-light",
-      "scene": "relaunch-update-progress",
-      "at": 35,
-      "theme": "light",
+      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "captureMethod": "Standalone real-main browser fixture",
       "size": "1000x800",
-      "headings": [
-        "Updating OpenBot"
-      ],
-      "errors": []
+      "theme": "light"
     },
     {
       "name": "18-shutdown-light",
@@ -222,18 +206,15 @@
       "headings": [
         "Shutting down OpenBot"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "19-update-compact",
-      "scene": "relaunch-update-progress",
-      "at": 35,
-      "theme": "dark",
+      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "captureMethod": "Standalone real-main browser fixture",
       "size": "720x560",
-      "headings": [
-        "Updating OpenBot"
-      ],
-      "errors": []
+      "theme": "dark"
     },
     {
       "name": "20-windows-setup",
@@ -244,7 +225,8 @@
       "headings": [
         "Turn on Windows Subsystem for Linux"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
     },
     {
       "name": "21-windows-restart",
@@ -255,7 +237,29 @@
       "headings": [
         "Restart Windows to finish"
       ],
-      "errors": []
+      "errors": [],
+      "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c"
+    },
+    {
+      "name": "22-cloud-compact",
+      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "captureMethod": "Standalone real-main browser fixture",
+      "size": "720x560",
+      "theme": "dark"
+    },
+    {
+      "name": "23-connect-compact",
+      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "captureMethod": "Standalone real-main browser fixture",
+      "size": "720x560",
+      "theme": "dark"
+    },
+    {
+      "name": "24-self-contained-compact",
+      "sourceCommit": "191f72ce17f6c973b5550071b21af54bd22778eb",
+      "captureMethod": "Standalone real-main browser fixture",
+      "size": "720x560",
+      "theme": "dark"
     }
   ]
 }
