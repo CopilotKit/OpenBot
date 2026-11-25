@@ -21,6 +21,7 @@ import {
 } from "streamdown";
 import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
 import { attachmentAddress } from "@/lib/channels/attachments";
+import { MarkdownTable, TABLE_EXPORT_SKIP } from "@/lib/markdown-table";
 import { hasMaths, withMathDelimiters } from "@/lib/maths";
 import {
   NO_SLACK_NAMES,
@@ -170,6 +171,8 @@ export function fileAddress(path: string): string | null {
 }
 
 export const markdownComponents = {
+  // Streamdown's table, whose Copy and Download keep the table's links (`lib/markdown-table.tsx`).
+  table: MarkdownTable,
   a: ({ href, children, ...rest }: ComponentProps<"a">) => {
     const path = inAppPath(href);
     const file = path === null ? null : fileAddress(path);
@@ -218,7 +221,12 @@ export const markdownComponents = {
            * The type, after the name. It answers "can I open this, and with what" without the reader
            * hovering to read a URL, and it is the part a file name often leaves out.
            */}
-          <span className="shrink-0 text-muted-foreground">{kind.label}</span>
+          <span
+            className="shrink-0 text-muted-foreground"
+            {...TABLE_EXPORT_SKIP}
+          >
+            {kind.label}
+          </span>
         </a>
       );
     }

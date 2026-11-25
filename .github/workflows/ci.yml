@@ -374,7 +374,8 @@ jobs:
       # key the provider refuses saying why and changing nothing, and on OpenBot Cloud a person
       # held at Connect your AI until they connect their own, and Admin's Providers where an admin
       # changes, disconnects and connects the organization's AI, told apart from their own, and
-      # People's Remove dialog and the SCIM row fitting wide and on a phone. The
+      # People's Remove dialog and the SCIM row fitting wide and on a phone, and an unsent reply and
+      # its files staying with their conversation across a switch and a reload. The
       # onboarding frame reads the generated app config, which `bun test` alone doesn't write (the
       # test script's pretest does).
       - run: bun run generate:app-config
@@ -384,7 +385,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 \
             "$PLAYWRIGHT_IMAGE" \
-            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/compact-avatar-layout.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/team-models-screens-layout.test.tsx app/tests/conversation-refusal-layout.test.tsx app/tests/model-picker-phone-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx app/tests/audit-computer-limit-layout.test.tsx app/tests/ai-connection-dialog.test.tsx app/tests/connect-your-ai.test.tsx app/tests/admin-providers-connection.test.tsx app/tests/admin-people-remove-layout.test.tsx
+            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/compact-avatar-layout.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/team-models-screens-layout.test.tsx app/tests/conversation-refusal-layout.test.tsx app/tests/model-picker-phone-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx app/tests/audit-computer-limit-layout.test.tsx app/tests/ai-connection-dialog.test.tsx app/tests/connect-your-ai.test.tsx app/tests/admin-providers-connection.test.tsx app/tests/admin-people-remove-layout.test.tsx app/tests/composer-keeps-draft-browser.test.tsx
 
   # Dictation in the Desktop window on a Mac whose recognizer has no English (United Kingdom) on
   # the device, in Chromium and in WebKit, the engine the Mac window draws with: it listens in the
@@ -416,7 +417,8 @@ jobs:
   # signed-in gate says the hold, never terms to agree to. And a Bot's screen on a display of two
   # device pixels to one, told to the computer at that size and drawn as sharp, with a click on it
   # still landing where it is seen. And a conversation with a Bot started from under it in the
-  # Bots panel. In the image, as above: WebKit's
+  # Bots panel. And a Bot's table of links, downloaded as Markdown and as CSV with its links, and
+  # looking exactly as Streamdown's own table. In the image, as above: WebKit's
   # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
   app-browser-webkit:
     name: app (real browser, WebKit)
@@ -440,7 +442,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
-            bun test app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/settings-tool-cards-core.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx app/tests/people-lists.test.tsx app/tests/organization-moving.test.tsx app/tests/organization-removed.test.tsx app/tests/organization-held-reload.test.tsx app/tests/organization-unavailable-pages.test.tsx app/tests/organization-held-actions.test.tsx app/tests/organization-unavailable-admin-pages.test.tsx app/tests/organization-held-recovery.test.tsx app/tests/bot-screen-sharp.test.tsx app/tests/bots-panel-start-conversation.test.tsx
+            bun test app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/settings-tool-cards-core.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx app/tests/people-lists.test.tsx app/tests/organization-moving.test.tsx app/tests/organization-removed.test.tsx app/tests/organization-held-reload.test.tsx app/tests/organization-unavailable-pages.test.tsx app/tests/organization-held-actions.test.tsx app/tests/organization-unavailable-admin-pages.test.tsx app/tests/organization-held-recovery.test.tsx app/tests/bot-screen-sharp.test.tsx app/tests/bots-panel-start-conversation.test.tsx app/tests/table-export-browser.test.tsx
       # A conversation, a Bot's chat page and the audit log's filters during a move or an outage.
       - run: |
           docker run --rm --ipc=host \
@@ -467,6 +469,15 @@ jobs:
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
             bun test app/tests/moved-apps-reconnect.test.tsx
+      # An unsent reply and its files staying with their conversation across a switch and a reload,
+      # in WebKit, the engine the Mac window draws with. Chromium runs it in the job above.
+      - run: |
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=webkit \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test app/tests/composer-keeps-draft-browser.test.tsx
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own
