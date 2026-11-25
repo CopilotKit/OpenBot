@@ -30,6 +30,7 @@ import { ChatOpenAI } from "@langchain/openai";
 // moves to the Responses API moves here in the same change. Node loads it through the JSON hook in
 // json-modules.ts (see there for why and how).
 import { requiresResponsesApi } from "../../shared/model-providers.ts";
+import { withContextEditing } from "./context-room.ts";
 import { HarnessRunError, MODEL_UNREACHABLE } from "./errors.ts";
 import { PlanHarnessChatModel } from "./plan-model.ts";
 
@@ -270,15 +271,19 @@ function openAIModel(model: string, run: RunModel, env: Env): BaseChatModel {
 
 function anthropicModel(model: string, run: RunModel, env: Env): BaseChatModel {
   const baseUrl = env.ANTHROPIC_BASE_URL?.trim() || undefined;
-  return new ChatAnthropic({
-    model,
-    apiKey: env.ANTHROPIC_API_KEY?.trim() || undefined,
-    maxRetries: retries(run),
-    ...(baseUrl ? { anthropicApiUrl: baseUrl } : {}),
-    ...(ANTHROPIC_EFFORTS.has(run.effort)
-      ? { outputConfig: { effort: run.effort as never } }
-      : {}),
-  });
+  // Anthropic clears old tool results on its side, so a long run stays inside the window
+  // (context-room.ts), unless a proxy at this address has already refused it.
+  return withContextEditing(
+    new ChatAnthropic({
+      model,
+      apiKey: env.ANTHROPIC_API_KEY?.trim() || undefined,
+      maxRetries: retries(run),
+      ...(baseUrl ? { anthropicApiUrl: baseUrl } : {}),
+      ...(ANTHROPIC_EFFORTS.has(run.effort)
+        ? { outputConfig: { effort: run.effort as never } }
+        : {}),
+    }),
+  );
 }
 
 /** `GOOGLE_GENERATIVE_AI_BASE_URL` may end in its API version, as the AI SDK takes it. */

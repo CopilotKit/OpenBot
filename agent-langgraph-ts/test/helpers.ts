@@ -1,4 +1,5 @@
 /** Drive the engine as the server does: a real HTTP AG-UI run against `createEngine`. */
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createEngine, type ServerOptions } from "../src/server.ts";
 
@@ -108,3 +109,38 @@ export function types(list: Event[]): string[] {
 }
 
 export const quietLog = { warn: () => {}, error: () => {} };
+
+export type Callback = {
+  url: string;
+  calls: { name: string; args: unknown; run: unknown; token: unknown }[];
+  close: () => Promise<void>;
+};
+
+/** The server's `/api/agent-tools/call`, answering every call it is sent. */
+export async function toolCallback(
+  answer = (name: string, _args?: unknown) => `result of ${name}`,
+  delay = (_name: string) => 0,
+): Promise<Callback> {
+  const calls: Callback["calls"] = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk as Buffer);
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    calls.push({
+      name: body.name,
+      args: body.args,
+      run: body.run,
+      token: request.headers["x-openbot-agent-token"],
+    });
+    await new Promise((resolve) => setTimeout(resolve, delay(body.name)));
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ text: answer(body.name, body.args) }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}/api/agent-tools/call`,
+    calls,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}

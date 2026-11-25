@@ -107,7 +107,7 @@ test("The plan's model is asked as plan-model.ts asks it, and its words stream o
     );
     assert.deepEqual(
       (body.tools as { name: string }[]).map((tool) => tool.name),
-      ["get_weather"],
+      ["get_weather", "recall_earlier_results"],
     );
 
     const words = result.events
