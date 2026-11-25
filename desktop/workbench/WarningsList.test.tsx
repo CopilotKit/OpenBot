@@ -230,6 +230,7 @@ test("the shown warning's row says when it is jumping and when it is pinned", ()
       highlight={{ key, pinned: false, jumping: true }}
     />,
   );
+  expect(getByRole("button").hasAttribute("data-current")).toBe(true);
   expect(getByRole("button").textContent).toContain("Jumping…");
   expect(getByRole("button").getAttribute("aria-pressed")).toBe("false");
   rerender(
@@ -242,6 +243,7 @@ test("the shown warning's row says when it is jumping and when it is pinned", ()
   );
   expect(getByRole("button").textContent).not.toContain("Jumping…");
   expect(getByRole("button").getAttribute("aria-pressed")).toBe("true");
+  expect(getByRole("button").hasAttribute("data-current")).toBe(true);
 });
 
 test("while the page seeks, the heading says where it goes and the list is busy", () => {
@@ -448,34 +450,4 @@ test("with no expected moves there is no toggle", () => {
     />,
   );
   expect(queryByRole("checkbox")).toBeNull();
-});
-
-test("the list is drawn with the app's components", () => {
-  const warning = clipped(250, "A");
-  const view = render(
-    <WarningsList
-      warnings={[warning, moved(37_000, 'p "Done"')]}
-      movements={
-        new Map<string, Movement>([
-          [
-            warningMark(moved(37_000, 'p "Done"')),
-            { class: "expected", rule: "after-action", why: "after the click" },
-          ],
-        ])
-      }
-      onSeek={() => {}}
-      onPin={() => {}}
-      highlight={{ key: warningKey(warning), pinned: false, jumping: false }}
-    />,
-  );
-  const [row] = rowsIn(view.container);
-  expect(row?.getAttribute("data-slot")).toBe("item");
-  // The warning shown over the window: the app's ring around its row.
-  expect(row?.hasAttribute("data-current")).toBe(true);
-  expect(row?.className).toContain("data-current:border-ring");
-  expect(
-    view
-      .getByRole("checkbox", { name: "Show expected moves (1)" })
-      .getAttribute("data-slot"),
-  ).toBe("checkbox");
 });

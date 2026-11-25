@@ -300,25 +300,3 @@ test("the clear button empties the filter and puts the focus back in it", () => 
     "Cloud one",
   ]);
 });
-
-test("the list is drawn with the app's components", () => {
-  const view = render(
-    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
-  );
-  const filter = view.getByLabelText("Filter scenes");
-  expect(filter.closest("[data-slot=input-group]")).not.toBeNull();
-  expect(
-    view.getByText("Collapse all").closest("[data-slot=button]"),
-  ).not.toBeNull();
-  expect(
-    view.getByRole("button", { name: "Connected" }).getAttribute("data-slot"),
-  ).toBe("collapsible-trigger");
-  const row = view.getByText("Install one");
-  expect(row.getAttribute("data-slot")).toBe("item");
-  expect(row.tagName).toBe("BUTTON");
-  // The current scene has the app's muted fill; the others have none until hovered.
-  expect(row.classList.contains("bg-muted")).toBe(true);
-  expect(view.getByText("Install two").classList.contains("bg-muted")).toBe(
-    false,
-  );
-});

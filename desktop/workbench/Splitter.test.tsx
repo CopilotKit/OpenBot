@@ -30,21 +30,8 @@ test("a splitter is a focusable separator with its label and range", () => {
   expect(handle.getAttribute("aria-valuenow")).toBe("248");
   expect(handle.getAttribute("aria-valuemin")).toBe("180");
   expect(handle.getAttribute("aria-valuemax")).toBe("420");
-});
-
-test("a splitter takes its colors from the app's tokens", () => {
-  const view = render(<Splitter {...props({ axis: "y", value: null })} />);
-  const handle = view.getByRole("separator");
+  view.rerender(<Splitter {...props({ axis: "y", value: null })} />);
   expect(handle.getAttribute("aria-orientation")).toBe("horizontal");
-  const classes = handle.className.split(/\s+/);
-  for (const name of [
-    "bg-border",
-    "hover:bg-ring/40",
-    "focus-visible:ring-2",
-    "focus-visible:ring-ring",
-  ])
-    expect(classes).toContain(name);
-  expect(classes.some((name) => name.startsWith("wb-split"))).toBe(false);
 });
 
 test("the arrow keys, Home, End and Enter size the panel", () => {

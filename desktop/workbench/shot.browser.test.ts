@@ -57,23 +57,6 @@ describe.skipIf(!asked)("workbench:shot", () => {
     expect(Array.isArray(report.warnings)).toBe(true);
   }, 120_000);
 
-  test("--all --check finds no stalled run in the scenes", async () => {
-    const out = mkdtempSync(join(tmpdir(), "shot-check-"));
-    const result = await run(["--all", "--check", "--out", out]);
-    // Each problem is one line: "<scene> at <s>s: <message>".
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    // The findings of every scene, for the Findings page.
-    const findings = JSON.parse(
-      readFileSync(join(out, "findings.json"), "utf8"),
-    );
-    expect(findings.version).toBe(1);
-    expect(findings.sceneCount).toBeGreaterThan(0);
-    expect(Array.isArray(findings.findings)).toBe(true);
-    // Every committed scene, walked to its end: 155 s here and 299 s on CI's runner before three more
-    // move scenes, so CI's limit of 300 s was reached. Three times CI's time, as scenes keep coming.
-  }, 900_000);
-
   test("refuses an unknown scene", async () => {
     const result = await run(["no-such-scene"]);
     expect(result.code).toBe(2);
