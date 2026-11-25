@@ -62,7 +62,7 @@ The easiest way to get started is with the fully self-contained app that runs on
 <div align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/openbot-stack-dark.svg">
-  <img src="docs/assets/openbot-stack-light.svg" alt="OpenBot's modular stack: an enterprise workspace over built-in or AG-UI agents, your models, MCP tools, configurable infrastructure, and deployment on your laptop or Kubernetes." width="90%">
+  <img src="docs/assets/openbot-stack-light.svg" alt="OpenBot's modular stack: an enterprise workspace over Built-in Bots or any agent connected through AG-UI or A2A, your models, MCP tools, modular lanes for MCP hubs (Composio, Arcade, AgentCore) and sandboxes (Daytona, E2B, Modal, your Kubernetes), and your infrastructure or OpenBot Cloud, on your laptop, Kubernetes, AWS, Azure, or Google Cloud." width="90%">
 </picture>
 </div>
 
