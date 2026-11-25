@@ -98,6 +98,7 @@ export const HOME_FIELD_VERTEX =
 export const HOME_FIELD_FRAGMENT = `
 precision highp float;
 uniform vec4 uBox;
+uniform vec2 uResolution;
 uniform float uTime, uEnergy, uDark, uDpr, uIntro;
 uniform vec3 uC0, uC1, uC2, uC3, uC4;
 float hash(float n){ return fract(sin(n * 12.9898) * 43758.5453); }
@@ -105,7 +106,10 @@ float blob(vec2 q, vec2 at, float r){ vec2 d = q - at; return exp(-dot(d, d) / (
 void main(){
   vec2 px = gl_FragCoord.xy;
   vec2 c = vec2(uBox.x + 0.5 * uBox.z, uBox.y + 0.5 * uBox.w);
-  float R = 0.3 * uBox.z * (1.0 + 0.03 * uEnergy) * (0.86 + 0.14 * smoothstep(0.0, 0.8, uIntro));
+  // Fit the outer rings and leave room for the glow to fade at the canvas edge.
+  vec2 room = min(c, uResolution - c);
+  float radius = max(1.0, min(0.3 * uBox.z, min(room.x, room.y) / 1.5));
+  float R = radius * (1.0 + 0.03 * uEnergy) * (0.86 + 0.14 * smoothstep(0.0, 0.8, uIntro));
   vec2 d = px - c;
   float rn = length(d) / R;
   vec2 q = d / R;
@@ -152,5 +156,7 @@ void main(){
   }
 
   float grain = (fract(sin(dot(px, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
-  gl_FragColor = vec4(max(oc + grain, 0.0), clamp(oa + grain, 0.0, 1.0));
+  vec2 edge = min(px, uResolution - px);
+  float fade = smoothstep(0.0, 0.5 * R, min(edge.x, edge.y));
+  gl_FragColor = fade * vec4(max(oc + grain, 0.0), clamp(oa + grain, 0.0, 1.0));
 }`;

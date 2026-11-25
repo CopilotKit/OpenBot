@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Browser, Page } from "playwright-core";
+import { compile } from "tailwindcss";
 
 /**
  * OpenBot follows the system's light or dark until a person chooses one of their own.
@@ -64,6 +65,7 @@ async function open(
   system: "light" | "dark",
   stored: string | null = null,
   key = KEY,
+  menu = false,
 ): Promise<Page> {
   const context = await browser.newContext({ colorScheme: system });
   const page = await context.newPage();
@@ -88,10 +90,73 @@ async function open(
       [key, stored] as const,
     );
   }
-  await page.goto(`${ORIGIN}/`);
-  await page.locator("[data-setting-shows]").waitFor({ timeout: 8000 });
+  await page.goto(`${ORIGIN}/${menu ? "?menu" : ""}`);
+  await (menu
+    ? page.getByRole("combobox", { name: "Theme" })
+    : page.locator("[data-setting-shows]")
+  ).waitFor({ timeout: 8000 });
   return page;
 }
+
+test.skipIf(!asked).each([
+  [160, true],
+  [80, false],
+] as const)(
+  "the Theme menu reaches Dark at %dpx viewport height",
+  async (height, fits) => {
+    const page = await open("light", null, KEY, true);
+    try {
+      await page.setViewportSize({ width: 640, height });
+      await page.addStyleTag({
+        content: `html { zoom: 1.25 } body { margin: 0 } #root { padding-top: ${fits ? 36 : 12}px }`,
+      });
+      const css = await compile(
+        "@theme { --spacing: 0.25rem; } @tailwind utilities;",
+      );
+      const style = async () =>
+        page.addStyleTag({
+          content: css.build(
+            await page
+              .locator("[class]")
+              .evaluateAll((elements) =>
+                elements.flatMap((element) => [...element.classList]),
+              ),
+          ),
+        });
+      await style();
+      const trigger = page.getByRole("combobox", { name: "Theme" });
+      await trigger.click();
+      const list = page.getByRole("listbox");
+      await list.waitFor();
+      await style();
+      const dimensions = await list.evaluate((menu) => [
+        menu.clientHeight,
+        menu.scrollHeight,
+      ]);
+      if (fits) {
+        expect(dimensions[0]).toBe(dimensions[1]);
+      } else {
+        expect(dimensions[0]).toBeLessThan(dimensions[1]);
+        const bounds = await list.boundingBox();
+        if (!bounds) throw new Error("The Theme list is hidden");
+        await page.mouse.move(bounds.x + 12, bounds.y + 5);
+        await page.mouse.wheel(0, 100);
+        await page.waitForFunction(
+          () =>
+            (document.querySelector('[role="listbox"]')?.scrollTop ?? 0) > 0,
+          null,
+          { timeout: 3000 },
+        );
+      }
+      await list.getByRole("option", { name: "Dark" }).click();
+      expect(
+        await trigger.locator('[data-slot="select-value"]').textContent(),
+      ).toBe("Dark");
+    } finally {
+      await page.context().close();
+    }
+  },
+);
 
 /** What the page shows: the theme at first paint, the theme now, and what the setting reads. */
 function shown(page: Page) {

@@ -148,21 +148,26 @@ export function HomeField({
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const width = Math.round(canvas.clientWidth * dpr);
       const height = Math.round(canvas.clientHeight * dpr);
+      const c = canvas.getBoundingClientRect();
+      if (!width || !height || !c.width || !c.height) return;
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
       }
-      const c = canvas.getBoundingClientRect();
       const b = box().getBoundingClientRect();
+      // DOM rectangles and the canvas backing store can scale differently at page zoom.
+      const scaleX = width / c.width;
+      const scaleY = height / c.height;
       gl.viewport(0, 0, width, height);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.uniform2f(uniform("uResolution"), width, height);
       gl.uniform4f(
         uniform("uBox"),
-        (b.left - c.left) * dpr,
-        (c.bottom - b.bottom) * dpr,
-        b.width * dpr,
-        b.height * dpr,
+        (b.left - c.left) * scaleX,
+        (c.bottom - b.bottom) * scaleY,
+        b.width * scaleX,
+        b.height * scaleY,
       );
       gl.uniform1f(uniform("uTime"), clock);
       gl.uniform1f(uniform("uEnergy"), energy);
