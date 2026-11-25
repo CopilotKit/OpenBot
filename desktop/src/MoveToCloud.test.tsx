@@ -996,6 +996,166 @@ test("the result says what the move screen said it removes, and what the disk sh
   expect(view.queryByText(/freed/)).toBe(null);
 });
 
+/** The person's own organization on OpenBot Cloud and their company's, as `move_destinations` says. */
+const SAMS_OWN = {
+  id: "org_mine",
+  name: "Sam's organization",
+  personal: true,
+  canMoveIn: true,
+};
+const ACME = { id: "org_acme", name: "Acme", personal: false, canMoveIn: true };
+
+function radioNames(view: ReturnType<typeof render>) {
+  return view
+    .getAllByRole("radio")
+    .map(
+      (radio) =>
+        radio.closest("label")?.querySelector(".tile-name")?.textContent,
+    );
+}
+
+/*
+ * A person in their own organization on OpenBot Cloud and their company's. Before, the move put
+ * everything in their own and never asked, and nothing let them move it across after. Signed in,
+ * they choose where their Bots go, their own first and picked to begin with, and the move goes there.
+ */
+test("a person in two organizations chooses where their Bots go, and they move there", async () => {
+  const view = await atConfirm();
+  // OpenBot Cloud lists the company's first; the person's own still comes first on screen.
+  answers.move_destinations = [ACME, SAMS_OWN];
+  answers.move_to_cloud = {
+    ...MOVED,
+    connectAi: false,
+    account: { email: "sam@example.com", organization: "Acme" },
+  };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "Where should your Bots go?" });
+  expect(called("move_destinations").map((call) => call.args)).toEqual([
+    { address: "https://api.open.bot" },
+  ]);
+  // Nothing moves until they choose.
+  expect(called("move_to_cloud")).toEqual([]);
+  expect(radioNames(view)).toEqual(["Sam's organization", "Acme"]);
+  const own = view.getByRole("radio", {
+    name: /^Sam's organization/,
+  }) as HTMLInputElement;
+  const acme = view.getByRole("radio", { name: /^Acme/ }) as HTMLInputElement;
+  expect(own.checked).toBe(true);
+  expect(acme.disabled).toBe(false);
+  expect(
+    view.getByText(
+      "Nothing is removed from this computer until everything has arrived in OpenBot Cloud and been checked.",
+    ),
+  ).toBeTruthy();
+  await userEvent.click(acme);
+  expect(acme.checked).toBe(true);
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  expect(called("move_to_cloud").map((call) => call.args)).toEqual([
+    {
+      address: "https://api.open.bot",
+      includeModelKeys: true,
+      organization: "org_acme",
+    },
+  ]);
+  // The result names the organization they chose.
+  expect(
+    view.getByText(/You're signed in as sam@example\.com, in Acme\./),
+  ).toBeTruthy();
+});
+
+test("a person in one organization isn't asked: the move goes straight on into it", async () => {
+  const view = await atConfirm();
+  answers.move_destinations = [ACME];
+  answers.move_to_cloud = () => new Promise(() => {});
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await waitFor(() => expect(called("move_to_cloud")).toHaveLength(1));
+  expect(called("move_to_cloud")[0]?.args).toEqual({
+    address: "https://api.open.bot",
+    includeModelKeys: true,
+    organization: "org_acme",
+  });
+  expect(
+    view.getByRole("heading", { name: "Moving to OpenBot Cloud" }),
+  ).toBeTruthy();
+  expect(
+    view.queryByRole("heading", { name: "Where should your Bots go?" }),
+  ).toBe(null);
+});
+
+/*
+ * An organization that doesn't let the person use Bots is shown, so they know why it isn't theirs
+ * to pick, and can't be picked. If the shell refuses one anyway (OpenBot Cloud changed its mind),
+ * the move stopped with nothing removed, and Try again asks again, their last choice picked.
+ */
+test("an organization that doesn't let the person use Bots is shown but can't be picked, and a refused move removed nothing", async () => {
+  const view = await atConfirm();
+  answers.move_destinations = [
+    SAMS_OWN,
+    { ...ACME, canMoveIn: false },
+    {
+      id: "org_lab",
+      name: "Research Lab",
+      personal: false,
+      canMoveIn: true,
+    },
+  ];
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "Where should your Bots go?" });
+  expect(radioNames(view)).toEqual([
+    "Sam's organization",
+    "Acme",
+    "Research Lab",
+  ]);
+  const acme = view.getByRole("radio", { name: /^Acme/ }) as HTMLInputElement;
+  expect(acme.disabled).toBe(true);
+  expect(acme.closest("label")?.textContent).toContain(
+    "An admin of this organization hasn't let you use Bots here.",
+  );
+  await userEvent.click(acme.closest("label") as HTMLElement);
+  expect(acme.checked).toBe(false);
+  expect(
+    (
+      view.getByRole("radio", {
+        name: /^Sam's organization/,
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(true);
+
+  // Research Lab, which the shell then refuses: nothing moved.
+  const said =
+    "An admin of Research Lab hasn't let you use Bots there. Ask them to let you, or choose another organization.";
+  answers.move_to_cloud = () => {
+    throw { said, detail: null, kind: "move-not-allowed" };
+  };
+  await userEvent.click(view.getByRole("radio", { name: /^Research Lab/ }));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("heading", { name: "Your Bots can't move there" });
+  expect(view.getByText(said)).toBeTruthy();
+  expect(
+    view.getByText("Nothing was removed from this computer."),
+  ).toBeTruthy();
+  expect(called("move_to_cloud")[0]?.args).toEqual({
+    address: "https://api.open.bot",
+    includeModelKeys: true,
+    organization: "org_lab",
+  });
+  // Try again asks where once more, their last choice picked.
+  await userEvent.click(view.getByRole("button", { name: "Try again" }));
+  await view.findByRole("heading", { name: "Where should your Bots go?" });
+  expect(called("move_destinations")).toHaveLength(2);
+  expect(
+    (view.getByRole("radio", { name: /^Research Lab/ }) as HTMLInputElement)
+      .checked,
+  ).toBe(true);
+});
+
 test("counts keep the kinds there are words for, in order, and skip zeros; space reads in GB or MB", () => {
   expect(
     countLines([

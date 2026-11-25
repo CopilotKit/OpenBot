@@ -10,10 +10,10 @@ import { importListInQueryOptions, importListQueryOptions } from "./queries";
  * work in (`movedElsewhere`), or null.
  *
  * Asked only of a hosted OpenBot, the one moves go to, and only of a person with another
- * organization to look in. Their other organizations are asked only once the one they work in has
- * answered that it holds none of their moves, so somebody working where their Bots are asks nothing
- * more. Null until every read it needs has answered, and on any read that failed: the bar is a
- * pointer, never a second place to report an error.
+ * organization to look in. Every one of their organizations is asked, the one they work in too: a
+ * finished move here says nothing on its own, because their Bots may since have moved on from here
+ * to another of their organizations. Null until every read it needs has answered, and on any read
+ * that failed: the bar is a pointer, never a second place to report an error.
  */
 export function useMovedElsewhere(): MovedElsewhere | null {
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
@@ -27,16 +27,13 @@ export function useMovedElsewhere(): MovedElsewhere | null {
     ...importListQueryOptions(),
     enabled: others.length > 0,
   });
-  const noneHere =
-    here.isSuccess && !here.data.some((move) => move.status === "imported");
   const elsewhere = useQueries({
-    queries: others.map((organization) => ({
-      ...importListInQueryOptions(organization.id),
-      enabled: noneHere,
-    })),
+    queries: others.map((organization) =>
+      importListInQueryOptions(organization.id),
+    ),
   });
   const preferences = useUserPreferences();
-  if (!choices || !noneHere || !preferences.isSuccess) return null;
+  if (!choices || !here.isSuccess || !preferences.isSuccess) return null;
   if (elsewhere.some((read) => !read.isSuccess)) return null;
   const imports = new Map(
     others.map((organization, at) => [
