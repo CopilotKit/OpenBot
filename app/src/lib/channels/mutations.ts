@@ -15,6 +15,7 @@ import {
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { settingsKeys } from "@/lib/settings/queries";
+import { noteBusyHere } from "./held-busy";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -95,6 +96,8 @@ export async function setChannelBusy(variables: {
   channelId: string;
   busy: boolean;
 }) {
+  // Held here too, so a read of the roster while this tab's turn runs keeps its row lit.
+  noteBusyHere(variables.channelId, variables.busy);
   // Best effort: a lost signal is corrected by the next one.
   await signalConversationBusy(
     organizationId(),

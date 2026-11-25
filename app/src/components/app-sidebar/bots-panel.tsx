@@ -50,9 +50,15 @@ import {
 import { isHeld, loadFailure } from "@/lib/load-failure";
 import { relativeTimeShort } from "@/lib/relative-time";
 import { useMessageListEmphasis } from "@/lib/settings/message-list";
+import { delegatingConversationsQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { Channel } from "./channel";
-import { isUnread, pinnedFirst } from "./conversations-panel";
+import {
+  isUnread,
+  isWorking,
+  NONE_DELEGATING,
+  pinnedFirst,
+} from "./conversations-panel";
 
 /** Where a Bot's row hands up that its conversations are held back, by Bot, for the panel to say once. */
 const HeldReads = createContext<(botId: string, held: unknown) => void>(
@@ -81,6 +87,8 @@ function BotConversations({
   const conversations = useInfiniteQuery(
     botConversationsInfiniteQueryOptions(botId, BOT_CONVERSATIONS_PAGE),
   );
+  const delegating =
+    useQuery(delegatingConversationsQueryOptions()).data ?? NONE_DELEGATING;
   const openChannelId = useParams({
     strict: false,
     select: (params) => (params as { channelId?: string }).channelId,
@@ -163,7 +171,7 @@ function BotConversations({
       {/* Pinned first, as the Conversations panel draws them: a live patch reorders by time alone. */}
       {pinnedFirst(conversations.data).map((channel) => (
         <Channel
-          busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
+          busy={isWorking(channel, delegating)}
           canRename={channel.canRename ?? false}
           channelId={channel.id}
           data-slot="bot-conversation-row"

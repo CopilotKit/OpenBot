@@ -7,6 +7,7 @@
     "extensionApi": 1,
     "database": {
       "from": [
+        "0181_organization_ai_sign_in_credentials",
         "0164_schedules_held_by_move",
         "0162_computer_restores",
         "0161_ai_connection_shared_sign_in",
@@ -19,13 +20,14 @@
         "0082_routine_goal",
         "0077_channel_opening"
       ],
-      "to": "0181_organization_ai_sign_in_credentials",
+      "to": "0182_withdraw_default_source_imports",
       "rollbackCompatible": false
     },
     "intelligenceCapabilities": []
   },
   "upgrade": {
     "fromVersions": [
+      "v1.2.0-rc.5",
       "v1.2.0-rc.4",
       "v1.2.0-rc.3",
       "v1.2.0-rc.2",
