@@ -69,16 +69,16 @@ describe("release order", () => {
   });
 
   test("an app below a minimum is the one refused, and not one at it", () => {
-    // As a server whose admin raised Desktop to 1.2.0 (OPENBOT_MINIMUM_CLIENTS=desktop=1.2.0).
+    // As a server whose admin raised Desktop to 9.0.0 (OPENBOT_MINIMUM_CLIENTS=desktop=9.0.0).
     const raised = cases.deployments.raised.minimumClients;
     const named = parseClientHeader("web/1.1.0 desktop/1.1.0");
     expect(belowMinimum(named, raised)).toEqual({
       kind: "desktop",
       version: "1.1.0",
-      minimum: "1.2.0",
+      minimum: "9.0.0",
     });
     expect(
-      belowMinimum(parseClientHeader("desktop/1.2.0"), raised),
+      belowMinimum(parseClientHeader("desktop/9.0.0"), raised),
     ).toBeUndefined();
     // With no minimum, every app is served.
     expect(belowMinimum(named, MINIMUM_CLIENTS)).toBeUndefined();
