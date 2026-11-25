@@ -9,6 +9,7 @@
       "!**/.venv*",
       "!app/src/lib/generated/application-config.ts",
       "!app/src/routeTree.gen.ts",
+      "!mobile/src/uniwind-types.d.ts",
       "!desktop/src-tauri/gen",
       "!**/target",
       "!app/tests/fixtures/arcade-catalogue.json"

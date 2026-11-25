@@ -1,40 +1,81 @@
-import { Redirect, router } from "expo-router";
+import { router } from "expo-router";
+import { Button } from "heroui-native/button";
 import { useCallback } from "react";
-import { Pressable, Text } from "react-native";
+import { FlatList, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { everyBot } from "../src/api";
 import { authClient } from "../src/auth";
-import { card, colors, heading, muted, Problem, Screen } from "../src/ui";
+import {
+  BotTile,
+  EmptyState,
+  Notice,
+  Refresh,
+  Screen,
+} from "../src/components";
+import { IconRobot } from "../src/icons";
 import { useLoad } from "../src/use-load";
+import { usePull } from "../src/use-pull";
 
-/** Every Bot this person can reach, each opening its profile. */
-export default function BotsScreen() {
-  const { data: session, isPending } = authClient.useSession();
+/** Your Bots: every Bot this person can use, two to a row, each opening its page. */
+export default function Bots() {
+  const insets = useSafeAreaInsets();
+  const { data: session } = authClient.useSession();
   const load = useCallback(() => everyBot(), []);
   const bots = useLoad(load, Boolean(session));
-  if (!session && !isPending) return <Redirect href="/" />;
+  const pull = usePull(bots.refresh);
+  const listed = (bots.data ?? []).filter((bot) => !bot.hidden);
   return (
-    <Screen refreshing={bots.pending} onRefresh={() => void bots.refresh()}>
-      <Text style={heading}>Bots</Text>
-      <Problem message={bots.error} />
-      {bots.data?.map((bot) => (
-        <Pressable
-          key={bot.id}
-          accessibilityRole="link"
-          accessibilityLabel={`Open ${bot.name}`}
-          onPress={() =>
-            router.push({ pathname: "/bot", params: { botId: bot.id } })
-          }
-          style={card}
-        >
-          <Text style={{ fontSize: 17, fontWeight: "600", color: colors.link }}>
-            {bot.name}
-          </Text>
-          {bot.title ? <Text style={muted}>{bot.title}</Text> : null}
-        </Pressable>
-      ))}
-      {bots.data?.length === 0 && (
-        <Text>No Bots yet. Create one in OpenBot on your computer.</Text>
-      )}
+    <Screen>
+      <FlatList
+        className="flex-1"
+        data={listed}
+        keyExtractor={(bot) => bot.id}
+        numColumns={2}
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerClassName="px-2 py-2"
+        columnWrapperClassName="gap-1"
+        refreshControl={
+          <Refresh refreshing={pull.refreshing} onRefresh={pull.onRefresh} />
+        }
+        ListHeaderComponent={
+          bots.error ? (
+            <View className="px-2 pb-2">
+              <Notice message={bots.error} />
+            </View>
+          ) : undefined
+        }
+        renderItem={({ item: bot, index }) => (
+          <>
+            <BotTile
+              name={bot.name}
+              seed={bot.avatarSeed || bot.id}
+              title={bot.title}
+              onPress={() =>
+                router.push({ pathname: "/bot", params: { botId: bot.id } })
+              }
+            />
+            {/* The last Bot of an odd count keeps half the row, as the others do. */}
+            {index === listed.length - 1 && listed.length % 2 === 1 ? (
+              <View className="flex-1" />
+            ) : null}
+          </>
+        )}
+        ListEmptyComponent={
+          bots.data ? (
+            <EmptyState
+              icon={IconRobot}
+              title="No Bots yet"
+              description="Make your first Bot with New Bot."
+            />
+          ) : undefined
+        }
+      />
+      <View
+        className="border-t border-border bg-background px-4 pt-3"
+        style={{ paddingBottom: Math.max(insets.bottom, 12) }}
+      >
+        <Button onPress={() => router.push("/new-bot")}>New Bot</Button>
+      </View>
     </Screen>
   );
 }

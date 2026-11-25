@@ -16,6 +16,14 @@ is a tolerant reader: it ignores a field it doesn't know, reads an enum value it
 "other" and never sends it back, and shows a feature only when the server's `deployment` answer
 offers it. `tests/tolerant-reader.test.ts` and `tests/unknown-statuses.test.ts` hold it to that.
 
+The components every screen draws with are in `src/components` (see "The phone's components" in
+[docs/app-guidelines.md](../docs/app-guidelines.md)); the development build shows them all at
+`/gallery`. Import an icon from `src/icons.ts` and a HeroUI Native component from its own path
+(`heroui-native/button`): either package's index pulls the whole library into the app.
+`src/uniwind-types.d.ts` is written by Uniwind when Metro starts; after a change to
+`global.css`'s themes, run `npx uniwind generate-artifacts --css ./global.css --dts
+./src/uniwind-types.d.ts`.
+
 How to run the app, the checks CI makes, and how a build is started: [README.md](README.md). Add a
 dependency with `npx expo install <name>` and commit `package-lock.json`.
 

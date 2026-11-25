@@ -17,8 +17,10 @@ import { REGIONS, WHOLE_FILES } from "./targets";
  *   / * end of tokens/src/scheme.ts * /
  *
  * `all` names every token. An entry written `field=token` writes a Rust struct field holding the
- * token as an RGB tuple, for the desktop app's native first paint; otherwise a line is a CSS custom
- * property. The region keeps the start marker's indent.
+ * token as an RGB tuple, for the desktop app's native first paint. One written `--name=token` writes
+ * a CSS custom property under another library's name (the phone app's HeroUI Native names);
+ * otherwise a line is a CSS custom property under the token's own name. The region keeps the start
+ * marker's indent.
  */
 
 const START =
@@ -57,6 +59,8 @@ function regionLines(mode: Mode, entries: string, indent: string) {
       : [undefined, entry];
     const value = scheme[mode][token(name as string)];
     if (!field) return `${indent}--${name}: ${value};`;
+    // `--surface=card`: a CSS property under another library's name, holding the scheme's token.
+    if (field.startsWith("--")) return `${indent}${field}: ${value};`;
     const { r, g, b } = opaque(mode, value);
     const hex = (n: number) => `0x${n.toString(16).padStart(2, "0")}`;
     return `${indent}${field}: (${hex(r)}, ${hex(g)}, ${hex(b)}),`;

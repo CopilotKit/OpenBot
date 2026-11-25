@@ -53,7 +53,8 @@ copy, and the copies are written, never edited:
 | `app/src/theme.css` (the web app, and the Recorder's pages, which import it) | CSS custom properties, light in `:root` and dark in `.dark` |
 | `desktop/src/styles.css`, `desktop/src-tauri/src/connected/sign_in.rs` (OpenBot Desktop's setup window and sign-in page) | CSS custom properties, the tokens each uses |
 | `desktop/src-tauri/src/first_paint.rs` (the window's color before the page draws) | RGB |
-| `mobile/src/scheme.ts` (the phone app) | Hex, since React Native draws no `oklch()` |
+| `mobile/src/scheme.ts` (the phone app's old screens) | Hex, since React Native draws no `oklch()` |
+| `mobile/global.css` (the phone app, under HeroUI Native's names) | CSS custom properties, light under `@variant light` and dark under `@variant dark` |
 
 To change a color: change it in `tokens/src/scheme.ts`, run `bun run tokens:generate`, and commit
 the scheme with every copy it rewrites. A copy inside a hand-written file sits between two marker
@@ -178,11 +179,13 @@ The platform draws everything around a screen. HeroUI Native draws what is insid
 The rules under [One color scheme, used sparingly](#one-color-scheme-used-sparingly) hold here too.
 
 HeroUI Native has its own names for the tokens, and two of them mean something else than the web
-app's token of the same name. When Uniwind goes in, `mobile/global.css` takes the scheme under
-HeroUI Native's names, for light and for dark, written by `bun run tokens:generate`: add it to
-`tokens/src/targets.ts` with this mapping, rather than writing the values by hand. Until then the
-screens read `src/scheme.ts`. No other file in `mobile/` has a color value in it, but
-`src/colors.ts`'s one blue.
+app's token of the same name. `mobile/global.css` takes the scheme under HeroUI Native's names, for
+light and for dark, written by `bun run tokens:generate` with the mapping below (an entry
+`--surface=card` in its marker comment). Screens not moved to Uniwind yet read `src/scheme.ts`.
+
+No other file in `mobile/` has a color value in it, but two: `src/colors.ts`'s one blue, and
+`src/orb-palette.ts`, a Bot's orb colors. Those are a Bot's identity, the same on the phone as on
+the web app, and `mobile/tests/orb-palette.test.ts` holds them to `app/src/lib/orb-palette.ts`.
 
 | HeroUI Native token | Takes the scheme's |
 | --- | --- |
@@ -197,6 +200,30 @@ screens read `src/scheme.ts`. No other file in `mobile/` has a color value in it
 | `warning` | `warning` |
 | `border` | `border` |
 | `focus` | `ring` |
+| `field-background`, `field-border` | `card`, `input` |
+| `segment`, `separator` | `card`, `border` |
+| `fill` (ours: a quiet fill, `bg-fill`) | `muted` |
+| `sidebar` and its set (ours: the app's menu) | `sidebar` and its set |
+
+### The phone's components
+
+`mobile/src/components` is the phone app's library, drawn from the scheme with Uniwind and HeroUI
+Native: text in Inter, a Bot's orb, rows, conversation rows, messages, the message box, notices,
+empty states, the switch and the segmented control. A screen uses these first, then HeroUI
+Native's, and builds its own only when neither fits. The development build shows every one at
+`/gallery` (`mobile/app/gallery.tsx`), in light and dark; a new component goes there too.
+
+- **Icons come from `src/icons.ts`.** Tabler's index holds every icon, and Metro bundles every one
+  it reaches. `src/icons.ts` imports each icon the app uses from its own file.
+- **HeroUI Native from its own paths:** `heroui-native/button`, never `heroui-native`, for the same
+  reason.
+- **The look is the web app's.** Inter, Tabler at a 1.75 line, buttons as rounded rectangles
+  rather than HeroUI's pills, rows as one card with hairline dividers and 32px icon tiles, the
+  person's messages in a quiet bubble and a Bot's as plain text, and the message box the one
+  control that lights while someone types.
+- **The menu** slides in from the left over the native stack (`react-native-drawer-layout`), so
+  every screen keeps the native header. A section's screen (Conversations, Bots, Routines, Memory,
+  Skills, Connections) has the menu button where a back button would be.
 
 ## The web app and OpenBot Desktop
 
