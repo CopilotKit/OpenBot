@@ -419,7 +419,7 @@ mod tests {
         );
         assert_eq!(
             problem.detail.as_deref(),
-            Some("the deployment's minimumClients.desktop is 1.2.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2")
+            Some("the deployment's minimumClients.desktop is 9.0.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2")
         );
         assert!(security.seen_at(METADATA).is_empty());
         // What the log says beside the sentence: what that OpenBot asked for, against this app.
@@ -427,7 +427,7 @@ mod tests {
         let problem = check(&raised.address()).expect_err("raised");
         assert_eq!(
             problem.detail.as_deref(),
-            Some("the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2")
+            Some("the deployment's minimumClients.desktop is 9.0.0; this app is desktop/1.1.0 and speaks v2")
         );
     }
 
