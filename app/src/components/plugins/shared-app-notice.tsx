@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import {
   botSharedAppsQueryOptions,
   requestSharedUseMutationOptions,
@@ -25,10 +26,19 @@ export function SharedAppNotice({
 }) {
   const queryClient = useQueryClient();
   const me = useQuery(currentUserQueryOptions()).data;
-  const shared = useQuery(botSharedAppsQueryOptions(botId));
+  /*
+   * Apps open: a shared account is usable through a Bot by everybody who can use the Bot, so who
+   * can reach it changes nothing to approve, and there is nothing to say. Said only once it is known
+   * that apps are locked down.
+   */
+  const open = useAppsOpen();
+  const shared = useQuery({
+    ...botSharedAppsQueryOptions(botId),
+    enabled: open === false,
+  });
   const ask = useMutation(requestSharedUseMutationOptions(queryClient));
   const apps = shared.data?.apps ?? [];
-  if (apps.length === 0) return null;
+  if (open !== false || apps.length === 0) return null;
 
   if (isOrganizationAdmin(me?.role)) {
     return (

@@ -141,12 +141,16 @@ async function style(page: Page) {
   await page.evaluate(() => document.fonts.ready);
 }
 
-/** The fixture at `path`, as `role`, in a window the width of a desktop app. */
+/**
+ * The fixture at `path`, as `role`, in a window the width of a desktop app. Apps are locked down
+ * unless `apps` is "open".
+ */
 async function open(
   engine: string,
   theme: "light" | "dark",
   role: "admin" | "member",
   path: string,
+  apps: "open" | "locked" = "locked",
 ): Promise<Page> {
   const browser = browsers.get(engine);
   if (!browser) throw new Error(`no ${engine}`);
@@ -171,7 +175,7 @@ async function open(
       body: `<!doctype html><html lang="en" class="${theme}" style="color-scheme: ${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div><script type="module" src="/connections.js"></script></body></html>`,
     });
   });
-  await page.goto(`${ORIGIN}${path}?theme=${theme}&role=${role}`);
+  await page.goto(`${ORIGIN}${path}?theme=${theme}&role=${role}&apps=${apps}`);
   return page;
 }
 
@@ -286,7 +290,48 @@ describe.skipIf(!asked)("Connections on OpenBot Cloud", () => {
         }
       }, 90_000);
 
-      test(`a member finds an app and asks an admin for it in one press, and gets no switch, in ${engine}, ${theme}`, async () => {
+      test(`apps open, a member finds an app nobody added and adds and connects it in one press, in ${engine}, ${theme}`, async () => {
+        const page = await open(
+          engine,
+          theme,
+          "member",
+          "/connections",
+          "open",
+        );
+        try {
+          const browse = page.getByTestId("account-browse");
+          await browse.waitFor({ timeout: 15_000 });
+          await page
+            .getByRole("button", { name: "Add custom MCP" })
+            .waitFor({ timeout: 15_000 });
+          expect(await browse.innerText()).not.toContain("admin");
+          await style(page);
+          await shoot(page, "member-open-connections", name);
+          await search(page, "slack");
+          const slack = page.getByTestId("directory-slack");
+          await slack.waitFor({ timeout: 15_000 });
+          expect(await slack.innerText()).toContain("Connect");
+          expect(await slack.innerText()).not.toContain("Request");
+          await style(page);
+          await shoot(page, "member-open-search", name);
+          expect(await fits(page)).toEqual({ sideways: false, inside: true });
+          await slack.click();
+          await page
+            .getByText("Finish signing in to Slack in the tab that opened.")
+            .waitFor({ timeout: 15_000 });
+          const done = await events(page);
+          expect(done.slice(0, 3)).toEqual([
+            "tab claimed",
+            `POST ${APPS_PATH}`,
+            `POST ${myConnectionPath("composio-slack", "connect")}`,
+          ]);
+          expect(done).not.toContain(`POST ${APP_ACCESS_REQUESTS_PATH}`);
+        } finally {
+          await page.close();
+        }
+      }, 90_000);
+
+      test(`apps locked down, a member finds an app and asks an admin for it in one press, and gets no switch, in ${engine}, ${theme}`, async () => {
         const page = await open(engine, theme, "member", "/connections");
         try {
           const browse = page.getByTestId("account-browse");
@@ -314,7 +359,7 @@ describe.skipIf(!asked)("Connections on OpenBot Cloud", () => {
           expect(faded).toBe(1);
 
           await page.goto(
-            `${ORIGIN}/connections/composio-rootly?theme=${theme}&role=member`,
+            `${ORIGIN}/connections/composio-rootly?theme=${theme}&role=member&apps=locked`,
           );
           await page.getByText("Your account").waitFor({ timeout: 15_000 });
           expect(

@@ -17,6 +17,7 @@ import {
   AppAccessAction,
   appAccessSentence,
   namesAnAdmin,
+  useOpenApps,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
@@ -390,15 +391,19 @@ function Granted({
     ...botAppsQueryOptions(agentId),
     enabled: kind === "apps",
   });
+  // Apps open: the Bot's owner gives it apps, and nobody is told to ask an admin for that.
+  const knownOpen = useOpenApps(agentId);
+  const open = knownOpen ?? null;
   /*
    * Who a member is told to go to, read only once one of the rows says only an admin can take the
-   * step, and only once it is known the person is not an admin themselves.
+   * step, and only once it is known the person is not an admin themselves, and whether apps are open.
    */
   const admins = useOrganizationAdmins(
     me !== undefined &&
+      knownOpen !== undefined &&
       kind === "apps" &&
       (apps.data ?? []).some((app) =>
-        namesAnAdmin(app, edition, isOrganizationAdmin(me?.role)),
+        namesAnAdmin(app, edition, isOrganizationAdmin(me?.role), open),
       ),
   );
   /*
@@ -470,6 +475,10 @@ function Granted({
             <>
               Connect one on <Link to="/connections">Connections</Link>.
             </>
+          ) : open && mine ? (
+            "Give it one under Your apps. Until then this Bot can only talk with you."
+          ) : open ? (
+            "Its owner can give it some. Until then this Bot can only talk with you."
           ) : mine ? (
             "Give it one under Your apps, or ask an admin. Until then this Bot can only talk with you."
           ) : (
@@ -504,6 +513,7 @@ function Granted({
                             edition,
                             admin,
                             admins,
+                            open,
                           )}
                     </ItemDescription>
                   </ItemContent>

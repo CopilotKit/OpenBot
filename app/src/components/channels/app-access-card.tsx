@@ -4,6 +4,8 @@ import {
   AppAccessAction,
   appAccessSentence,
   namesAnAdmin,
+  type OpenApps,
+  useOpenApps,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
@@ -101,12 +103,18 @@ function LiveAppAccessCard({
   // An admin is offered the step itself, so the sentence never tells them to ask one.
   const me = useQuery(currentUserQueryOptions());
   const admin = isOrganizationAdmin(me.data?.role);
+  // Apps open: the Bot's owner gives it, and nobody is told to ask an admin for that.
+  const knownOpen = useOpenApps(agentId);
+  const open = knownOpen ?? null;
   /*
    * Who a member is told to go to, read only where the sentence says only an admin can do it, and
-   * only once it is known the person is not an admin themselves.
+   * only once it is known the person is not an admin themselves, and whether apps are open.
    */
   const admins = useOrganizationAdmins(
-    me.isSuccess && access !== null && namesAnAdmin(access, edition, admin),
+    me.isSuccess &&
+      knownOpen !== undefined &&
+      access !== null &&
+      namesAnAdmin(access, edition, admin, open),
   );
   /*
    * A read that failed falls back to what this card was before it read anything, where that was a
@@ -145,7 +153,15 @@ function LiveAppAccessCard({
           {live.isPending ? null : access ? (
             <p className="text-muted-foreground text-sm">
               {access.state !== "ready"
-                ? refusedSentence(access, prompt, bot, edition, admin, admins)
+                ? refusedSentence(
+                    access,
+                    prompt,
+                    bot,
+                    edition,
+                    admin,
+                    admins,
+                    open,
+                  )
                 : carried || inHand || offer
                   ? `${name} is ready now.`
                   : prompt.reason !== "access"
@@ -157,6 +173,7 @@ function LiveAppAccessCard({
                         edition,
                         admin,
                         admins,
+                        open,
                       )}
             </p>
           ) : (
@@ -230,19 +247,33 @@ function refusedSentence(
   edition: "team" | "personal",
   admin: boolean,
   admins: readonly AdminName[],
+  open: OpenApps,
 ): string {
   /*
    * Actions the Bot wasn't given, of an app it holds: what it can't do yet, and for a person who
    * can't give them, who can. An admin, the Bot's owner where the app is theirs to give, and the one
-   * person of a personal OpenBot have the button beside this, so they are never told to ask.
+   * person of a personal OpenBot have the button beside this, so they are never told to ask. With
+   * apps open, an app open to Bot owners is its owner's to give, so nobody else is sent to an admin.
    */
   if (
     prompt.reason === "tools" &&
     (access.state === "not_granted" || access.state === "owner_grantable")
   ) {
+    const ownersGive =
+      open !== null && edition === "team" && access.ownerGrants === "any";
     const gives =
-      access.state === "owner_grantable" || admin || edition === "personal";
-    return toolsSentence(access.displayName, prompt.need, bot, gives, admins);
+      access.state === "owner_grantable" ||
+      admin ||
+      edition === "personal" ||
+      (ownersGive && open.owner);
+    return toolsSentence(
+      access.displayName,
+      prompt.need,
+      bot,
+      gives,
+      admins,
+      ownersGive,
+    );
   }
   if (
     access.state === "shared_not_connected" &&
@@ -255,13 +286,14 @@ function refusedSentence(
           `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`,
           admins,
         );
-  return appAccessSentence(access, bot, edition, admin, admins);
+  return appAccessSentence(access, bot, edition, admin, admins, open);
 }
 
 /**
  * "Calendar Bot can't change an event's colour yet.", from the Bot's own few words for what the
  * actions do. Without them, the app is named instead. A person who can't give the actions is told
- * who can, by name where the admins are known.
+ * who can: the Bot's owner where apps are open and the app is open to owners (`ownersGive`), else an
+ * admin, by name where the admins are known.
  */
 function toolsSentence(
   app: string,
@@ -269,15 +301,16 @@ function toolsSentence(
   bot: string | undefined,
   gives: boolean,
   admins: readonly AdminName[],
+  ownersGive = false,
 ): string {
   const who = bot ?? "This Bot";
   const doing = plainNeed(need);
   const first = doing
     ? `${who} can't ${doing} yet.`
     : `${who} needs more of ${app} for this.`;
-  return gives
-    ? first
-    : withAdmins(`${first} Only an admin can give it that.`, admins);
+  if (gives) return first;
+  if (ownersGive) return `${first} Its owner can give it that.`;
+  return withAdmins(`${first} Only an admin can give it that.`, admins);
 }
 
 /**

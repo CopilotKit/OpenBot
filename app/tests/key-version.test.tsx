@@ -28,6 +28,7 @@ import {
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { APPS_SETTING_PATH, appsSettingResponse } from "./admin-settings-api";
 import {
   APPS_PATH,
   answerAppsApi,
@@ -128,13 +129,18 @@ let servers: TodayServer[] = [];
 /** Every createApp body the screen sent, in order. */
 const adds: Record<string, unknown>[] = [];
 
+/** The organization's apps switch: locked down unless a test opens it. */
+let lockedDown = true;
+
 const originalFetch = global.fetch;
 beforeEach(() => {
   adds.length = 0;
   servers = [];
+  lockedDown = true;
   global.fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = String(input).split("?")[0] ?? "";
+      if (path === APPS_SETTING_PATH) return appsSettingResponse(lockedDown);
       if (init?.method === "POST" && path === APPS_PATH) {
         const body = JSON.parse(String(init.body)) as {
           directoryEntryId: string;
@@ -396,15 +402,38 @@ describe("Admin's directory", () => {
   });
 });
 
-test("a member, who asks for apps, is offered no key version", async () => {
+test("apps locked down, a member, who asks for apps, is offered no key version", async () => {
   directory = [posthog(null)];
   const { view } = browse("team", "connections", "member");
 
   const row = await view.findByTestId("directory-posthog");
   expect(
-    within(row).getByRole("button", { name: "Request PostHog" }),
+    await within(row).findByRole("button", { name: "Request PostHog" }),
   ).toBeTruthy();
   expect(within(row).queryByTestId("key-version")).toBeNull();
+});
+
+test("apps open, a member connects as an admin does, the key version too", async () => {
+  lockedDown = false;
+  directory = [posthog(null)];
+  const { view, user, history } = browse("team", "connections", "member");
+
+  const row = await view.findByTestId("directory-posthog");
+  await within(row).findByRole("button", { name: "Connect PostHog" });
+  expect(within(row).queryByRole("button", { name: /Request/ })).toBeNull();
+  await user.click(
+    within(row).getByRole("button", { name: "Connect with a key instead" }),
+  );
+  await waitFor(() =>
+    expect(history.location.pathname).toBe(`/connections/${KEY_APP}`),
+  );
+  expect(adds).toEqual([
+    {
+      from: "directory",
+      directoryEntryId: "directory:posthog",
+      connectsWith: "key",
+    },
+  ]);
 });
 
 describe("the sign-in version's own page", () => {

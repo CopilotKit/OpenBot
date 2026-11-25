@@ -229,6 +229,29 @@ export function personalConnectionRows(input: {
   return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];
 }
 
+/**
+ * The team edition's catalogue tiles for apps nobody here has added yet, where apps are open and so
+ * anybody adds one: only the ones that connect in one press (`oneStep`), because one that needs a
+ * host, a client or a key typed first is set up by an admin before anybody can add it. Each press
+ * adds the app and connects the person's own account, as the personal edition's tiles do.
+ */
+export function catalogueToAddRows(input: {
+  catalogue: CatalogueItem[];
+  added: ReadonlySet<string>;
+  connected: ReadonlySet<string>;
+}): ConnectionRow[] {
+  return input.catalogue
+    .filter(
+      (entry) =>
+        entry.key !== ALWAYS_ON_APP &&
+        !input.added.has(entry.key) &&
+        entry.oneStep &&
+        !entry.perInstance &&
+        (entry.auth === "user-oauth" || entry.auth === "none"),
+    )
+    .map((entry) => personalAppRow(entry, input));
+}
+
 function personalAppRow(
   entry: CatalogueItem,
   input: { added: ReadonlySet<string>; connected: ReadonlySet<string> },

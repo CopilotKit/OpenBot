@@ -16,7 +16,11 @@ import { Route as ConnectionRoute } from "@/routes/_authed/_app/connections.$key
 import { Route as BrowseRoute } from "@/routes/_authed/_app/connections.browse.composio";
 import { Route as ConnectionsRoute } from "@/routes/_authed/_app/connections.index";
 import { ME_PATH, meResponse } from "./accounts-api";
-import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  APPS_SETTING_PATH,
+  appsSettingResponse,
+  DEPLOYMENT_PATH,
+} from "./admin-settings-api";
 import {
   APPS_PATH,
   answerAppsApi,
@@ -53,6 +57,8 @@ const params = new URLSearchParams(location.search);
 if (params.get("theme") === "dark")
   document.documentElement.classList.add("dark");
 const role = params.get("role") === "member" ? "member" : "admin";
+// The organization's apps switch: locked down unless `?apps=open`, as a member's Request is locked down's.
+const lockedDown = params.get("apps") !== "open";
 
 const directoryApp = (
   slug: string,
@@ -113,6 +119,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     });
   if (path === ME_PATH)
     return meResponse({ user: { id: `usr_${role}`, role, name: role } });
+  if (path === APPS_SETTING_PATH) return appsSettingResponse(lockedDown);
   if (method === "POST" && path === APPS_PATH) {
     const { directoryEntryId } = JSON.parse(String(init?.body)) as {
       directoryEntryId: string;

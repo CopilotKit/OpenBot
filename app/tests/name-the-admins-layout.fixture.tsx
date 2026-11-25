@@ -23,7 +23,11 @@ import type { AppAccess } from "@/lib/app-access/queries";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
-import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  APPS_SETTING_PATH,
+  appsSettingResponse,
+  DEPLOYMENT_PATH,
+} from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
 import {
   APP_ACCESS_REQUESTS_PATH,
@@ -98,6 +102,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     });
   if (path === ME_PATH)
     return meResponse({ user: { id: "usr_me", role, name: "Me" } });
+  // Apps locked down: naming the admins and Request access are locked down's.
+  if (path === APPS_SETTING_PATH) return appsSettingResponse(true);
   if (path === MEMBERS_PATH) return membersResponse(url.toString(), MEMBERS);
   if (path === botPath(BOT))
     return Response.json({ bot: { id: BOT, name: "Personal Assistant" } });

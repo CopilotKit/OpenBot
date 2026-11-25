@@ -25,10 +25,12 @@ import { deploymentKeys } from "@/lib/deployment/queries";
 import { identityKeys } from "@/lib/identity/queries";
 import { Route as BrowseRoute } from "@/routes/_authed/_app/connections.browse.composio";
 import { Route as ConnectionsRoute } from "@/routes/_authed/_app/connections.index";
+import { APPS_SETTING_PATH, appsSettingResponse } from "./admin-settings-api";
 import {
   APPS_PATH,
   answerAppsApi,
   appBody,
+  type TodayCatalogueItem,
   type TodayDirectoryApp,
   type TodayServer,
 } from "./apps-api";
@@ -116,12 +118,28 @@ function added(slug: string): TodayServer {
   };
 }
 
+/** One app of OpenBot's own catalogue nobody has added: no account, so one press uses it. */
+const CATALOGUE: TodayCatalogueItem[] = [
+  {
+    key: "exa",
+    title: "Exa",
+    summary: "Search the web.",
+    auth: "none",
+    oneStep: true,
+  },
+];
+
 let servers: TodayServer[] = [];
 let connected: string[] = [];
 let requests: AppAccessRequest[] = [];
 const writes: string[] = [];
 /** Every directory read, with its search, so a test can see nothing read the whole directory. */
 const directoryReads: string[] = [];
+/**
+ * The organization's apps switch. Locked down unless a test opens it: every test here that pins a
+ * member's Request pins it locked down.
+ */
+let lockedDown = true;
 
 const originalFetch = global.fetch;
 beforeEach(() => {
@@ -130,15 +148,26 @@ beforeEach(() => {
   requests = [];
   writes.length = 0;
   directoryReads.length = 0;
+  lockedDown = true;
   global.fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = new URL(String(input), "http://openbot.invalid");
       const path = url.pathname;
       const method = (init?.method ?? "GET").toUpperCase();
+      if (path === APPS_SETTING_PATH) return appsSettingResponse(lockedDown);
       if (method === "POST" && path === APPS_PATH) {
         const { directoryEntryId } = JSON.parse(String(init?.body)) as {
           directoryEntryId: string;
         };
+        const entry = CATALOGUE.find(
+          (item) => directoryEntryId === `catalogue:${item.key}`,
+        );
+        if (entry) {
+          writes.push(`add ${directoryEntryId}`);
+          const app: TodayServer = { id: entry.key, title: entry.title };
+          servers = [...servers, app];
+          return Response.json(appBody(app), { status: 201 });
+        }
         const slug = directoryEntryId.replace(/^directory:/, "");
         writes.push(`add ${slug}`);
         const app = added(slug);
@@ -184,6 +213,7 @@ beforeEach(() => {
         directoryReads.push(url.searchParams.get("search") ?? "");
       const answered = answerAppsApi(input, init, {
         servers,
+        catalogue: CATALOGUE,
         directory: DIRECTORY,
         composioConfigured: true,
         provider: "composio",
@@ -373,7 +403,7 @@ describe("Browse apps on the team edition's Connections", () => {
     });
   });
 
-  test("is there for a member, says they ask an admin, and Request asks with no Bot", async () => {
+  test("apps locked down: is there for a member, says they ask an admin, and Request asks with no Bot", async () => {
     const drawn = draw("member");
     const browse = await drawn.view.findByTestId("account-browse");
     expect(browse.textContent).toContain("ask an admin");
@@ -452,7 +482,7 @@ describe("one press of an app found by searching Connections", () => {
     expect(tabs).toHaveLength(0);
   });
 
-  test("asks an admin for it, for a member, and says Requested after a reload", async () => {
+  test("apps locked down: asks an admin for it, for a member, and says Requested after a reload", async () => {
     const drawn = draw("member");
     await search(drawn, "slack");
     const tile = await drawn.view.findByTestId("directory-slack", undefined, {
@@ -480,5 +510,86 @@ describe("one press of an app found by searching Connections", () => {
       },
       { timeout: 3_000 },
     );
+  });
+});
+
+/*
+ * APPS OPEN, the organization's default: a member adds an app nobody has added and connects their
+ * own account in the same one press an admin makes, from a search, from Browse apps and from the
+ * catalogue, and is never sent to ask an admin.
+ */
+describe("apps open, a member adds and connects in one press", () => {
+  test("from a search of Connections", async () => {
+    lockedDown = false;
+    const drawn = draw("member");
+    await search(drawn, "slack");
+    const tile = await drawn.view.findByTestId("directory-slack", undefined, {
+      timeout: 3_000,
+    });
+    await waitFor(() => expect(tile.textContent).toContain("Connect"));
+    expect(tile.textContent).not.toContain("Request");
+    await drawn.user.click(tile);
+    await waitFor(() => {
+      expect(writes).toEqual(["add slack", "connect composio-slack"]);
+      expect(tabs).toHaveLength(1);
+    });
+  });
+
+  test("from Browse apps, which says nothing about asking an admin", async () => {
+    lockedDown = false;
+    const drawn = draw("member");
+    const browse = await drawn.view.findByTestId("account-browse");
+    await waitFor(() => expect(browse.textContent).not.toContain("admin"));
+    await drawn.user.click(browse);
+    await drawn.view.findByRole("heading", { name: "Browse apps" });
+    expect(drawn.view.container.textContent).not.toContain("ask an admin");
+    const row = await drawn.view.findByTestId("directory-slack");
+    await drawn.user.click(
+      await within(row).findByRole("button", { name: "Connect Slack" }),
+    );
+    await waitFor(() => {
+      expect(writes).toEqual(["add slack", "connect composio-slack"]);
+      expect(tabs).toHaveLength(1);
+    });
+    expect(writes.some((write) => write.startsWith("request"))).toBe(false);
+  });
+
+  test("from the catalogue's tile for an app nobody has added", async () => {
+    lockedDown = false;
+    const drawn = draw("member");
+    const tile = await drawn.view.findByTestId("account-exa", undefined, {
+      timeout: 3_000,
+    });
+    expect(tile.textContent).toContain("Connect");
+    await drawn.user.click(tile);
+    await waitFor(() => expect(writes).toEqual(["add catalogue:exa"]));
+  });
+
+  test("Add custom MCP is offered to a member with apps open, and not locked down", async () => {
+    lockedDown = false;
+    const open = draw("member");
+    const add = await open.view.findByRole("button", {
+      name: "Add custom MCP",
+    });
+    expect(add.getAttribute("href")).toBe("/connections/new");
+    cleanup();
+
+    lockedDown = true;
+    const locked = draw("member");
+    await locked.view.findByTestId("account-browse");
+    await settleReactWork();
+    expect(
+      locked.view.queryByRole("button", { name: "Add custom MCP" }),
+    ).toBeNull();
+  });
+
+  test("locked down, the catalogue's apps nobody has added aren't offered to anybody", async () => {
+    for (const role of ["member", "admin"] as const) {
+      const drawn = draw(role);
+      await drawn.view.findByTestId("account-browse");
+      await settleReactWork();
+      expect(drawn.view.queryByTestId("account-exa")).toBeNull();
+      cleanup();
+    }
   });
 });
