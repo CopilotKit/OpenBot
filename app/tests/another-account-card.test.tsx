@@ -255,3 +255,19 @@ test("drawn again after the account was connected, it says so and offers no seco
     view.queryByRole("button", { name: "Connect another Gmail account" }),
   ).toBeNull();
 });
+
+// Found in the live journey: an account the app names by no address started the sentence lower case.
+test("an account with no address starts its sentence with a capital", async () => {
+  serving({
+    accounts: [
+      { ...WORK, identity: null, label: "account 1" },
+      { ...PERSONAL, identity: null, label: "account 2" },
+    ],
+  });
+  const view = mount(
+    <ServerToolLine name={SHOW_APP_ACCESS_TOOL} result={answer} />,
+  );
+  expect((await card(view)).textContent).toContain(
+    "Account 2 is connected. Bots use account 1 unless you ask for account 2.",
+  );
+});

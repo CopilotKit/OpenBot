@@ -162,10 +162,18 @@ function sentence(
   usedByDefault: BrokeredAccountRecord | undefined,
   canAddAnother: boolean,
 ): string {
+  /*
+   * An account the app names by no address is "account 2", which starts the sentence with a capital.
+   * FOUND IN THE LIVE JOURNEY: "account 2 is connected." An address is left as the app writes it.
+   */
+  const first =
+    newest && newest.identity === null
+      ? newest.label.charAt(0).toUpperCase() + newest.label.slice(1)
+      : newest?.label;
   if (newest)
     return newest.isDefault || !usedByDefault
-      ? `${newest.label} is connected. Bots use it by default.`
-      : `${newest.label} is connected. Bots use ${usedByDefault.label} unless you ask for ${newest.label}.`;
+      ? `${first} is connected. Bots use it by default.`
+      : `${first} is connected. Bots use ${usedByDefault.label} unless you ask for ${newest.label}.`;
   if (!canAddAnother) return `You can't connect a second ${name} account.`;
   return usedByDefault
     ? `Connect another ${name} account. Bots keep using ${usedByDefault.label} until you make another the default.`
