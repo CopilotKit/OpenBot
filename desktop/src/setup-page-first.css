@@ -136,7 +136,7 @@ main > .rail + .sheet.welcome.page-first {
 
 /* Requirements and the install action use separate parts of the available page height. */
 .sheet.welcome:has(> .needs) > .needs {
-  margin: 64px 0;
+  margin: clamp(32px, 8vh, 64px) 0;
   padding: 0;
 }
 

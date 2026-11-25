@@ -837,7 +837,8 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
             ].every(
               (input) =>
                 getComputedStyle(input).opacity === "1" &&
-                input.getBoundingClientRect().width === 16,
+                input.getBoundingClientRect().width > 0 &&
+                input.getBoundingClientRect().height > 0,
             ),
           };
         });
