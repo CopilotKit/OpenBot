@@ -5,12 +5,16 @@ name: OpenBot Mobile build
 # with its install link: this job only starts it and prints that link. mobile/README.md says what
 # each profile is for.
 #
-# Run by hand, from main or from a branch of this repository. The production profile is not offered
-# here: a build for the stores comes from a release workflow of its own, behind a reviewer.
+# Run by hand. A preview or development build starts from main or from any branch of this
+# repository. A production build is the one the stores get, so it runs in the `mobile-release`
+# environment: a reviewer approves the run, and only main and mobile may start it. With `submit`
+# on, Expo uploads the finished build to TestFlight and to Google Play's internal testing track.
+# Nobody outside the team gets the app from there: a release to the public is made by hand, in
+# App Store Connect and in the Play Console.
 #
-# EXPO_TOKEN is the token of a robot user of the Expo organization. It is kept in the
-# `mobile-preview` environment and nowhere else. The signing certificates and the Android keystore
-# stay on Expo's side, so this repository holds none of them.
+# EXPO_TOKEN is the token of a robot user of the Expo organization. Each of the two environments
+# holds its own, so one can be revoked without the other. The signing certificates, the Android
+# keystore and the stores' upload keys stay on Expo's side, so this repository holds none of them.
 on:
   workflow_dispatch:
     inputs:
@@ -21,6 +25,7 @@ on:
           - preview
           - development
           - development-simulator
+          - production
         default: preview
       platform:
         description: The phones to build for.
@@ -30,6 +35,10 @@ on:
           - ios
           - android
         default: all
+      submit:
+        description: Upload the build to TestFlight and Google Play internal testing. Production only.
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -45,10 +54,15 @@ jobs:
     if: github.repository == 'CopilotKit/OpenBot'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: mobile-preview
+    environment: ${{ inputs.profile == 'production' && 'mobile-release' || 'mobile-preview' }}
     permissions:
       contents: read
     steps:
+      - name: Refuse an upload of a build that is not for the stores
+        if: inputs.submit && inputs.profile != 'production'
+        run: |
+          echo "::error::Only a production build is uploaded to the stores. Pick the production profile, or turn submit off."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -70,4 +84,12 @@ jobs:
         env:
           PROFILE: ${{ inputs.profile }}
           PLATFORM: ${{ inputs.platform }}
-        run: eas build --profile "$PROFILE" --platform "$PLATFORM" --non-interactive --no-wait
+          SUBMIT: ${{ inputs.submit }}
+        # --auto-submit queues the upload on Expo's side: it starts when the build is done, so this
+        # job still ends as soon as the build has started.
+        run: |
+          args=(--profile "$PROFILE" --platform "$PLATFORM" --non-interactive --no-wait)
+          if [ "$SUBMIT" = "true" ]; then
+            args+=(--auto-submit)
+          fi
+          eas build "${args[@]}"

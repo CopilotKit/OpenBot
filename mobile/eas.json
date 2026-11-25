@@ -23,5 +23,10 @@
       "autoIncrement": true,
       "channel": "production"
     }
+  },
+  "submit": {
+    "production": {
+      "android": { "track": "internal" }
+    }
   }
 }
