@@ -422,7 +422,7 @@ function RouteComponent() {
           title: moreApps.title,
           description: mayAdd
             ? moreApps.description
-            : "Find more apps and ask an admin to add them.",
+            : "Find more apps and ask an admin for them.",
         }
       : null;
   const browseLink =
@@ -488,7 +488,7 @@ function RouteComponent() {
   const yourApps = matching.filter((row) => row.state !== "available");
   const toAdd = matching.filter((row) => row.state === "available");
   /*
-   * The directory's apps for this search that aren't on the page already, as tiles under Add an app.
+   * The directory's apps for this search that aren't on the page already, as tiles under Connect an app.
    * Read only while the answer is for what is typed now, so a tile never stands for an older term.
    */
   const directoryCurrent =
@@ -574,7 +574,7 @@ function RouteComponent() {
       className="@container"
       description={
         personal
-          ? "Add apps and connect your accounts so your Bots can use them."
+          ? "Connect your accounts so your Bots can use apps on your behalf."
           : "Connect your accounts so Bots can use apps on your behalf."
       }
       title="Connections"
@@ -634,7 +634,7 @@ function RouteComponent() {
       {/*
        * The first section has no heading of its own: in the team edition it is the page's one list,
        * and "Your connections" under "Connections" said the same thing twice. It holds the search,
-       * which filters every section under it. In the personal edition Your apps and Add an app
+       * which filters every section under it. In the personal edition Your apps and Connect an app
        * follow as sections of their own.
        */}
       <PageSection>
@@ -768,13 +768,13 @@ function RouteComponent() {
         </PageSection>
       ) : null}
       {/*
-       * Add an app, in both editions: the apps you could add (the personal edition's catalogue), the
+       * Connect an app, in both editions: the apps you could add (the personal edition's catalogue), the
        * directory's matches for a search, and Browse apps last. In the team edition an admin's press
        * adds and connects, and a member's asks an admin.
        */}
       {showingApps &&
       ((personal ? toAdd.length : 0) + found.length > 0 || browse) ? (
-        <PageSection title="Add an app">
+        <PageSection title="Connect an app">
           <ConnectionGrid
             connectApp={connectApp}
             press={press}
@@ -943,7 +943,7 @@ function ConnectionsLoading() {
   );
 }
 
-/** The broker's directory of more apps, as the last tile of Add an app. */
+/** The broker's directory of more apps, as the last tile of Connect an app. */
 function BrowseTile({
   browse,
   link,
@@ -1040,16 +1040,19 @@ function ConnectionMark({
   return <Mark className="size-4" />;
 }
 
-/** Where a tile stands, or the word for what pressing it does. */
+/**
+ * Where a tile stands, or the word for what pressing it does. An app that needs no account says
+ * Connect too: the press is for using the app, and adding it is never a step of its own.
+ */
 const ACTION_LABEL = {
   connect: "Connect",
-  add: "Add",
+  add: "Connect",
   setup: "Set up",
   request: "Request",
 };
 const PENDING_LABEL = {
   connect: "Connecting…",
-  add: "Adding…",
+  add: "Connecting…",
   setup: "Connecting…",
   request: "Requesting…",
 };

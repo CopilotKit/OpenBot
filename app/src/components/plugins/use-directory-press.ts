@@ -18,13 +18,15 @@ import { connectionsQueryOptions } from "@/lib/plugins/queries";
  *
  * - `connect`: somebody who may add apps (the personal edition's one person, or an admin of their
  *   organization, OpenBot Cloud's usual case) adds it and connects their own account in the same
- *   press. An app that signs in opens its sign-in in a tab claimed on the click; one that takes a
- *   key opens its page with the key form; one that needs no account is simply added.
- * - `add`: Admin's own directory. Adding is the admin's act for everybody, and each person connects
- *   their own account afterwards.
- * - `request`: a member, who can't add apps, asks an admin to add it.
+ *   press, from Connections and from Admin alike. An app that signs in opens its sign-in in a tab
+ *   claimed on the click; one that takes a key opens its page with the key form; one that needs no
+ *   account is simply added.
+ * - `request`: a member, who can't add apps, asks an admin for it.
+ *
+ * There is no press that only adds. Admin's Browse apps had one ("Add"), and the row then needed a
+ * second press to connect: two steps for what a person reads as one.
  */
-export type DirectoryPressMode = "connect" | "add" | "request";
+export type DirectoryPressMode = "connect" | "request";
 
 /**
  * The press, shared by Browse apps and Connections' search so the two can never do different things
@@ -185,22 +187,15 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
   };
 
   /**
-   * One press of "with a key instead": add the entry's key version as its own app. In `connect` it
-   * goes on to that app's key form, as a key app's Add does; in `add` it only adds. A member asks
-   * for apps and adds none, so `request` does nothing.
+   * One press of "with a key instead": add the entry's key version as its own app and go on to that
+   * app's key form, as a key app's Connect does. A member asks for apps and adds none, so `request`
+   * does nothing.
    */
   const pressKey = (entry: DirectoryApp) => {
     if (mode === "request") return;
-    const added = enableKey.mutateAsync({
-      directoryEntryId: entry.id,
-      connectsWith: "key",
-    });
-    if (mode === "connect")
-      added.then(openKeyForm, () => {
-        // Said by the mutation's own `onError`.
-      });
-    else
-      added.catch(() => {
+    enableKey
+      .mutateAsync({ directoryEntryId: entry.id, connectsWith: "key" })
+      .then(openKeyForm, () => {
         // Said by the mutation's own `onError`.
       });
   };

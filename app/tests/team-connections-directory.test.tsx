@@ -54,7 +54,7 @@ import { settleReactWork } from "./settle-react-work";
  * was reachable only through Admin, then Apps, then More apps. A member couldn't reach it at all.
  *
  * Now, in the team edition as in the personal one, Connections has Browse apps, and its search asks
- * the directory too, showing the apps nobody has added under Add an app. One press of one of them
+ * the directory too, showing the apps nobody has added under Connect an app. One press of one of them
  * does what this person can do: an admin (or owner) adds it and connects their own account, and a
  * member asks an admin to add it. Every response is the shape the API answers.
  */
@@ -319,12 +319,12 @@ describe("team-edition Connections search finds an app not yet added", () => {
     test(`for an organization's ${role}`, async () => {
       const drawn = draw(role);
       await search(drawn, "slack");
-      // Under Add an app, asked of the directory's own search, never the whole directory.
+      // Under Connect an app, asked of the directory's own search, never the whole directory.
       const tile = await drawn.view.findByTestId("directory-slack", undefined, {
         timeout: 3_000,
       });
       expect(tile.textContent).toContain("Slack");
-      expect(drawn.view.getByText("Add an app")).toBeTruthy();
+      expect(drawn.view.getByText("Connect an app")).toBeTruthy();
       expect(directoryReads.length).toBeGreaterThan(0);
       expect(directoryReads.every((term) => term !== "")).toBe(true);
       expect(drawn.view.queryByText("No matches")).toBeNull();
@@ -353,7 +353,7 @@ describe("team-edition Connections search finds an app not yet added", () => {
 });
 
 describe("Browse apps on the team edition's Connections", () => {
-  test("is there for an admin, and opens Browse apps under Connections, where Add connects", async () => {
+  test("is there for an admin, and opens Browse apps under Connections, where one Connect adds and connects", async () => {
     const drawn = draw("admin");
     const browse = await drawn.view.findByTestId("account-browse");
     expect(browse.textContent).toContain("Browse apps");
@@ -364,7 +364,9 @@ describe("Browse apps on the team edition's Connections", () => {
       "/connections/browse/composio",
     );
     const row = await drawn.view.findByTestId("directory-slack");
-    await drawn.user.click(within(row).getByRole("button", { name: "Add" }));
+    await drawn.user.click(
+      within(row).getByRole("button", { name: "Connect Slack" }),
+    );
     await waitFor(() => {
       expect(writes).toEqual(["add slack", "connect composio-slack"]);
       expect(tabs).toHaveLength(1);
@@ -442,7 +444,9 @@ describe("one press of an app found by searching Connections", () => {
       undefined,
       { timeout: 3_000 },
     );
-    expect(tile.textContent).toContain("Add");
+    // Connect, never Add: an app with no account is still one press to use.
+    expect(tile.textContent).toContain("Connect");
+    expect(tile.textContent).not.toContain("Add");
     await drawn.user.click(tile);
     await waitFor(() => expect(writes).toEqual(["add hackernews"]));
     expect(tabs).toHaveLength(0);
