@@ -726,7 +726,7 @@ describe.skipIf(!asked)(
         expect(page.url()).toBe(inWindow("/connections/composio-gmail"));
       }, 40_000);
 
-      test(`in ${name}: Add in Browse apps shows the step in the window before the browser opens`, async () => {
+      test(`in ${name}: Connect in Browse apps shows the step in the window before the browser opens`, async () => {
         const { page, server, window } = await launchDesktop(name, {
           added: false,
         });
@@ -735,7 +735,7 @@ describe.skipIf(!asked)(
         });
         const add = page
           .getByTestId("directory-gmail")
-          .getByRole("button", { name: "Add" });
+          .getByRole("button", { name: "Connect Gmail" });
         await add.waitFor();
         await add.click();
 
@@ -858,7 +858,7 @@ describe.skipIf(!asked || !shots)("the screens, for a look", () => {
         // The step in OpenBot Desktop's window: over Gmail's page, over Browse apps and over a card.
         for (const [path, screen, button] of [
           ["/connections/composio-gmail", "desktop-Gmail-page", "Connect"],
-          ["/connections/browse/composio", "desktop-browse", "Add"],
+          ["/connections/browse/composio", "desktop-browse", "Connect Gmail"],
           ["/card/composio-gmail", "desktop-card", "Connect"],
         ] as const) {
           const desktop = await launchDesktop(name, {

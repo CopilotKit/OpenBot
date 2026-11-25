@@ -23,6 +23,7 @@ import { switchOrganizationMutationOptions } from "@/lib/organizations/mutations
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 import { LinkCompanyAccount } from "./link-company-account";
+import { failureSaid } from "@/lib/load-failure";
 
 export const SWITCH_ORGANIZATION = "Switch organization";
 
@@ -153,7 +154,7 @@ function OtherOrganizations() {
       </DropdownMenu>
       {switching.error ? (
         <p className="text-center text-destructive text-sm" role="alert">
-          {switching.error.message}
+          {failureSaid(switching.error)}
         </p>
       ) : null}
     </>

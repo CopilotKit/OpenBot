@@ -39,7 +39,17 @@ import {
   accountMenuClassName,
   accountMenuItemClassName,
 } from "./account-label";
+import { TroubleshootingLogsMenuItem } from "./troubleshooting-logs-item";
 import { useSignOut } from "./use-sign-out";
+
+/**
+ * The strip's own short names, where a section's name is too long to sit under its icon in a narrow
+ * strip. Only the strip says them: the panel or page each opens keeps its full name.
+ */
+const STRIP_NAMES: Partial<Record<string, string>> = {
+  [CONVERSATIONS]: "Chats",
+  connections: "Apps",
+};
 
 /** The orb's palette: periwinkle, the nearest of the eight to OpenBot's own mark. */
 const ORB_COLORS = ORB_PALETTES[2];
@@ -122,7 +132,7 @@ function PageItem({ item }: { item: NavigationLink }) {
       aria-current={page === item.id ? "page" : undefined}
       end={recordingHere ? <RecordingDot {...recordingHere} /> : null}
       icon={item.icon}
-      label={item.label}
+      label={STRIP_NAMES[item.id] ?? item.label}
       /*
        * Already on its page, the link goes nowhere, so the page cannot hand the strip back: a
        * panel opened over it (Bots on Routines) kept its icon lit and Routines could not be chosen.
@@ -137,7 +147,10 @@ function PageItem({ item }: { item: NavigationLink }) {
   );
 }
 
-/** The account at the strip's foot, and the menu it opens: organizations, the account's pages, Sign out. */
+/**
+ * The account at the strip's foot, and the menu it opens: organizations, the account's pages, Get
+ * troubleshooting logs, Sign out.
+ */
 function StripAccount() {
   const navigation = useNavigationItems();
   const signOut = useSignOut();
@@ -190,6 +203,7 @@ function StripAccount() {
               <BrandName>{item.label}</BrandName>
             </DropdownMenuItem>
           ))}
+        <TroubleshootingLogsMenuItem className={accountMenuItemClassName} />
         {signOutOffered ? (
           <DropdownMenuItem
             className={accountMenuItemClassName}
@@ -215,7 +229,11 @@ export function SectionStrip() {
   const navigation = useNavigationItems();
   return (
     <Strip footer={<StripAccount />} header={<HomeOrb />}>
-      <PanelItem icon={IconMessages} id={CONVERSATIONS} label="Conversations" />
+      <PanelItem
+        icon={IconMessages}
+        id={CONVERSATIONS}
+        label={STRIP_NAMES[CONVERSATIONS] ?? "Conversations"}
+      />
       {navigation
         .filter(isNavigationLink)
         .filter((item) => item.section === "primary")
@@ -227,7 +245,7 @@ export function SectionStrip() {
               icon={item.icon}
               id={item.id}
               key={item.id}
-              label={item.label}
+              label={STRIP_NAMES[item.id] ?? item.label}
             />
           ) : (
             <PageItem item={item} key={item.id} />

@@ -107,3 +107,47 @@ test("a section's panel has its title as a heading, with its actions beside it",
   expect(view.getByRole("button", { name: "New conversation" })).toBeTruthy();
   expect(view.getByText("rows")).toBeTruthy();
 });
+
+test("each section's name is written under its icon, and read out once", () => {
+  const view = inSidebar(
+    <Strip>
+      <StripItem icon={IconMessages} label="Conversations" />
+    </Strip>,
+  );
+  const button = view.getByRole("button", { name: "Conversations" });
+  const label = button.querySelector('[data-slot="strip-label"]');
+  expect(label?.textContent).toBe("Conversations");
+  expect(label?.className).not.toContain("sr-only");
+  expect(label?.className).toContain("text-xs");
+  expect(button.querySelector(".sr-only")).toBeNull();
+});
+
+test("each section's icon sits in a square, the account's size", () => {
+  const view = inSidebar(
+    <Strip>
+      <StripItem icon={IconMessages} label="Conversations" />
+    </Strip>,
+  );
+  const button = view.getByRole("button", { name: "Conversations" });
+  const square = button.querySelector('[data-slot="strip-icon"]');
+  expect(square?.className.split(" ")).toContain("size-9");
+  expect(square?.className).not.toMatch(/\b[hw]-\d/);
+});
+
+test("an item with nothing more to say than its name has no tooltip", () => {
+  const view = inSidebar(
+    <Strip>
+      <StripItem icon={IconBolt} label="Bots" render={<a href="/bots" />} />
+      <StripItem
+        icon={IconBolt}
+        label="Skills"
+        render={<a href="/skills" />}
+        tooltip="Recording a skill"
+      />
+    </Strip>,
+  );
+  const bots = view.getByRole("link", { name: "Bots" });
+  const skills = view.getByRole("link", { name: "Skills" });
+  expect(bots.hasAttribute("data-base-ui-tooltip-trigger")).toBe(false);
+  expect(skills.hasAttribute("data-base-ui-tooltip-trigger")).toBe(true);
+});

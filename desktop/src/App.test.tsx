@@ -766,10 +766,10 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
   expect(
     view.queryByRole("heading", { name: "What this computer needs" }),
   ).toBeNull();
-  // What it adds, in the app's words.
+  // What it adds, in the app's words, where it runs first.
   expect(
     view.getByText(
-      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
+      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
     ),
   ).toBeTruthy();
   expect(
@@ -790,6 +790,9 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
   );
   expect(src.searchParams.get("embed_type")).toBe("Inline");
   expect(src.searchParams.get("embed_domain")).toBe(window.location.host);
+  // Tagged as booked from inside the app, which Calendly keeps on the booking.
+  expect(src.searchParams.get("utm_source")).toBe("openbot_app");
+  expect(src.searchParams.get("utm_medium")).toBe("in_app");
   expect(view.getByText("Loading the calendar")).toBeTruthy();
   // Calendly says it is there: the spinner goes.
   await act(async () => {
@@ -1413,7 +1416,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     const view = await renderApp();
     const radios = view.getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
-      "OpenBot CloudUse OpenBot here. Your Bots run in our cloud.",
+      "OpenBot CloudYour Bots run in our cloud. Free usage-based trial.",
       "OpenBot for BusinessYour own cloud or on-prem. Book a demo.",
     ]);
     expect(radios.map((radio) => [radio.value, radio.checked])).toEqual([
@@ -4855,6 +4858,16 @@ function withMoveDue() {
       return { due: true, fromSettings: false, footprintBytes: 20_200_000_000 };
     if (command === "move_preview") return preview.promise;
     if (command === "keep_self_contained") return null;
+    // In one organization on OpenBot Cloud: the move goes straight on into it.
+    if (command === "move_destinations")
+      return [
+        {
+          id: "org_mine",
+          name: "Sam's organization",
+          personal: true,
+          canMoveIn: true,
+        },
+      ];
     if (command === "move_to_cloud")
       return {
         removedBytes: 20_200_000_000,

@@ -1,6 +1,6 @@
 ---
 name: openbot-screen-layout
-description: The default layout for every OpenBot configuration screen — PageShell and its prose/wide widths, PageSection and PageRows, Item row composition, the settings-row pattern where a summary and a chevron open a dialog, and the size and variant vocabulary. This is what a new screen looks like unless an instruction says otherwise. Use when adding or changing a screen under app/src/routes, adding a row to an admin or settings page, choosing a Button or Item size, picking between a bordered and a filled row, laying out a dialog, or reviewing a diff that adds max-w-*, a hand-drawn card, or a new spacing scale under app/src. Don't use for where the data comes from (that is openbot-data-access), for the gallery components under components/gallery that a Bot draws, for the chat and channel surfaces, or for editing the primitives under components/ui themselves.
+description: The default layout for every OpenBot configuration screen — PageShell and its prose/wide widths, PageSection and PageRows, Item row composition, the settings-row pattern where a summary and a chevron open a screen of its own, the rule that a dialog is used only where it is asked for, and the size and variant vocabulary. This is what a new screen looks like unless an instruction says otherwise. Use when adding or changing a screen under app/src/routes, adding a row to an admin or settings page, choosing a Button or Item size, picking between a bordered and a filled row, choosing between a dialog and a screen, laying out a dialog, or reviewing a diff that adds a Dialog, max-w-*, a hand-drawn card, or a new spacing scale under app/src. Don't use for where the data comes from (that is openbot-data-access), for the gallery components under components/gallery that a Bot draws, for the chat and channel surfaces, or for editing the primitives under components/ui themselves.
 ---
 
 # OpenBot Screen Layout
@@ -90,6 +90,19 @@ sentence of description saying how the first one arrives, and an `action` — th
 page already has — when there is one to offer. Don't repeat "Add one with X" in the description when
 the action is right there. A search with no results uses `IconSearch` and "No matches".
 
+## Screens, Not Dialogs
+
+**A dialog is used only where the request explicitly asks for one. Everything else is a new
+screen.** Editing a row, a detail behind a list, adding a new thing, a sign-in with steps: each is
+its own route, with `PageShell`'s `backButton` leading back to where it came from. A screen has an
+address, so it can be linked to, reloaded, and reached with the browser's Back button; a dialog has
+none of that, and a dialog that grows a second step is a screen squeezed into a box.
+
+A dialog that is already there stays until the screen it lives on is changed; then it moves to a
+screen as part of that change. A confirmation ("Disconnect Claude?") counts as a dialog: it is used
+only where asked for too, and otherwise the action's own screen says what will happen beside the
+button.
+
 ## Procedures
 
 ### Procedure 1: Lay out a screen
@@ -139,14 +152,14 @@ starts to feel wrong.
    "No Bot may use it.").
 2. **Anything larger** — a free-text field, a set of grants, more than one input — is a summary in
    `ItemDescription` plus `<IconChevronRight className="size-4 text-muted-foreground" />` in
-   `ItemActions`, and the row opens a dialog. Editing more than one value in place turns a settings
-   screen back into a form.
+   `ItemActions`, and the row is a `Link` to a screen of its own (Screens, Not Dialogs). Editing
+   more than one value in place turns a settings screen back into a form.
 3. **Read-only** — the value in `ItemActions`, no chevron, nothing to click. A chevron on a row that
    goes nowhere is a promise the row cannot keep.
 
 The summary on a chevron row states the current answer, not the field's name: "All 3 Bots", "2 of 3
 Bots", "Nothing — it draws only what the model hands it". Compute it from the query so it updates
-itself when the dialog changes something.
+itself when the screen behind it changes something.
 
 ### Procedure 4: Sizes and variants
 
@@ -172,6 +185,8 @@ itself when the dialog changes something.
 4. `admin/credentials_.new.tsx` is the reference.
 
 ### Procedure 6: Lay out a dialog
+
+Only where the request asks for a dialog (Screens, Not Dialogs).
 
 1. `DialogContent` defaults to `max-w-lg` and `max-h-[85svh]` with `p-5`. Header, body and footer go
    in as `DialogHeader` / `DialogBody className="mt-4"` / `DialogFooter className="mt-4"`.
@@ -204,7 +219,8 @@ is actually on screen. The root was once 15px, and every constant taken from the
 - Adding a row to an existing screen → Procedure 2, then Procedure 3 to pick its kind.
 - The row toggles one thing → Procedure 3, kind 1: a `Switch`, no save.
 - The row edits text, or a set of grants, or more than one value → Procedure 3, kind 2: a summary, a
-  chevron, and a dialog. Then Procedure 6.
+  chevron, and a screen of its own.
+- Tempted to open a dialog → only if the request says so (Screens, Not Dialogs); then Procedure 6.
 - Adding a new thing that takes several fields → Procedure 5: its own screen with a back button.
 - The row only states something → Procedure 3, kind 3: a value and no chevron.
 - Unsure which `Item` size, `Button` size, or `variant` → Procedure 4.
@@ -231,10 +247,14 @@ is actually on screen. The root was once 15px, and every constant taken from the
 | A pixel constant matching a Tailwind rem token (672, 768, 1024) | Breaks the day a width or the root changes | Measure the element |
 | An `mt-*` on a screen's first block, or a gap between blocks not in the Rhythm table | A second spacing scale, which is what made every screen feel slightly off | Let `PageShell` and `PageSection` space it |
 | A one-section page whose section has a `title` | The heading repeats the page title | Drop the section title; description on `PageShell` |
-| A `Switch` on a row that needs two or more values | Half the change happens in place and half in a dialog | A summary, a chevron, and a dialog |
+| A `Switch` on a row that needs two or more values | Half the change happens in place and half somewhere else | A summary, a chevron, and a screen |
+| A new `Dialog` nobody asked for | Something with no address, no Back, and no room to grow | A route of its own with `backButton` |
 | A chevron on a row that opens nothing | Announces a destination that does not exist | Value in `ItemActions`, no chevron |
 | A set of chips or toggles crammed into `ItemActions` | It competes with the label for width and wraps badly | `ItemFooter`, which is `basis-full` |
 | A back link in `PageShell`'s `action` | `action` is the page's primary verb, on the title's baseline | `backButton={{ label, linkProps }}` |
+| A bordered `bg-card` box drawn by hand that is not a list of rows | A card of its own, which drifts from every other card | `Card` from `components/ui/card.tsx` |
+| A corner, shadow or text size in brackets (`rounded-[20px]`, `shadow-[…]`, `text-[13px]`) | A look of its own that no token reaches | The rules in `docs/app-guidelines.md`, "The look" |
+| A `dark:` color class | A color that only one theme gets right | A token: it carries both values |
 
 ## Error Handling
 
@@ -251,7 +271,7 @@ is actually on screen. The root was once 15px, and every constant taken from the
   height resolves to 100% width and a height derived from its own ratio. Give it
   `className="h-full w-full"`; `overflow-hidden` on the parent clips at the border rather than the
   padding, so it is no help here.
-- **A row's summary does not change after its dialog edits something**: the summary was captured into
+- **A row's summary does not change after its screen edits something**: the summary was captured into
   state instead of computed from the query. Derive it on every render.
 - **Two screens that should match do not**: one of them drew its own container. Diff the two against
   `admin/plugins/index.tsx` and delete whichever hand-drawn wrapper is not `PageRows`.

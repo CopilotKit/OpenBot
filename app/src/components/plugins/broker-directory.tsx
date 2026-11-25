@@ -9,6 +9,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import type { ConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
+import { KeyVersionLine } from "@/components/plugins/key-version";
 import { AppInitial, LOGO_TILE } from "@/components/plugins/plugin-logo";
 import {
   type DirectoryPressMode,
@@ -35,6 +36,8 @@ import {
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   type DirectoryAppState,
@@ -66,11 +69,13 @@ import { connectionsQueryOptions } from "@/lib/plugins/queries";
  * Adding one is account-wide, and it still reads nothing. Every app here is reached as whoever is
  * asking, so a person's own connection is what makes their own mail or messages readable.
  *
- * WHERE IT IS OPENED DECIDES WHAT A PRESS DOES (`place`). From Connections, a person is finding an
- * app to use: somebody who may add apps (the personal edition's one person, or an admin of their
- * organization, which is OpenBot Cloud's usual case) adds it and connects their own account in one
- * press, and a member asks an admin to add it. From Admin, adding is the admin's act for everybody,
- * and each person connects their own account afterwards.
+ * ONE PRESS, WHEREVER IT IS OPENED. Somebody who may add apps (the personal edition's one person, or
+ * an admin of their organization, which is OpenBot Cloud's usual case) presses Connect: the app is
+ * added for everybody and their own sign-in or key form follows on the same press, from Connections
+ * and from Admin alike. Admin's Browse apps used to stop at "Add", and the row then asked for a
+ * second press to Connect; "turn it on, then connect it" was a step nobody read as one. With apps
+ * open a member connects in the same press; locked down, a member asks an admin for it. `place`
+ * decides only where the back button and the app's page go.
  *
  * A COMPONENT AND NOT A ROUTE, so every directory route is the same screen rather than several that
  * drift. A route file importing another route file is how that drift starts, so none does. Every
@@ -84,15 +89,21 @@ const LOADING_ROWS = ["a", "b", "c", "d", "e", "f"];
 /** Where the directory was opened from: a person's Connections, or Admin's Apps. */
 export type DirectoryPlace = "connections" | "admin";
 
-/** What a press does for this person, opened from `place`. */
+/**
+ * What a press does for this person, opened from `place`. Admin is opened only by an admin, so
+ * there it is always Connect. With apps open (`open`, the organization's switch) a member connects
+ * too; locked down, a member asks an admin.
+ */
 export function directoryPressMode(input: {
   edition: "team" | "personal";
   place: DirectoryPlace;
   role: string | null | undefined;
+  open?: boolean;
 }): DirectoryPressMode {
-  if (input.edition === "personal") return "connect";
-  if (input.place === "admin") return "add";
-  return isOrganizationAdmin(input.role) ? "connect" : "request";
+  if (input.edition === "personal" || input.place === "admin") return "connect";
+  return isOrganizationAdmin(input.role) || input.open === true
+    ? "connect"
+    : "request";
 }
 
 export function BrokerDirectory({
@@ -119,7 +130,13 @@ export function BrokerDirectory({
   const apps = useQuery(directoryAppsQueryOptions(query));
   const personal = paths.edition === "personal";
   const role = useQuery(currentUserQueryOptions()).data?.role;
-  const mode = directoryPressMode({ edition: paths.edition, place, role });
+  const open = useAppsOpen();
+  const mode = directoryPressMode({
+    edition: paths.edition,
+    place,
+    role,
+    open,
+  });
   /** From Connections the app's page is under Connections, in either edition. */
   const ownPages = personal || place === "connections";
   /*
@@ -141,6 +158,26 @@ export function BrokerDirectory({
       servers: plugins.data,
       connections: connections.data?.connections,
     });
+
+  /*
+   * WHERE AN ADDED KEY VERSION'S PAGE IS, beside the sign-in it was offered under. Its key form opens
+   * on arrival while this person hasn't connected it, as Connect on a key app's own row does.
+   */
+  const keyVersionLink = (keyAppId: string | null): LinkOptions | null => {
+    if (keyAppId === null) return null;
+    if (!ownPages) return paths.plugin(keyAppId);
+    const keyState = directoryAppState(
+      { appId: keyAppId, connectsWith: "key" },
+      { servers: plugins.data, connections: connections.data?.connections },
+    );
+    return {
+      to: "/connections/$key",
+      params: { key: keyAppId },
+      ...(keyState.kind === "not_connected"
+        ? { search: { connect: true } }
+        : {}),
+    };
+  };
 
   const signedIn =
     signingIn !== null &&
@@ -174,7 +211,7 @@ export function BrokerDirectory({
       <PageSection description={description.search} title="Apps">
         {press.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {press.error}
+            {failureSaid(press.error)}
           </p>
         ) : null}
 
@@ -218,7 +255,10 @@ export function BrokerDirectory({
              * the single thing an operator who reached this URL needs to read; the derived line
              * stays as the fallback for a failure that arrived carrying no message of its own.
              */}
-            {apps.error.message || directoryReadFailure(provider)}
+            {loadFailure(
+              apps.error,
+              apps.error.message || directoryReadFailure(provider),
+            )}
           </p>
         ) : listed.length === 0 ? (
           <PageEmpty
@@ -276,6 +316,15 @@ export function BrokerDirectory({
                         {entry.appId !== null ? null : (
                           <BreadthNote app={entry} />
                         )}
+                        {entry.keyVersion ? (
+                          <KeyVersionLine
+                            keyVersion={entry.keyVersion}
+                            link={keyVersionLink(entry.keyVersion.appId)}
+                            mode={mode}
+                            onPress={() => press.pressKey(entry)}
+                            pending={press.addingKey.has(entry.id)}
+                          />
+                        ) : null}
                         {mine ? (
                           <SignInNote name={entry.title} tab={tab} />
                         ) : null}
@@ -288,9 +337,9 @@ export function BrokerDirectory({
                         </span>
                         {/*
                          * An app this deployment already has says where it stands rather than
-                         * offering Add again. A second Add would ask the server to record an app it
-                         * already holds, and there is nothing on the row to suggest that would be
-                         * harmless.
+                         * offering to add it again. A second add would ask the server to record an
+                         * app it already holds, and there is nothing on the row to suggest that
+                         * would be harmless.
                          */}
                         {state.kind === "addable" && mode === "request" ? (
                           requested.has(slug) ? (
@@ -311,13 +360,20 @@ export function BrokerDirectory({
                             </Button>
                           )
                         ) : state.kind === "addable" ? (
+                          /*
+                           * Connect, never Add: the press adds the app and goes straight on to this
+                           * person's own sign-in or key form (`useDirectoryPress`).
+                           */
                           <Button
+                            aria-label={
+                              isAdding ? undefined : `Connect ${entry.title}`
+                            }
                             disabled={isAdding || (mine && tab.pending)}
                             onClick={() => press.press(entry)}
                             size="sm"
                             variant="outline"
                           >
-                            {isAdding ? "Adding…" : "Add"}
+                            {isAdding ? "Connecting…" : "Connect"}
                           </Button>
                         ) : (
                           <DirectoryRowState

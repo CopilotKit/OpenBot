@@ -9,6 +9,7 @@ import {
   revokeConversationGrantMutationOptions,
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** A kind of action, as the start of a sentence about where it is allowed. */
 const KIND_WORDS: Record<ActionKind, string> = {
@@ -86,7 +87,7 @@ export function ConversationAllowances({ threadId }: { threadId: string }) {
       })}
       {revoke.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {revoke.error.message}
+          {failureSaid(revoke.error)}
         </p>
       ) : null}
     </section>

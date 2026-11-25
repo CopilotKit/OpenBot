@@ -25,15 +25,18 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { describeConnection } from "@/lib/ai-connection/describe";
+import {
+  type DescribedConnection,
+  describeConnection,
+} from "@/lib/ai-connection/describe";
 import { removePersonalAiMutationOptions } from "@/lib/ai-connection/mutations";
 import { isSignIn, providerById } from "@/lib/ai-connection/providers";
 import {
+  aiConnectionsQueryOptions,
   needsAiConnection,
   type PersonalAiConnection,
   personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
-import type { AiConnection } from "@/lib/api/generated/model";
 import { queryClient } from "@/query-client";
 import {
   ChooseConnection,
@@ -41,31 +44,53 @@ import {
   Details,
   ProviderTile,
 } from "./ai-connection-chooser";
+import { failureSaid } from "@/lib/load-failure";
+import { AiConnectionRows, SEVERAL } from "./ai-connection-list";
 
 /**
- * Settings → General → Your AI: the AI a person's Bots use when they work for them, on an OpenBot
+ * Settings → Providers → Your AI: the AI a person's Bots use when they work for them, on an OpenBot
  * where each person can bring their own (getPersonalAiConnection's `available`, OpenBot Cloud).
  * Theirs alone: it follows them into every organization they are in, and nobody else's runs use it.
  *
- * One row, saying which AI their runs use now: their own, the organization's, or none yet. It opens
- * the same chooser as onboarding's Connect your AI step and the organization's AI connection, in
- * its personal mode. Their own can be removed, and their runs go back to the organization's; where
- * the organization has none and one is required, they are sent to connect another.
+ * One row per connection of their own, each leading to its page, and a row that connects one
+ * (ai-connection-list.tsx). Against a server older than the list: the one row from before, saying
+ * which AI their runs use now, which opens the chooser in its personal mode.
  */
 export function YourAiSection() {
   const personal = useQuery(personalAiConnectionQueryOptions());
+  const available = personal.data?.available === true;
+  const list = useQuery({
+    ...aiConnectionsQueryOptions("personal"),
+    enabled: available,
+  });
   // Pending, failed, or an OpenBot without this: the section isn't there.
-  if (!personal.data?.available) return null;
+  if (!personal.data?.available || list.isPending) return null;
+  // Their own connections, where the server lists them; the one row from before otherwise.
+  const own = list.data ?? null;
+  const usesOrganization =
+    own?.connections.length === 0 && personal.data.organization.ready;
   return (
     <PageSection
-      description="Bots use your own AI when they work for you. It's personal to you and never shared with your organization."
-      // Admin → Providers links here.
-      id="your-ai"
+      description={`Bots use your own AI when they work for you. It's personal to you and never shared with your organization.${
+        usesOrganization
+          ? " Until you connect one, they use your organization's."
+          : own && own.connections.length > 1
+            ? ` ${SEVERAL}`
+            : ""
+      }`}
       title="Your AI"
     >
-      <PageRows>
-        <YourAiRow personal={personal.data} />
-      </PageRows>
+      {own ? (
+        <AiConnectionRows
+          list={own}
+          organizationWide={false}
+          scope="personal"
+        />
+      ) : (
+        <PageRows>
+          <YourAiRow personal={personal.data} />
+        </PageRows>
+      )}
     </PageSection>
   );
 }
@@ -137,7 +162,7 @@ function YourAiRow({ personal }: { personal: PersonalAiConnection }) {
 type Step =
   | { at: "current" }
   | { at: "choose" }
-  | { at: "done"; connection: AiConnection };
+  | { at: "done"; connection: DescribedConnection };
 
 function YourAiDialog({
   personal,
@@ -200,7 +225,7 @@ function YourAiDialog({
         <p className="text-muted-foreground">{afterRemoving}</p>
         {remove.error ? (
           <p className="text-destructive" role="alert">
-            {remove.error.message}
+            {failureSaid(remove.error)}
           </p>
         ) : null}
       </DialogBody>

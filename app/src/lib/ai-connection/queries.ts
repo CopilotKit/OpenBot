@@ -1,28 +1,44 @@
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import type {
   AiConnection,
+  AiConnectionEntry,
+  AiConnectionPage,
+  AiConnectionProvider,
   PersonalAiConnection,
 } from "@/lib/api/generated/model";
 import {
   getAiConnection,
   getPersonalAiConnection,
+  listAiConnections,
+  listPersonalAiConnections,
 } from "@/lib/api/generated/models/models";
 import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { invokeDesktop } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { unavailableSaid } from "@/lib/load-failure";
 
 /**
  * How OpenBot reaches its AI provider (getAiConnection), and whether the Desktop window this page
  * may be in can change it in place. And a person's own AI connection (getPersonalAiConnection),
  * which on OpenBot Cloud each person brings for themselves.
  */
-export type { AiConnection, PersonalAiConnection };
+export type { AiConnection, AiConnectionEntry, PersonalAiConnection };
+
+/** Whose AI connections: the organization's (admins), or the signed-in person's own (OpenBot Cloud). */
+export type ConnectionScope = "organization" | "personal";
+
+/** Every AI connection in one scope, and the providers the server signs in to for it itself. */
+export type AiConnections = {
+  connections: AiConnectionEntry[];
+  signIns: AiConnectionProvider[];
+};
 
 export const aiConnectionKeys = {
   all: ["ai-connection"] as const,
   current: ["ai-connection", "current"] as const,
   personal: ["ai-connection", "personal"] as const,
+  list: (scope: ConnectionScope) => ["ai-connection", "list", scope] as const,
   /** The person's answer in another of their organizations, named by its id. */
   personalIn: (organizationId: string) =>
     ["ai-connection", "personal", "in", organizationId] as const,
@@ -45,6 +61,63 @@ export function aiConnectionQueryOptions() {
         });
       } catch (error) {
         if (error instanceof ClientError && error.status === 404) return null;
+        throw error;
+      }
+    },
+  });
+}
+
+async function everyConnection(
+  scope: ConnectionScope,
+  signal: AbortSignal,
+): Promise<AiConnections> {
+  const connections: AiConnectionEntry[] = [];
+  const seen = new Set<string>();
+  let signIns: AiConnectionProvider[] = [];
+  let cursor: string | undefined;
+  do {
+    const params = { limit: 100, ...(cursor ? { cursor } : {}) };
+    const options = {
+      signal,
+      fallback:
+        scope === "organization"
+          ? "Couldn't load the AI connections."
+          : "Couldn't load your AI connections.",
+    };
+    const page: AiConnectionPage =
+      scope === "organization"
+        ? await listAiConnections(organizationId(), params, options)
+        : await listPersonalAiConnections(
+            organizationId(),
+            "me",
+            params,
+            options,
+          );
+    connections.push(...page.connections);
+    signIns = page.signIns;
+    if (cursor) seen.add(cursor);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor && !seen.has(cursor));
+  return { connections, signIns };
+}
+
+/**
+ * Every AI connection in a scope, every page read. Never a key. Null from an OpenBot older than
+ * several connections (404), or where a person can't have their own (409), where Settings draws
+ * the single connection it drew before.
+ */
+export function aiConnectionsQueryOptions(scope: ConnectionScope) {
+  return queryOptions({
+    queryKey: aiConnectionKeys.list(scope),
+    queryFn: async ({ signal }): Promise<AiConnections | null> => {
+      try {
+        return await everyConnection(scope, signal);
+      } catch (error) {
+        if (
+          error instanceof ClientError &&
+          (error.status === 404 || error.status === 409)
+        )
+          return null;
         throw error;
       }
     },
@@ -111,6 +184,12 @@ export function needsAiConnection(
  * The same question, for a route's gate. A server that can't answer is read as "not required": a
  * self-hosted OpenBot and an older one never require it, and OpenBot Cloud refuses the run itself
  * with a sentence the chat turns into a way to connect.
+ *
+ * Except a hold: OpenBot moving the organization, or its database out of reach for a moment (503
+ * with its sentence and Retry-After, lib/load-failure.tsx). That says nothing either way, and read as
+ * "not required" it sent somebody on Connect your AI out of onboarding and into the app. It is thrown
+ * on, so the page says the hold calmly ("Back in a moment") and goes on by itself once OpenBot
+ * answers.
  */
 export async function aiConnectionRequired(
   queryClient: QueryClient,
@@ -119,7 +198,8 @@ export async function aiConnectionRequired(
     return needsAiConnection(
       await queryClient.ensureQueryData(personalAiConnectionQueryOptions()),
     );
-  } catch {
+  } catch (error) {
+    if (unavailableSaid(error) !== undefined) throw error;
     return false;
   }
 }

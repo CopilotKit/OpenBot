@@ -214,6 +214,8 @@ let server: {
   organizations: Listed[];
   /** The one her session works in. */
   active: string;
+  /** How many of a list one page holds. */
+  pageSize: number;
   /** Acme's members, in the order they joined. */
   members: OrganizationMemberSummary[];
   /** The invitations Acme sent that nobody accepted. */
@@ -224,6 +226,11 @@ let server: {
   delivery: "emailed" | "link";
   /** What the next write is refused with, when it is. */
   refusal: { status: number; detail: string } | null;
+  /**
+   * Seats Acme has paid for and not given to anybody, where it pays for each member; null where it
+   * doesn't. With none, an invitation is refused with SEAT_REQUIRED, as the API describes.
+   */
+  freeSeats: number | null;
   /**
    * What every read of the person's own organizations or invitations is answered with instead,
    * when it is: a refusal, or the answer of a server that has no such address.
@@ -237,6 +244,9 @@ let server: {
 let requests: string[] = [];
 let writes: { request: string; body: unknown; keyed: boolean }[] = [];
 const DEPLOYMENT = "/api/v2/organizations/default/deployment";
+/** The server's sentence when an invitation needs a seat, as the API's example says it. */
+const SEAT_SENTENCE =
+  "Each member is $5 a month. Add a seat to invite someone.";
 
 function problem(status: number, code: string, detail: string): Response {
   return new Response(JSON.stringify({ status, code, detail, title: code }), {
@@ -246,11 +256,13 @@ function problem(status: number, code: string, detail: string): Response {
 }
 
 const page = <T,>(key: string, items: T[], url: URL) => {
-  // Two to a page, so a list longer than that is only whole when every page is read.
+  // Two to a page unless a test says otherwise, so a list longer than that is only whole when
+  // every page is read.
+  const size = server.pageSize;
   const from = Number(url.searchParams.get("cursor") ?? 0);
-  const next = from + 2 < items.length ? String(from + 2) : null;
+  const next = from + size < items.length ? String(from + size) : null;
   return Response.json({
-    [key]: items.slice(from, from + 2),
+    [key]: items.slice(from, from + size),
     nextCursor: next,
   });
 };
@@ -439,6 +451,26 @@ async function answer(
       if (method === "GET") return page("invitations", server.sent, url);
       const no = refused();
       if (no) return no;
+      if (server.freeSeats === 0)
+        return new Response(
+          JSON.stringify({
+            type: "https://open.bot/errors/seat-required",
+            title: "This organization needs another seat.",
+            status: 402,
+            detail: SEAT_SENTENCE,
+            code: "SEAT_REQUIRED",
+            category: "permission",
+            retryable: false,
+            requestId: "req_example",
+            traceId: "trace_example",
+            addSeatUrl: `/api/auth/hosted/add-seat?organizationId=${organization}`,
+          }),
+          {
+            status: 402,
+            headers: { "content-type": "application/problem+json" },
+          },
+        );
+      if (server.freeSeats !== null) server.freeSeats -= 1;
       const { email, role } = body as { email: string; role: "member" };
       const made = server.sent.some((one) => one.id === "inv_new")
         ? `inv_new_${server.sent.length}`
@@ -474,6 +506,7 @@ beforeEach(() => {
     hosted: false,
     organizations: [{ ...OWN }, { ...ACME, role: "owner", personal: false }],
     active: ACME.id,
+    pageSize: 2,
     members: [
       member("dana", "Dana Fresh", "owner"),
       member("lee", "Lee Park", "admin"),
@@ -487,6 +520,7 @@ beforeEach(() => {
     received: [],
     delivery: "link",
     refusal: null,
+    freeSeats: null,
     ownRefusal: null,
   };
   requests = [];
@@ -936,7 +970,9 @@ describe("the account menu", () => {
         ...app.view.container.querySelectorAll(
           "[data-slot=strip] [aria-current=page], [data-slot=strip] [aria-pressed=true]",
         ),
-      ].map((item) => item.querySelector(".sr-only")?.textContent);
+      ].map(
+        (item) => item.querySelector("[data-slot=strip-label]")?.textContent,
+      );
     await waitFor(() => expect(marked()).toEqual(["Bots"]));
     const menu = await app.openAccountMenu();
     await app.person.click(
@@ -1021,6 +1057,12 @@ describe("the account menu", () => {
 });
 
 describe("organization settings, for its owner", () => {
+  // Its lists show a page at a time, as the API's 50 by default: everybody here fits on one.
+  // Paging itself is people-lists.test.tsx's, in a real browser.
+  beforeEach(() => {
+    server.pageSize = 50;
+  });
+
   test("renames it from the Name row, and a refusal stays in the dialog in the server's sentence", async () => {
     const app = await open("/settings/organization");
     const page = within(await app.view.findByRole("main"));
@@ -1411,9 +1453,111 @@ describe("organization settings, for its owner", () => {
       null,
     );
   });
+
+  test("with every paid seat taken, the invitation says what a member costs and offers Add a seat, and back from adding it, Invite sends it", async () => {
+    /*
+     * Found end to end on OpenBot Cloud: once an organization paid, inviting a second person said
+     * "That couldn't be done just now. Try again." for good. The organization pays for each
+     * member and had no seat to spare; adding one is the way on, and a try again never is.
+     */
+    sessionStorage.clear();
+    server.freeSeats = 0;
+    // Following a link leaves this page; here the press is what matters, not the page it opens.
+    const stay = (event: Event) => {
+      if ((event.target as Element | null)?.closest?.("a"))
+        event.preventDefault();
+    };
+    document.addEventListener("click", stay, true);
+    try {
+      let app = await open("/settings/organization");
+      let page = within(await app.view.findByRole("main"));
+      await app.person.click(
+        await page.findByRole("button", { name: "Invite" }),
+      );
+      let dialog = await app.view.findByRole("dialog", {
+        name: "Invite to Acme",
+      });
+      await app.person.type(
+        within(dialog).getByLabelText("Email"),
+        "kit@example.com",
+      );
+      await app.person.click(
+        within(dialog).getByRole("button", { name: "Invite" }),
+      );
+
+      // The server's sentence, and one way on: Add a seat, to the address the server gave,
+      // coming back to these settings.
+      expect((await within(dialog).findByRole("alert")).textContent).toBe(
+        SEAT_SENTENCE,
+      );
+      expect(dialog.textContent).not.toMatch(/try again/i);
+      const add = within(dialog).getByRole("link", { name: "Add a seat" });
+      const address = new URL(
+        add.getAttribute("href") ?? "",
+        "http://openbot.invalid",
+      );
+      expect(address.pathname).toBe("/api/auth/hosted/add-seat");
+      expect(address.searchParams.get("organizationId")).toBe(ACME.id);
+      expect(address.searchParams.get("returnTo")).toBe(
+        "http://openbot.invalid/settings/organization",
+      );
+      expect(within(dialog).queryByRole("button", { name: "Invite" })).toBe(
+        null,
+      );
+      expect(within(dialog).getByLabelText("Email")).toHaveProperty(
+        "value",
+        "kit@example.com",
+      );
+      expect(server.sent.map((one) => one.email)).not.toContain(
+        "kit@example.com",
+      );
+      await app.person.click(add);
+
+      // The seat is added, and the browser comes back to the organization's settings.
+      server.freeSeats = 1;
+      cleanup();
+      queryClient.clear();
+      app = await open("/settings/organization");
+      // The Invite dialog is open again by itself, the address still typed, ready to send.
+      dialog = await app.view.findByRole("dialog", { name: "Invite to Acme" });
+      expect(within(dialog).getByLabelText("Email")).toHaveProperty(
+        "value",
+        "kit@example.com",
+      );
+      expect(within(dialog).queryByRole("alert")).toBe(null);
+      await app.person.click(
+        within(dialog).getByRole("button", { name: "Invite" }),
+      );
+      await app.view.findByRole("dialog", { name: "Invitation ready" });
+      expect(writes.at(-1)).toEqual({
+        request: `POST /api/v2/organizations/${ACME.id}/invitations`,
+        body: { email: "kit@example.com", role: "member" },
+        keyed: true,
+      });
+
+      // Read once: opening the settings again later starts the dialog closed and empty.
+      await app.person.click(
+        within(
+          await app.view.findByRole("dialog", { name: "Invitation ready" }),
+        ).getByRole("button", { name: "Done" }),
+      );
+      cleanup();
+      queryClient.clear();
+      app = await open("/settings/organization");
+      page = within(await app.view.findByRole("main"));
+      await page.findByText("kit@example.com");
+      expect(app.view.queryByRole("dialog")).toBe(null);
+    } finally {
+      document.removeEventListener("click", stay, true);
+    }
+  });
 });
 
 describe("invitations on a hosted OpenBot", () => {
+  beforeEach(() => {
+    server.pageSize = 50;
+  });
+
   /** Opens the Invite dialog and answers what it says the person will see. */
   async function inviteDialogSays(app: Awaited<ReturnType<typeof open>>) {
     const page = within(await app.view.findByRole("main"));
@@ -1457,6 +1601,10 @@ describe("invitations on a hosted OpenBot", () => {
 });
 
 describe("organization settings, for a member", () => {
+  beforeEach(() => {
+    server.pageSize = 50;
+  });
+
   test("shows the name and the members, and nothing a member cannot use", async () => {
     asMember();
     const app = await open("/settings/organization");

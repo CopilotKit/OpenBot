@@ -672,7 +672,11 @@ export const ReadComputerPageResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -736,9 +740,20 @@ export const GetComputerControlResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
+          ),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
           ),
         status: zod.string(),
         createdAt: zod.string(),
@@ -832,9 +847,20 @@ export const RequestComputerControlResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
+          ),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
           ),
         status: zod.string(),
         createdAt: zod.string(),
@@ -931,9 +957,20 @@ export const TakeComputerControlResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
+          ),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
           ),
         status: zod.string(),
         createdAt: zod.string(),
@@ -1030,9 +1067,20 @@ export const ReleaseComputerControlResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
+          ),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
           ),
         status: zod.string(),
         createdAt: zod.string(),
@@ -1129,9 +1177,20 @@ export const CancelComputerControlResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
+          ),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
           ),
         status: zod.string(),
         createdAt: zod.string(),
@@ -1230,9 +1289,20 @@ export const RequestComputerSecretResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
+          ),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
           ),
         status: zod.string(),
         createdAt: zod.string(),
@@ -1412,7 +1482,11 @@ export const SnapshotComputerResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1501,7 +1575,11 @@ export const NavigateComputerResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1585,7 +1663,11 @@ export const ClickComputerResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1667,7 +1749,11 @@ export const TypeComputerResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1746,7 +1832,11 @@ export const PressComputerKeyResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1824,7 +1914,11 @@ export const ScrollComputerResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })

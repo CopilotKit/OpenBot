@@ -1,9 +1,4 @@
-import {
-  IconArrowRight,
-  IconChevronRight,
-  IconUsers,
-} from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
+import { IconArrowRight, IconUsers } from "@tabler/icons-react";
 import type { ComponentType, ReactNode } from "react";
 import { Badge, type Tone } from "@/components/gallery/frame";
 import { PersonAvatar } from "@/components/organizations/person-avatar";
@@ -26,6 +21,7 @@ import type {
   ChangeLine,
   ChangeView,
 } from "./admin-tool-results";
+import { ScreenLinks as SettingsScreenLinks } from "./screen-link";
 
 /**
  * The pieces every admin settings card is drawn from, so a change a Bot made reads as the Admin
@@ -259,20 +255,13 @@ export function AffectedRows({ affected }: { affected: Affected }) {
 
 /** Links to the Admin screens the change shows on. */
 export function ScreenLinks({ screens }: { screens: readonly AdminScreen[] }) {
-  if (screens.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-x-4 gap-y-1">
-      {screens.map((screen) => (
-        <Link
-          className="inline-flex items-center gap-0.5 font-medium text-primary text-xs hover:underline"
-          key={screen.path}
-          to={screen.path}
-        >
-          Open {screen.label}
-          <IconChevronRight aria-hidden className="size-3.5" />
-        </Link>
-      ))}
-    </div>
+    <SettingsScreenLinks
+      links={screens.map((screen) => ({
+        to: screen.path,
+        label: `Open ${screen.label}`,
+      }))}
+    />
   );
 }
 

@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import { ConsentHandoffDialog } from "@/components/plugins/consent-handoff";
 import { desktopShell } from "@/lib/desktop/shell";
+import { failureOf } from "@/lib/load-failure";
 import { markConnectReturn } from "@/lib/plugins/connect-return";
 import {
   brokeredConsentFor,
@@ -288,11 +289,12 @@ export function useConnectInNewTab() {
     needsKey,
     blockedUrl,
     pending: connect.isPending,
-    /** The connect route's own sentence, when it refused. */
+    /**
+     * The connect route's refusal, when it refused: kept whole, so whoever draws it draws a hold calmly
+     * (`failureSaid`).
+     */
     error: connect.isError
-      ? connect.error instanceof Error
-        ? connect.error.message
-        : "Couldn't connect that account."
+      ? failureOf(connect.error, "Couldn't connect that account.")
       : null,
   };
 }

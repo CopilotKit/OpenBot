@@ -89,6 +89,8 @@ function renderSidebar(
   edition: "team" | "personal" = "team",
   /** Serve `/api/me` with this body instead of seeding the person, so the real read runs. */
   me?: Record<string, unknown>,
+  /** OpenBot Cloud: people sign in with their OpenBot by CopilotKit account (`hostedSignIn`). */
+  hostedSignIn = false,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -99,6 +101,7 @@ function renderSidebar(
     selfHostBanner: false,
     localEvaluation: edition === "personal",
     edition,
+    hostedSignIn,
   });
   const person = {
     id: "maya",
@@ -198,10 +201,15 @@ test.each(["user", "admin"] as const)(
     // (Bots) as a button that switches the panel, any other as a link to its page.
     const names = [
       ...footer.querySelectorAll<HTMLElement>("a[href], button"),
-    ].map((item) => item.querySelector(".sr-only")?.textContent);
+    ].map(
+      (item) => item.querySelector('[data-slot="strip-label"]')?.textContent,
+    );
+    // The strip's short names: Chats for Conversations, Apps for Connections; the rest as listed.
     expect(names).toEqual([
-      "Conversations",
-      ...expected(role, "primary").map((item) => item.label),
+      "Chats",
+      ...expected(role, "primary").map((item) =>
+        item.label === "Connections" ? "Apps" : item.label,
+      ),
     ]);
     expect(links(footer).map(({ to }) => to)).toEqual([
       "/routines",
@@ -222,6 +230,7 @@ test.each(["user", "admin"] as const)(
       .map((item) => item.textContent?.trim());
     expect(items).toEqual([
       ...expected(role, "account").map((item) => item.label),
+      "Get troubleshooting logs",
       "Sign out",
     ]);
     expect(links(menu)).toEqual(expected(role, "account"));
@@ -412,6 +421,74 @@ test("in the personal edition the menu opens Admin, and OpenBot for Business bes
       name: "OpenBot for Business",
     }),
   ).toBeTruthy();
+});
+
+/*
+ * OpenBot Cloud is the team edition, run by OpenBot by CopilotKit, so its people have no self-host
+ * bar and no Admin of a company's own. OpenBot for Business sits in their account menu where the
+ * personal edition has it, before Settings. An OpenBot a company runs itself already is Business,
+ * so it never offers it.
+ */
+test.each(["user", "admin"] as const)(
+  "on OpenBot Cloud the account menu offers OpenBot for Business before Settings, for a %s, and opens its dialog",
+  async (role) => {
+    const ids: string[] = navigationFor(role, "team", true).map(
+      (item) => item.id,
+    );
+    expect(ids.slice(-2)).toEqual(["team-features", "settings"]);
+    // Nothing else changes: the team edition's own entries, in their order.
+    expect(ids.filter((id) => id !== "team-features")).toEqual(
+      navigationFor(role, "team").map((item) => item.id),
+    );
+
+    const { view, user } = renderSidebar(role, "team", undefined, true);
+    await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+    const menu = await view.findByRole("menu");
+    const entry = within(menu).getByRole("menuitem", {
+      name: "OpenBot for Business",
+    });
+    // Right before Settings, as in the personal edition.
+    expect(entry.nextElementSibling).toBe(
+      within(menu).getByRole("menuitem", { name: "Settings" }),
+    );
+    expect(entry.querySelector("svg image")).toBeTruthy();
+    await user.click(entry);
+    const dialog = await view.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("heading", {
+        level: 2,
+        name: "OpenBot for Business",
+      }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole("heading", { level: 3, name: "Book a demo" }),
+    ).toBeTruthy();
+  },
+);
+
+test.each(["user", "admin"] as const)(
+  "an OpenBot a company runs itself never offers OpenBot for Business, for a %s",
+  async (role) => {
+    expect(
+      navigationFor(role, "team", false).map((item) => item.id),
+    ).not.toContain("team-features");
+    const { view, user } = renderSidebar(role, "team");
+    await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+    const menu = await view.findByRole("menu");
+    expect(
+      within(menu).queryByRole("menuitem", { name: "OpenBot for Business" }),
+    ).toBeNull();
+    expect(
+      within(menu).getByRole("menuitem", { name: "Settings" }),
+    ).toBeTruthy();
+  },
+);
+
+test("the personal edition's menu is the same whatever the sign-in", () => {
+  for (const role of ["user", "admin"])
+    expect(navigationFor(role, "personal", true)).toEqual(
+      navigationFor(role, "personal"),
+    );
 });
 
 test("a single-person install has no Sign out, because nobody signed in", async () => {

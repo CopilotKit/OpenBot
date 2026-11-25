@@ -7,11 +7,8 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import type { SettingsToolCardProps } from "./registry";
-import {
-  SettingsChangeCard,
-  type SettingsScreenLink,
-  settingsChangeOf,
-} from "./settings-change-card";
+import type { SettingsScreenLink } from "./screen-link";
+import { SettingsChangeCard, settingsChangeOf } from "./settings-change-card";
 
 /**
  * `update_my_settings`, drawn: the person asked a Bot to change their own settings, and this is each

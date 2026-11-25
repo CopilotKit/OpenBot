@@ -156,7 +156,8 @@ async function open(
     });
   });
   await page.goto(`${ORIGIN}/`, { waitUntil: "domcontentloaded" });
-  await page.getByText("Decision").first().waitFor();
+  // The rows, not the Decision heading: on a phone the decision is drawn under What, with no column.
+  await page.locator("tbody [data-column=decision]").first().waitFor();
   const classes = await page.evaluate(() =>
     [...document.querySelectorAll("[class]")].flatMap((element) => [
       ...element.classList,
@@ -228,10 +229,12 @@ describe.skipIf(!asked)("a computer refused at a limit, on Activity", () => {
             seen.text.match(/Started by ben\.okafor@northwind\.example/g)
               ?.length,
           ).toBe(4);
+          // A row with no Bot says "-" in its column; on a phone, where the Bot is drawn under What,
+          // it says nothing.
           expect(seen.rows.map((row) => row.bot)).toEqual([
             "Notes",
             "Notes",
-            "-",
+            window.width < 768 ? undefined : "-",
             "Notes",
           ]);
           // Blocked is drawn in the refusal's colour, never the muted one the rest of the row uses.

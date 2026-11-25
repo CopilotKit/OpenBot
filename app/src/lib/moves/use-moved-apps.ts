@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { appsQueryOptions } from "@/lib/apps/queries";
+import { appsQueryOptions, catalogueQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import {
   connectionsQueryOptions,
   personalConnections,
@@ -19,6 +20,7 @@ import {
   type MovedApp,
   movedApps,
   movedAppsInView,
+  needsNoAccountOfYours,
 } from "./moved-apps";
 import { importListQueryOptions } from "./queries";
 
@@ -50,8 +52,11 @@ export function useMovedApps() {
   const connections = useQuery({ ...connectionsQueryOptions(), enabled: any });
   // Which app each one is here: a move names an app as the computer knew it (`cloudAppFor`).
   const cloudApps = useQuery({ ...appsQueryOptions(), enabled: any });
+  // How each catalogue app is reached, which says whether it needs an account of the person's.
+  const catalogue = useQuery({ ...catalogueQueryOptions(), enabled: any });
   const preferences = useUserPreferences();
   const user = useQuery(currentUserQueryOptions());
+  const open = useAppsOpen();
   const dismiss = useMutation(
     dismissNoticeMutationOptions(queryClient, preferences.userId),
   );
@@ -64,6 +69,16 @@ export function useMovedApps() {
   );
   const cloudIdOf = (appId: string) =>
     cloudAppFor(appId, cloudApps.data ?? [])?.id;
+  /*
+   * Done once it is here, for an app that needs no account of the person's: what listApps says of
+   * it, and for a catalogue app what the catalogue says of how it is reached. A catalogue that
+   * couldn't be read says nothing, so such an app waits for the person's own connection.
+   */
+  const doneHere = (cloudId: string) => {
+    const app = (cloudApps.data ?? []).find((each) => each.id === cloudId);
+    const entry = (catalogue.data ?? []).find((item) => item.key === cloudId);
+    return app !== undefined && needsNoAccountOfYours(app, entry?.auth);
+  };
   // Settled once the deployment has answered (an answer that failed reads as not hosted, as every
   // capability does) and, where it takes moves, the moves have.
   const ready =
@@ -72,6 +87,7 @@ export function useMovedApps() {
     (!any ||
       (connections.isSuccess &&
         cloudApps.isSuccess &&
+        (catalogue.isSuccess || catalogue.isError) &&
         (preferences.isSuccess || preferences.isError)));
   const apps: MovedApp[] = ready
     ? movedAppsInView(
@@ -79,6 +95,7 @@ export function useMovedApps() {
         cloudIdOf,
         connected,
         preferences.data?.dismissedNotices ?? [],
+        doneHere,
       )
     : [];
   const reads = [imports, connections, cloudApps];
@@ -92,10 +109,10 @@ export function useMovedApps() {
     },
     retrying: reads.some((read) => read.isFetching),
     /**
-     * Whether the person may add an app the organization hasn't yet: only an admin may add one from
-     * the directory (createApp), as on the directory's own page.
+     * Whether the person may add an app the organization hasn't yet (createApp), as on the
+     * directory's own page: an admin, or anybody while apps are open.
      */
-    mayAdd: isOrganizationAdmin(user.data?.role),
+    mayAdd: isOrganizationAdmin(user.data?.role) || open === true,
     cloudIdOf,
     /** Whether any finished move listed an app at all, dismissed or not. */
     listedAny: listed.length > 0,
@@ -103,6 +120,8 @@ export function useMovedApps() {
     /** The ones still to connect again. */
     remaining: apps.filter((app) => !app.reconnected),
     connected,
+    /** Whether the app here with this id needs no account of the person's, so it's done. */
+    doneHere,
     dismiss: (app: MovedApp) => dismiss.mutate(app.noticeId),
     dismissing: dismiss.isPending ? dismiss.variables : undefined,
     dismissError: dismiss.error,
@@ -149,9 +168,10 @@ export function clearReconnectReturn(): void {
  * app's page (where OpenBot Desktop's window stays through the sign-in) and on Connections (where a
  * browser's sign-in can come back). Home instead when that was the last app to connect.
  *
- * Connected means the person's own connections have it, read from the server. A sign-in that failed
- * (`?connected=failed`) adds nothing there, so it never takes them back: they stay where the failure
- * is said, and the list is one press away.
+ * Connected means the person's own connections have it, read from the server, or, for an app that
+ * needs no account of theirs, that the organization has it (`needsNoAccountOfYours`). A sign-in
+ * that failed (`?connected=failed`) adds nothing there, so it never takes them back: they stay
+ * where the failure is said, and the list is one press away.
  *
  * The way back is kept as the moved app's id, as the move named it. Answers the id of the app it is
  * here, the one its page is at, so that page can offer the way back.
@@ -162,7 +182,10 @@ export function useReturnToReconnectList(): string | null {
   const navigate = useNavigate();
   const cloudId =
     pending === null ? null : (moved.cloudIdOf(pending) ?? pending);
-  const done = cloudId !== null && moved.ready && moved.connected.has(cloudId);
+  const done =
+    cloudId !== null &&
+    moved.ready &&
+    (moved.connected.has(cloudId) || moved.doneHere(cloudId));
   const remaining = moved.remaining.filter((app) => app.appId !== pending);
   const home = remaining.length === 0;
   useEffect(() => {

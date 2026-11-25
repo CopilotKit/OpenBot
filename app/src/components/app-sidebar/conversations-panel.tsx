@@ -23,6 +23,7 @@ import {
   isChannelSearchable,
   normalizeChannelSearch,
 } from "@/lib/channels/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
@@ -231,7 +232,10 @@ function SearchResults({
     return (
       <div className="px-2 py-3 text-center">
         <p role="alert" className="mb-2 text-xs text-muted-foreground">
-          {results.error?.message || "Couldn't search your conversations."}
+          {loadFailure(
+            results.error,
+            results.error?.message || "Couldn't search your conversations.",
+          )}
         </p>
         <Button
           variant="ghost"
@@ -277,7 +281,7 @@ function SearchResults({
         <div className="px-2 py-3 text-center">
           {results.isFetchNextPageError ? (
             <p role="alert" className="mb-2 text-xs text-muted-foreground">
-              Couldn't load more results.
+              {loadFailure(results.error, "Couldn't load more results.")}
             </p>
           ) : null}
           <Button
@@ -347,7 +351,7 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
         // The sidebar's hover rather than `muted`, which is nearly the sidebar's own colour.
         <Button
           aria-label="New conversation"
-          className="hover:bg-foreground/5 dark:hover:bg-foreground/5"
+          className="hover:bg-foreground/5"
           size="icon"
           variant="ghost"
           render={(props) => (

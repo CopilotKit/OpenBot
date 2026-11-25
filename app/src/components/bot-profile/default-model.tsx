@@ -24,6 +24,13 @@ import {
 import type { AgentProfile } from "@/lib/agents/queries";
 import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
+import { connectionOf, pickerGroups } from "@/lib/models/connections";
+import {
   effortLabel,
   type ModelPick,
   offeredBotDefault,
@@ -31,6 +38,7 @@ import {
   shownPick,
 } from "@/lib/models/effort";
 import {
+  type ModelCatalogue,
   type ModelOption,
   modelCatalogueQueryOptions,
 } from "@/lib/models/queries";
@@ -41,7 +49,14 @@ export function DefaultModelSection({
   saving,
 }: {
   agent: AgentProfile;
-  onSave: (pick: ModelPick | null) => Promise<unknown>;
+  /** What is saved: a model, its effort, and with several connections the kind it is on. */
+  onSave: (
+    defaultModel: {
+      model: string;
+      effort: string | null;
+      source?: string;
+    } | null,
+  ) => Promise<unknown>;
   saving: boolean;
 }) {
   const eligible = useBotTakesModelChoice(agent);
@@ -55,12 +70,13 @@ export function DefaultModelSection({
     ({ id }) => id === catalogue.default,
   );
   const deploymentPick = shownPick(null, catalogue);
-  const savedModel = catalogue?.models.find(({ id }) => id === saved?.model);
+  const savedModel = modelOf(catalogue, saved);
   const sourceField = useId();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ModelPick>();
   const [useDeploymentDefault, setUseDeploymentDefault] = useState(true);
-  const [error, setError] = useState<string>();
+  // A refused save is kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const [error, setError] = useState<Failure>();
   if (!eligible) return null;
 
   const open = () => {
@@ -79,14 +95,14 @@ export function DefaultModelSection({
   const save = async () => {
     if (!useDeploymentDefault && !custom) return;
     try {
-      await onSave(useDeploymentDefault ? null : (custom ?? null));
+      await onSave(
+        useDeploymentDefault || !custom
+          ? null
+          : savedDefault(custom, catalogue),
+      );
       setEditing(false);
     } catch (failure) {
-      setError(
-        failure instanceof Error
-          ? failure.message
-          : "Couldn't save the default model.",
-      );
+      setError(failureOf(failure, "Couldn't save the default model."));
     }
   };
   const deploymentSummary = deploymentModel
@@ -195,9 +211,8 @@ export function DefaultModelSection({
                           setDraft({
                             ...pick,
                             effort:
-                              catalogue?.models.find(
-                                ({ id }) => id === pick.model,
-                              )?.defaultEffort === pick.effort
+                              modelOf(catalogue, pick)?.defaultEffort ===
+                              pick.effort
                                 ? null
                                 : pick.effort,
                           });
@@ -209,7 +224,10 @@ export function DefaultModelSection({
                       {!catalogue ? (
                         <p className="text-sm text-muted-foreground">
                           {models.isError
-                            ? "Couldn't load the models."
+                            ? loadFailure(
+                                models.error,
+                                "Couldn't load the models.",
+                              )
                             : "Loading models…"}
                         </p>
                       ) : null}
@@ -219,7 +237,7 @@ export function DefaultModelSection({
               </fieldset>
               {error ? (
                 <p role="alert" className="text-destructive text-sm">
-                  {error}
+                  {failureSaid(error)}
                 </p>
               ) : null}
             </DialogBody>
@@ -250,6 +268,39 @@ export function DefaultModelSection({
 const optionClass =
   "flex cursor-pointer items-start gap-3 rounded-lg border border-border px-3 py-2.5 has-checked:border-foreground/40 has-checked:bg-muted/30";
 const radioClass = "mt-0.5 size-4 shrink-0 accent-foreground";
+
+/** The model a pick names, on its own connection where several are connected. */
+function modelOf(
+  catalogue: ModelCatalogue | undefined,
+  pick: ModelPick | undefined,
+): ModelOption | undefined {
+  if (!pick) return undefined;
+  const models =
+    pickerGroups(catalogue).length > 0
+      ? connectionOf(catalogue, pick.connection)?.models
+      : catalogue?.models;
+  return models?.find(({ id }) => id === pick.model);
+}
+
+/**
+ * What a Bot's default is saved as: the model and effort, and with several connections the kind of
+ * connection it is on (`source`), never one person's connection. With one connection, no source: the
+ * server stamps the one in use, as it always did.
+ */
+function savedDefault(
+  pick: ModelPick,
+  catalogue: ModelCatalogue | undefined,
+): { model: string; effort: string | null; source?: string } {
+  const source =
+    pickerGroups(catalogue).length > 0
+      ? connectionOf(catalogue, pick.connection)?.source
+      : undefined;
+  return {
+    model: pick.model,
+    effort: pick.effort,
+    ...(source ? { source } : {}),
+  };
+}
 
 function modelSummary(model: ModelOption, effort: string | null) {
   const thinking = shownEffort(model, effort);

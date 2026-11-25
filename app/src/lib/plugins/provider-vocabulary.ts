@@ -1,4 +1,5 @@
 import type { AppSetup } from "@/lib/api/generated/model";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
 
 /**
  * The words an admin Plugins screen uses for the directory's ACTIVE service, and nothing of the
@@ -116,22 +117,22 @@ export function directoryDescriptions(
   switch (reader) {
     case "personal":
       return {
-        page: "Add an app and connect your account so your Bots can use it.",
+        page: "Connect an app so your Bots can use it.",
         search: "Search by name. OpenBot hasn't reviewed these apps.",
       };
     case "connect":
       return {
-        page: "Add an app for everyone in your organization and connect your own account.",
+        page: "Connect an app to use it yourself. Everyone in your organization can then connect their own account.",
         search,
       };
     case "request":
       return {
-        page: "Find an app and ask an admin to add it. Once it's added, connect your own account.",
+        page: "Find an app and ask an admin for it. Once it's ready, connect your own account.",
         search,
       };
     default:
       return {
-        page: "Add an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
+        page: "Connect an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
         search,
       };
   }
@@ -208,7 +209,7 @@ export function brokeredConnectionDescription(
     return "Each person connects their own account through OpenBot.";
   if (personal.kind === "no-auth")
     return `${capitalised(personal.title)} works through OpenBot without an account.`;
-  return `Connect your ${personal.title} account through OpenBot.`;
+  return `Connect your ${vendorNameOf(personal.title)} account through OpenBot.`;
 }
 
 /**
@@ -247,7 +248,7 @@ export function brokeredReach(
       kind === "consent"
         ? `You sign in to ${title} in your browser. OpenBot never sees your password.`
         : kind === "fields"
-          ? `You connect with a key from your ${title} account. Your Bots use it as you.`
+          ? `You connect with a key from your ${vendorNameOf(title)} account. Your Bots use it as you.`
           : "There's nothing to sign in to.",
     badge,
   };

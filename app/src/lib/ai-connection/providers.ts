@@ -179,7 +179,7 @@ export function sharedLogins(
 
 /** What a person calls a provider's sign-in: "Claude plan", "ChatGPT plan", "Google sign-in". */
 export function signInWords(
-  provider: AiConnectionProvider,
+  provider: AiConnectionProviderAnswer,
   login: AiConnectionLogin,
 ): string {
   if (login === "plan")

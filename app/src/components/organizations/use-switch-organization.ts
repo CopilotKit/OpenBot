@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "@/components/ui/toast";
+import { failureToastType } from "@/lib/load-failure";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { switchOrganizationMutationOptions } from "@/lib/organizations/mutations";
 import { queryClient } from "@/query-client";
@@ -31,10 +32,11 @@ export function useSwitchOrganization() {
         onSuccess: () => toast.close(SWITCH_TOAST),
         onError: (error) =>
           toast.add({
-            // One at a time: a second refusal replaces the first.
+            // One at a time: a second refusal replaces the first. A move or a brief outage of the
+            // organization is said calmly, as news, and only a failure as an error.
             id: SWITCH_TOAST,
             title: error.message,
-            type: "error",
+            type: failureToastType(error),
             priority: "high",
           }),
       });

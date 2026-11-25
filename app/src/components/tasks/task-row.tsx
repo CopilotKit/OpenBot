@@ -21,6 +21,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import type { ListedTask } from "@/lib/tasks/groups";
 import { taskLine } from "@/lib/tasks/line";
@@ -43,6 +44,7 @@ import {
 } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** Each status's icon. A status a newer server sends that this app doesn't know has a plain circle. */
 const ICONS: Partial<Record<TaskStatus, typeof IconProgress>> = {
@@ -240,7 +242,11 @@ export function TaskRow({
           {canTryAgain({ ...task, status }) ? (
             <Button
               disabled={busy}
-              onClick={() => again.mutate(task.id)}
+              onClick={() => {
+                // Bots can't run until a card is added: the dialog says why, in place of a run.
+                if (stopIfNeedsCard()) return;
+                again.mutate(task.id);
+              }}
               size="sm"
             >
               {again.isPending ? "Starting…" : "Try again"}
@@ -291,7 +297,7 @@ export function TaskRow({
         </ItemFooter>
         {error ? (
           <p className="mt-1 text-destructive text-sm" role="alert">
-            {error.message}
+            {failureSaid(error)}
           </p>
         ) : null}
       </ItemContent>
@@ -411,7 +417,7 @@ export function TaskBoardRow({
           ...held.meta,
           error ? (
             <span className="text-destructive" key="error" role="alert">
-              {error.message}
+              {failureSaid(error)}
             </span>
           ) : null,
         ]}
@@ -431,7 +437,11 @@ export function TaskBoardRow({
         canTryAgain({ ...task, status }) ? (
           <Button
             disabled={busy}
-            onClick={() => again.mutate(task.id)}
+            onClick={() => {
+              // Bots can't run until a card is added: the dialog says why, in place of a run.
+              if (stopIfNeedsCard()) return;
+              again.mutate(task.id);
+            }}
             size="sm"
           >
             {again.isPending ? "Starting…" : "Try again"}
@@ -452,7 +462,7 @@ export function TaskBoardRow({
         <span key="when">{relativeTime(task.updatedAt)}</span>,
         error ? (
           <span className="text-destructive" key="error" role="alert">
-            {error.message}
+            {failureSaid(error)}
           </span>
         ) : null,
       ]}

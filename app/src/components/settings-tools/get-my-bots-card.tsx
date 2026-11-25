@@ -1,4 +1,9 @@
-import { IconLock, IconRobot, IconUsers } from "@tabler/icons-react";
+import {
+  IconChevronRight,
+  IconLock,
+  IconRobot,
+  IconUsers,
+} from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Badge } from "@/components/gallery/frame";
@@ -107,6 +112,10 @@ export function GetMyBotsCard({
                     </span>
                   ) : null}
                 </span>
+                <IconChevronRight
+                  aria-hidden
+                  className="size-4 shrink-0 self-center text-muted-foreground"
+                />
               </Link>
             </li>
           ))}

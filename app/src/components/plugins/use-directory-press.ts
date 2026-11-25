@@ -3,8 +3,12 @@ import { useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
 import { requestAppMutationOptions } from "@/lib/app-access/mutations";
-import { addDirectoryAppMutationOptions } from "@/lib/apps/mutations";
+import {
+  addDirectoryAppMutationOptions,
+  type DirectoryAppInput,
+} from "@/lib/apps/mutations";
 import { type DirectoryApp, directorySlug } from "@/lib/apps/queries";
+import type { Failure } from "@/lib/load-failure";
 import { directoryConnect } from "@/lib/plugins/directory-state";
 import { invalidatePlugins } from "@/lib/plugins/mutations";
 import { connectionsQueryOptions } from "@/lib/plugins/queries";
@@ -14,13 +18,15 @@ import { connectionsQueryOptions } from "@/lib/plugins/queries";
  *
  * - `connect`: somebody who may add apps (the personal edition's one person, or an admin of their
  *   organization, OpenBot Cloud's usual case) adds it and connects their own account in the same
- *   press. An app that signs in opens its sign-in in a tab claimed on the click; one that takes a
- *   key opens its page with the key form; one that needs no account is simply added.
- * - `add`: Admin's own directory. Adding is the admin's act for everybody, and each person connects
- *   their own account afterwards.
- * - `request`: a member, who can't add apps, asks an admin to add it.
+ *   press, from Connections and from Admin alike. An app that signs in opens its sign-in in a tab
+ *   claimed on the click; one that takes a key opens its page with the key form; one that needs no
+ *   account is simply added.
+ * - `request`: a member, who can't add apps, asks an admin for it.
+ *
+ * There is no press that only adds. Admin's Browse apps had one ("Add"), and the row then needed a
+ * second press to connect: two steps for what a person reads as one.
  */
-export type DirectoryPressMode = "connect" | "add" | "request";
+export type DirectoryPressMode = "connect" | "request";
 
 /**
  * The press, shared by Browse apps and Connections' search so the two can never do different things
@@ -35,7 +41,8 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const tab = useConnectInNewTab();
-  const [error, setError] = React.useState<string | null>(null);
+  // The refusal itself, not its words: a hold is drawn calmly (`failureSaid`).
+  const [error, setError] = React.useState<Failure | null>(null);
   const [adding, setAdding] = React.useState<ReadonlySet<string>>(new Set());
   const [requesting, setRequesting] = React.useState<ReadonlySet<string>>(
     new Set(),
@@ -58,11 +65,30 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
       setError(null);
       setAdding((set) => held(set, input.directoryEntryId));
     },
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
     // Spelled out: a second `onSettled` replaces the spread one, and its refetch is what turns the
     // added row into its connection state.
     onSettled: (_data, _error, input) => {
       setAdding((set) => released(set, input.directoryEntryId));
+      return invalidatePlugins(queryClient);
+    },
+  });
+  /*
+   * THE KEY VERSION'S OWN ADD, for an entry listed as a sign-in in place of its key. A mutation of its
+   * own and a set of its own, so the row's primary button never reads "Adding…" for it.
+   */
+  const [addingKey, setAddingKey] = React.useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const enableKey = useMutation({
+    ...addDirectoryAppMutationOptions(queryClient),
+    onMutate: (input: DirectoryAppInput) => {
+      setError(null);
+      setAddingKey((set) => held(set, input.directoryEntryId));
+    },
+    onError: (thrown: Error) => setError(thrown),
+    onSettled: (_data, _error, input) => {
+      setAddingKey((set) => released(set, input.directoryEntryId));
       return invalidatePlugins(queryClient);
     },
   });
@@ -72,7 +98,7 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
       setError(null);
       setRequesting((set) => held(set, slug));
     },
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
     onSettled: (_data, _error, slug) => {
       setRequesting((set) => released(set, slug));
       return queryClient.invalidateQueries({ queryKey: ["plugins"] });
@@ -160,13 +186,30 @@ export function useDirectoryPress(mode: DirectoryPressMode) {
     enable.mutate({ directoryEntryId: entry.id });
   };
 
+  /**
+   * One press of "with a key instead": add the entry's key version as its own app and go on to that
+   * app's key form, as a key app's Connect does. A member asks for apps and adds none, so `request`
+   * does nothing.
+   */
+  const pressKey = (entry: DirectoryApp) => {
+    if (mode === "request") return;
+    enableKey
+      .mutateAsync({ directoryEntryId: entry.id, connectsWith: "key" })
+      .then(openKeyForm, () => {
+        // Said by the mutation's own `onError`.
+      });
+  };
+
   return {
     mode,
     press,
+    pressKey,
     connect,
     signedIn,
     /** Entry ids being added. */
     adding,
+    /** Entry ids whose key version is being added. */
+    addingKey,
     /** Slugs being asked for. */
     requesting,
     signingIn,

@@ -10,10 +10,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **Before upgrading.**
 
-- **Migrations run at start: eleven, and none removes anything.** The database moves from
-  `0151_sign_up_switch`, where 1.1.3 left it, to `0164_schedules_held_by_move`. Every one is
-  an expand: a 1.1.3 server works against the new schema, so 1.1.3 upgrades with its servers
-  rolling one by one, with no downtime. There is no `0154` or `0155`.
+- **Migrations run at start: twenty-eight, and none removes anything.** The database moves from
+  `0151_sign_up_switch`, where 1.1.3 left it, to `0181_organization_ai_sign_in_credentials`, and
+  from `0164_schedules_held_by_move`, where 1.2.0-rc.4 left it, through the last seventeen. Every one
+  is an expand: a 1.1.3 or 1.2.0-rc.4 server works against the new schema, so either upgrades with
+  its servers rolling one by one, with no downtime. There is no `0154` or `0155`.
   - `0152_bot_run_client_and_outcome` keeps, for each Bot run, which app asked for it (web,
     Desktop, the API or another) and how it ended.
   - `0153_personal_ai_connections` keeps a person's own AI connection (below), sealed with the
@@ -36,6 +37,43 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     TrustedRouter (below).
   - `0164_schedules_held_by_move` keeps which move to OpenBot Cloud holds a routine, check-in or
     goal it brought, until the move is checked (below).
+  - `0165_team_models` keeps the models a team's people may run, for each team that sets a list
+    (below).
+  - `0166_refused_turns` keeps a person's turns refused before they ran, so the conversation still
+    shows them (below).
+  - `0167_shard_directory` keeps which database each organization is on, for an OpenBot that spreads
+    its organizations over several (`database.shards`, below). An organization with no row is on the
+    first, so nothing is filled in, and an install with one database never writes to it.
+  - `0168_cross_database_changes` keeps a move of an organization between those databases, and the
+    making or deleting of an organization while it is under way, so one stopped halfway finishes. An
+    organization's audit trail may now be deleted only from the database it moved away from, in the
+    move itself; the trail is otherwise as append-only as before.
+  - `0169_shard_outbox` keeps a copy one of those databases couldn't take while it was down, to write
+    once it is back.
+  - `0170_intelligence_organization_holders` keeps which organization holds each CopilotKit
+    Intelligence organization, so no two organizations hold the same one whichever database they are
+    on. It is filled from the organizations already bound.
+  - `0171_intelligence_holders_authority` adds to it which sign-in organization each one is, so a
+    hosted sign-in reads it there. Filled the same way.
+  - `0172_free_runs` keeps how many free runs each person has used on OpenBot Cloud (below). Everybody
+    starts at zero.
+  - `0173_memory_source_added_by` keeps who made each memory source: OpenBot, for an app the person
+    connected, or the person (below). A source from before this is worked out at its next sync.
+  - `0174_app_access_request_actions` keeps the actions a request for an app asks a Bot be given
+    (below). Earlier requests read as naming none.
+  - `0175_move_imports_from_organization` keeps which of a person's organizations a move on OpenBot
+    Cloud takes their Bots from (below).
+  - `0176_copilotkit_employee` keeps whether each person is a CopilotKit employee, from the verified
+    address of their last hosted sign-in. Nobody is, until their next sign-in.
+  - `0177_bot_app_defaults` keeps which of its owner's connected apps OpenBot gave a Bot by itself,
+    or its owner took away, and whether an admin gave an app to every Bot (below).
+  - `0178_free_run_takes` keeps which run took each free run, and whether a failure gave it back.
+  - `0179_additional_ai_connections` keeps an organization's and a person's other AI connections
+    beside the default, one per provider (below).
+  - `0180_ai_connection_problem` marks an AI connection whose key the provider refused, so every
+    server sees it.
+  - `0181_organization_ai_sign_in_credentials` keeps, sealed, what a provider hands back when an
+    admin signs the organization in to it (below).
 - **Product analytics are on by default.** While an install is connected to CopilotKit management,
   it sends a daily rollup of counts with its health metrics: how many people, organizations and Bots
   there are, how many people are active, how many come back, and how many Bot runs there were. It is
@@ -57,6 +95,37 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   from `default` or turned away is put back, and it runs once: somebody who leaves `default` later
   isn't added again at the next start. `config.organizations.ownOrganizations: true`
   (`OPENBOT_OWN_ORGANIZATIONS=true`) gives everybody their own instead. OpenBot Cloud is unchanged.
+- **Apps are open by default, and the upgrade opens each organization's apps once.** In the team
+  edition, OpenBot Cloud included:
+  - A person's connected apps are on for every Bot they own, Bots made later included, with every
+    action, and nobody presses anything. A Bot somebody else owns never gets them, and a teammate
+    using a Bot uses their own account, never its owner's. A shared team account, once an admin
+    connects it, is on for every Bot, and anybody who can use a Bot uses it through that Bot with
+    nothing to approve; a run steered by email, Slack or a webhook still needs an approval for it.
+    Connecting a shared account stays an admin's. Any member adds an app the organization hasn't
+    added, unless it needs a key or something only an admin can enter, or Only approved connectors
+    leaves it out, and a Bot's owner connects an app and gives it to their Bot in one press (#2174,
+    #2175).
+  - One press of give, the card's Connect and give it to, or approving a request that names no
+    actions gives every action of the app, not only the ones that read. Actions that change
+    something still ask first where the approval rules say so.
+  - Every app is open to Bot owners unless an admin closes it.
+  - Parallel Search, Exa Search and Firecrawl, which need no key or sign-in, are added and given to
+    every Bot, so a Bot can search the web with nothing set up. Its searches, and the addresses of
+    the pages it reads with them, go to those services. OpenBot Personal adds Exa Search and
+    Firecrawl beside Parallel Search, in the background.
+  - At each organization's first start its apps are opened: an app an admin kept to admins is
+    opened to Bot owners, and every Bot that holds part of an app is given the rest of it. Earlier
+    limits on one Bot or one app are not kept. The audit trail records it once per organization.
+  Admin, Apps, Open apps locks apps down again (below). That changes what giving does from then on.
+  It doesn't put back what the upgrade opened, and its take-back box removes only what OpenBot gave
+  by itself from connected apps and the no-sign-in apps. To keep a Bot to an app's reads, take the
+  other actions from that Bot. To keep an app to admins, close it on the app's page. What an admin
+  takes from a Bot stays taken across restarts and reconnects. (#2160, #2163)
+- **Removing somebody deletes the logins they saved in that organization.** When it starts, and once
+  a day after, OpenBot also deletes the saved logins of anybody already removed, so the first start
+  of this release deletes those of people removed before it. Logins a person saved in another
+  organization they're still in stay. Restoring somebody doesn't bring theirs back.
 - Nothing in a Helm values file has to change. Every new chart value (under Kubernetes) is off or
   empty by default, except `config.productAnalytics` (above).
 
@@ -97,9 +166,25 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   or xAI sign-in, or key picks from everything it lists, as OpenBot Desktop does. The organization's
   allowlist narrows what people on the organization's AI pick from, and applies to a person's own
   AI only once an admin narrows it.
-- **Settings, Your AI.** Shows the person's own connection, or that their Bots use the
-  organization's, to add, change or remove theirs. The admin's section beside it reads
-  Organization's AI.
+- **Several AIs connected at once, one per provider.** Keep a Claude plan, a ChatGPT plan and a few
+  keys connected together and pick a model from any of them in a conversation, instead of switching
+  one connection that moves every Bot and conversation. Settings, Providers is its own screen (it
+  was a section of Settings, General) and lists each connection, with a Default tag once there are
+  two; Admin, Providers lists the organization's the same way. Each row opens that provider's page,
+  with Make default, Change and Disconnect; one that stopped working offers Sign in again or Replace
+  key. Connect another AI adds one beside the others, and the first one connected is the default.
+  On OpenBot Cloud, Your AI lists a person's own above the Organization's AI, and their own always
+  come first for them. This is on OpenBot Cloud and the personal edition; where whoever runs
+  OpenBot sets the provider, Providers shows that one connection as before. (#2069)
+  - The composer's model picker has a providers rail once two or more are connected, the default
+    first, and opens on the one in use. Its search looks through all of them, and a pick stays on
+    its provider for that conversation.
+  - A Bot's default model applies on any of a person's connections of its kind.
+  - A turn whose picked connection stopped working says why under the message, with Reconnect for
+    whoever can fix it and Choose another model. With connections and no default, it says so with
+    Choose a default.
+  - On OpenBot (Self-Contained), a Claude or ChatGPT plan connected beside the default runs only
+    while it is the default, and says so.
 - **An admin can share their own sign-in as the organization's AI.** In Admin, Providers, the
   organization's AI chooser offers each provider's sign-in first, as Connect your AI does. Signing in
   connects the organization on that admin's sign-in, and an admin whose own AI is already such a
@@ -144,9 +229,72 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   restarts while routines wait. Nothing is ever restored unless somebody asks. On the same page, an
   admin sees Restore… on each other person's row under Its computer, for that person's copies.
   Self-hosted OpenBot keeps copies once `computers.sandbox.snapshots` is on (below).
+- **OpenBot Cloud's free trial is counted in Bot runs, not days.** Each person gets a number of free
+  Bot runs, counted across every organization they're in, and a new account goes straight into the
+  app with no card. Settings, Organization's Plan row shows "Free trial" with a bar and how much is
+  used ("42% used"), never the count. Once it's used up, a dialog says "Your free trial was 500 Bot
+  runs, and they're all used. From now on, OpenBot is $5 a month for each member of this
+  organization.", with Add a card for an owner or an admin, and for a member "Ask an admin of this
+  organization to add a card." It opens by itself once, then each time you try something that runs a
+  Bot (sending a message, Run now, Work on it, Try again, Carry on, a voice call), and nothing is
+  sent: what you typed stays in the box. A run OpenBot fails before doing any work (its computer
+  didn't start, the Bot couldn't be reached, the model provider was down) gives its free run back.
+  One that failed on your own AI (a refused key, no credit, a rate limit) or that you stopped keeps
+  it. A routine, Slack, Teams or text message refused once the trial is used up is kept in its
+  conversation with the reason, and the routine stays on. The sign-in screen, OpenBot Desktop's
+  OpenBot Cloud choice and Move to OpenBot Cloud say "Free usage-based trial". Before, the trial
+  counted days. Self-hosted OpenBot and OpenBot (Self-Contained) count nothing. (#2108, #2112)
+- A CopilotKit employee on OpenBot Cloud is never stopped for want of a plan. They get the same free
+  trial, counted the same way, and once it's used up their own runs go on, in any organization, a
+  failed payment included. The used-up dialog opens once with a thank-you in place of Add a card.
+  It goes by a verified copilotkit.ai address, checked at each sign-in. The organization still pays
+  for everyone else: an employee who is an owner or an admin gets Add a card on the Plan row once a
+  member who isn't an employee needs one. (#2156, #2157)
+- **A move of your organization, or a brief outage, is said calmly and clears by itself.** While
+  OpenBot moves an organization between its databases, or that organization's database is briefly
+  out of reach, OpenBot answers "OpenBot is moving this organization. Try again in a moment." or
+  "This organization is unavailable right now. Try again in a moment." Every page, dialog, button
+  and toast now says that sentence once, in muted text, never in red, and never with an empty state
+  such as "No Bots yet" in its place. A page that can't load at all shows "Back in a moment" with the
+  sentence and Try again, instead of "Something went wrong" and a stack trace. OpenBot asks again
+  after each wait the server gives, for as long as the hold lasts, so the page fills in by itself
+  once the organization is back. A message sent meanwhile shows the sentence and keeps what you
+  wrote, and the sentence goes as soon as the organization answers. It used to say "OpenBot
+  couldn't reach its backend, so your message wasn't sent." in red. The terms and Connect your AI
+  steps wait too: coming back during an outage could land somebody who agreed long ago on "Agree to
+  the terms". A real failure still shows in red. This happens on OpenBot Cloud, and on an OpenBot
+  that spreads its organizations over several databases (`database.shards`, below). (#2111, #2148,
+  #2151, #2152, #2162)
+- **Move your Bots into another of your organizations.** The bar that says your moved Bots are in
+  another of your organizations now offers Move them to, naming that organization, beside Switch
+  to. It brings your Bots, conversations, memories, routines, skills and files into the
+  organization you're working in, checks everything arrived, and only then removes them from the
+  other one. A conversation other people are in stays there for them. Where the organization doesn't
+  let you use Bots, the bar says you can't move them there, and to ask an admin to let you use Bots
+  there. The bar now follows your newest move. (#2139)
+- A Bot on an OpenBot Cloud computer refuses to mine cryptocurrency, scan ports or networks, send
+  bulk or unsolicited messages, flood a site, run a proxy, VPN or tunnel, brute-force logins, get
+  around the computer's limits, or host malware. It says it isn't allowed on OpenBot Cloud computers,
+  names the rule, and offers what it can do instead. Self-hosted OpenBot is unchanged.
+- On OpenBot Cloud the account menu offers OpenBot for Business before Settings, opening the same
+  dialog with Book a demo. A company's own OpenBot doesn't show it. (#2144)
 
 ### OpenBot Desktop
 
+- **Get Troubleshooting Logs… is back while the app is connected to an OpenBot elsewhere**, such as
+  OpenBot Cloud, in the tray and the OpenBot menu beside Open Log Folder. Its file says what the app
+  saw of that OpenBot: its address, whether it answers, its release, and the account and
+  organization ids; the app's own recent problems, recorded as they happen (requests that failed or
+  got no answer, each with the request id that finds it in the server's logs, errors on its pages,
+  and runs that failed); the relay's recent lines; and the end of the app's log. Keys, tokens,
+  passwords, cookies and email addresses are taken out, and nothing anybody wrote is recorded.
+  Before, the item was gone while connected, and the log held only the relay's lines.
+- **Get troubleshooting logs in the web app too**, in the menu under your name. In a browser it
+  downloads one file of the last 30 minutes: the app's address and version, the release OpenBot
+  runs, your account and organization ids, and the problems the app met in that time, each failed
+  request with its request id. Keys, tokens, passwords, cookies and email addresses are removed with
+  the same rules OpenBot Desktop uses, and it says so once the file is saved. Inside OpenBot Desktop
+  the same item saves Desktop's own file and shows it.
 - **OpenBot Cloud, first on the first screen.** "Set up OpenBot" opens on OpenBot Cloud: this app on
   your computer, connected to OpenBot Cloud, where your Bots run. Sign in to OpenBot Cloud opens
   your browser to sign in at my.open.bot, or to create an account, then comes straight back to the
@@ -174,7 +322,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   updates and starts it behind the move's own screen, which shows what moves once it can read it;
   keeping it here runs the update as before. The move lists
   what moves (Bots, skills, conversations, memories, routines, goals, check-ins and files) and the
-  app connections to connect again, which never move. Only apps you connected are listed: an app a
+  apps you'll sign in to again (apps connected with a key come across connected, below). Only apps
+  you connected are listed: an app a
   Bot could use but nobody connected, such as Gmail on a new install, isn't. Your AI key comes
   along, sealed so only your OpenBot Cloud account can read it, unless you untick it. Desktop signs
   in to OpenBot Cloud, packs everything up, sends it part by part, has OpenBot Cloud add it and
@@ -197,6 +346,27 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   remembered and never asked again at launch, unless it was chosen after a move that didn't finish:
   then the move is offered once more at the first launch of the next release, and a second Keep
   sticks.
+  - **Choose where your Bots go.** Someone in more than one OpenBot Cloud organization is asked
+    "Where should your Bots go?" after signing in, with their own organization picked first. One
+    that doesn't let them use Bots is listed but can't be picked, and says why. Someone in one
+    organization isn't asked, and the result names the organization chosen. Before, everything went
+    into their own organization. (#2139)
+  - **Apps connected with a key come across connected.** Each app you connected with a key arrives
+    in OpenBot Cloud connected, its key sealed so only your OpenBot Cloud account can read it, and
+    its Bots hold it there. Only apps you sign in to are left to reconnect. The preview and the
+    result list them apart ("Sign-ins can't move, so you'll sign in to each one again.", "These apps
+    come across connected"), and an app OpenBot Cloud couldn't take shows its reason. On the
+    Reconnect list one press works for every kind of app: a directory app opens its sign-in, a
+    catalogue app is added or opens its own form where it needs a token, and a server added by its
+    address opens Add custom MCP with its name filled in. Settings' "Move to OpenBot Cloud?" says
+    "Apps connected with a key come across connected. You'll sign in to the rest again in OpenBot
+    Cloud." (#2138, #2155)
+  - **A move no longer leaves two General Assistants.** A starter Bot you move lands on the one your
+    OpenBot Cloud organization already has, with its conversations, memories and routines, and an
+    organization's own starter keeps the organization's instructions. Copies an earlier move left
+    beside it are folded into it when OpenBot starts.
+  - A file sent in a conversation keeps its name when it moves to OpenBot Cloud. Before, every move
+    showed it as "Untitled file". Its size still doesn't come across.
   - **What a move brings to run waits for its check.** Routines, check-ins and goals a move brings
     arrive in OpenBot Cloud held, and run there on their own only once the move's check passes, so a
     move that fails its check leaves them running on this computer alone. A person's own Run now
@@ -240,13 +410,172 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Bot you picked, and every Retry failed. Start now finds an installation that needs laying out
   again, downloads the list, and starts. Only a Bot the release really lacks still gets that
   sentence, in Start and in Change AI connection.
+- **On a Mac, the window moves from its whole top strip.** Dragging the top of the page beside the
+  sidebar, or the bars over the page such as the one about apps to reconnect, used to do nothing.
+  The window now moves from anywhere along the top of the sidebar and the page, in the app, Admin
+  and Settings, with the sidebar shown, folded or hidden. A double-click there zooms the window,
+  and buttons in it, such as Reconnect and Dismiss, still work. Windows is unchanged. (#2146)
+
+### OpenBot settings in a conversation
+
+- **Ask a Bot to change your settings, and see the change before it's made.** Every Bot now has
+  OpenBot settings, an app that is always on. Through it a Bot reads your settings and your Bots, and
+  changes what you could change on those screens yourself: your name, standing instructions, skin,
+  check-ins, Narration, where updates go, notifications and approval preferences, and a Bot's name,
+  title, description, instructions, default model and visibility. It never touches keys, passwords,
+  sign-ins or AI connections. An admin's Bot also changes the organization: its settings and
+  permissions, inviting people, making somebody an admin or a member, removing them, and creating,
+  renaming and moving teams and changing who is in them. No Bot changes who owns the organization,
+  and a member's Bot is never offered the organization's settings: it says only an admin can change
+  them.
+  - Each change is a card in the conversation: every setting before and after, in the words of the
+    screen it lives on, who it reaches, and a link to that screen. Its approval says what it does
+    ("Change your settings", "Change Scout's settings", "Change your organization's settings",
+    "Invite someone to your organization"), and a declined change reads "You declined it." A
+    settings approval in Slack or Teams shows the same before and after and who it reaches. (#2098,
+    #2105)
+  - A change to the organization, or to what a Bot can use in an app, happens only when somebody
+    asks for it in a conversation, and asks them every time. A routine, goal, check-in or hand-off
+    can't make one. A change to your own settings or Bots follows your approval settings when you ask
+    for it, and asks you every time when nobody asked in a conversation, saying so on the card.
+  - **A Bot knows OpenBot's screens.** Asked how to do something, it answers with numbered steps,
+    screen by screen, a link to open the screen, and "Or ask your Bot to do it for you." where it
+    can. It used to say it couldn't see OpenBot's screens. A member asking about an admin's job is
+    told which part only an admin can do. (#2158)
+  - **A Bot changes what another Bot can use in an app**, where you may: an admin for any Bot, a
+    Bot's owner for apps that are theirs to give. The card names the Bot and the app, and each action
+    before and after ("Send email: Off to On"), with Open Apps. (#2158)
+  - Every change is on the audit trail with its before and after.
+- The phone app's approvals say what the Bot wants to do, in the web card's words ("General
+  Assistant wants to change your organization's settings"), with each setting before and after and
+  who it reaches. Any other action's details read as labelled lines, and Always allow is offered
+  only where OpenBot takes it. It used to show the Bot's and the tool's ids and the arguments as
+  JSON. (#2118)
+
+### Conversations
+
+- **A refused turn stays under its message.** When OpenBot refuses a turn before it runs (a model
+  your teams don't allow, a switch an admin turned off, no plan, or an AI connection that stopped
+  working), the conversation keeps your message and puts the reason under it as a notice with its
+  icon and any button beside it, where it was plain red text that went away. Each refused message
+  keeps its own notice, and they come back after a reload or on another device; a routine's reads
+  "Routine didn't run." with its instruction. A later message that is refused stays sent and the
+  box empties, as a refused first message does; a turn that failed any other way still hands its
+  words back. (#2086)
+- **An action you allow inside a hand-off now happens.** When a Bot handed work to another Bot and
+  that Bot stopped to ask you, Allow once ended "Not done: That conversation is no longer available
+  to this Bot and person." It now runs as you while the hand-off is still open, and only you can
+  answer it. What came of it shows in the conversation you asked in, under the Bot that did the work:
+  its reply and the action's card, or "Not done. You declined it." A second approval in the same
+  hand-off works the same way, and the first one's card then says "Done. The next step needs your
+  approval."
+- A Bot asks only what it can't go on without. Asked to check in on your todos every day, a Bot put
+  up a card of several questions, the time among them; it now picks a time, says which, and asks
+  nothing. A question card asks at most two things, and the Bot no longer repeats it in its reply.
+- **Replies start sooner for Bots that hold many app actions.** Before each run OpenBot prepares the
+  Bot's tools. It used to prepare every Bot the person had for each message, and to check whether
+  the Bot is published once for every app action it holds. It now prepares only the Bot the message
+  is for, and checks once. In our tests, with nineteen Bots holding about 1,100 actions each, this
+  took about 0.9 seconds off every message and every conversation opened, and cut the memory a
+  message needs from about 3.5 GB to under 0.2 GB, which had stopped servers on OpenBot Cloud.
+- **An unsent message stays with its conversation.** Type a reply, attach a file, then open another
+  conversation and come back, or reload: the words, their `@` and `/` chips and the files are back in
+  the message box. Home and a new conversation keep theirs too. Sending clears it. The draft is kept
+  in this browser, for the person and organization it was written in, and is dropped 30 days after
+  it was last changed. A file attached more than a day ago is no longer kept by OpenBot, so the box
+  names it and says it "was removed after a day without being sent. Attach it again." Before,
+  switching conversations or reloading emptied the box without a word. (#2168)
+- **Copy under every finished reply.** In a conversation, each Bot reply now has the Copy button a
+  Bot's own chat page has, once the reply has finished. It copies the reply's words as Markdown,
+  without the cards between them. Before, a reply in a conversation couldn't be copied. (#2170)
+- **A table keeps its links when downloaded or copied** from its own buttons. Markdown keeps
+  `[words](address)`, and CSV and TSV write `words (address)`. A link to a page of OpenBot gets its
+  full address, so it still works from a saved file. Before, only the link's words were kept. (#2169)
+- **A new conversation works like Home.** Pressing + puts the cursor in the message, and To: reads
+  "OpenBot picks the right Bot, or choose one…". Send with nobody in To: and the conversation starts
+  with the Bot OpenBot picks, or the default Bot when it can't pick. Before, + opened the Bot menu,
+  and sending with nobody picked said "Choose a Bot first.", which now shows only when there is no
+  Bot at all. (#2125)
+- **Start a conversation with a Bot from the Bots panel.** A Bot with no conversations says "No
+  conversations with this Bot yet. Start one.", and a Bot with some has New conversation first
+  under it. Both open a new conversation with that Bot. Before, the only way in was the Bot's page,
+  then Message. (#2093)
+- **A slow Bot is no longer reported as lost.** When a run goes quiet, as a slow app call can make
+  it, OpenBot asks whether it is still going. One unanswered question used to end the turn with
+  "OpenBot lost touch with the Bot before it finished. Carry on once OpenBot is back." while the run
+  went on and finished. OpenBot now asks again, and says so only after three questions in a row go
+  unanswered. A file save cut short when a run stopped now says the file wasn't saved, where it used
+  to say it was. (#2161)
+- **A page in a Bot's computer that asks for a passkey says what to do, and takes your clicks.** A
+  passkey on your own device, in a password manager or on your phone, can't be used in a Bot's
+  computer. When a page there asks for one, as Google's sign-in can, the Bot asks for you: "This
+  page is asking for a passkey. A passkey on your own device can't be used in the Bot's computer, so
+  take control and choose Try another way on the page to sign in with a password or a code." While
+  you have control, the line under "You have control." says the same. Before, the browser opened its
+  own passkey window out of sight, and the page took no clicks or typing, Try another way included.
+  A Bot using the Chrome on your own computer is unchanged, and your passkeys work there. (#2167)
+- **Imported memories read as words, and say where they came from.** A memory source OpenBot turns on
+  for an app no longer reads the app's accounts, users, teams or settings. Nothing is imported as raw
+  JSON any more: each record becomes its title and its readable fields, with its own link as Open
+  record. A source OpenBot turned on that finds nothing worth remembering is turned off and what it
+  imported is cleared (a memory you rewrote stays), and it isn't turned on again. Earlier imports are
+  rewritten at the source's next sync, with nothing to do. On the Memory page, each imported memory
+  says "Read in by" the Bot and its source, with Turn off or remove this source, which opens that
+  Bot's Memory page. Before, connecting an app could fill the Memory page with one raw JSON memory
+  per account. (#2123)
+- The message box's text is now the size of the conversation's, 16px instead of 14px, and still
+  opens two lines tall. At 125% zoom in Safari and OpenBot Desktop, a draft no longer scrolls
+  sideways. (#2165)
 
 ### Admin
 
+- **Open apps, and giving an app to every Bot.** Admin, Apps has a Giving apps section with one
+  switch, Open apps, on by default: "People's connected apps are on for their own Bots, with every
+  action. Turn this off to lock apps down." Turning it off asks first, in "Lock apps down?". From
+  then on an admin approves each request for an app, one press gives only an app's read-only
+  actions, an app that doesn't run on each person's own account is open to Bot owners only once an
+  admin opens it, and nothing is given by itself. Bots keep what they have unless "Also take back
+  what OpenBot gave Bots while apps were open" is ticked. That takes back each person's connected
+  apps on their own Bots and the no-sign-in apps on every Bot. What anybody gave by hand stays.
+  Turning the switch back on asks nothing. What an admin sets on one app or one Bot holds either
+  way, and an admin's Bot can change the switch through OpenBot settings, behind its approval
+  card. Each app's page also has an Every Bot row: its switch gives the app to every Bot in the
+  organization, Bots made later too ("Every Bot in this organization can use it, Bots made later
+  too."). Turning it off takes back only what it gave. Where each person connects their own account,
+  every Bot uses the account of whoever is asking. A Bot's card shown to somebody who doesn't own
+  the Bot reads "This Bot hasn't been given Gmail. Its owner can give it, or an admin.", and "Only
+  an admin can give it." only where an admin kept the app to admins. The personal edition is always
+  open and has neither switch. (#2160, #2163)
+- **An app that lists its tools only once someone signs in.** Some apps' own servers, such as
+  Sanity, Fireflies, PostHog and Notion, list their tools only to a person who has signed in. Admin,
+  Apps no longer shows such an app in red telling the admin to connect their own account. Its row,
+  its page and its page for one Bot say "Sanity lists its tools once someone connects their
+  account." Approving a member's request for one no longer needs the admin to connect anything: it
+  is approved, and the member's card and the Bot's Apps row say to connect their own account. A
+  task waiting on it reads "This needs you: connect your Sanity". Once they connect, the Bot gets the
+  app's actions: every action while apps are open, the reads where they're locked down. Removing the
+  app ends the wait. An app nobody can connect yet says it can't be connected on this OpenBot yet,
+  and why. (#2145)
+- **Models per team.** A team's page has a Models row: "Everything the organization allows", or
+  the models an owner or an admin ticks for the team from what the organization allows. Someone in
+  several teams can run any model one of their teams allows, a team's list also holds the people
+  of the teams under it, and it is always within the organization's allowlist. Admins and owners
+  are held to their teams' lists too; everybody else only reads the row. The model picker offers
+  each person only what they may run, and a Bot on a model their teams leave out is refused before
+  it runs, routines included, saying "…which your team's models don't include. Ask an admin to
+  change your team's models." A model on a team's list that the organization no longer allows
+  shows greyed, saying why, and comes off on save. Providers names the teams that have their own
+  list, each linking to its team. (#2084, #2086)
+- In Activity, a run refused for its model reads Blocked, with a line naming the model and saying
+  it "isn't on" a team's list or "isn't one the organization allows"; it read as Allowed. A change
+  to a team's models says its models before and after by name, and every team event names its
+  team. Usage counts "refused" runs and says "set in OpenBot". Providers' Allowed models, Usage,
+  In conversations and both models dialogs name each model as the provider lists it (such as
+  GPT-4.1 Mini), not by its id. Deleting a team no longer flashes "Couldn't find that team." (#2086)
 - **Providers changes, disconnects and connects the organization's AI.** It showed Connected with
   no way to change it, and on OpenBot Cloud it could show an admin's own plan as the organization's.
-  It now reads the organization's connection and opens the same chooser as Settings: Change, and a
-  new Disconnect, which stops the organization's Bots using it and revokes its key while keeping the
+  It now lists the organization's connections, each opening its own page with Make default, Change
+  and a new Disconnect, which stops the organization's Bots using it and revokes its key while keeping the
   keys of other connections for a later switch. Where whoever runs OpenBot sets the provider, the
   row says so and opens nothing. Activity names the disconnect.
 - **The model allowlist says what it does.** In conversations says "Every listed model" until the
@@ -262,17 +591,51 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **An admin gives a Bot an app from its card in one press.** Asked for Notion, a Bot drew a card
   that told its admin "Only an admin can give it", and Give it answered "Notion has no tools to give
   yet". An app that has listed none of its tools yet is asked again once you've signed in, and the
-  press stopped before your sign-in. It now turns the app on, opens your sign-in, and gives the app
-  to the Bot once you're in. On OpenBot Cloud that is the admin of their own organization. A card or
+  press stopped before your sign-in. The card's Connect and give it to now adds the app where nobody
+  has, opens your sign-in, and gives the app to the Bot once you're in, with every action while apps
+  are open. On OpenBot Cloud that is the admin of their own organization. A card or
   a Bot's Apps row shown to an admin says what is missing, never to ask an admin. Where the press
   still can't go on, the card says "Couldn't get Notion ready for this Bot. Try again in a moment."
 - When an admin asks a Bot for an app it can't use yet, the Bot names the step the admin's own app
-  card offers (Give it to, Turn on and give it to, Set it up, or Connect the shared account). It
-  used to tell them to ask an administrator, even when they were the organization's only one.
-- **Connections offers Add server only to an admin.** A server added by its address is added for
-  everyone in the organization, so the button shows only for an admin, and for the one person of
-  a personal OpenBot. Anybody else who opens the Add server page is told that only an admin can add
-  a server, and to ask one.
+  card offers, such as Give it to or Set it up. It used to tell them to ask an administrator, even
+  when they were the organization's only one.
+- **A Bot that needs more of an app it holds puts up that app's card.** Asked to recolour events, a
+  Bot that could only read Google Calendar said an admin could give it more, and the admin had to
+  find the Bot's settings and tick the actions by name. The card now says what the Bot can't do yet.
+  An admin, or the Bot's owner where they may give it, gives exactly those actions in one press, and
+  the conversation carries on. Anybody else is told its owner can give it that. Where apps are
+  locked down, or an admin kept the app to admins, they press Request access, and the admin's
+  Requests list names the actions asked for. (#2175)
+- **Delete the saved logins nobody may use.** Admin, Permissions has Saved logins nobody may use,
+  under the Password manager switch. Delete counts them first, then asks with the numbers: those of
+  people Password manager is off for, and those of people no longer in the organization, with their
+  passwords, which can't be undone. Somebody a team or directory group turns the switch back on for
+  keeps their logins. The row then says how many it deleted of each, and Activity records it.
+  (#2166, #2173)
+- The Password manager switch says what it does: "People may save logins, and sign a Bot in with a
+  login they saved." Turning it off counts the logins saved or used, no longer sign-ins people typed
+  or took over. With it off, a Bot working on its own no longer asks a person for a login. With
+  saved logins turned off, the Vault still lists your logins, each with its delete button, under
+  "Saved logins are off. An admin turned them off. These logins won't be offered or used. You can
+  delete them." It used to show only that they were off. The form where you type a login for a
+  Bot's browser lets your own password manager fill it. (#2166)
+- Opening the audit log's Bot, Person, App, Tool or Rule filter while its choices couldn't load no
+  longer takes the page down to "Something went wrong". The menu says "Couldn't load the choices.
+  Try again in a moment.", and opening it again tries again. (#2162)
+- **A member told only an admin can do something is told who the admins are.** An app's card, a
+  Bot's Apps row, an app's page under Connections and Reconnect your apps name the organization's
+  owners and admins, by name and email, up to three and then how many more. After Request access,
+  Requested says who it was sent to. An admin never sees the list. While apps are open, a sentence
+  about a step that is now the member's, or the Bot owner's, names nobody. (#2175)
+- **Add custom MCP, on Connections and on Admin, Apps.** Adding an MCP server by its address was only
+  on Connections, and admins looked for it under Admin, Apps. Both now have Add custom MCP (it was
+  Add server), which opens the same form. From Admin, Back and Cancel return to Apps, and a server
+  added there is listed under Connected. A server added by its address is added for everyone in the
+  organization. Where apps are locked down, only an owner or admin sees it on Connections, and
+  anybody else who opens the form reads "Only an admin can add a server, because it's added for
+  everyone in the organization. Ask an admin to add it." While they're open, a member sees it too,
+  with no Key field, because a key typed there would be every Bot's. Admin, Apps offers it only to an
+  owner or admin, and the personal edition to its one person. (#2126, #2175)
 - Admin, Apps: the MCP servers section is now Connectors, and its switches say what each app can do.
   While Only approved connectors is off, every app can be used and its switch can't be changed.
   Turning it on starts with your added apps approved, an app an admin adds is approved in the same
@@ -287,9 +650,58 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   ownership passes to the admin here who joined first. With no admin here to take it, a demoted
   last owner stays owner, and an organization left with no owner makes the next admin the sign-in
   confirms its owner.
+- **Find any app from Connections, in the team edition too.** Connections listed only the apps
+  already added, its search filtered only those, and the wider directory was reachable only through
+  Admin, then Apps, then More apps. Connections now has Browse apps, and its search asks the
+  directory, showing apps nobody has added under Connect an app. An owner or admin of the
+  organization, which on OpenBot Cloud is usually you, adds the app and connects their own account
+  in one press (a sign-in, a key form, or nothing for an app with no account), from Connections and
+  from Admin's Browse apps alike. While apps are open, a member's press does the same, and
+  Connections also shows tiles for OpenBot's own apps that connect in one press. Where apps are
+  locked down, a member's press asks an admin to add it, and the request reads "Add Slack for
+  everyone" in the admin's requests (#2175). An owner or admin also turns an app off for
+  everyone from its own page under Connections, with "On for everyone", so adding and removing
+  never need Admin. A member isn't shown it.
+
+### Organizations and teams
+
+- **Invite says when a seat is needed.** On OpenBot Cloud's per-member plan, inviting someone when
+  every paid seat is taken says "Each member is $5 a month. Add a seat to invite someone.", and an
+  owner or an admin gets Add a seat in place of Invite. Back from adding it, the Invite dialog opens
+  again with the address and role as they were. Before, it said "That couldn't be done just now.
+  Try again." every time. (#2133, #2135)
+- When you're removed from the organization you're working in, OpenBot moves you to one you're
+  still in and says so in a bar: "You're no longer a member of" the organization, and which one
+  you're now working in. Before, its pages said "Couldn't find that organization." and nothing you
+  could act on. (#2111)
+- **Activity records team changes and an organization's deletion**: Create a team, Change a team,
+  Delete a team, Add a person to a team, Change a person's role in a team, Remove a person from a
+  team, and Delete an organization. Team changes your company directory or a company sign-in's
+  groups make are recorded too, by "Directory sync" or "SSO sync".
+- **Every list of people pages and searches, as People does.** Organization settings' Members and
+  Invitations, the Teams list and a team's people show a page at a time with Show more, and a
+  search box above them that asks the server: Members and a team's people by name or address,
+  Invitations by address, Teams by name. "sar" finds Sarah, Sara and Sarita anywhere in the name or
+  address, whatever the case, and a search that finds nobody says No matches. They used to read
+  every page before drawing anything. A team's people, and its count, no longer include anybody
+  removed from the organization; restored, they are back. (#2096, #2099)
+- **People are picked from the organization only.** Adding somebody to a group conversation, and
+  choosing who a Bot is published to, find members of the organization as you type, as Add person on
+  a team does. The email box and the comma-separated addresses are gone, and nobody outside the
+  organization is ever found or shown. Inviting somebody new is still a plain email box. (#2099)
 
 ### API
 
+- **Every answer carries `X-Request-Id`, and the server logs each failed request by it.** The spec
+  says so on every response (`RequestId`), and the addresses outside /api/v2, the chat runtime
+  among them, carry it too. A problem's `requestId` is the same id. Each answer of 400 or more is
+  one line in the server's log, `api-request-failed`, with the id, the method, the path and the
+  status, never a query string, a body or a credential, so a failure an app reports can be found.
+- **Anybody signed in searches the app directory, and asks for an app with no Bot named.**
+  `listAppDirectory` answers the wider directory (`source=directory`) to every member, not only to
+  an admin. Only an admin adds from it where apps are locked down (below). `createAppAccessRequest` takes `botId` as optional: left out,
+  the request is to add an app nobody has added yet, for everyone, its `kind` is `enable` and its
+  `botId` is null. `appId` is then the directory entry's slug.
 - **TrustedRouter as an AI connection, and the AI provider in answers can gain values.**
   `replaceAiConnection` and `replacePersonalAiConnection` take `provider: trustedrouter` with
   `login: endpoint`, an address and a key, like `unbiased`. In answers, the provider is now declared
@@ -309,6 +721,34 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `startPersonalAiSignIn` also takes an optional `loopbackPort` (1024 to 65535): for Claude, the
   server then sends the browser to `http://localhost:{loopbackPort}/callback`, where OpenBot Desktop
   listens, instead of Claude's page with a code to copy. Every other provider ignores it.
+- **Several AI connections at once.** One per provider, for the organization (admin only) and for a
+  person (own only, where `available` is true), on the existing scopes. `listAiConnections`,
+  `connectAiConnection`, `removeAiConnection` and `makeAiConnectionDefault` under `ai-connections`,
+  and `listPersonalAiConnections`, `connectPersonalAiConnection`, `removePersonalAiConnection` and
+  `makePersonalAiConnectionDefault` under `people/{personId}/ai-connections`. A connection's id is
+  its provider's, unique within its list only. Connecting a provider that already has a connection
+  replaces it and keeps its id; the first connection is the default, a later one isn't. The server
+  moves the default only when a removal leaves exactly one connection; removing the default with
+  more left leaves none until one is made default. `makeAiConnectionDefault` refuses a connection
+  that can't run now with 409 `AI_CONNECTION_NOT_READY`, and an unknown id is 404
+  `AI_CONNECTION_NOT_FOUND`. Where whoever runs OpenBot sets the provider, the list holds that one
+  connection and connecting or removing one is 409 `AI_CONNECTION_FIXED`. `startAiSignIn`,
+  `getAiSignIn` and `finishAiSignIn` under `ai-connection-sign-ins` sign the organization in to a
+  provider the way a person's sign-in does, on OpenBot Cloud and the personal edition; where
+  whoever runs OpenBot sets the provider, and on the OpenBot that OpenBot Desktop runs, they answer
+  409 `AI_CONNECTION_FIXED`. Only the admin who started a sign-in reads or finishes it. The
+  single-connection operations keep their meaning and describe the default: replacing it makes the
+  connection saved the default and keeps a default of another provider beside it, the
+  organization's disconnect leaves the others connected (the one left becomes the default where
+  exactly one is left), and a person's removes all of theirs. A run whose picked connection can't
+  run, or that has no pick and no default, is refused before it starts with `AI_CONNECTION_STOPPED`
+  and kept as a refused turn, and on OpenBot Cloud it spends no free run; a default connection that
+  can't run still fails the run as before. `ModelCatalogue` gains `connections` (each connection's
+  own models, `owner`, `source`, `isDefault`, `ready` and `problem`), `ModelChoice` gains
+  `connection` and `stopped`, `ModelChoiceInput` gains `connection`, and a Bot's `defaultModel`
+  input gains `source`. Each change is on the trail (`ai_connection.default_changed`,
+  `ai_connection.signed_in` and their personal twins). All optional: an older client sends and
+  reads what it did. (#2069)
 - **Disconnect the organization's AI.** `deleteAiConnection`
   (`DELETE /api/v2/organizations/{organizationId}/ai-connection`), admin only, refused with
   `AI_CONNECTION_FIXED` where whoever runs OpenBot sets the provider, and recorded on the trail.
@@ -325,7 +765,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `uploadImportPart`, `applyImport` and `getImportVerification`, on `imports:read` and
   `imports:write`: a per-import key a model key is sealed to, parts in any order, applied in the
   background, and a verification that counts what arrived by kind, files by bytes. A busy move
-  answers 429 `RATE_LIMITED`.
+  answers 429 `RATE_LIMITED`. An app connected with a key moves connected: `recipientKey` also seals
+  app keys, with or without `includeModelKeys`, and `ExportEstimate`, `Export`, `Import` and
+  `ImportVerification` carry `carried` (`CarriedApp`), the apps that come across connected.
+  `ReconnectApp.reason` says why one still needs connecting. Sign-in connections stay on
+  `reconnect` (#2138).
 - **A hosted OpenBot's sign-out and invitations.** `GET /api/auth/hosted/sign-out` ends the browser's
   OpenBot session and its OpenBot by CopilotKit session, and the hosted authorization server
   metadata names it as `end_session_endpoint`. `GET /api/auth/hosted/sign-in` takes
@@ -336,12 +780,117 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `Idempotency-Key`; one runs at a time per computer (409 `COMPUTER_RESTORE_RUNNING`). An admin may
   name another person's computer with `computer`. A Bot's action on a computer being restored is
   answered 503 `COMPUTER_RESTORING`, worth retrying. Both are recorded on the trail.
+- **Which models a team's people may run.** `getTeamModels`, `replaceTeamModels` and
+  `deleteTeamModels` under `teams/{teamId}/models`. Any member reads a team's list; only an owner or
+  an admin sets or clears it, as provider/model names the organization's catalogue offers (400
+  naming a model it doesn't, 403 for anyone else). A person in teams with lists, or under a parent
+  team with one, runs only a model one of those lists names, within what the organization allows;
+  a team with no list sets nothing, and admins are held to it too. `getModelCatalogue` is narrowed
+  for the caller the same way, and a change is recorded on the trail as `team.models_changed`. A
+  model a person or a Bot's default chose that their teams don't allow is refused before the run
+  with `MODEL_NOT_ALLOWED`, saying their team's models leave it out, in routines and other turns
+  nobody started from the browser too, never swapped for another. (#2084)
+- **The model catalogue offers only what can run.** With Only allowed models on, the
+  organization's default model is offered only when it is on the list; otherwise the default is
+  the newest allowed model. Before, it was offered and every run on it was refused. A model a
+  person or a Bot chose that the organization's allowlist leaves out is refused before the run
+  too, never swapped for the default.
+- **Refused turns stay in the conversation.** `listRefusedTurns`
+  (`conversations/{conversationId}/refused-turns`) lists, newest first, the caller's own turns
+  refused before they ran: a model they may not run (`MODEL_NOT_ALLOWED`), a permission they lack
+  (`CAPABILITY_REQUIRED`), no plan (`PLAN_REQUIRED`), or an AI connection that can't run or no
+  default to run on (`AI_CONNECTION_STOPPED`). Each has the message it was for (the person's, or
+  what a routine or a task asked), who started it (`initiator`), where it came in the thread
+  (`afterMessageId`) and the refusal's code and words; `botId` narrows it to one Bot. Nothing of a
+  refused turn reaches the thread itself. (#2084)
+- **Search invitations, teams and a team's people.** `listOrganizationInvitations`, `listTeams`
+  and `listTeamMembers` take an optional `search`, which narrows each list to the invitations
+  whose address holds it, the teams whose name holds it, or the people whose name or address holds
+  it, ignoring case. Each finds only that organization's own, and a cursor belongs to the search
+  that made it. A team's people, and its `memberCount`, leave out anybody removed from the
+  organization until they are restored.
 - The model catalogue's `exposure` and its description say an empty allowlist means every model.
 - `ManagementEnrollment` carries `agentRemovedWithChart`, true only while OpenBot is connected
   through the agent its own chart installed after the chart turned management off. Optional, and
   absent in every other state.
 - The introduction and the descriptions of `createOrganization`, `revokePersonAccess` and
   `restorePersonAccess` no longer say everybody has an organization of their own.
+- **A free allowance of runs on an organization's plan.** `OrganizationPlan.status` can be `free`:
+  the organization isn't on the plan and the person reading has free runs left. `none` still means
+  a card is needed. `freeRunsUsedPercent` (0 to 100) says how much of the reading person's own
+  allowance is used, while a plan is required and the organization is neither `active` nor
+  `trialing`. `freeRunsAllowance`, the allowance's size, is sent only once it is used up. Both are
+  optional. 402 `PLAN_REQUIRED` is now declared on every operation that starts a run: `runRoutine`,
+  `runCheckIn`, `startCheckInItem`, `workOnCheckInItem`, `runGoal`, `startVoiceCall` and
+  `retryTask`, besides `sendConversationMessage`. The plan's descriptions no longer say 30-day trial.
+- **Inviting into an organization that pays for each member.** `createOrganizationInvitation` can
+  answer 402 `SEAT_REQUIRED` when every seat the organization paid for is taken. The problem
+  carries `addSeatUrl`, where an owner or an admin adds a seat in the browser; nothing is invited.
+  `addSeatUrl` is an optional problem property.
+- **Open or lock down an organization's apps.** `getAppsSetting` and `updateAppsSetting`
+  (`/api/v2/organizations/{organizationId}/settings/apps`) read and set `lockedDown`, false by
+  default. Every member reads it and only an admin changes it. `takeBackWhatOpenGave: true` sent with
+  `lockedDown: true` also takes back what OpenBot gave by itself while apps were open. The switch is
+  not in the organization's settings answer, so a client that reads that answer strictly is
+  unaffected. `updateApp` takes `everyBot`, and every app answers it: true gives the app to every
+  Bot, Bots made later included; false takes back what that gave, and is refused (403) for Routines
+  and OpenBot settings. While apps are open, `giveBotApp`, `approveBotApp` and
+  `approveAppAccessRequest` with no actions named give every action of the app, and
+  `ownerGrants: null` means open to Bot owners for every app. (#2160, #2163)
+- **While apps are open, any member adds an app, and a shared account needs no approval.** Any
+  member adds an app with `createApp`, from the catalogue, the directory or by address, recorded in
+  their name. A member is still refused an add that carries a `token`, one whose server needs a key,
+  one that needs what only an admin can enter, and one Only approved connectors leaves out
+  (`APP_NOT_APPROVED`); a member's add never approves anything. A Bot's owner may `approveBotApp`
+  on their own Bot, as their own grant. `shared_not_approved` and `needsApproval` happen only where
+  apps are locked down, except for a run steered by outside input. (#2174, #2175)
+- **An app offered as a sign-in can still be added with its key.** In `listAppDirectory`, an entry
+  offered as a sign-in in place of its key carries `keyVersion`: the app it was added as with its
+  key (or null), its title once added, and how many actions it offers. `createApp` from the
+  directory takes `connectsWith: key`, which adds that key version as an app of its own. It is
+  refused (400) for a catalogue entry and for an app with no key. (#2120)
+- **Give a Bot exactly the actions a task needs.** `getBotApp` takes `actions` (written
+  `<app id>/<action name>`, up to 50): a Bot that holds the app but not all of them reads
+  `not_granted`, or `owner_grantable` where the caller may give them, with `requestKind: grant`. An
+  action the app doesn't offer is left out. `approveBotApp` and `giveBotApp` take an optional body,
+  `{ actions }`, and give exactly those, also to a Bot that already holds some of the app; an action
+  the app doesn't offer is refused with `VALIDATION_ERROR`. `createAppAccessRequest` takes `actions`
+  (with `botId`), and asking again while it waits adds the new ones. `AppAccessRequest` now always
+  carries `actions`, empty for a request that names none, and approving a request without `actions`
+  gives the ones it names. (#2127)
+- **Count and delete the saved logins nobody may use.** `getUnusableSavedLogins`
+  (`GET /api/v2/organizations/{organizationId}/saved-logins/unusable`) counts what a purge would
+  delete now, as `switchedOff` and `removed`, and deletes nothing. `purgeSavedLogins`
+  (`POST .../saved-logins/purge`, no body, `Idempotency-Key`) deletes them and answers `deleted`
+  with the same two counts. Admin only (403 `AdminOnly`); the personal edition answers 404. On the
+  existing `saved-logins:read` and `saved-logins:write` scopes. (#2166)
+- **Move Bots between a person's organizations.** On OpenBot Cloud `createImport` takes
+  `fromOrganizationId`, another organization the caller is in: OpenBot packs up what they have
+  there, imports it with the same verification as a move from a computer, and removes it there only
+  once the check matches. `Import.fromOrganizationId` echoes it. Each organization in the caller's
+  list carries `canMoveIn`, and `createImport` answers 403 `MOVE_NOT_ALLOWED` where the organization
+  doesn't let the caller use Bots. All additive. (#2132)
+- `OrganizationPlan.copilotKitEmployee` (optional) is true while a plan is required and the reading
+  person is a CopilotKit employee, by a verified `copilotkit.ai` address. Their own runs are never
+  refused for want of a plan. `status` stays the organization's own, except that `none` reads
+  `free`. (#2156)
+- `updateOrganizationSettings` saves all or nothing: a refused setting leaves every other setting in
+  the request unsaved, where the ones before it used to be saved. `context` is refused as read-only.
+- Twenty operations (notifications, team grants, app errors, management enrollment) now take the
+  scope the spec names, and still take the one they needed before. The seven notification scopes
+  (`devices:read`, `devices:write`, `destinations:read`, `destinations:write`, `deliveries:read`,
+  `notification-settings:read`, `notification-settings:write`) can now be asked for.
+- **A page that asks for a passkey in a Bot's computer is named.** `ComputerChallenge.kind` and
+  `ComputerControlRequest.source` gain `passkey`, and `ComputerControlRequest.passkey` (optional)
+  names the site that asked (`host`) and when (`askedAt`). Both enums are now declared open
+  (`x-extensible-enum`), so a client should show a value it doesn't know rather than fail. Nothing
+  a client sends changes. (#2147)
+- **A Bot's screen viewer can ask for frames at the size it draws them.** On the screen socket,
+  `ScreenHello.viewSize` says the computer takes a size, and `ScreenViewSize`
+  (`{"type":"view-size","width","height"}`, in the viewer's device pixels) asks for frames that
+  large, up to twice the screen. A viewer that is only watching may send it too. `ScreenFrame`'s
+  `width` and `height` stay the screen's own size, which clicks are measured in. A viewer that sends
+  nothing gets frames as before. (#2150)
 
 ### Kubernetes
 
@@ -361,7 +910,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Google for their own AI through a Google web client. Off with an empty `clientId`.
 - **`abuseWatch`** (off) watches each computer for CPU pinned at its limit and lookups its resolver
   refused, as gauges on the internal `/metrics`, and can suspend the one computer a crypto-mining
-  finding traces to.
+  finding traces to. With it on, `/metrics` also says, for each flagged computer over the last 10
+  minutes, why its connections were blocked and the destination blocked most, which list its refused
+  lookups were on and the name refused most, and whose it is (`openbot_computer_owner`, with the
+  organization's name and the owner's email) while anything is flagged.
 - **`computers.sandbox.snapshots`** (off) keeps a daily copy of each computer's two volumes as CSI
   VolumeSnapshots, the newest `keepDaily` (7), and lets people restore one (above). It needs the
   snapshot controller and its CRDs in the cluster (on EKS, the `snapshot-controller` add-on) and a
@@ -376,18 +928,60 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **`config.productAnalytics`** (on) is the product analytics switch (Before upgrading).
 - **`config.cloudAnalytics`** (off) is OpenBot Cloud's own counts for CopilotKit's staff console.
   Leave it off.
+- **An upgrade that stops the server first waits for its runs to drain.** Before a backup, the
+  management agent (and `bun scripts/update.ts kubernetes`) scales the server to zero and waits for
+  its pods to go. That wait ended at the upgrade's own timeout (15 minutes on the management agent),
+  so a server whose termination grace period is longer, still draining a long run, had its upgrade
+  undone and the agent tried again 30 minutes later, after the server had served nothing meanwhile.
+  The wait now lasts the server's own termination grace period plus a minute, and never less than
+  that timeout. (#2171)
+- **`database.shards`** (off) spreads organizations over more PostgreSQL databases. Name a Secret
+  (`database.shards.existingSecret`) whose key (`shards`) holds a JSON list of each further
+  database's id and address. The database above stays the global one and the first shard, the
+  server migrates every one as it starts, and `database.shards.placement` (`fewest-organizations`,
+  or `shard:<id>`) chooses where a new organization goes. One database that can't be reached stops
+  only its own organizations, which see "This organization is unavailable right now." within about
+  a second and a half. With none set, nothing changes. Compose takes `OPENBOT_SHARDS` and
+  `OPENBOT_SHARD_PLACEMENT`.
+- **A long answer outlives a server going away.** When a server stops for a rollout or a scale-down,
+  a Bot's answer still going past `server.shutdown.drainSeconds` is ended with what it said kept, and
+  the conversation shows "The Bot stopped part way because OpenBot restarted. Ask the Bot to carry
+  on." with Carry on. Before, it was stopped as if you had pressed Stop, with no notice.
 
 ### Smaller changes
 
+- **A sharper look, at the same sizes.** Corners come from one 8px radius, cards are flat with a
+  hairline border you can see in both themes, and shadows show only on what floats: menus and
+  popovers, then dialogs and sheets over the app. The grays are slate, a quiet blue-gray in dark,
+  with CopilotKit's lavender kept for the focus ring and the selected sidebar row. The message box
+  glows while you type in it. On Home, OpenBot's orb sits behind the message box as a pale field
+  with rings of dots that brighten as you type, and the page rises in on the first Home of a visit.
+  Nothing moves when your system asks for less motion. Skins keep their own look. OpenBot
+  Desktop's setup window and the phone app take the same grays.
+- **Product telemetry says which kind of install sent it.** An event's `environment` was read from
+  `NODE_ENV`, which a Compose install and OpenBot Desktop leave empty, so every event said
+  `unknown`. It now comes from the build: a release, a release candidate or an internal build says
+  `production`; a development server or a local image build says `development`. Nothing else in the
+  events changes. `docs/TELEMETRY.md` says how older events are read.
+- **A Bot's screen is sharp on a high-resolution display.** On a Retina Mac, the Bot's browser in
+  the full-size view looked soft, because the screen showed the page at its own size and the display
+  stretched it. The screen now tells the Bot's computer how large it is drawn, and the computer sends
+  the page at that size, up to 2560 by 1600. A computer from before this release sends the page as
+  it did.
+- **An app's Connect card shows once.** A reply that called two tools of an app you haven't
+  connected showed the same card twice. It now shows one card per app. When a later reply asks for
+  the same app again, its card moves down to that reply.
 - The composer's model picker names every model whole. On a phone, OpenBot's own model beside its
-  Default tag was cut to "GPT-6…"; a long name now takes a second line.
+  Default tag was cut to "GPT-6…"; a name and its Default tag now wrap together, onto a second line
+  only when they don't fit.
 - **After a move to OpenBot Cloud you can tell where everything went.** OpenBot Desktop stays on the
   move's screens until you move or keep OpenBot here: coming back to the window from the Dock while
   OpenBot got ready for the move used to show the OpenBot on this computer instead, and the move
   never started. The result names the account and organization the move went into, says where
   OpenBot Cloud is in a browser and opens it there. Settings → Computer names the account the app
   is signed in as. In OpenBot Cloud, a bar says when your moved Bots are in another of your
-  organizations than the one you're working in, with a way to switch to it.
+  organizations than the one you're working in, with a way to switch to it, or to move them into the
+  one you're working in (above).
 - **Warnings and successes are drawn with the theme's colors.** What waits on a person, or may not go
   as they expect, is the new `--warning` token, and what worked is `--success`, in place of Tailwind's
   amber and green. A skin's `--success` now colors them too, and a theme in `brand.yaml`'s
@@ -403,7 +997,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Assistant. One whose colors matched theirs gets other colors.
 - **TrustedRouter is an AI provider.** It is listed between Unbiased AI and the custom endpoint
   wherever an AI is chosen: OpenBot Desktop's setup window and Settings; Connect your AI; Settings,
-  Your AI; and Admin, Providers. TrustedRouter is an OpenAI-compatible gateway in front of many
+  Providers; and Admin, Providers. TrustedRouter is an OpenAI-compatible gateway in front of many
   providers, so its row asks only for an API key: OpenBot fills in
   `https://api.trustedrouter.com/v1` and the model `anthropic/claude-sonnet-5.5`, which can be
   changed to any name the gateway lists.
@@ -418,21 +1012,56 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   "Importing a module script failed." The app now loads the page again, once, to get the files
   OpenBot serves now. Failing that, it shows OpenBot's own error screen: what failed, Reload, the
   details to copy into a bug report and, in OpenBot Desktop, its log folder.
-- **One press of Connect on an app's card.** For an app nobody had turned on yet, such as a key app
-  like Fireflies or a sign-in app like Slack, a Bot's card offered Turn on, and pressing it only
-  swapped in a second Connect. Now Connect turns the app on and carries straight on: a key app opens
-  its page under Connections with the key form open, and a sign-in app opens its sign-in in a new
-  tab. An admin's Turn on and give it carries on the same way.
-- A Bot shows one connect card per app, and no longer says an app's tools are ready before it's
-  connected.
-- On OpenBot Cloud, Connections leads to every app in the directory, searching it finds apps you
-  haven't added yet, and an admin can turn an app off from its Connections page.
+- **Connecting an app is one press everywhere.** For an app nobody had turned on yet, a Bot's card
+  offered Turn on, and pressing it only swapped in a second Connect. Turning an app on and then
+  connecting it are now one step: Connect adds the app and carries straight on. A sign-in opens in a
+  new tab, a key app opens its key form, and an app that needs a token, its instance or a sign-in
+  client opens that form first. This works on a Bot's card, on Connections, on an app's page under
+  Admin, and in Admin's Browse apps, which used to stop at Add with a second Connect after it. An
+  admin's card button reads "Connect and give it to" and the Bot's name, where it said Turn on and
+  give it to. An added app's page keeps a switch, "On for everyone", to turn it off for everyone,
+  where it showed "Enable for this organization" ahead of any Connect. Explore apps says "Not
+  connected" where it said "Not added". Where apps are locked down, a member's step is still
+  Request access. While they're open, a member's Connect adds the app and connects their own
+  account, and the Bot's owner gets Connect and give it to. (#2153, #2175)
+- **Apps added by their address work with MCP servers on the newest protocol.** OpenBot talks to a
+  server on MCP's 2026-07-28 revision as well as to the 2025 ones, choosing for each server. Adding
+  a server that speaks only the newest revision used to be refused as not an MCP server; it is now
+  found, open or asking you to sign in.
+- **Connecting several apps a Bot asked for carries the task on once.** A Bot that needs several
+  apps for one task puts up a card for each. Connecting the first used to send "Notion is ready
+  now. Please carry on." by itself, so the Bot moved on and connecting the others told it nothing.
+  Now nothing is sent until the last is ready, then one message names them all: "Notion, Slack and
+  Fireflies are ready now. Please carry on." While some still wait, Continue under the last ready
+  card carries on with what is ready. An app connected with its key on its own page counts too.
+  (#2159)
+- **A Bot with no search app searches with its own browser.** It opens a search engine (DuckDuckGo
+  first, then Bing or Google), reads the results and the pages that answer the question, and tries
+  another engine past a cookie wall or a CAPTCHA. It never says an admin has to add a search app.
+  It used to answer from what it knew, or say it could open Google "but I'm set up not to". (#2160)
+- **Notion connects through Notion's own server.** Notion is offered again in every edition, as
+  Notion's own server, which signs you in as yourself. A Bot now searches page text as well as
+  titles, sees your private pages, and can make a private page. The directory lists one Notion.
+  Pressing it on Connections, in Browse apps, in Admin, on a Bot's card or from a member's request
+  adds it and opens Notion's sign-in in the same press. A Notion connected through the directory
+  keeps working for the Bots that hold it, and reads "Your Notion connection needs reconnecting."
+  with Reconnect. The first sign-in moves each of those Bots onto Notion's own server: with every
+  Notion action while apps are open, and where they're locked down, Notion's reads plus its writes
+  where the Bot could write before.
+- A Bot no longer says an app's tools are ready before the app is connected.
 - Connecting an app that asked for a key now takes you to a sign-in where there is one: the maker's
   own, for PostHog, Fireflies and over a hundred others, or else the directory's version of the app
-  that signs in through its maker. An app already added with its key keeps working as it is.
-- The built-in Notion, Google Drive, Parallel Search, Exa Search and Firecrawl are no longer offered,
-  in any edition. Asking a Bot for Notion reaches the directory's Notion, and one already added keeps
-  working. OpenBot Personal's keyless web search stays on in the background.
+  that signs in through its maker. An app already added with its key keeps working as it is. The key
+  is still one press away for whoever may add apps. Browse apps and the sign-in's own app page offer
+  "Connect with a key instead", with how many actions the key version has. That press adds the key
+  version as an app of its own, named such as "PostHog (key)", and opens its key form. Once it is
+  added, the line reads "Also added with a key as PostHog (key)." (#2121)
+- The built-in Google Drive, and the key versions of Parallel Search, Exa Search and Firecrawl, are
+  no longer offered, in any edition. Find them in the directory or add a server by its address. One
+  already added keeps working. Notion is offered again, as Notion's own server (above). The keyless
+  Parallel Search, Exa Search and Firecrawl are on for every Bot (Before upgrading): in OpenBot
+  Personal in the background, out of every list, and in the team edition in Admin, Apps. There an
+  admin can turn one off for good, and turn it on again from Explore apps.
 - Signing in to an app's own server works with servers that identify OpenBot by its published
   client document, not only by registration. Where a server offers both, OpenBot Cloud uses its
   document and every other OpenBot registers.
@@ -454,7 +1083,23 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - A request that gets no answer says "Couldn't reach OpenBot. Check your connection and try
   again." instead of the browser's own "Load failed" or "Failed to fetch".
 - The terms screen lets a person past only where OpenBot has no terms at all. Any other failed read
-  keeps them at the terms.
+  keeps them at the terms. While OpenBot is moving the organization or its database is out of reach,
+  it shows "Back in a moment" instead, and goes on by itself.
+- A message sent from Slack, Microsoft Teams or a text while its Bot is still answering in that
+  conversation now waits for it, for up to about two minutes, instead of failing. If the Bot is
+  still busy then, it says "The Bot was still busy in this conversation after about 2 minutes, so
+  your message never reached it and nothing was done. Send it again once the Bot has answered."
+- **A public Bot is for everyone in your organization, and the words say so.** Sharing, Setup's
+  Visibility, New Bot and the Sharing row said everyone on OpenBot could use a public Bot. They now
+  name the organization ("Everyone in" it "can find and use it."), and say only you can where you're
+  its only member. The Bots an organization starts with are listed under "Included with OpenBot",
+  not "Shared with you". On OpenBot Cloud, Isolated says "OpenBot Cloud gives each person one
+  computer, not one per Bot." with a link to OpenBot for Business, in Setup, New Bot and Admin.
+  (#2130)
+- OpenBot for Business, in OpenBot Desktop and the app, lists where it runs first ("Deploy in your
+  own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud"), adds deploying custom agents built
+  with any agent stack or your own harness, and leads In control with governance and the audit
+  trail. (#2137)
 - On Routines, the strip lights Routines, and Routines' icon brings its section back after another
   one, such as Bots, was opened there.
 - After connecting an app from a Bot's card, a Bot's page or Browse apps, you're back where you

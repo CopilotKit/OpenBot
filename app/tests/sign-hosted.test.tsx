@@ -179,7 +179,7 @@ test("OpenBot Cloud's signed-out screen offers signing in and OpenBot for Busine
     name: "OpenBot for Business",
   });
   expect(dialog.textContent).toContain(
-    "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
+    "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
   );
   expect(dialog.textContent).toContain("Book a demo");
   expect(dialog.querySelector('iframe[title="Booking calendar"]')).toBeTruthy();

@@ -61,6 +61,7 @@ import {
 import { checkInSubject, planRoutine } from "@/lib/routines/plan";
 import { openingOf } from "@/lib/voice/cut";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** The conversations a routine for this Bot may post in: live ones the Bot is in. */
 function conversationsWith(
@@ -897,7 +898,7 @@ export function NewRoutinePage({
 
         {createFromPlan.error ? (
           <p className="mt-8 text-destructive text-sm" role="alert">
-            {createFromPlan.error.message}
+            {failureSaid(createFromPlan.error)}
           </p>
         ) : null}
         <div className="mt-8 flex justify-end gap-2">

@@ -678,6 +678,11 @@ export const updateBotBodyOneDefaultModelModelRegExp = new RegExp("\\S");
 export const updateBotBodyOneDefaultModelEffortMax = 40;
 
 export const updateBotBodyOneDefaultModelEffortRegExp = new RegExp("\\S");
+export const updateBotBodyOneDefaultModelSourceMax = 40;
+
+export const updateBotBodyOneDefaultModelSourceRegExp = new RegExp(
+  "^[a-z][a-z0-9-]*$",
+);
 
 export const UpdateBotBody = zod
   .object({
@@ -753,6 +758,15 @@ export const UpdateBotBody = zod
           .max(updateBotBodyOneDefaultModelEffortMax)
           .regex(updateBotBodyOneDefaultModelEffortRegExp)
           .nullable(),
+        source: zod
+          .string()
+          .min(1)
+          .max(updateBotBodyOneDefaultModelSourceMax)
+          .regex(updateBotBodyOneDefaultModelSourceRegExp)
+          .optional()
+          .describe(
+            "Who serves the model, as the catalogue's connections name it (ModelCatalogueConnection source). The default applies for a person with a connection of that kind that can run. Omit for the default connection's.",
+          ),
       })
       .nullish()
       .describe(
@@ -910,7 +924,7 @@ export const UpdateBotResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 

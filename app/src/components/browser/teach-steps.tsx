@@ -11,6 +11,7 @@ import { Item, ItemContent, ItemMedia } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { atComputerLimit, settledRefusal } from "@/lib/computers/refusal";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { CANT_OPEN_BROWSER } from "./browser-screen";
@@ -77,7 +78,10 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
     if (saved) rememberIntroduced();
   }, [saved]);
 
-  const error = state.problem ?? (show.error ?? recording.error)?.message;
+  // The refusal kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const error: Failure | null = state.problem
+    ? { message: state.problem }
+    : (show.error ?? recording.error);
   /*
    * Opening the browser refused for good: said calmly, in place of the error. Show browser only opens it. Record opens
    * it and then starts the Recorder, so only the computer limit's refusal of it is the browser's.
@@ -239,7 +243,7 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
         />
       ) : error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
       <NarrationChoiceDialog {...recording.question} />

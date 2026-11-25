@@ -1,6 +1,6 @@
 import { IconBrowser } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { noteStoreTabOpened } from "@/components/browser/browser-nav-item";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -12,6 +12,12 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
 import {
   CONFIRM_WINDOW_MS,
   connectRefusalSentence,
@@ -44,7 +50,8 @@ type Attempt =
   | { state: "expired" }
   | { state: "cancelled" }
   | { state: "closed" }
-  | { state: "failed"; message: string };
+  // The refusal kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  | { state: "failed"; failure: Failure };
 
 /** Whether the Recorder in this browser is installed, and connected to this OpenBot as you. `onInstallId` hears this
  * browser's own copy once it is known (it answers with it only once connected: not while its Connect page waits for
@@ -145,7 +152,9 @@ export function ThisBrowser({
       if (!answer.ok) {
         setAttempt({
           state: "failed",
-          message: connectRefusalSentence(answer.error, answer.retryAfterMs),
+          failure: {
+            message: connectRefusalSentence(answer.error, answer.retryAfterMs),
+          },
         });
         return;
       }
@@ -161,10 +170,7 @@ export function ThisBrowser({
     } catch (error) {
       setAttempt({
         state: "failed",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Couldn't connect this browser.",
+        failure: failureOf(error, "Couldn't connect this browser."),
       });
     }
   }
@@ -173,8 +179,10 @@ export function ThisBrowser({
     <PageSection title="This browser">
       {connections.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't check whether this browser is connected. Try again in a
-          moment.
+          {loadFailure(
+            connections.error,
+            "Couldn't check whether this browser is connected. Try again in a moment.",
+          )}
         </p>
       ) : detected === undefined ? null : (
         <PageRows>
@@ -237,7 +245,7 @@ function describe(
   detected: DetectedRecorder | null,
   connected: boolean,
   attempt: Attempt,
-): string {
+): ReactNode {
   if (!detected) return "The OpenBot Recorder isn't installed in this browser.";
   if (connected) return "Connected";
   switch (attempt.state) {
@@ -250,7 +258,7 @@ function describe(
     case "closed":
       return "The OpenBot Recorder tab closed before you confirmed. Nothing was connected.";
     case "failed":
-      return attempt.message;
+      return failureSaid(attempt.failure);
     default:
       return "Installed. Connect it to record tasks for your Bots.";
   }

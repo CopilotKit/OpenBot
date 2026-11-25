@@ -74,12 +74,20 @@ import {
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+} from "@/components/ui/item";
+import {
   MessageContent,
   MessageFooter,
   MessageHeader,
   Message as MessageRow,
 } from "@/components/ui/message";
 import {
+  conversationFitsInView,
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
@@ -109,6 +117,7 @@ import {
   folderStepBody,
   folderStepSubject,
 } from "@/lib/folders/folder-steps";
+import { type Failure, failureSaid, isHeld } from "@/lib/load-failure";
 import {
   BotMarkdown,
   markdownComponents,
@@ -163,6 +172,7 @@ import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
 import { ResearchResults } from "./research-results";
 import { TeamBotConsentCard } from "./team-bot-consent";
+import { ReplyToolbar } from "./telemetry-assistant-message";
 import {
   dropRepeatedAppCards,
   groupToolSteps,
@@ -179,6 +189,7 @@ import {
   AT_END_PX,
   currentTurn,
   isPersonSentMessage,
+  replyCopies,
   type Turn,
   turnsOf,
 } from "./transcript-turns";
@@ -215,9 +226,23 @@ type ChatTranscriptProps = {
    *
    * A sentence rather than a flag, because the reasons are not interchangeable: a Bot that refused,
    * a Bot whose endpoint is down and a Bot that simply stopped talking are three different things to
-   * be told, and only the thing that ended the turn knows which one happened.
+   * be told, and only the thing that ended the turn knows which one happened. OpenBot holding off
+   * (a move, a brief outage) is the server's refusal kept whole, and is drawn calmly.
    */
-  stopped?: string;
+  stopped?: Failure;
+  /**
+   * The turns the server refused for the person, by the id of the person's message each answered:
+   * the sentence it said. Each is drawn under its own message, as `stopped` is under the last, and
+   * stays there when a later turn is sent. A refusal is not the last turn's state but a fact about
+   * that message, so a second refusal must not take the first one's notice away.
+   */
+  refusals?: ReadonlyMap<string, string>;
+  /**
+   * Drawn under `stopped` while it shows, or else under the latest of `refusals`: what the
+   * conversation itself knows about why, such as the AI connection it runs on having stopped
+   * working (stopped-connection-notice.tsx, which draws nothing unless the server says so).
+   */
+  stoppedNotice?: React.ReactNode;
   /**
    * Carry on with a turn that was cut off part way, drawn as a button beside `stopped`. Absent for
    * a turn that ended for a reason carrying on would not fix (a refusal, a Bot no longer shared).
@@ -233,6 +258,14 @@ type ChatTranscriptProps = {
 
 /** One shared empty array, so a screen without a queue does not hand down a new one per render. */
 const EMPTY_QUEUE: readonly QueuedMessage[] = [];
+const NO_REFUSALS: ReadonlyMap<string, string> = new Map();
+
+/** The person's message a row is part of: a message's attachments row is `<id>:attachments`. */
+function personMessageOf(rowId: string): string {
+  return rowId.endsWith(":attachments")
+    ? rowId.slice(0, -":attachments".length)
+    : rowId;
+}
 
 /**
  * The `/` commands handed to the transcript, from each command to the skill's name.
@@ -345,6 +378,53 @@ function Thinking() {
 }
 
 /**
+ * Whether the whole conversation is in view (`conversationFitsInView`), measured again whenever the
+ * view's size changes or a row is drawn, grows or goes, at most once a frame. A streamed reply
+ * changes its text many times a second; the frame keeps that to one measure per paint.
+ */
+function useAllInView(
+  viewportRef: React.RefObject<HTMLDivElement | null>,
+  /** While history loads there is no view yet; it is looked for again once there is. */
+  restoring: boolean,
+): boolean {
+  const [allInView, setAllInView] = useState(false);
+  useEffect(() => {
+    if (restoring) return;
+    const viewport = viewportRef.current;
+    const content = viewport?.querySelector<HTMLElement>(
+      "[data-slot=message-scroller-content]",
+    );
+    if (!viewport || !content) return;
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() =>
+        setAllInView(conversationFitsInView(content)),
+      );
+    };
+    measure();
+    const resized =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    resized?.observe(viewport);
+    resized?.observe(content);
+    const changed = new MutationObserver(measure);
+    changed.observe(content, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      resized?.disconnect();
+      changed.disconnect();
+    };
+  }, [viewportRef, restoring]);
+  return allInView;
+}
+
+/**
  * The turn ended and no answer came.
  *
  * In the same slot as `Thinking`, and for the same reason it is there: the person is looking at the
@@ -360,32 +440,77 @@ function Thinking() {
 function Stopped({
   reason,
   onCarryOn,
+  notice,
 }: {
-  reason: string;
+  reason: Failure;
   /** A turn cut off part way can be carried on from here. See `onCarryOn` on the transcript. */
   onCarryOn?: () => void;
+  /** More about why, drawn under it. See `stoppedNotice` on the transcript. */
+  notice?: React.ReactNode;
 }) {
-  return (
-    <div
-      className="flex flex-col items-start gap-2"
+  /*
+   * OpenBot holding off (a move, or the organization's database briefly out of reach) is no failure:
+   * the server's sentence in muted words, a clock in place of the warning, and nothing to press.
+   */
+  const held = isHeld(reason);
+  /*
+   * The app's notice: one outlined row, its icon in the media tile, the sentence in the foreground
+   * where it reads as words rather than as an error code in red, and the one way on beside it (on a
+   * phone, under it). Drawn as plain red text it read as a fault in the screen, not as something the
+   * person could act on.
+   */
+  const row = (
+    <Item
+      /*
+       * Card-filled, and framed in both themes as every card in a conversation is (the help-request
+       * card, `dark:border-border`): an outlined row drops its border in dark, and there the notice
+       * read as a filled block with no edge.
+       */
+      className="w-full bg-card dark:border-border"
+      data-held={held ? "" : undefined}
       data-testid="transcript-stopped"
+      size="sm"
+      variant="outline"
     >
-      <p className="text-destructive text-sm" role="alert">
-        {reason}
-      </p>
-      {onCarryOn ? (
-        <Button onClick={onCarryOn} size="sm" variant="outline">
-          Carry on
-        </Button>
-      ) : (
-        <>
-          {/* A run refused because the organization needs a card is answered where it was refused. */}
-          <AddCardButton />
-          {/* And one with no model key, for an admin who can add it. */}
-          <AddModelKeyLink reason={reason} />
-        </>
-      )}
+      <ItemMedia variant="icon">
+        {held ? (
+          <IconClock className="text-muted-foreground" />
+        ) : (
+          <IconAlertTriangle className="text-destructive" />
+        )}
+      </ItemMedia>
+      <ItemContent className="min-w-0">
+        <ItemDescription
+          className="line-clamp-none text-foreground text-sm"
+          role="alert"
+        >
+          {failureSaid(reason)}
+        </ItemDescription>
+      </ItemContent>
+      {/* Nothing drawn when there is no way on: the actions below render nothing then. */}
+      <ItemActions className="empty:hidden max-sm:basis-full">
+        {held ? null : onCarryOn ? (
+          <Button onClick={onCarryOn} size="sm" variant="outline">
+            Carry on
+          </Button>
+        ) : (
+          <>
+            {/* A run refused because the organization needs a card is answered where it was refused. */}
+            <AddCardButton />
+            {/* And one with no model key, for an admin who can add it. */}
+            <AddModelKeyLink reason={reason.message} />
+          </>
+        )}
+      </ItemActions>
+    </Item>
+  );
+  return notice ? (
+    <div className="flex w-full flex-col items-start gap-2">
+      {row}
+      {notice}
     </div>
+  ) : (
+    row
   );
 }
 
@@ -797,7 +922,14 @@ function Arriving({
  * what a routine already is everywhere else in the app; and the instruction ALONE, because that is
  * the part a person wrote and the only part addressed to them.
  */
-function RoutineFiring({ instruction }: { instruction: string }) {
+function RoutineFiring({
+  instruction,
+  refused = false,
+}: {
+  instruction: string;
+  /** Refused before it ran (its notice is under it): it didn't run, so it doesn't say it did. */
+  refused?: boolean;
+}) {
   const responsibility = readResponsibilityTurn(instruction);
   if (responsibility) {
     return <ResponsibilityFiring raw={instruction} turn={responsibility} />;
@@ -806,7 +938,9 @@ function RoutineFiring({ instruction }: { instruction: string }) {
     <div className="flex min-w-0 items-baseline gap-2 text-muted-foreground text-sm">
       <IconClock aria-hidden className="size-4 shrink-0 translate-y-0.5" />
       <span className="min-w-0">
-        <span className="font-medium">Routine ran.</span>{" "}
+        <span className="font-medium">
+          {refused ? "Routine didn't run." : "Routine ran."}
+        </span>{" "}
         <span className="whitespace-pre-wrap">{instruction}</span>
       </span>
     </div>
@@ -875,6 +1009,7 @@ function ResponsibilityFiring({
  */
 const TranscriptMessage = memo(function TranscriptMessage({
   commandLabels = "",
+  copy,
   role,
   slackNames = NO_SLACK_NAMES,
   streaming = false,
@@ -883,9 +1018,17 @@ const TranscriptMessage = memo(function TranscriptMessage({
   threadId,
   messageId,
   underItsCard = false,
+  refused = false,
 }: {
   commandLabels?: string;
+  /**
+   * The words of the finished reply this message ends, when it ends one: the toolbar under it copies
+   * them. See `replyCopies`.
+   */
+  copy?: string;
   role: "user" | "assistant";
+  /** The turn this message asked for was refused before it ran: a routine's says it didn't run. */
+  refused?: boolean;
   /** A task's result drawn directly under that task's card. See `reportsUnderTheirCards`. */
   underItsCard?: boolean;
   /** The people and channels this conversation's Slack steps named, for mentions in the reply. */
@@ -936,7 +1079,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
       <MessageRow align="start">
         <MessageContent>
           <Arriving>
-            <RoutineFiring instruction={firing} />
+            <RoutineFiring instruction={firing} refused={refused} />
           </Arriving>
         </MessageContent>
       </MessageRow>
@@ -984,7 +1127,10 @@ const TranscriptMessage = memo(function TranscriptMessage({
             className={isUser ? undefined : "w-full"}
           >
             <BubbleContent
-              className={cn("text-[1rem]/[1.5]", !isUser && "w-full")}
+              className={cn(
+                "text-(length:--text-conversation)/(--text-conversation--line-height)",
+                !isUser && "w-full",
+              )}
             >
               {isUser ? (
                 // A person's own message is shown exactly as they typed it. Rendering it as markdown
@@ -1061,6 +1207,27 @@ const TranscriptMessage = memo(function TranscriptMessage({
               )}
             </BubbleContent>
           </Bubble>
+          {/*
+           * The Bot chat page's own toolbar, under a finished reply: Copy, as it has there, and as
+           * far below the last line as it sits there (a paragraph's space).
+           *
+           * Its room is kept while the reply is still being written, unseen and out of reach, so the
+           * reply does not move when its turn ends and the toolbar shows: the transcript holds a
+           * reply still at that moment (transcript-room.test.tsx).
+           */}
+          {!isUser && copy !== undefined ? (
+            <div
+              aria-hidden={settled ? undefined : true}
+              className={cn("mt-5", !settled && "invisible")}
+              inert={!settled}
+            >
+              <ReplyToolbar
+                messageId={messageId}
+                text={copy}
+                threadId={threadId}
+              />
+            </div>
+          ) : null}
           {isUser && threadId ? (
             <MessageReactions messageId={messageId} threadId={threadId} />
           ) : null}
@@ -2071,6 +2238,8 @@ export function ChatTranscript({
   queued = EMPTY_QUEUE,
   restoring = false,
   stopped,
+  refusals = NO_REFUSALS,
+  stoppedNotice,
   onCarryOn,
   working,
 }: ChatTranscriptProps) {
@@ -2116,6 +2285,14 @@ export function ChatTranscript({
     folds,
     lastAskId: [...folds.at.values()].at(-1)?.askId,
   };
+  /*
+   * Each finished reply's words, under its last line. A task's folded working is not what it said
+   * back, and a steer note is the person's words, not the Bot's.
+   */
+  const replies = replyCopies(
+    items,
+    (id) => folds.inside.has(id) || readTaskReport(id)?.kind === "steer",
+  );
   /*
    * The folders this conversation's "Check your folders" steps named, for its other folder steps.
    * The same map while the names are the same: a new one on every render is a new context value,
@@ -2200,6 +2377,8 @@ export function ChatTranscript({
          */
         item.kind === "attachments",
     )?.id ?? null;
+  /* Whether every turn is already in view, when the rail of turns has nowhere to take anybody. */
+  const allInView = useAllInView(viewportRef, restoring);
   /* Whether the view follows a streaming reply; see `follow-intent`. */
   const follow = useFollowIntent(viewportRef, restoring);
   const { dispatch: dispatchFollow } = follow;
@@ -2474,6 +2653,29 @@ export function ChatTranscript({
    * What one row draws, without the scroller's wrapper: drawn on its own below, and inside a task
    * turn's "Worked for" row when it folds there (`foldTurnWork`).
    */
+  /*
+   * Each refused message's notice goes under its last row (its words, or its attachments when it
+   * has no words), by row id. A refusal whose message isn't drawn here draws nothing.
+   */
+  const refusedUnder = new Map<string, string>();
+  if (refusals.size > 0) {
+    const lastRow = new Map<string, string>();
+    for (const item of items)
+      if (item.kind === "text" || item.kind === "attachments")
+        lastRow.set(personMessageOf(item.id), item.id);
+    for (const [messageId, sentence] of refusals) {
+      const row = lastRow.get(messageId);
+      if (row !== undefined) refusedUnder.set(row, sentence);
+    }
+  }
+  /*
+   * `stoppedNotice` goes under the latest refusal when no other failure is drawn: a run refused
+   * because its AI connection stopped working is a refusal, said under its message.
+   */
+  const noticeUnder = stopped
+    ? undefined
+    : items.findLast((item) => refusedUnder.has(item.id))?.id;
+
   const rowContent = (item: TranscriptItem, index: number) =>
     item.kind === "tools" || item.kind === "tool" ? (
       <ToolRow
@@ -2490,11 +2692,13 @@ export function ChatTranscript({
       <TranscriptMessage
         threadId={threadId}
         messageId={item.id}
+        copy={replies.get(item.id)}
         settled={!busy || index < turnStart}
         commandLabels={commandLabels}
         role={item.role}
         slackNames={slackNames}
         underItsCard={underTheirCards.has(item.id)}
+        refused={refusedUnder.has(item.id)}
         streaming={
           busy && item.role === "assistant" && index === items.length - 1
         }
@@ -2538,6 +2742,8 @@ export function ChatTranscript({
         </MessageScrollerItem>
       );
     if (taskWork.folds.inside.has(item.id)) return null;
+    // A refused turn's notice, under the last row of the person's message it answered.
+    const refusal = refusedUnder.get(item.id);
     return (
       <MessageScrollerItem
         key={item.id}
@@ -2550,6 +2756,19 @@ export function ChatTranscript({
         {...openingProps(item.id)}
       >
         {rowContent(item, index)}
+        {/*
+         * Inside the message's own row, not a row of its own: the scroller counts its rows by
+         * position, and a row added beside a message would read as a new one arriving. The gap is
+         * the column's own (`gap-6`), so it sits as the live notice does.
+         */}
+        {refusal !== undefined ? (
+          <div className="mt-6">
+            <Stopped
+              notice={item.id === noticeUnder ? stoppedNotice : undefined}
+              reason={{ message: refusal }}
+            />
+          </div>
+        ) : null}
       </MessageScrollerItem>
     );
   };
@@ -2662,7 +2881,11 @@ export function ChatTranscript({
                   </ArrivalsLiveContext.Provider>
                   <div className="contents [&>*]:order-1">
                     {stopped ? (
-                      <Stopped onCarryOn={onCarryOn} reason={stopped} />
+                      <Stopped
+                        notice={stoppedNotice}
+                        onCarryOn={onCarryOn}
+                        reason={stopped}
+                      />
                     ) : waitingOnTheModel ? (
                       <Thinking />
                     ) : null}
@@ -2705,7 +2928,17 @@ export function ChatTranscript({
                 onQueued={followOnQueued}
               />
               <FollowScroll request={follow.request} />
-              <TranscriptRail active={activeTurn} onJump={jump} turns={turns} />
+              {/*
+               * Not while every turn is in view: beside two short turns its marks read as a stray
+               * dash in the margin, and choosing one moved nothing.
+               */}
+              {allInView ? null : (
+                <TranscriptRail
+                  active={activeTurn}
+                  onJump={jump}
+                  turns={turns}
+                />
+              )}
             </MessageScroller>
           </MessageScrollerProvider>
         </LateRenderersContext.Provider>

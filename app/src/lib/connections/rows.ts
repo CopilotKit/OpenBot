@@ -1,4 +1,5 @@
 import { directorySlug } from "@/lib/apps/queries";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
 import type { IdentityProviders, LinkedAccount } from "@/lib/identity/queries";
 import { appNeedsKey } from "@/lib/plugins/enablement-notes";
 import type { CatalogueItem, PluginServer } from "@/lib/plugins/queries";
@@ -157,7 +158,7 @@ export function connectionRows(input: {
           // expected a sign-in is surprised when the page asks for one.
           summary:
             !input.connected.has(server.id) && appNeedsKey(server)
-              ? `Needs a key from ${server.title}`
+              ? `Needs a key from ${vendorNameOf(server.title)}`
               : server.summary,
           state: input.connected.has(server.id) ? "connected" : "available",
           notConnected: !input.connected.has(server.id),
@@ -226,6 +227,29 @@ export function personalConnectionRows(input: {
   const rows = [...apps, ...rest];
   const inUse = (row: ConnectionRow) => row.state !== "available";
   return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];
+}
+
+/**
+ * The team edition's catalogue tiles for apps nobody here has added yet, where apps are open and so
+ * anybody adds one: only the ones that connect in one press (`oneStep`), because one that needs a
+ * host, a client or a key typed first is set up by an admin before anybody can add it. Each press
+ * adds the app and connects the person's own account, as the personal edition's tiles do.
+ */
+export function catalogueToAddRows(input: {
+  catalogue: CatalogueItem[];
+  added: ReadonlySet<string>;
+  connected: ReadonlySet<string>;
+}): ConnectionRow[] {
+  return input.catalogue
+    .filter(
+      (entry) =>
+        entry.key !== ALWAYS_ON_APP &&
+        !input.added.has(entry.key) &&
+        entry.oneStep &&
+        !entry.perInstance &&
+        (entry.auth === "user-oauth" || entry.auth === "none"),
+    )
+    .map((entry) => personalAppRow(entry, input));
 }
 
 function personalAppRow(

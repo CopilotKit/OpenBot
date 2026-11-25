@@ -11,9 +11,9 @@ import {
   IconSparkles,
   IconUsers,
 } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import {
   PageEmpty,
@@ -22,6 +22,12 @@ import {
 } from "@/components/layout/page-shell";
 import { AiConnectionRow } from "@/components/settings/ai-connection";
 import { ProviderTile } from "@/components/settings/ai-connection-chooser";
+import {
+  AiConnectionRows,
+  SEVERAL,
+  SEVERAL_FOR_THE_ORGANIZATION,
+} from "@/components/settings/ai-connection-list";
+import { teamPaths } from "@/components/teams/team-paths";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -48,6 +54,7 @@ import { providerById } from "@/lib/ai-connection/providers";
 import {
   type AiConnection,
   aiConnectionQueryOptions,
+  aiConnectionsQueryOptions,
   desktopAiSupportQueryOptions,
   type PersonalAiConnection,
   personalAiConnectionQueryOptions,
@@ -56,14 +63,20 @@ import {
   enterpriseOverviewQueryOptions,
   modelUsageQueryOptions,
 } from "@/lib/enterprise/queries";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { markFor } from "@/lib/marks";
 import { effortLabel } from "@/lib/models/effort";
+import { modelLabel, modelNamer } from "@/lib/models/names";
 import {
   type AvailableModels,
   availableModelsQueryOptions,
   type ModelOption,
   type ModelSource,
 } from "@/lib/models/queries";
+import {
+  teamListQueryOptions,
+  teamModelsQueryOptions,
+} from "@/lib/teams/queries";
 import { ControlsSection } from "./controls-section";
 
 /** Who serves the models, by the name an admin knows it by. */
@@ -105,27 +118,50 @@ export function ProviderSection() {
   const connection = useQuery(aiConnectionQueryOptions());
   const support = useQuery(desktopAiSupportQueryOptions());
   const personal = useQuery(personalAiConnectionQueryOptions());
-  if (connection.isPending || support.isPending || personal.isPending)
+  const list = useQuery(aiConnectionsQueryOptions("organization"));
+  if (
+    connection.isPending ||
+    support.isPending ||
+    personal.isPending ||
+    list.isPending
+  )
     return null;
+  // Several connections, where the server lists them; the one row it had before otherwise.
+  const listed =
+    list.data &&
+    list.data.connections.length > 0 &&
+    connection.data?.editable &&
+    support.data !== "older"
+      ? list.data
+      : null;
   // Each person brings their own AI here (OpenBot Cloud): the server's verdict, never guessed.
   const cloud = personal.data?.available === true;
   return (
     <>
       <PageSection
-        description={
+        description={`${
           cloud
             ? "Bots use it for everyone in your organization who hasn't connected their own AI."
             : "Built-in Bots and the framework picked at setup run on this provider."
-        }
+        }${listed && listed.connections.length > 1 ? ` ${cloud ? SEVERAL_FOR_THE_ORGANIZATION : SEVERAL}` : ""}`}
         title={cloud ? "Organization's AI" : "AI provider"}
       >
         {connection.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load the AI connection. Try again in a moment.
+            {loadFailure(
+              connection.error,
+              "Couldn't load the AI connection. Try again in a moment.",
+            )}
           </p>
         ) : connection.data === null ? (
           // An OpenBot older than the AI connection: what the model listing says serves it.
           <CatalogueProviderRow />
+        ) : listed ? (
+          <AiConnectionRows
+            list={listed}
+            organizationWide={cloud}
+            scope="organization"
+          />
         ) : (
           <PageRows>
             {connection.data.editable && support.data !== "older" ? (
@@ -196,7 +232,7 @@ function ViewerAiSection({ personal }: { personal: PersonalAiConnection }) {
       title="Your AI"
     >
       <PageRows>
-        <Item render={<Link hash="your-ai" to="/settings" />} size="sm">
+        <Item render={<Link to="/settings/providers" />} size="sm">
           {described ? (
             <ProviderTile
               provider={providerById(personal.connection.provider)}
@@ -242,7 +278,10 @@ function CatalogueProviderRow() {
   if (available.error)
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load the provider. Try again in a moment.
+        {loadFailure(
+          available.error,
+          "Couldn't load the provider. Try again in a moment.",
+        )}
       </p>
     );
   return <ProviderRow listing={available.data} />;
@@ -268,8 +307,8 @@ function ProviderRow({ listing }: { listing: AvailableModels }) {
           <ItemTitle>{name}</ItemTitle>
           <ItemDescription>
             {listing.listed
-              ? `Default ${listing.default} · ${listing.models.length} models listed`
-              : `Default ${listing.default} · couldn't read its models`}
+              ? `Default ${modelLabel(listing, listing.default)} · ${listing.models.length} models listed`
+              : `Default ${modelLabel(listing, listing.default)} · couldn't read its models`}
           </ItemDescription>
         </ItemContent>
       </Item>
@@ -338,24 +377,39 @@ export function ModelChoiceSection() {
         allowed={
           allowlist && allowlistNarrows(allowlist) ? allowlist.models : null
         }
-        failed={overview.error !== null}
+        failed={overview.error}
       />
     );
   // Open unless an admin narrowed it: one person, or a team whose allowlist narrows nothing.
   const open =
     data.exposure === "all" || !allowlist || !allowlistNarrows(allowlist);
+  /*
+   * What a run uses when nobody picked, as the server decides it: the deployment's default, unless
+   * the allowlist leaves it out. Then the newest model allowed (the listing is newest first), since
+   * the server never offers a model it would refuse. With nothing allowed listed, the default.
+   */
+  const isAllowed = (id: string) =>
+    allowlist?.models.includes(`${data.provider}/${id}`) === true;
+  const runsOn =
+    open || isAllowed(data.default)
+      ? data.default
+      : (data.models.find((model) => isAllowed(model.id))?.id ?? data.default);
+  const fallback = modelLabel(data, runsOn);
   return (
     <PageSection
       description={
         open
-          ? `People can pick any model your provider lists, and its thinking level, in each conversation. Bots run on ${data.default} until somebody picks another.`
-          : `People pick among the models you allow below, and their thinking level, in each conversation. Bots run on ${data.default} until somebody picks another.`
+          ? `People can pick any model your provider lists, and its thinking level, in each conversation. Bots run on ${fallback} until somebody picks another.`
+          : `People pick among the models you allow below, and their thinking level, in each conversation. Bots run on ${fallback} until somebody picks another.`
       }
       title="In conversations"
     >
       {overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load these settings. Try again in a moment.
+          {loadFailure(
+            overview.error,
+            "Couldn't load these settings. Try again in a moment.",
+          )}
         </p>
       ) : (
         <PageRows>
@@ -375,7 +429,7 @@ export function ModelChoiceSection() {
                 {open
                   ? `${data.models.length} ${data.models.length === 1 ? "model" : "models"}, kept current from your provider.`
                   : allowed === 0
-                    ? `Your provider doesn't list any model you allowed, so people only get ${data.default}.`
+                    ? `Your provider doesn't list any model you allowed, so people only get ${fallback}.`
                     : "People see them in the composer's model picker, with the default."}
               </ItemDescription>
             </ItemContent>
@@ -397,7 +451,8 @@ function OwnModelsChoice({
 }: {
   /** The models an admin allowed, when the allowlist narrows anything. Null while it is open. */
   allowed: readonly string[] | null;
-  failed: boolean;
+  /** Why the settings couldn't be read, or null when they were. */
+  failed: unknown;
 }) {
   return (
     <PageSection
@@ -410,7 +465,10 @@ function OwnModelsChoice({
     >
       {failed ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load these settings. Try again in a moment.
+          {loadFailure(
+            failed,
+            "Couldn't load these settings. Try again in a moment.",
+          )}
         </p>
       ) : (
         <PageRows>
@@ -437,16 +495,26 @@ function OwnModelsChoice({
   );
 }
 
-/** What the allowed-models row says: the models themselves, the first few by name. */
-export function allowedSummary(models: readonly string[]): string {
+/**
+ * What the allowed-models row says: the models themselves, the first few by name. `nameOf` names
+ * each as the provider's listing does; one the listing doesn't have keeps its id.
+ */
+export function allowedSummary(
+  models: readonly string[],
+  nameOf: (name: string) => string = (name) => name,
+): string {
   if (models.length === 0) return "None listed";
-  if (models.length <= 3) return models.join(", ");
-  return `${models.slice(0, 3).join(", ")} and ${models.length - 3} more`;
+  const named = models.map(nameOf);
+  if (named.length <= 3) return named.join(", ");
+  return `${named.slice(0, 3).join(", ")} and ${named.length - 3} more`;
 }
 
 /** Admin, Providers: the allowlist every Bot's model is checked against. */
 export function ModelAllowlistSection() {
   const [open, setOpen] = useState(false);
+  // The models by name, from the listing the allowlist is chosen from.
+  const listing = useQuery(availableModelsQueryOptions());
+  const nameOf = modelNamer(listing.data);
   // With no organization AI, each person's own AI lists their models: there is no list here.
   const noOrganizationAi = useNoOrganizationAi();
   if (noOrganizationAi === undefined) return null;
@@ -505,13 +573,14 @@ export function ModelAllowlistSection() {
                 <ItemContent>
                   <ItemTitle>Allowed models</ItemTitle>
                   <ItemDescription>
-                    {allowedSummary(modelAllowlist.models)}
+                    {allowedSummary(modelAllowlist.models, nameOf)}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <IconChevronRight className="size-4 text-muted-foreground" />
                 </ItemActions>
               </Item>
+              <TeamsWithOwnModelsRow />
             </PageRows>
             {/* A fresh draft on each open, from the latest saved allowlist. */}
             {open ? (
@@ -531,6 +600,56 @@ export function ModelAllowlistSection() {
       }}
     </ControlsSection>
   );
+}
+
+/**
+ * The teams with a list of their own, each linking to its page in Admin, where its list is set.
+ * Nothing at all while no team has one, or while the teams are being read.
+ */
+function TeamsWithOwnModelsRow() {
+  const list = useQuery(teamListQueryOptions());
+  const teams = list.data?.teams ?? [];
+  const lists = useQueries({
+    queries: teams.map((team) => teamModelsQueryOptions(team.id)),
+  });
+  const limited = teams.filter(
+    (_team, index) => (lists[index]?.data?.models ?? null) !== null,
+  );
+  if (limited.length === 0) return null;
+  return (
+    <>
+      <Separator />
+      <Item size="sm">
+        <ItemMedia variant="icon">
+          <IconUsers />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>Teams with their own list</ItemTitle>
+          <ItemDescription className="line-clamp-none">
+            {limited.map((team, index) => (
+              <Fragment key={team.id}>
+                {index > 0 ? ", " : null}
+                <Link {...teamPaths("admin").team(team.id)}>{team.name}</Link>
+              </Fragment>
+            ))}
+            . People in them run only their team's models, within this list.
+          </ItemDescription>
+        </ItemContent>
+      </Item>
+    </>
+  );
+}
+
+/** What a row in the Allowed models dialog says under a model's name: default, and its thinking. */
+function modelFacts(isDefault: boolean, model?: ModelOption): string {
+  return [
+    isDefault ? "Default" : null,
+    model?.efforts?.length
+      ? `Thinking: ${model.efforts.map(effortLabel).join(", ")}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** `provider/model`, the spelling the allowlist and the usage view share. */
@@ -618,16 +737,22 @@ export function AllowedModelsDialog({
         <DialogHeader>
           <DialogTitle>Allowed models</DialogTitle>
         </DialogHeader>
-        <DialogBody className="mt-4 flex flex-col gap-3 overflow-y-auto">
-          {/* Nothing listed and nothing added yet: nothing to search. */}
-          {listsModels || selected.length > 0 ? (
-            <Input
-              aria-label="Search models"
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search models"
-              value={search}
-            />
-          ) : null}
+        {/*
+         * The search above the list and the box for another model under it stay put: only the list
+         * scrolls. With both inside the scroll, a long list on a phone took the box for another
+         * model out of sight, and nothing said it was there.
+         */}
+        {/* Nothing listed and nothing added yet: nothing to search. */}
+        {listsModels || selected.length > 0 ? (
+          <Input
+            aria-label="Search models"
+            className="mt-4 shrink-0"
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search models"
+            value={search}
+          />
+        ) : null}
+        <DialogBody className="mt-3 flex flex-col gap-3 overflow-y-auto">
           {!listsModels ? (
             <p className="text-muted-foreground text-sm">
               Your organization has no AI yet, so no models are listed. Add each
@@ -635,7 +760,7 @@ export function AllowedModelsDialog({
             </p>
           ) : available.isPending ? null : available.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {available.error.message}
+              {failureSaid(available.error)}
             </p>
           ) : !available.data.listed ? (
             <p className="text-muted-foreground text-sm">
@@ -644,8 +769,9 @@ export function AllowedModelsDialog({
             </p>
           ) : null}
           {rows.length === 0 ? (
-            // With nothing listed and nothing searched for, the note above says why.
-            listsModels || needle ? (
+            // With nothing listed and nothing searched for, the note above says why. A listing that
+            // is still on its way, or couldn't be read, is no answer to a search either.
+            (listsModels ? available.data !== undefined : needle) ? (
               <PageEmpty icon={IconSearch} title="No matches" />
             ) : null
           ) : (
@@ -669,13 +795,15 @@ export function AllowedModelsDialog({
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{model.label}</ItemTitle>
-                    <ItemDescription className="text-xs">
-                      <span className="font-mono">{model.name}</span>
-                      {model.name === defaultName ? " · default" : ""}
-                      {model.model?.efforts?.length
-                        ? ` · Thinking: ${model.model.efforts.map(effortLabel).join(", ")}`
-                        : ""}
-                    </ItemDescription>
+                    {/*
+                     * By its name only: the id a run sends is nobody's to read here. A model the
+                     * listing doesn't have is titled by its full name, which is all it has.
+                     */}
+                    {modelFacts(model.name === defaultName, model.model) ? (
+                      <ItemDescription className="text-xs">
+                        {modelFacts(model.name === defaultName, model.model)}
+                      </ItemDescription>
+                    ) : null}
                   </ItemContent>
                   <ItemActions>
                     <Checkbox
@@ -690,6 +818,8 @@ export function AllowedModelsDialog({
               ))}
             </div>
           )}
+        </DialogBody>
+        <div className="mt-3 flex shrink-0 flex-col gap-3">
           <form
             className="flex items-center gap-2"
             onSubmit={(event) => {
@@ -715,13 +845,21 @@ export function AllowedModelsDialog({
               Add
             </Button>
           </form>
-          {defaultName && !selected.includes(defaultName) ? (
+          {/*
+           * Left out while others are allowed, the default is no longer offered: the server makes the
+           * newest allowed model the default instead, and refuses a Bot set to the old one.
+           */}
+          {defaultName &&
+          selected.length > 0 &&
+          !selected.includes(defaultName) ? (
             <p className="text-muted-foreground text-xs">
-              {defaultName} is the default and stays offered. With Only allowed
-              models on, a built-in Bot on it is refused unless you allow it.
+              {modelNamer(available.data)(defaultName)} is the default. While
+              Only allowed models is on without it, the newest model you allow
+              is the default instead. A Bot set to{" "}
+              {modelNamer(available.data)(defaultName)} is refused.
             </p>
           ) : null}
-        </DialogBody>
+        </div>
         <DialogFooter className="mt-4">
           <Button onClick={onClose} size="sm" type="button" variant="outline">
             Cancel
@@ -745,9 +883,15 @@ export function AllowedModelsDialog({
 /** The Bot a usage row names when the model is one nobody reported (`remote:<bot id>`). */
 const UNREPORTED = /^remote:(.+)$/;
 
-/** A usage row's model, or what stands in for one its Bot never named. */
-export function usageModelName(model: string): string {
-  return UNREPORTED.test(model) ? "Model not reported" : model;
+/**
+ * A usage row's model by its name, or what stands in for one its Bot never named. `nameOf` names it
+ * as the provider's listing does; a model the listing doesn't have (a remote Bot's own) keeps its id.
+ */
+export function usageModelName(
+  model: string,
+  nameOf: (name: string) => string = (name) => name,
+): string {
+  return UNREPORTED.test(model) ? "Model not reported" : nameOf(model);
 }
 
 /**
@@ -756,7 +900,8 @@ export function usageModelName(model: string): string {
  * about why.
  */
 export function usageSourceWords(model: string, source: string): string {
-  if (source === "configured") return "chosen by OpenBot";
+  // The model OpenBot ran it on: a Bot's own setting, a person's pick, or the default.
+  if (source === "configured") return "set in OpenBot";
   if (source === "observed") return "reported by the Bot";
   const bot = UNREPORTED.exec(model)?.[1];
   return bot
@@ -770,19 +915,25 @@ export function usageSourceWords(model: string, source: string): string {
  */
 export function ModelUsageSection({ team }: { team: boolean }) {
   const usage = useQuery(modelUsageQueryOptions(30));
+  // Each model by its name, from the listing the page already reads.
+  const listing = useQuery(availableModelsQueryOptions());
+  const nameOf = modelNamer(listing.data);
   // Its own read, not one of the admin's controls, so it shows in the personal edition's Admin too.
   return (
     <PageSection
       description={
         team
-          ? "Runs on each model in the last 30 days, including runs the allowlist refused."
+          ? "Runs on each model in the last 30 days, refused runs included."
           : "Runs on each model in the last 30 days."
       }
       title="Usage"
     >
       {usage.isPending ? null : usage.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load model usage. Try again in a moment.
+          {loadFailure(
+            usage.error,
+            "Couldn't load model usage. Try again in a moment.",
+          )}
         </p>
       ) : usage.data.summary.length === 0 ? (
         <PageEmpty icon={IconChartBar} title="No recent runs">
@@ -798,14 +949,12 @@ export function ModelUsageSection({ team }: { team: boolean }) {
                   <IconChartBar />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>{usageModelName(row.model)}</ItemTitle>
+                  <ItemTitle>{usageModelName(row.model, nameOf)}</ItemTitle>
                   <ItemDescription>
                     {row.runs} {row.runs === 1 ? "run" : "runs"} by {row.people}{" "}
                     {row.people === 1 ? "person" : "people"}
-                    {row.refused > 0
-                      ? ` · ${row.refused} off the allowlist`
-                      : ""}{" "}
-                    · {usageSourceWords(row.model, row.source)}
+                    {row.refused > 0 ? ` · ${row.refused} refused` : ""} ·{" "}
+                    {usageSourceWords(row.model, row.source)}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>

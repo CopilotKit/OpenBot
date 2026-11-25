@@ -40,6 +40,7 @@ import {
   type BotNotify,
   botLifecycleQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
+import { loadFailure } from "@/lib/load-failure";
 import {
   requestNotificationPermission,
   useNotificationPermission,
@@ -122,7 +123,10 @@ export function BotProfile({
         ) : null}
         {lifecycle.isPending ? null : lifecycle.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load this Bot's settings. Try again in a moment.
+            {loadFailure(
+              lifecycle.error,
+              "Couldn't load this Bot's settings. Try again in a moment.",
+            )}
           </p>
         ) : (
           <PageRows>

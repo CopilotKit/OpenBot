@@ -357,7 +357,9 @@ jobs:
       # screen with a Bot's page in a window of any width, the team screens and a Bot's
       # Publish dialog holding their layout wide, narrow and on a phone, the composer's model picker
       # naming every model whole on a phone, and the Admin screens
-      # where a rule or a grant names a team holding theirs wide and on a phone, an unticked
+      # where a rule or a grant names a team holding theirs wide and on a phone, an admin setting a
+      # team's models and a member reading them, wide and on a phone, a refused turn read as the
+      # app's notice with no rail beside a conversation that fits, an unticked
       # tickbox's edge standing 3:1 from what it is drawn on in light and dark, a Needs you row read
       # whole at a phone's width and a chat's with its answers on a line of their own, a Bot's maths
       # drawn as formulas in KaTeX's font with a wide one scrolling in its own block, a delegated
@@ -372,7 +374,8 @@ jobs:
       # key the provider refuses saying why and changing nothing, and on OpenBot Cloud a person
       # held at Connect your AI until they connect their own, and Admin's Providers where an admin
       # changes, disconnects and connects the organization's AI, told apart from their own, and
-      # People's Remove dialog and the SCIM row fitting wide and on a phone. The
+      # People's Remove dialog and the SCIM row fitting wide and on a phone, and an unsent reply and
+      # its files staying with their conversation across a switch and a reload. The
       # onboarding frame reads the generated app config, which `bun test` alone doesn't write (the
       # test script's pretest does).
       - run: bun run generate:app-config
@@ -382,7 +385,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 \
             "$PLAYWRIGHT_IMAGE" \
-            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/compact-avatar-layout.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/model-picker-phone-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx app/tests/audit-computer-limit-layout.test.tsx app/tests/ai-connection-dialog.test.tsx app/tests/connect-your-ai.test.tsx app/tests/admin-providers-connection.test.tsx app/tests/admin-people-remove-layout.test.tsx
+            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/compact-avatar-layout.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/team-models-screens-layout.test.tsx app/tests/conversation-refusal-layout.test.tsx app/tests/model-picker-phone-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx app/tests/audit-computer-limit-layout.test.tsx app/tests/ai-connection-dialog.test.tsx app/tests/connect-your-ai.test.tsx app/tests/admin-providers-connection.test.tsx app/tests/admin-people-remove-layout.test.tsx app/tests/composer-keeps-draft-browser.test.tsx
 
   # Dictation in the Desktop window on a Mac whose recognizer has no English (United Kingdom) on
   # the device, in Chromium and in WebKit, the engine the Mac window draws with: it listens in the
@@ -399,15 +402,33 @@ jobs:
   # where only an owner is offered Remove on another owner's row. And an admin's settings changes
   # drawn as their cards in a conversation, waiting and answered, beside the Admin screens they
   # change, and the cards for a Bot changing a person's settings or Bots, each beside the screen it
-  # changes. And the chat card's one Connect for an app nobody has turned on, which goes straight
+  # changes, and the cards for a Bot reading them, every one opening its screen with the same link,
+  # and each change waiting on the person titled in plain words. And the chat card's one Connect for an app nobody has turned on, which goes straight
   # to the key form or to the sign-in in a tab claimed on the click, and an admin's one press on
   # an app that has listed nothing yet, which signs them in and then gives it to the Bot. And a part of the app whose
   # file didn't load (a release replaced the page's build, or the connection dropped) fetched again
   # by loading the page once, else OpenBot's own error screen with Reload, the details and the log
   # folder. And a Bot's answer reading as stored after the person switches to another conversation
   # while it is written and comes back, in both engines. And the lists of people with a long name in
-  # them, whose words stay clear of the row's controls. In the image, as above: WebKit's
+  # them, whose words stay clear of the row's controls. And every list of people paging and
+  # searching on the server (Members, Invitations, Teams, a team's people), and each place a person
+  # is picked offering only the organization's own members. And a hold on an organization that
+  # lasts several Retry-Afters: the open page fills in by itself once OpenBot answers, and the
+  # signed-in gate says the hold, never terms to agree to. And a Bot's screen on a display of two
+  # device pixels to one, told to the computer at that size and drawn as sharp, with a click on it
+  # still landing where it is seen. And a conversation with a Bot started from under it in the
+  # Bots panel. And a Bot's table of links, downloaded as Markdown and as CSV with its links, and
+  # looking exactly as Streamdown's own table. In the image, as above: WebKit's
   # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
+  #
+  # The files run side by side, like the Chromium list's, but eight at a time rather than a worker
+  # per core: each file opens Chromium and WebKit, and sixteen workers' 32 browsers on 16 cores
+  # starved the tests that wait on a clock (a hold's Retry-After, a menu's load). This job began
+  # with one file and ran its list one file after another; by 24 November it held 30 files in two
+  # engines each, took 35 minutes and was the whole length of a run. Add a new file to this one
+  # list, not a step of its own: a step runs after the one before it. Only a run narrowed to some of
+  # a file's tests (`-t`) gets its own step. scripts/ci-changes.test.ts holds every real-browser
+  # job to this.
   app-browser-webkit:
     name: app (real browser, WebKit)
     needs: changes
@@ -430,7 +451,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
-            bun test app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx
+            bun test --parallel=8 app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/settings-tool-cards-core.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx app/tests/people-lists.test.tsx app/tests/organization-moving.test.tsx app/tests/organization-removed.test.tsx app/tests/organization-held-reload.test.tsx app/tests/organization-unavailable-pages.test.tsx app/tests/organization-held-actions.test.tsx app/tests/organization-unavailable-admin-pages.test.tsx app/tests/organization-held-recovery.test.tsx app/tests/bot-screen-sharp.test.tsx app/tests/bots-panel-start-conversation.test.tsx app/tests/table-export-browser.test.tsx app/tests/organization-unavailable-chat.test.tsx app/tests/moved-apps-reconnect.test.tsx app/tests/composer-keeps-draft-browser.test.tsx app/tests/conversation-reply-toolbar-layout.test.tsx
       # Connect your AI's sign-in code, copied with one press and read back from WebKit's clipboard.
       # Only that test: the rest of the file runs in Chromium in the job above.
       - run: |
@@ -440,15 +461,6 @@ jobs:
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=webkit \
             "$PLAYWRIGHT_IMAGE" \
             bun test app/tests/connect-your-ai.test.tsx -t "copies with one press"
-      # The Reconnect list after a move to OpenBot Cloud, in both engines: one press of Reconnect is
-      # the whole connect (the sign-in, or the key form), and back to the list once it's connected.
-      - run: |
-          docker run --rm --ipc=host \
-            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
-            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
-            --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
-            "$PLAYWRIGHT_IMAGE" \
-            bun test app/tests/moved-apps-reconnect.test.tsx
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own

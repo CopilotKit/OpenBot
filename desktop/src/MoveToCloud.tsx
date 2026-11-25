@@ -13,6 +13,7 @@ import {
   IconPlug,
   IconRobot,
   IconTarget,
+  IconUser,
 } from "@tabler/icons-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -34,7 +35,12 @@ import {
   StatusLine,
   StepFooter,
 } from "./SetupProgress";
-import { BUSINESS_SUMMARY, CloudMarks, HostingMark } from "./Welcome";
+import {
+  BUSINESS_SUMMARY,
+  CLOUD_TRIAL,
+  CloudMarks,
+  HostingMark,
+} from "./Welcome";
 
 /**
  * Whether this window offers the move to OpenBot Cloud, as the shell answers `move_offer`. `due`:
@@ -51,11 +57,27 @@ export type MoveOffer = {
   footprintBytes: number | null;
 };
 
-/** One private app connection, which can't move and is connected again in OpenBot Cloud. */
+/**
+ * One app connection that doesn't move, connected again in OpenBot Cloud: a sign-in, which stays
+ * with the service it was made through, or an app meant to move connected that OpenBot Cloud
+ * couldn't connect, with `reason`, OpenBot Cloud's own sentence for why.
+ */
 export type ReconnectApp = {
   appId: string;
   appName: string;
   accountLabel?: string;
+  iconUrl?: string;
+  botNames?: string[];
+  reason?: string;
+};
+
+/**
+ * One app connected with a key, which moves connected: its key sealed so only the person's OpenBot
+ * Cloud account can read it, and the app connected there with it.
+ */
+export type CarriedApp = {
+  appId: string;
+  appName: string;
   iconUrl?: string;
   botNames?: string[];
 };
@@ -64,6 +86,8 @@ export type ReconnectApp = {
 export type MovePreview = {
   counts: { kind: string; count: number }[];
   apps: ReconnectApp[];
+  /** The apps that move connected. Absent from an older shell: none. */
+  carried?: CarriedApp[];
   footprintBytes: number | null;
   /** This computer has an AI key the move can bring along, sealed for the person's Cloud account. */
   modelKeysAvailable: boolean;
@@ -76,6 +100,8 @@ export type Moved = {
   /** How much more free space the disk showed right after, which can be less for a while. */
   diskGainedBytes: number | null;
   apps: ReconnectApp[];
+  /** The apps that came across connected. Absent from an older shell: none. */
+  carried?: CarriedApp[];
   /** Plain sentences from OpenBot Cloud about things that moved differently. */
   notes: string[];
   /** Plain sentences about what couldn't be removed from this computer after the move. */
@@ -97,6 +123,49 @@ export type MovedAccount = {
   email: string;
   organization?: string | null;
 };
+
+/**
+ * One organization the person belongs to on OpenBot Cloud, which their Bots can move into
+ * (`move_destinations`). `canMoveIn`: OpenBot Cloud lets them use Bots there. False, the move is
+ * refused before anything moves, so the window shows it and can't pick it.
+ */
+export type MoveDestination = {
+  id: string;
+  name: string;
+  personal: boolean;
+  canMoveIn: boolean;
+};
+
+/** Said on an organization the person can't move their Bots into. */
+export const NOT_ALLOWED_HERE =
+  "An admin of this organization hasn't let you use Bots here.";
+
+/** The person's own organization first, then the others, in the order OpenBot Cloud lists them. */
+export function destinationsInOrder(
+  destinations: MoveDestination[],
+): MoveDestination[] {
+  return [
+    ...destinations.filter((destination) => destination.personal),
+    ...destinations.filter((destination) => !destination.personal),
+  ];
+}
+
+/**
+ * The organization picked to begin with: the one chosen before (Try again), or the person's own,
+ * which is where the move went before they could choose, or else the first they can move into.
+ */
+export function firstPick(
+  destinations: MoveDestination[],
+  before: string | null,
+): string | null {
+  const open = destinations.filter((destination) => destination.canMoveIn);
+  return (
+    open.find((destination) => destination.id === before)?.id ??
+    open.find((destination) => destination.personal)?.id ??
+    open[0]?.id ??
+    null
+  );
+}
 
 /** "You're signed in as sam@example.com, in Sam's organization." Said under the result's heading. */
 export function signedInAsSaid(account: MovedAccount): string {
@@ -155,6 +224,32 @@ export const NOTHING_REMOVED_UNTIL_CHECKED =
 /** Under the choice while Keep is picked: the move stays on offer. */
 export const MOVE_LATER_IN_SETTINGS =
   "You can still move to OpenBot Cloud later in Settings.";
+
+/** Why an app the person signed in to doesn't move, said on the preview. */
+export const SIGN_INS_CANT_MOVE =
+  "Sign-ins can't move, so you'll sign in to each one again.";
+
+/** The same, said on the result, over each app's Reconnect. */
+export const SIGN_INS_DIDNT_MOVE =
+  "Sign-ins can't move, so sign in to each one again.";
+
+/** The same, on a result that sends the person to Connect your AI first. */
+export const SIGN_INS_AFTER_AI =
+  "Sign-ins can't move. Once your AI is connected, you'll reconnect each one from a list in OpenBot Cloud.";
+
+/** Over the apps connected with a key, on the preview. */
+export const CARRIED_HEADING = "These apps come across connected";
+
+/** Why they can: said in the voice of the AI key's own line. */
+export const CARRIED_SEALED =
+  "Their keys are sealed so only your OpenBot Cloud account can read them.";
+
+/** Over the apps that came across connected, on the result. */
+export const CARRIED_DONE_HEADING = "These apps came across connected";
+
+/** What that means for the person's Bots. */
+export const CARRIED_DONE_SAID =
+  "Your Bots can use them in OpenBot Cloud as before.";
 
 /** Said when a move stopped: the one thing the person needs to know first. */
 export const NOTHING_WAS_REMOVED = "Nothing was removed from this computer.";
@@ -331,6 +426,7 @@ type Screen =
   | { at: "choice" }
   | { at: "confirm" }
   | { at: "moving" }
+  | { at: "where"; destinations: MoveDestination[] }
   | { at: "failed"; problem: Problem }
   | { at: "done"; moved: Moved };
 
@@ -343,17 +439,20 @@ type Screen =
  *    next update when it followed a failed move (`onKeep`). Between them,
  *    OpenBot for Business as the first screen draws it, which books a demo (`BusinessBooker`) and
  *    moves nothing: while it is picked there is no Continue and no Keep.
- * 2. What moves, from the OpenBot running here (`move_preview`), and the app connections that can't
- *    move, by name, to reconnect in OpenBot Cloud. Settings opens here. Offered at launch, before
- *    OpenBot started (`here`), it starts now (`onGetReady`), and the figures arrive once it is up.
+ * 2. What moves, from the OpenBot running here (`move_preview`). What the person acts on comes
+ *    first: the apps they signed in to, which can't move, by name, to reconnect in OpenBot Cloud,
+ *    then bringing the AI key. The apps connected with a key, which come across connected
+ *    (`carried`), come last. Settings opens here. Offered at launch, before OpenBot started
+ *    (`here`), it starts now (`onGetReady`), and the figures arrive once it is up.
  * 3. The move (`move_to_cloud`): sign in through the browser, pack up, send, add, check, and only
  *    then remove OpenBot from this computer, each a row (`move:progress`).
  * 4. A move that stopped removed nothing: the sentence, Try again, or keep OpenBot here.
- * 5. Done: the space freed, the apps to reconnect, each opening its own connect page in OpenBot
- *    Cloud in this window (`open_moved_cloud`), and Open OpenBot, which opens the list of apps to
- *    reconnect when there are any. When OpenBot Cloud still needs the person's AI (`connectAi`),
- *    Connect your AI comes first and is the only way on: the apps are named as the step after it,
- *    with nothing on them to press. It names the account and organization the move went into
+ * 5. Done: the space freed, the apps to reconnect (one meant to come across that OpenBot Cloud
+ *    couldn't connect says why), each opening its own connect page in OpenBot Cloud in this window
+ *    (`open_moved_cloud`), then the apps that came across connected, and Open OpenBot, which opens
+ *    the list of apps to reconnect when there are any. When OpenBot Cloud still needs the person's
+ *    AI (`connectAi`), Connect your AI comes first and is the only way on: the apps are named as the
+ *    step after it, with nothing on them to press. It names the account and organization the move went into
  *    (`account`), and where OpenBot Cloud is in a browser, with Open in browser: on 1.2.0-rc.3 a
  *    person who moved went to the website, signed in with another account and found nothing.
  */
@@ -458,7 +557,14 @@ export function MoveToCloud({
   const [stages, setStages] = useState<Stages>(freshStages);
   const cancelled = useRef(false);
   const [cancelling, setCancelling] = useState(false);
-  const move = async () => {
+  // The organization the person chose last, picked again when Try again asks once more.
+  const chose = useRef<string | null>(null);
+  /*
+   * Move pressed (or Try again): sign in, and the organizations the person belongs to on OpenBot
+   * Cloud. One: the move goes straight on into it. More: they choose where their Bots go, and
+   * Continue moves them there (`into`).
+   */
+  const move = async (into?: MoveDestination) => {
     cancelled.current = false;
     setCancelling(false);
     setStages(freshStages());
@@ -467,9 +573,28 @@ export function MoveToCloud({
       if (alive.current) setStages((now) => advance(now, event.payload));
     }).catch(() => null);
     try {
+      let organization = into?.id;
+      if (!into) {
+        const destinations = await invoke<MoveDestination[] | null>(
+          "move_destinations",
+          { address: cloudAddress() },
+        );
+        if (!alive.current) return;
+        if (Array.isArray(destinations) && destinations.length > 1) {
+          setScreen({
+            at: "where",
+            destinations: destinationsInOrder(destinations),
+          });
+          return;
+        }
+        organization = Array.isArray(destinations)
+          ? destinations[0]?.id
+          : undefined;
+      }
       const moved = await invoke<Moved>("move_to_cloud", {
         address: cloudAddress(),
         includeModelKeys: Boolean(preview?.modelKeysAvailable && includeKeys),
+        ...(organization ? { organization } : {}),
       });
       if (alive.current) setScreen({ at: "done", moved });
     } catch (error) {
@@ -480,7 +605,8 @@ export function MoveToCloud({
         setScreen({ at: "confirm" });
         return;
       }
-      setStages((now) => stopped(now));
+      // Refused before anything was packed up: no step of the move failed, none had begun.
+      if (problem.kind !== "move-not-allowed") setStages((now) => stopped(now));
       setScreen({ at: "failed", problem });
     } finally {
       stop?.();
@@ -548,6 +674,17 @@ export function MoveToCloud({
       </Sheet>
     );
   }
+  if (screen.at === "where")
+    return (
+      <Where
+        destinations={screen.destinations}
+        picked={firstPick(screen.destinations, chose.current)}
+        onContinue={(destination) => {
+          chose.current = destination.id;
+          void move(destination);
+        }}
+      />
+    );
   if (screen.at === "failed") {
     const { problem } = screen;
     return (
@@ -557,7 +694,9 @@ export function MoveToCloud({
             ? "Signing in didn't finish"
             : problem.kind === "move-mismatch"
               ? "Not everything arrived"
-              : "The move didn't finish"}
+              : problem.kind === "move-not-allowed"
+                ? "Your Bots can't move there"
+                : "The move didn't finish"}
         </h1>
         <p className="lede">{problem.said}</p>
         <div className="local-alert needs move-safe" role="status">
@@ -686,6 +825,7 @@ function Choice({
           <span className="tile-summary">
             {WHAT_MOVES} move to your OpenBot Cloud account.
             {footprintBytes != null && ` ${removesSaid(footprintBytes)}`}
+            {` ${CLOUD_TRIAL}`}
           </span>
         </label>
         {/* The first screen's OpenBot for Business row: a company's own cloud or on-prem. */}
@@ -754,6 +894,79 @@ function Choice({
   );
 }
 
+/**
+ * Where the Bots go, for a person in more than one organization on OpenBot Cloud: the choice
+ * screen's own rows, one per organization, their own first. One that doesn't let them use Bots is
+ * shown, held, saying so. Continue moves them into the one picked.
+ */
+function Where({
+  destinations,
+  picked: first,
+  onContinue,
+}: {
+  destinations: MoveDestination[];
+  picked: string | null;
+  onContinue: (destination: MoveDestination) => void;
+}) {
+  const [picked, setPicked] = useState(first);
+  const chosen = destinations.find(
+    (destination) => destination.id === picked && destination.canMoveIn,
+  );
+  return (
+    <Sheet>
+      <h1>Where should your Bots go?</h1>
+      <p className="lede">
+        You belong to more than one organization in OpenBot Cloud. Choose the
+        one your Bots move to.
+      </p>
+      <fieldset className="picker hosting">
+        <legend className="sr-only">Organization</legend>
+        {destinations.map((destination) => (
+          <label
+            key={destination.id}
+            className={
+              !destination.canMoveIn
+                ? "tile held"
+                : destination.id === picked
+                  ? "tile chosen"
+                  : "tile"
+            }
+          >
+            <input
+              type="radio"
+              name="destination"
+              className="tile-input"
+              value={destination.id}
+              checked={destination.id === picked}
+              disabled={!destination.canMoveIn}
+              onChange={() => setPicked(destination.id)}
+            />
+            <Mark icon={destination.personal ? IconUser : IconBuilding} />
+            <span className="tile-name">{destination.name}</span>
+            <span className="tile-summary">
+              {!destination.canMoveIn
+                ? NOT_ALLOWED_HERE
+                : destination.personal
+                  ? "Your own organization."
+                  : "An organization you belong to."}
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <div className="row">
+        <button
+          type="button"
+          disabled={!chosen}
+          onClick={() => chosen && onContinue(chosen)}
+        >
+          Continue
+        </button>
+      </div>
+      <p className="footnote">{NOTHING_REMOVED_UNTIL_CHECKED}</p>
+    </Sheet>
+  );
+}
+
 function Confirm({
   preview,
   problem,
@@ -779,6 +992,7 @@ function Confirm({
   onKeep: () => void;
 }) {
   const lines = preview ? countLines(preview.counts) : [];
+  const carried = preview?.carried ?? [];
   return (
     <Sheet>
       <h1>Move to OpenBot Cloud</h1>
@@ -812,6 +1026,7 @@ function Confirm({
               ))}
             </ul>
           )}
+          {/* What the person acts on first: the apps to sign in to again, then the AI key. */}
           {preview.apps.length > 0 && (
             <section
               className="local-alert needs move-apps-notice"
@@ -820,9 +1035,7 @@ function Confirm({
               <h2 id="move-apps-heading">
                 You'll reconnect these apps in OpenBot Cloud
               </h2>
-              <p>
-                Your app connections are private, so they can't move safely.
-              </p>
+              <p>{SIGN_INS_CANT_MOVE}</p>
               <AppList apps={preview.apps} />
             </section>
           )}
@@ -847,6 +1060,17 @@ function Confirm({
             <p className="move-key-said move-key-none">
               You'll connect your AI in OpenBot Cloud after the move.
             </p>
+          )}
+          {/* Last, calm, in the bordered group: nothing to do for these. */}
+          {carried.length > 0 && (
+            <section
+              className="move-then"
+              aria-labelledby="move-carried-heading"
+            >
+              <h2 id="move-carried-heading">{CARRIED_HEADING}</h2>
+              <p>{CARRIED_SEALED}</p>
+              <AppList apps={carried} label="Apps that move connected" />
+            </section>
           )}
         </>
       )}
@@ -878,16 +1102,22 @@ function Confirm({
   );
 }
 
-/** The app connections to reconnect, by name, with an action on each row when there is one. */
+/**
+ * App connections by name, with an action on each row when there is one: the apps to reconnect, or
+ * (`label`) the apps that move connected. A row with a `reason` says it as its second line, where
+ * the Bots that used it would be.
+ */
 function AppList({
   apps,
   action,
+  label = "Apps to reconnect",
 }: {
   apps: ReconnectApp[];
   action?: (app: ReconnectApp) => ReactNode;
+  label?: string;
 }) {
   return (
-    <ul className="move-apps" aria-label="Apps to reconnect">
+    <ul className="move-apps" aria-label={label}>
       {apps.map((app) => (
         <li key={app.appId} className="move-app">
           <AppMark app={app} />
@@ -898,10 +1128,17 @@ function AppList({
                 <span className="move-app-account">, {app.accountLabel}</span>
               )}
             </span>
-            {app.botNames && app.botNames.length > 0 && (
-              <span className="move-app-bots">
-                Used by {namesSaid(app.botNames)}
+            {app.reason ? (
+              <span className="move-app-bots" data-move-app-reason="">
+                {app.reason}
               </span>
+            ) : (
+              app.botNames &&
+              app.botNames.length > 0 && (
+                <span className="move-app-bots">
+                  Used by {namesSaid(app.botNames)}
+                </span>
+              )
             )}
           </span>
           {action?.(app)}
@@ -962,6 +1199,7 @@ function Done({ moved }: { moved: Moved }) {
   // OpenBot Cloud sends a person with no AI to Connect your AI before any page, and then on to
   // the page they asked for: the list of apps that didn't move, each with Reconnect.
   const aiFirst = moved.connectAi === true;
+  const carried = moved.carried ?? [];
   return (
     <Sheet>
       <h1>You're on OpenBot Cloud</h1>
@@ -1004,11 +1242,7 @@ function Done({ moved }: { moved: Moved }) {
         (aiFirst ? (
           <section className="move-then" aria-labelledby="moved-apps-heading">
             <h2 id="moved-apps-heading">Then reconnect your apps</h2>
-            <p>
-              Your app connections are private, so they didn't move. Once your
-              AI is connected, you'll reconnect each one from a list in OpenBot
-              Cloud.
-            </p>
+            <p>{SIGN_INS_AFTER_AI}</p>
             <AppList apps={moved.apps} />
           </section>
         ) : (
@@ -1019,7 +1253,7 @@ function Done({ moved }: { moved: Moved }) {
             <h2 id="moved-apps-heading">
               Reconnect your apps in OpenBot Cloud
             </h2>
-            <p>Your app connections are private, so they didn't move.</p>
+            <p>{SIGN_INS_DIDNT_MOVE}</p>
             <AppList
               apps={moved.apps}
               action={(app) => (
@@ -1036,6 +1270,14 @@ function Done({ moved }: { moved: Moved }) {
             />
           </section>
         ))}
+      {/* After what the person acts on: nothing to do for these. */}
+      {carried.length > 0 && (
+        <section className="move-then" aria-labelledby="moved-carried-heading">
+          <h2 id="moved-carried-heading">{CARRIED_DONE_HEADING}</h2>
+          <p>{CARRIED_DONE_SAID}</p>
+          <AppList apps={carried} label="Apps that came across connected" />
+        </section>
+      )}
       {notices.length > 0 && (
         <div className="move-notice" role="status">
           {notices.map((said) => (

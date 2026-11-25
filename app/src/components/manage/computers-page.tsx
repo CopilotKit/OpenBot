@@ -61,6 +61,7 @@ import {
   deploymentCapabilitiesQueryOptions,
   useNoBotComputers,
 } from "@/lib/deployment/queries";
+import { FailureNotice, isHeld } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   RestoreComputerDialog,
@@ -202,18 +203,20 @@ export function ComputersPage({
    * A list that could not be read. A refused stop, reset or update is said beside the buttons
    * instead, because the top of this page is a long scroll away from them.
    */
-  const problem = fleet.error
-    ? "Couldn't load the computers. Try again in a moment."
-    : null;
-  const hostProblem = hostAccess.error
-    ? hostAccess.error.message
-    : requestGrant.error
-      ? requestGrant.error.message
-      : revokeGrant.error
-        ? revokeGrant.error.message
-        : stopHostAccess.error
-          ? stopHostAccess.error.message
-          : null;
+  const problem = fleet.error;
+  // OpenBot holding off for now: said calmly, and not as a list that failed (lib/load-failure.tsx).
+  const held = isHeld(fleet.error);
+  /*
+   * What the folders section couldn't read: whether the desktop app is there, and the Bots to list.
+   * Without both, "No Bots yet" and "The desktop app is offline" would be guesses, so the section
+   * says why it can't list them instead. A hold already said at the top of the page isn't said again.
+   */
+  const hostUnread = hostAccess.error ?? (agentId ? null : agents.error);
+  const hostProblem =
+    requestGrant.error ??
+    revokeGrant.error ??
+    stopHostAccess.error ??
+    (held && isHeld(hostUnread) ? null : hostUnread);
 
   const run = (
     computer: ComputerProfile,
@@ -300,14 +303,11 @@ export function ComputersPage({
 
   const body = (
     <>
-      {problem ? (
-        <p
-          className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-          role="alert"
-        >
-          {problem}
-        </p>
-      ) : null}
+      <FailureNotice
+        className="mt-4"
+        error={problem}
+        own="Couldn't load the computers. Try again in a moment."
+      />
 
       {personal || agentId ? null : isolation === "shared" ? (
         // The server's own word on whether this is a shared install (one person's isn't).
@@ -343,6 +343,7 @@ export function ComputersPage({
           pending={hostAccess.data?.pending ?? []}
           personal={personal}
           problem={hostProblem}
+          unread={Boolean(hostUnread)}
           requestingBotId={
             requestGrant.isPending
               ? (requestGrant.variables?.botId ?? null)
@@ -369,14 +370,7 @@ export function ComputersPage({
                 : "Computers in this organization"
           }
         >
-          {setState.error ? (
-            <p
-              className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-              role="alert"
-            >
-              {setState.error.message}
-            </p>
-          ) : null}
+          <FailureNotice className="mb-3" error={setState.error} />
           {noComputers ? (
             <PageEmpty
               icon={IconDeviceDesktopOff}
@@ -385,7 +379,7 @@ export function ComputersPage({
               Bots can't browse or run commands on this OpenBot. Set up
               computers for Bots, and they show up here.
             </PageEmpty>
-          ) : computers === null && problem ? (
+          ) : computers === null && problem && !held ? (
             <PageEmpty
               icon={IconAlertTriangle}
               title="Couldn't load the list"
@@ -674,7 +668,10 @@ type HostFoldersSectionProps = {
    * edition the desktop's owner may be somebody else, so a waiting request names them instead.
    */
   personal: boolean;
-  problem: string | null;
+  /** A refused press, or a read the section couldn't make: said in a box over the section. */
+  problem: unknown;
+  /** The desktop app's state or the Bots couldn't be read, so neither is guessed at. */
+  unread: boolean;
   requestingBotId: string | null;
   revokingGrantId: string | null;
   stopping: boolean;
@@ -693,6 +690,7 @@ function HostFoldersSection({
   pending,
   personal,
   problem,
+  unread,
   requestingBotId,
   revokingGrantId,
   stopping,
@@ -712,23 +710,16 @@ function HostFoldersSection({
       description="Choose folders a Bot can read on this computer. The desktop app asks before each edit or command. Access ends when you stop OpenBot."
       title="Folders on this computer"
     >
-      {problem ? (
-        <p
-          className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-          role="alert"
-        >
-          {problem}
-        </p>
-      ) : null}
+      <FailureNotice className="mb-3" error={problem} />
 
-      {desktop && !connected && !loading ? (
+      {desktop && !connected && !loading && !unread ? (
         <p className="mb-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
           The desktop app is offline. Open it to approve folders or run
           commands.
         </p>
       ) : null}
 
-      {loading ? null : !desktop ? (
+      {loading || unread ? null : !desktop ? (
         <PageEmpty icon={IconDeviceDesktop} title="Needs OpenBot Desktop">
           This OpenBot isn't running in the desktop app. Use OpenBot Desktop to
           let Bots read folders on this computer.

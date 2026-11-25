@@ -84,6 +84,13 @@ info:
     refused for a version.
 
 
+    Every answer carries `X-Request-Id`, the id OpenBot's server logs the
+    request under, and a problem's requestId is the same id. So does every
+    other answer under /api, the four addresses outside /api/v2 included.
+    Quote it when reporting a failure, so the request can be found in the
+    server's logs.
+
+
     This file is the single source of truth: the clients, the server's types,
     the docs and the contract tests are all generated from it or checked
     against it. A change that breaks an existing client fails the pull request.
@@ -176,6 +183,7 @@ paths:
   /api/v2/organizations/{organizationId}/deployment: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1deployment' }
   /api/v2/organizations/{organizationId}/settings: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings' }
   /api/v2/organizations/{organizationId}/settings/stop-inactive-computers: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1stop-inactive-computers' }
+  /api/v2/organizations/{organizationId}/settings/apps: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1apps' }
   /api/v2/organizations/{organizationId}/capabilities: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities' }
   /api/v2/organizations/{organizationId}/capabilities/{capabilityId}: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities~1{capabilityId}' }
   /api/v2/organizations/{organizationId}/capabilities/batch-update: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities~1batch-update' }
@@ -201,6 +209,7 @@ paths:
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/members: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1members' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/members/{memberId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1members~1{memberId}' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/messages: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1messages' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/refused-turns: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1refused-turns' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/attachments: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1attachments' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-calls: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1voice-calls' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-sessions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1voice-sessions' }
@@ -226,6 +235,15 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins' }
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins~1{signInId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}/code: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins~1{signInId}~1code' }
+  /api/v2/organizations/{organizationId}/ai-connections: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connections' }
+  /api/v2/organizations/{organizationId}/ai-connections/{connectionId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connections~1{connectionId}' }
+  /api/v2/organizations/{organizationId}/ai-connections/{connectionId}/make-default: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connections~1{connectionId}~1make-default' }
+  /api/v2/organizations/{organizationId}/ai-connection-sign-ins: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection-sign-ins' }
+  /api/v2/organizations/{organizationId}/ai-connection-sign-ins/{signInId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection-sign-ins~1{signInId}' }
+  /api/v2/organizations/{organizationId}/ai-connection-sign-ins/{signInId}/code: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection-sign-ins~1{signInId}~1code' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connections' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections/{connectionId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connections~1{connectionId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections/{connectionId}/make-default: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connections~1{connectionId}~1make-default' }
   /api/v2/organizations/{organizationId}/apps: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps' }
   /api/v2/organizations/{organizationId}/apps/{appId}: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}' }
   /api/v2/organizations/{organizationId}/apps/{appId}/refresh: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1refresh' }
@@ -340,6 +358,7 @@ paths:
   /api/v2/organizations/{organizationId}/teams/{teamId}: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}' }
   /api/v2/organizations/{organizationId}/teams/{teamId}/members: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1members' }
   /api/v2/organizations/{organizationId}/teams/{teamId}/members/{memberId}: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1members~1{memberId}' }
+  /api/v2/organizations/{organizationId}/teams/{teamId}/models: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1models' }
   /api/v2/organizations/{organizationId}/people/{personId}/approvals: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals' }
   /api/v2/organizations/{organizationId}/people/{personId}/approvals/{approvalId}/decide: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals~1{approvalId}~1decide' }
   /api/v2/organizations/{organizationId}/people/{personId}/questions: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1questions' }
@@ -450,6 +469,8 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}/cancel: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}~1cancel' }
   /api/v2/organizations/{organizationId}/people/{personId}/saved-logins: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1saved-logins' }
   /api/v2/organizations/{organizationId}/people/{personId}/saved-logins/{savedLoginId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1saved-logins~1{savedLoginId}' }
+  /api/v2/organizations/{organizationId}/saved-logins/purge: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1saved-logins~1purge' }
+  /api/v2/organizations/{organizationId}/saved-logins/unusable: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1saved-logins~1unusable' }
   /api/v2/organizations/{organizationId}/people/{personId}/recorder-connect-codes: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connect-codes' }
   /api/v2/organizations/{organizationId}/people/{personId}/recorder-connections: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connections' }
   /api/v2/organizations/{organizationId}/people/{personId}/recorder-connections/{recorderConnectionId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connections~1{recorderConnectionId}' }
@@ -667,8 +688,8 @@ components:
             host-access:write: Give a Bot a folder on the signed-in person's own computer, take one away, and stop folder access.
             sign-in-requests:read: Read the sign-in requests the signed-in person's Bots are waiting on, never a credential.
             sign-in-requests:write: Open, answer and decline sign-in requests for the signed-in person.
-            saved-logins:read: Read which logins the signed-in person saved, never a password.
-            saved-logins:write: Delete the signed-in person's saved logins.
+            saved-logins:read: Read which logins the signed-in person saved, never a password, and for an administrator how many saved logins nobody in the organization may use any more.
+            saved-logins:write: Delete the signed-in person's saved logins, and for an administrator the saved logins nobody in the organization may use any more.
             recorder:read: Read the signed-in person's connected browsers and their recordings.
             recorder:write: Connect and disconnect the signed-in person's browsers.
             learning:read: Read what Learning proposed in the signed-in person's own spaces, their Learning choices and skills, and for an administrator the organization's Learning settings, spaces, people's proposals and sharing requests.
@@ -813,6 +834,17 @@ components:
       schema:
         type: string
         const: private, no-store
+    RequestId:
+      description: >-
+        The id this OpenBot gave the request, the one its server logs file
+        the request under. A problem's requestId is the same id. A client
+        that reports a failure quotes it, so the request can be found in the
+        server's logs.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      example: req_5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
   schemas:
     BotVisibility: { $ref: './bots.yaml#/components/schemas/BotVisibility' }
     Bot: { $ref: './bots.yaml#/components/schemas/Bot' }
@@ -960,6 +992,8 @@ components:
     OrganizationSettings: { $ref: './admin-settings.yaml#/components/schemas/OrganizationSettings' }
     OrganizationSettingsContext: { $ref: './admin-settings.yaml#/components/schemas/OrganizationSettingsContext' }
     UpdateOrganizationSettingsRequest: { $ref: './admin-settings.yaml#/components/schemas/UpdateOrganizationSettingsRequest' }
+    AppsSetting: { $ref: './admin-settings.yaml#/components/schemas/AppsSetting' }
+    UpdateAppsSettingRequest: { $ref: './admin-settings.yaml#/components/schemas/UpdateAppsSettingRequest' }
     InactiveComputersStopped: { $ref: './admin-settings.yaml#/components/schemas/InactiveComputersStopped' }
     PersonComputersStopped: { $ref: './admin-settings.yaml#/components/schemas/PersonComputersStopped' }
     CapabilityId: { $ref: './admin-settings.yaml#/components/schemas/CapabilityId' }
@@ -1081,8 +1115,17 @@ components:
           maxLength: 2048
           description: >-
             On PLAN_REQUIRED, where an owner or an admin goes in the browser to
-            add a card and start the organization's free trial, or to update
-            the card. Null for a member, who asks an admin.
+            add a card, or to update it after a failed payment. Null for a
+            member, who asks an admin.
+        addSeatUrl:
+          type: [string, 'null']
+          format: uri-reference
+          maxLength: 2048
+          description: >-
+            On SEAT_REQUIRED, where an owner or an admin goes in the browser to
+            add one more seat to the organization's plan. It comes back to
+            OpenBot once the seat is added, and the invitation can be sent
+            then. Null for anyone who can't add a seat.
     ConversationJoinToken: { $ref: './conversations.yaml#/components/schemas/ConversationJoinToken' }
     CredentialKind: { $ref: './model-connections.yaml#/components/schemas/CredentialKind' }
     Credential: { $ref: './model-connections.yaml#/components/schemas/Credential' }
@@ -1097,6 +1140,9 @@ components:
   responses:
     InvalidRequest:
       description: A parameter is malformed.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1116,6 +1162,9 @@ components:
     InvalidBot: { $ref: './bots.yaml#/components/responses/InvalidBot' }
     Unauthenticated:
       description: The caller is not signed in.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1137,6 +1186,9 @@ components:
         The caller holds no role in this organization, or the organization
         requires signing in through the company's identity provider and the
         caller hasn't (SSO_REQUIRED).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1170,6 +1222,9 @@ components:
         The caller is not an administrator of the organization, or holds no
         role in it. Or the organization requires signing in through the
         company's identity provider and the caller hasn't (SSO_REQUIRED).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1201,6 +1256,9 @@ components:
     AuditQuestionNotUnderstood: { $ref: './audit-events.yaml#/components/responses/AuditQuestionNotUnderstood' }
     ModelFailed:
       description: The model didn't answer, or didn't answer usefully. Asking again may work.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1219,6 +1277,9 @@ components:
                 traceId: trace_example
     ModelNotConfigured:
       description: The deployment has no model to read a question with.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1237,6 +1298,9 @@ components:
                 traceId: trace_example
     OrganizationNotFound:
       description: The organization does not exist or is not visible to the caller.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1256,6 +1320,9 @@ components:
     BotNotFound: { $ref: './bots.yaml#/components/responses/BotNotFound' }
     IdempotencyConflict:
       description: The Idempotency-Key was already used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1278,6 +1345,9 @@ components:
         The caller asked about or changed somebody else without being an
         administrator, changed somebody else's name, or changed a role
         without being an administrator.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1309,6 +1379,9 @@ components:
       description: >-
         The caller asked about somebody else's own things, which only that
         person may read or change: an administrator can't either.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1332,6 +1405,9 @@ components:
         Nobody with that id has signed in here, or the organization does not
         exist. Only an administrator is told so: anybody else is refused
         first.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1368,6 +1444,9 @@ components:
         The body is larger than this address takes. Only an address that
         limits its body answers this; the detail says how much it takes where
         the limit is a person's to meet.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1386,6 +1465,9 @@ components:
                 traceId: trace_example
     ServerError:
       description: The server could not complete the request.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1410,6 +1492,9 @@ components:
         request too large to read (413, 414, 431) or a gateway that cannot
         reach it (502, 503, 504). A client reads detail and retryable from
         it like any other problem.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1455,31 +1540,49 @@ components:
                 security: true
     PlanRequired:
       description: >-
-        This OpenBot runs an organization's Bots only while it is on a plan or
-        its free trial, and this organization is on neither, or its last
-        payment failed (PLAN_REQUIRED). An owner or an admin adds a card at
-        addCardUrl.
+        This OpenBot runs an organization's Bots only while it is on a plan,
+        or while the person the run counts against has free runs left. This
+        organization isn't on the plan and those free runs are used up, or
+        its last payment failed (PLAN_REQUIRED). An owner or an admin adds a
+        card at addCardUrl.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
-            noPlan:
+            freeRunsUsedUp:
               value:
                 type: https://open.bot/errors/plan-required
                 title: This organization needs a plan.
                 status: 402
-                detail: Bots in this organization can't run until a card is added. Add a card to start your 30-day free trial.
+                detail: You've used your free trial. Add a card to keep your Bots running for $5 a month.
                 code: PLAN_REQUIRED
                 category: permission
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
                 addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+            freeRunsUsedUpMember:
+              value:
+                type: https://open.bot/errors/plan-required
+                title: This organization needs a plan.
+                status: 402
+                detail: You've used your free trial. Ask an admin to add a card to keep your Bots running.
+                code: PLAN_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ConversationNotFound:
       description: >-
         The conversation does not exist, was removed, or the caller is not in
         it, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:

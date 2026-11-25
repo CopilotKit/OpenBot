@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
+import { BOOKING_CALENDAR_ORIGIN } from "../../shared/openbot-for-business";
 
 /**
  * The AI step's form holds still while the install behind it comes and goes.
@@ -39,10 +40,12 @@ type Route = {
   fulfill(response: {
     status?: number;
     contentType?: string;
+    headers?: Record<string, string>;
     body: string;
   }): Promise<void>;
 };
 type Page = {
+  addInitScript(script: string): Promise<void>;
   route(url: string, handler: (route: Route) => Promise<void>): Promise<void>;
   goto(url: string): Promise<unknown>;
   getByRole(role: string, options?: { name: string; exact?: boolean }): Locator;
@@ -138,6 +141,19 @@ const MORE_APPS = [
   { appId: "google-calendar", appName: "Google Calendar", accountLabel: "sam@example.com" },
   { appId: "hubspot", appName: "HubSpot" },
 ];
+// \`#move-confirm-carried\`, \`#move-done-carried\`, \`#move-done-ai-carried\`: apps connected with a key
+// come across connected, the rest are signed in to again, and on the result one Cloud couldn't connect.
+const carriedMove = Boolean(move && move.endsWith("-carried"));
+const SIGN_IN_APPS = [
+  { appId: "gmail", appName: "Gmail", accountLabel: "sam@example.com", botNames: ["Inbox helper", "Standup"] },
+  { appId: "slack", appName: "Slack", accountLabel: "Northwind" },
+];
+const KEY_APPS = [
+  { appId: "fireflies", appName: "Fireflies", botNames: ["Standup"] },
+  { appId: "posthog", appName: "PostHog", botNames: ["Metrics"] },
+];
+const TEAM_WIKI = { appId: "team-wiki", appName: "Team wiki", botNames: ["Research"] };
+const NOT_ALLOWED = "Your organization doesn't allow Team wiki yet. Ask an admin to approve it, then connect it here.";
 const MOVE_PREVIEW = {
   counts: [
     { kind: "bots", count: 3 }, { kind: "skills", count: 9 }, { kind: "conversations", count: 37 },
@@ -145,18 +161,35 @@ const MOVE_PREVIEW = {
     { kind: "goals", count: 1 }, { kind: "check-ins", count: 2 }, { kind: "files", count: 64 },
     { kind: "settings", count: 1 },
   ],
-  apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
+  apps: move === "confirm-many" ? MORE_APPS : carriedMove ? SIGN_IN_APPS : MOVE_APPS,
+  ...(carriedMove ? { carried: [...KEY_APPS, TEAM_WIKI] } : {}),
   // \`#move-first\` is measured again once its update has added the new release's files.
   footprintBytes: moveFirst ? 26_600_000_000 : 20_200_000_000,
   modelKeysAvailable: true,
 };
+const MOVE_DESTINATIONS = [
+  { id: "org_northwind", name: "Northwind Traders", personal: false, canMoveIn: true },
+  { id: "org_mine", name: "Sam's organization", personal: true, canMoveIn: true },
+  { id: "org_lab", name: "Research Lab", personal: false, canMoveIn: false },
+];
 function moveAnswer(command) {
   if (command === "move_offer")
     return { due: true, fromSettings: move !== "choice" && !moveFirst, footprintBytes: moveFirst ? 23_100_000_000 : 20_200_000_000 };
   if (command === "move_preview")
     return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
+  // \`#move-where\`: in three organizations on OpenBot Cloud, one of which doesn't let them use Bots,
+  // so the window asks where the Bots go. \`#move-not-allowed\`: in one, which refuses the move.
+  if (command === "move_destinations") {
+    if (move === "where") return MOVE_DESTINATIONS;
+    if (move === "not-allowed") return [{ ...MOVE_DESTINATIONS[1], canMoveIn: true }];
+    return undefined;
+  }
   if (command !== "move_to_cloud") return undefined;
   const progress = (stage, state, share) => emit("move:progress", { stage, state, progress: share });
+  if (move === "not-allowed") {
+    progress("sign-in", "done");
+    throw { said: "An admin of Northwind Traders hasn't let you use Bots there. Ask them to let you, or choose another organization.", detail: null, kind: "move-not-allowed" };
+  }
   if (move === "signin") {
     progress("sign-in", "running");
     return new Promise(() => {});
@@ -183,10 +216,11 @@ function moveAnswer(command) {
   // \`#move-done-held\`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
   // \`#move-done-ai\`: OpenBot Cloud still needs the person's AI, so the result leads with it.
   return {
-    connectAi: move === "done-ai",
+    connectAi: move === "done-ai" || move === "done-ai-carried",
     removedBytes: 20_200_000_000,
     diskGainedBytes: move === "done-held" ? 4_500_000_000 : 20_100_000_000,
-    apps: MOVE_APPS,
+    apps: carriedMove ? [...SIGN_IN_APPS, { ...TEAM_WIKI, reason: NOT_ALLOWED }] : MOVE_APPS,
+    ...(carriedMove ? { carried: KEY_APPS } : {}),
     notes: move === "done" || move === "done-held" ? ["Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers."] : [],
     leftBehind: move === "done-left" ? ["Some of OpenBot's software is still on this computer. Restart your computer to finish removing it."] : [],
     account: { email: "sam.longname-for-wrapping@example.com", organization: "Sam's organization" },
@@ -486,7 +520,12 @@ async function buildWindow(env: Record<string, string> = {}): Promise<Window> {
 }
 
 /** Served as the shell serves the window: its page, its script and its stylesheet. */
-async function open(page: Page, hash = "", served: Window = built) {
+async function open(
+  page: Page,
+  hash = "",
+  served: Window = built,
+  headers: Record<string, string> = {},
+) {
   await page.route("https://openbot.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/main.js")
@@ -499,6 +538,7 @@ async function open(page: Page, hash = "", served: Window = built) {
     if (path === "/")
       return route.fulfill({
         contentType: "text/html",
+        headers,
         body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/main.css"></head><body><div id="root"></div><script type="module" src="/main.js"></script></body></html>',
       });
     return route.fulfill({ status: 404, body: "" });
@@ -3170,6 +3210,17 @@ describe.skipIf(!asked)(
         noButtons: true,
       },
       { hash: "#move-failed", heading: "The move didn't finish", move: true },
+      // In more than one organization on OpenBot Cloud: where the Bots go, one of them held.
+      {
+        hash: "#move-where",
+        heading: "Where should your Bots go?",
+        move: true,
+      },
+      {
+        hash: "#move-not-allowed",
+        heading: "Your Bots can't move there",
+        move: true,
+      },
       {
         hash: "#move-failed-detail",
         heading: "The move didn't finish",
@@ -3203,6 +3254,25 @@ describe.skipIf(!asked)(
         move: true,
       },
       { hash: "#move-done-ai", heading: "You're on OpenBot Cloud", move: true },
+      // Apps connected with a key come across connected, apart from those signed in to again: two
+      // lists, which scroll inside the card above its buttons, as many apps do.
+      {
+        hash: "#move-confirm-carried",
+        heading: "Move to OpenBot Cloud",
+        scrolls: true,
+      },
+      {
+        hash: "#move-done-carried",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+        scrolls: true,
+      },
+      {
+        hash: "#move-done-ai-carried",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+        scrolls: true,
+      },
     ];
     /*
      * The move screen's choices: OpenBot Cloud, then OpenBot for Business as the first screen draws
@@ -3295,7 +3365,10 @@ describe.skipIf(!asked)(
               await page
                 .getByRole("heading", { name: screen.heading, exact: true })
                 .waitFor();
-              if (screen.hash === "#move-confirm")
+              if (
+                screen.hash === "#move-confirm" ||
+                screen.hash === "#move-confirm-carried"
+              )
                 await page.getByRole("list", { name: "What moves" }).waitFor();
               if (screen.openDetail) {
                 await page
@@ -3333,6 +3406,21 @@ describe.skipIf(!asked)(
                 await page.screenshot({
                   path: `${shots}/${name}-${width}x${height}-${colorScheme}-${engine}.png`,
                 });
+              // What scrolls inside the card, scrolled to its end for a look, then back.
+              if (shots && screen.scrolls) {
+                await page.evaluate(() => {
+                  const sheet = document.querySelector("main > .sheet");
+                  if (sheet) sheet.scrollTop = sheet.scrollHeight;
+                });
+                await page.waitForTimeout(200);
+                await page.screenshot({
+                  path: `${shots}/${name}-scrolled-${width}x${height}-${colorScheme}-${engine}.png`,
+                });
+                await page.evaluate(() => {
+                  const sheet = document.querySelector("main > .sheet");
+                  if (sheet) sheet.scrollTop = 0;
+                });
+              }
               const fit = await page.evaluate(() => {
                 const sheet = document.querySelector("main > .sheet");
                 const card = sheet?.getBoundingClientRect();
@@ -3406,6 +3494,42 @@ describe.skipIf(!asked)(
                 );
               if (screen.hash.startsWith("#move-done"))
                 expect(said).toContain("20.2 GB of OpenBot files removed");
+              // Their own organization first and picked, then the others; one held, saying why.
+              if (screen.hash === "#move-where")
+                expect(
+                  await page.evaluate(() =>
+                    [
+                      ...document.querySelectorAll<HTMLInputElement>(
+                        "fieldset.picker > .tile > .tile-input",
+                      ),
+                    ].map((input) => [
+                      input.closest(".tile")?.querySelector(".tile-name")
+                        ?.textContent,
+                      input.checked,
+                      input.disabled,
+                      input.closest(".tile")?.querySelector(".tile-summary")
+                        ?.textContent,
+                    ]),
+                  ),
+                ).toEqual([
+                  ["Sam's organization", true, false, "Your own organization."],
+                  [
+                    "Northwind Traders",
+                    false,
+                    false,
+                    "An organization you belong to.",
+                  ],
+                  [
+                    "Research Lab",
+                    false,
+                    true,
+                    "An admin of this organization hasn't let you use Bots here.",
+                  ],
+                ]);
+              if (screen.hash === "#move-not-allowed")
+                expect(said).toContain(
+                  "Nothing was removed from this computer.",
+                );
               expect(said.includes("of that is free space on your disk")).toBe(
                 screen.hash === "#move-done-held",
               );
@@ -3956,4 +4080,131 @@ describe.skipIf(!asked)("a screen that fails to draw", () => {
         await page.close();
       }
     });
+});
+
+/**
+ * The Content Security Policy the shell serves the bundled window with (`app.security.csp`), as
+ * directive name to sources. Tauri adds its own scripts' hashes to `script-src` when it serves the
+ * page, so what is written here is the floor the window draws under.
+ */
+function bundledPolicy(): { text: string; directives: Map<string, string[]> } {
+  const config = JSON.parse(
+    readFileSync(
+      new URL("../src-tauri/tauri.conf.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { app: { security: { csp: unknown } } };
+  const text = config.app.security.csp;
+  if (typeof text !== "string")
+    throw new Error(
+      `tauri.conf.json serves the window with no Content Security Policy (app.security.csp is ${JSON.stringify(text)})`,
+    );
+  const directives = new Map<string, string[]>();
+  for (const part of text.split(";")) {
+    const [name, ...sources] = part.trim().split(/\s+/);
+    if (name) directives.set(name, sources);
+  }
+  return { text, directives };
+}
+
+describe("the bundled window's Content Security Policy", () => {
+  test("loads only the window's own files, its images, the IPC and the booking calendar", () => {
+    const { directives } = bundledPolicy();
+    expect(directives.get("default-src")).toEqual(["'self'"]);
+    // Nothing inline and nothing evaluated: Tauri adds its own scripts by hash.
+    expect(directives.get("script-src")).toEqual(["'self'"]);
+    expect(directives.get("object-src")).toEqual(["'none'"]);
+    expect(directives.get("base-uri")).toEqual(["'self'"]);
+    expect(directives.get("frame-ancestors")).toEqual(["'none'"]);
+    // The one page the window frames is OpenBot for Business's booking calendar.
+    expect(directives.get("frame-src")).toEqual([BOOKING_CALENDAR_ORIGIN]);
+    // The window reaches the shell over Tauri's IPC only: `ipc:` on macOS and Linux, and
+    // http://ipc.localhost on Windows.
+    expect(directives.get("connect-src")).toEqual([
+      "'self'",
+      "ipc:",
+      "http://ipc.localhost",
+    ]);
+  });
+});
+
+/**
+ * The window served with that policy, as the shell serves it, collecting every violation the page
+ * reports. A screen that needs something the policy refuses shows here as a violation.
+ */
+describe.skipIf(!asked)("the window under its Content Security Policy", () => {
+  const RECORD_VIOLATIONS = `
+    globalThis.__violations = [];
+    document.addEventListener("securitypolicyviolation", (event) => {
+      globalThis.__violations.push(event.violatedDirective + " " + event.blockedURI);
+    });
+  `;
+  const violations = (page: Page) =>
+    page.evaluate(
+      () => (globalThis as { __violations?: string[] }).__violations ?? [],
+    );
+
+  test("the first screen and OpenBot for Business's booking calendar draw with nothing refused", async () => {
+    const { text } = bundledPolicy();
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await page.addInitScript(RECORD_VIOLATIONS);
+      await routeCalendar(page);
+      // An app's icon, as the move to OpenBot Cloud shows one from the app directory.
+      await page.route("https://icons.openbot.test/**", (route) =>
+        route.fulfill({
+          contentType: "image/svg+xml",
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>',
+        }),
+      );
+      await open(page, "", built, { "Content-Security-Policy": text });
+      await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+      await page.getByText("Your own cloud or on-prem.").click();
+      await page.locator(".tile-option.chosen").waitFor();
+      await page.getByText("We run it for you.").click();
+      await page
+        .locator(
+          '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
+        )
+        .waitFor();
+      const icon = await page.evaluate(
+        () =>
+          new Promise<boolean>((resolve) => {
+            const image = new Image();
+            image.onload = () => resolve(true);
+            image.onerror = () => resolve(false);
+            image.src = "https://icons.openbot.test/gmail.svg";
+          }),
+      );
+      expect(icon).toBe(true);
+      expect(await violations(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a script put into the page is refused", async () => {
+    const { text } = bundledPolicy();
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await page.addInitScript(RECORD_VIOLATIONS);
+      await open(page, "", built, { "Content-Security-Policy": text });
+      await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+      const ran = await page.evaluate(() => {
+        const script = document.createElement("script");
+        script.textContent = "globalThis.__injected = true;";
+        document.head.append(script);
+        return (globalThis as { __injected?: boolean }).__injected === true;
+      });
+      expect(ran).toBe(false);
+      await page.waitForTimeout(100);
+      expect(await violations(page)).toContain("script-src-elem inline");
+    } finally {
+      await page.close();
+    }
+  });
 });

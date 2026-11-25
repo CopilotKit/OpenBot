@@ -256,9 +256,9 @@ const SIGN_IN_APPS: {
   { provider: "arcade", slug: "Gmail", name: "Gmail" },
 ];
 
-describe("Add in the personal edition", () => {
+describe("Connect in the personal edition", () => {
   for (const target of SIGN_IN_APPS) {
-    test(`Add on ${target.name} adds it and starts the sign-in in a new tab`, async () => {
+    test(`Connect on ${target.name} adds it and starts the sign-in in a new tab`, async () => {
       provider = target.provider;
       apps = [
         app(target.slug, target.name, "consent", false),
@@ -267,7 +267,9 @@ describe("Add in the personal edition", () => {
       const { view, user } = draw("personal");
 
       const row = await view.findByTestId(`directory-${target.slug}`);
-      await user.click(within(row).getByRole("button", { name: "Add" }));
+      await user.click(
+        within(row).getByRole("button", { name: `Connect ${target.name}` }),
+      );
 
       const id = `${target.provider}-${target.slug}`;
       await waitFor(() => {
@@ -298,13 +300,15 @@ describe("Add in the personal edition", () => {
     });
   }
 
-  test("Add on an app that takes a key adds it and opens its key form", async () => {
+  test("Connect on an app that takes a key adds it and opens its key form", async () => {
     provider = "composio";
     apps = [app("posthog", "PostHog", "fields", false)];
     const { view, user, history } = draw("personal");
 
     const row = await view.findByTestId("directory-posthog");
-    await user.click(within(row).getByRole("button", { name: "Add" }));
+    await user.click(
+      within(row).getByRole("button", { name: "Connect PostHog" }),
+    );
 
     await waitFor(() => {
       expect(history.location.pathname).toBe("/connections/composio-posthog");
@@ -359,16 +363,26 @@ describe("an added app nobody has signed in to", () => {
     });
   }
 
-  test("in the team edition Add stays the admin's act and starts no sign-in", async () => {
+  /*
+   * Admin's Browse apps used to stop at Add, and the admin then had to find a second Connect. Its
+   * one press now adds the app for everyone and starts the admin's own sign-in, as everywhere else.
+   */
+  test("in the team edition Admin's Connect adds it and starts the admin's sign-in", async () => {
     provider = "composio";
     apps = [app("slack", "Slack", "consent", false)];
     const { view, user } = draw("team");
 
     const row = await view.findByTestId("directory-slack");
-    await user.click(within(row).getByRole("button", { name: "Add" }));
-    await waitFor(() => expect(writes).toEqual(["add slack"]));
-    await settleReactWork();
-    expect(tabs).toHaveLength(0);
+    expect(within(row).queryByRole("button", { name: "Add" })).toBeNull();
+    await user.click(
+      within(row).getByRole("button", { name: "Connect Slack" }),
+    );
+    await waitFor(() => {
+      expect(writes).toEqual(["add slack", "connect composio-slack"]);
+      expect(signInBehind(tabs[0]?.url)).toBe(
+        "https://sign-in.example/composio-slack",
+      );
+    });
   });
 });
 

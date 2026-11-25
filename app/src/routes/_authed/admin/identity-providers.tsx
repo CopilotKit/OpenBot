@@ -32,14 +32,15 @@ import {
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   deleteIdentityProviderMutationOptions,
   type IdentityProviderInput,
   registerIdentityProviderMutationOptions,
 } from "@/lib/identity-providers/mutations";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { identityProviderListQueryOptions } from "@/lib/identity-providers/queries";
 import { identityProviderWords } from "@/lib/identity-providers/words";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { ONLY_ORGANIZATION } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
@@ -163,12 +164,15 @@ function IdentityProvidersPage() {
       <PageSection description={words.registeredDescription} title="Registered">
         {failure ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {failure.message}
+            {failureSaid(failure)}
           </p>
         ) : null}
         {providers.isPending ? null : providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load identity providers. Try again in a moment.
+            {loadFailure(
+              providers.error,
+              "Couldn't load identity providers. Try again in a moment.",
+            )}
           </p>
         ) : registered.length === 0 ? (
           <PageEmpty
@@ -409,7 +413,7 @@ function IdentityProvidersPage() {
               */}
             {register.error ? (
               <p className="text-destructive text-sm" role="alert">
-                {register.error.message}
+                {failureSaid(register.error)}
               </p>
             ) : null}
           </DialogBody>

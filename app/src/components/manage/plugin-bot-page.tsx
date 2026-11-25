@@ -43,6 +43,12 @@ import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { appsQueryOptions, catalogueQueryOptions } from "@/lib/apps/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   grantPlugin,
@@ -116,7 +122,8 @@ export function PluginBotPage({
    * say there is no such Bot.
    */
   const hiddenAgents = useQuery(agentListQueryOptions(true, scope));
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
   /** What the list is narrowed to, over action names. Never over what is switched on. */
   const [search, setSearch] = useState("");
   /**
@@ -133,7 +140,7 @@ export function PluginBotPage({
 
   const setGrant = useMutation({
     ...setPluginGrantMutationOptions(queryClient),
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
   });
 
   const server = plugins.data?.find((row) => row.id === key);
@@ -192,7 +199,7 @@ export function PluginBotPage({
         setGranting({ done, total: refs.length });
       }
     } catch (thrown) {
-      setError((thrown as Error).message);
+      setError(failureOf(thrown, String(thrown)));
     } finally {
       await invalidatePlugins(queryClient);
       setGranting(null);
@@ -240,7 +247,10 @@ export function PluginBotPage({
         title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load apps. Try again in a moment.
+          {loadFailure(
+            plugins.error,
+            "Couldn't load apps. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );
@@ -337,7 +347,7 @@ export function PluginBotPage({
       });
       setPendingGrant(null);
     } catch (thrown) {
-      setError((thrown as Error).message);
+      setError(failureOf(thrown, String(thrown)));
     } finally {
       setGrantingShared(false);
     }
@@ -436,7 +446,7 @@ export function PluginBotPage({
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
 
@@ -447,7 +457,7 @@ export function PluginBotPage({
           {toolsListError(server.lastError, {
             title: server.title,
             personal: false,
-          }) ?? "Refresh its tools to check again."}
+          })?.text ?? "Refresh its tools to check again."}
         </PageEmpty>
       ) : (
         <>
@@ -580,7 +590,7 @@ export function PluginBotPage({
                */}
               {error ? (
                 <p className="mt-4 text-destructive text-sm" role="alert">
-                  {error}
+                  {failureSaid(error)}
                 </p>
               ) : null}
               <DialogFooter className="mt-4">

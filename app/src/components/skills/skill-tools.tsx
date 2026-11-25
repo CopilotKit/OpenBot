@@ -25,6 +25,8 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { appsQueryOptions } from "@/lib/apps/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
+import { loadFailure } from "@/lib/load-failure";
 import { undeclaredElsewhere } from "@/lib/skills/form";
 
 /**
@@ -98,6 +100,8 @@ export function SkillTools({
   onChange: (refs: string[]) => void;
 }) {
   const plugins = useQuery(appsQueryOptions());
+  // Apps open: anybody adds an app, so an app not added yet is not an admin's to add.
+  const appsOpen = useAppsOpen() === true;
   const [open, setOpen] = useState<string | null>(null);
   const held = new Set(selected);
 
@@ -117,7 +121,10 @@ export function SkillTools({
   if (!plugins.data) {
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load the tools. Try again in a moment.
+        {loadFailure(
+          plugins.error,
+          "Couldn't load the tools. Try again in a moment.",
+        )}
       </p>
     );
   }
@@ -232,7 +239,9 @@ export function SkillTools({
               <DialogTitle>{current.title}</DialogTitle>
               <DialogDescription>
                 {current.unavailable
-                  ? "These do nothing until an admin adds the app. Untick one to remove it from the skill."
+                  ? appsOpen
+                    ? "These do nothing until the app is added. Untick one to remove it from the skill."
+                    : "These do nothing until an admin adds the app. Untick one to remove it from the skill."
                   : "Using this skill loads the tools you tick for that reply."}
               </DialogDescription>
             </DialogHeader>

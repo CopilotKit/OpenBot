@@ -1,8 +1,8 @@
 import { IconSettings, type TablerIcon } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { SettingsToolCallState } from "./registry";
+import { ScreenLink, type SettingsScreenLink } from "./screen-link";
 
 /**
  * The frame every settings card that reads draws in: an icon, a title and a line under it, then the
@@ -19,16 +19,19 @@ export function SettingsReadCard({
   state,
   reason,
   link,
+  wrapTitle = false,
   children,
 }: {
   title: string;
+  /** A title that is a sentence (a job to do) wraps onto a second line instead of being cut. */
+  wrapTitle?: boolean;
   /** One line under the title. */
   caption?: string;
   icon?: TablerIcon;
   state: SettingsToolCallState;
   /** Why it was refused or didn't work, in the person's words. */
   reason?: string;
-  link?: { to: string; label: string };
+  link?: SettingsScreenLink;
   children?: ReactNode;
 }) {
   const body =
@@ -56,7 +59,14 @@ export function SettingsReadCard({
           <Icon aria-hidden className="size-4 text-muted-foreground" />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="truncate font-medium text-sm">{title}</p>
+          <p
+            className={cn(
+              "font-medium text-sm",
+              wrapTitle ? "text-pretty break-words" : "truncate",
+            )}
+          >
+            {title}
+          </p>
           <p
             className={cn(
               "text-muted-foreground text-xs",
@@ -76,14 +86,7 @@ export function SettingsReadCard({
       {body || (link && state === "done") ? (
         <div className="flex flex-col gap-4 px-4 py-3">
           {body}
-          {link && state === "done" ? (
-            <Link
-              className="self-start text-sm underline underline-offset-2 hover:text-foreground/80"
-              to={link.to as never}
-            >
-              {link.label}
-            </Link>
-          ) : null}
+          {link && state === "done" ? <ScreenLink {...link} /> : null}
         </div>
       ) : null}
     </figure>

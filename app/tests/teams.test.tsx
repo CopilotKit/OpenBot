@@ -50,6 +50,7 @@ import {
   getCreateTeamMockHandler,
   getDeleteTeamMockHandler,
   getGetTeamMockHandler,
+  getGetTeamModelsMockHandler,
   getListTeamMembersMockHandler,
   getListTeamsMockHandler,
   getPutTeamMemberMockHandler,
@@ -313,6 +314,11 @@ const server = setupServer(
     team.members = team.members.filter(
       (member) => member.id !== params.memberId,
     );
+  }),
+  // No team limits its models here (team-models.test.tsx covers those that do).
+  getGetTeamModelsMockHandler(({ params }) => {
+    teamOf(params.organizationId, params.teamId);
+    return { models: null, updatedBy: null, updatedAt: null };
   }),
   // The person's own organizations, the one the app works in marked, as the sidebar asks for them.
   getListOrganizationsMockHandler(() => ({
@@ -1226,6 +1232,44 @@ test("an admin renames a team, moves it under another, and deletes it only after
     { method: "PATCH", path: team, key: KEY, body: { parentTeamId: null } },
     { method: "DELETE", path: team, key: KEY, body: undefined },
   ]);
+});
+
+test("deleting a team goes to the list without ever saying the team can't be found", async () => {
+  const { view, router, person } = open("/teams/team_emea");
+  await view.findByRole("heading", { level: 1, name: "Sales EMEA" });
+  // Everything the page says from the moment Delete is pressed until the list is there.
+  const said: string[] = [];
+  const watcher = new MutationObserver(() => {
+    said.push(document.body.textContent ?? "");
+  });
+  watcher.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+  try {
+    await person.click(view.getByRole("button", { name: "Delete team" }));
+    const confirm = await view.findByRole("dialog", {
+      name: "Delete “Sales EMEA”?",
+    });
+    await person.click(
+      within(confirm).getByRole("button", { name: "Delete team" }),
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/teams"));
+    await view.findByRole("link", { name: /^Sales\b/ });
+  } finally {
+    watcher.disconnect();
+  }
+  // The person deleted it on purpose: no error for that, not even for a moment.
+  expect(
+    said.filter((text) => text.includes("Couldn't find that team")),
+  ).toEqual([]);
+  // And nothing of the deleted team's page stays read.
+  expect(
+    requests.filter(
+      (request) => request === `GET ${teamsPath(ACME)}/team_emea`,
+    ),
+  ).toHaveLength(1);
 });
 
 test("a team is never offered itself, a team under it, or a directory team as its parent", () => {

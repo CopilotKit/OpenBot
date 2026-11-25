@@ -331,7 +331,7 @@ test("the move screen offers OpenBot for Business between Cloud and Self-Contain
   expect(business.checked).toBe(true);
   expect(
     view.getByText(
-      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
+      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
     ),
   ).toBeTruthy();
   expect(view.getByRole("heading", { name: "Book a demo" })).toBeTruthy();
@@ -366,6 +366,68 @@ test("the move screen offers OpenBot for Business between Cloud and Self-Contain
   expect(called("move_to_cloud")).toEqual([]);
   expect(called("keep_self_contained")).toEqual([]);
   expect(called("show_openbot")).toEqual([]);
+});
+
+/*
+ * Where OpenBot for Business runs is the first thing in its list, not a big line over it: somebody
+ * looking down the list for running it in their own VPC found it missing, because the eye skips a
+ * large heading of that sort. The screen keeps a short heading. Governance and the audit trail lead
+ * "In control", and custom agents and harnesses are listed for the whole organization.
+ */
+test("OpenBot for Business lists where it runs first, governance and the audit trail first in control, and custom agents", async () => {
+  selfContainedRunning({ due: true });
+  const view = await launch();
+  await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot for Business/ }),
+  );
+  const booker = document.querySelector(".business-booker") as HTMLElement;
+  expect(booker).toBeTruthy();
+  // A short heading, and the booker is named by it.
+  const heading = booker.querySelector<HTMLElement>(".business-deploy");
+  expect(heading?.textContent).toBe("OpenBot for Business");
+  expect(
+    document.getElementById(booker.getAttribute("aria-labelledby") ?? ""),
+  ).toBe(heading);
+  // Each group as drawn: its heading, then its items in order.
+  const groups = [...booker.querySelectorAll(".business-group")].map(
+    (group) => [
+      group.querySelector("h3")?.textContent,
+      [...group.querySelectorAll("li")].map((item) => item.textContent),
+    ],
+  );
+  expect(groups).toEqual([
+    [
+      "For your whole organization",
+      [
+        "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
+        "Sign-in with Google, Microsoft or custom SSO",
+        "People, roles and admins",
+        "Bots shared with your whole organization",
+        "Learning shared across your organization",
+        "Deploy custom agents built with any agent stack, or bring your own custom harness, with a great user experience and governance",
+      ],
+    ],
+    [
+      "Where your Bots work",
+      ["Bots in Slack and Microsoft Teams", "A computer for each Bot"],
+    ],
+    [
+      "In control",
+      [
+        "Top-to-bottom enterprise governance",
+        "A full audit trail, with export",
+        "Controls over models, apps and networks",
+        "Rules every Bot follows",
+        "Policies in plain English, tested on past activity",
+      ],
+    ],
+  ]);
+  // Every item has its icon.
+  for (const item of booker.querySelectorAll(".business-list li")) {
+    expect(item.querySelector(".business-icon svg")).toBeTruthy();
+  }
+  expect(view.queryByText("Governance for everyone")).toBeNull();
 });
 
 test("a launch that isn't due shows OpenBot straight away, and a connected app is never asked", async () => {
@@ -445,7 +507,11 @@ test("before the move, the apps that must be reconnected are listed by name, abo
     "Slack",
     "Google Drive",
   ]);
-  expect(view.getByText(/can't move safely/)).toBeTruthy();
+  expect(
+    view.getByText("Sign-ins can't move, so you'll sign in to each one again."),
+  ).toBeTruthy();
+  // An older shell names no apps that move connected: none is said.
+  expect(view.queryByText("These apps come across connected")).toBe(null);
   const move = view.getByRole("button", { name: "Move to OpenBot Cloud" });
   // The notice comes before the button a person presses.
   expect(
@@ -463,6 +529,141 @@ test("before the move, the apps that must be reconnected are listed by name, abo
       /Removes about 18\.4 GB of OpenBot files\. Nothing is removed/,
     ),
   ).toBeTruthy();
+});
+
+const FIREFLIES = {
+  appId: "fireflies",
+  appName: "Fireflies",
+  botNames: ["Standup"],
+};
+const POSTHOG = { appId: "posthog", appName: "PostHog" };
+/** OpenBot Cloud's sentence for a carried app its organization doesn't allow. */
+const NOT_ALLOWED =
+  "Your organization doesn't allow Team wiki yet. Ask an admin to approve it, then connect it here.";
+
+/**
+ * Reported in dogfooding: after moving, a person reconnected about 20 apps, over an hour, because
+ * the move said every app connection had to be connected again. Apps connected with a key now come
+ * across connected, and the move says which, apart from the apps the person signs in to again.
+ */
+test("before the move, the apps that come across connected are said apart from those to sign in to again", async () => {
+  selfContainedRunning({ due: false, fromSettings: true });
+  answers.move_preview = { ...PREVIEW, carried: [FIREFLIES, POSTHOG] };
+  const view = await launch();
+  const carried = await view.findByRole("list", {
+    name: "Apps that move connected",
+  });
+  expect(
+    [...carried.querySelectorAll("li")].map((li) => li.textContent),
+  ).toEqual(["FirefliesUsed by Standup", "PostHog"]);
+  expect(
+    view.getByRole("heading", { name: "These apps come across connected" }),
+  ).toBeTruthy();
+  expect(
+    view.getByText(
+      "Their keys are sealed so only your OpenBot Cloud account can read them.",
+    ),
+  ).toBeTruthy();
+  const reconnect = view.getByRole("list", { name: "Apps to reconnect" });
+  expect(
+    [...reconnect.querySelectorAll("li")].map(
+      (li) => li.querySelector(".move-app-name")?.textContent,
+    ),
+  ).toEqual(["Gmail, sam@example.com", "Slack", "Google Drive"]);
+  expect(
+    view.getByRole("heading", {
+      name: "You'll reconnect these apps in OpenBot Cloud",
+    }),
+  ).toBeTruthy();
+  // What the person acts on first: the apps to sign in to again, then the AI key, then the apps
+  // that come across connected, with nothing to do for them.
+  const follows = (first: Node, then: Node) =>
+    Boolean(
+      first.compareDocumentPosition(then) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  const key = view.getByRole("checkbox", {
+    name: /Bring my AI key to OpenBot Cloud/,
+  });
+  expect(follows(reconnect, key)).toBe(true);
+  expect(follows(key, carried)).toBe(true);
+  // Without the AI key, the apps still come across connected: the move is asked as before.
+  await userEvent.click(
+    view.getByRole("checkbox", { name: /Bring my AI key to OpenBot Cloud/ }),
+  );
+  answers.move_to_cloud = () => new Promise(() => {});
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  expect(called("move_to_cloud")[0]?.args).toEqual({
+    address: "https://api.open.bot",
+    includeModelKeys: false,
+  });
+});
+
+test("a finished move says which apps came across connected, and one it couldn't connect says why, with its Reconnect", async () => {
+  const view = await atConfirm();
+  answers.move_to_cloud = {
+    ...MOVED,
+    connectAi: false,
+    carried: [FIREFLIES],
+    apps: [
+      ...APPS,
+      { appId: "team-wiki", appName: "Team wiki", reason: NOT_ALLOWED },
+    ],
+  };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  const carried = view.getByRole("list", {
+    name: "Apps that came across connected",
+  });
+  expect(
+    [...carried.querySelectorAll("li")].map((li) => li.textContent),
+  ).toEqual(["FirefliesUsed by Standup"]);
+  expect(
+    view.getByRole("heading", { name: "These apps came across connected" }),
+  ).toBeTruthy();
+  expect(
+    view.getByText("Your Bots can use them in OpenBot Cloud as before."),
+  ).toBeTruthy();
+  // Nothing to press on an app that came across connected.
+  expect(carried.querySelectorAll("button")).toHaveLength(0);
+  const reconnect = view.getByRole("list", { name: "Apps to reconnect" });
+  const wiki = [...reconnect.querySelectorAll("li")].find((li) =>
+    li.textContent?.startsWith("Team wiki"),
+  );
+  expect(wiki?.querySelector("[data-move-app-reason]")?.textContent).toBe(
+    NOT_ALLOWED,
+  );
+  expect(
+    view.getByText("Sign-ins can't move, so sign in to each one again."),
+  ).toBeTruthy();
+  // The apps to reconnect first, then the ones that came across connected, then the notices.
+  expect(
+    reconnect.compareDocumentPosition(carried) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    carried.compareDocumentPosition(view.getByText(MOVED.notes[0] as string)) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    view
+      .getAllByRole("button", { name: /^Reconnect / })
+      .map((button) => button.getAttribute("aria-label")),
+  ).toEqual([
+    "Reconnect Gmail",
+    "Reconnect Slack",
+    "Reconnect Google Drive",
+    "Reconnect Team wiki",
+  ]);
+  await userEvent.click(
+    view.getByRole("button", { name: "Reconnect Team wiki" }),
+  );
+  expect(called("open_moved_cloud").map((call) => call.args)).toEqual([
+    { path: "/reconnect/team-wiki" },
+  ]);
 });
 
 test("a move that fails removes nothing, and Try again moves again", async () => {
@@ -715,7 +916,9 @@ test("a finished move that still needs the person's AI leads with Connect your A
     "Google Drive",
   ]);
   expect(
-    view.getByText(/reconnect each one from a list in OpenBot Cloud/),
+    view.getByText(
+      "Sign-ins can't move. Once your AI is connected, you'll reconnect each one from a list in OpenBot Cloud.",
+    ),
   ).toBeTruthy();
   expect(view.queryByRole("button", { name: /^Reconnect/ })).toBe(null);
   // No way past the step: Connect your AI is the one button.
@@ -791,6 +994,166 @@ test("the result says what the move screen said it removes, and what the disk sh
     view.getByText(/So far, 4\.5 GB of that is free space on your disk\./),
   ).toBeTruthy();
   expect(view.queryByText(/freed/)).toBe(null);
+});
+
+/** The person's own organization on OpenBot Cloud and their company's, as `move_destinations` says. */
+const SAMS_OWN = {
+  id: "org_mine",
+  name: "Sam's organization",
+  personal: true,
+  canMoveIn: true,
+};
+const ACME = { id: "org_acme", name: "Acme", personal: false, canMoveIn: true };
+
+function radioNames(view: ReturnType<typeof render>) {
+  return view
+    .getAllByRole("radio")
+    .map(
+      (radio) =>
+        radio.closest("label")?.querySelector(".tile-name")?.textContent,
+    );
+}
+
+/*
+ * A person in their own organization on OpenBot Cloud and their company's. Before, the move put
+ * everything in their own and never asked, and nothing let them move it across after. Signed in,
+ * they choose where their Bots go, their own first and picked to begin with, and the move goes there.
+ */
+test("a person in two organizations chooses where their Bots go, and they move there", async () => {
+  const view = await atConfirm();
+  // OpenBot Cloud lists the company's first; the person's own still comes first on screen.
+  answers.move_destinations = [ACME, SAMS_OWN];
+  answers.move_to_cloud = {
+    ...MOVED,
+    connectAi: false,
+    account: { email: "sam@example.com", organization: "Acme" },
+  };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "Where should your Bots go?" });
+  expect(called("move_destinations").map((call) => call.args)).toEqual([
+    { address: "https://api.open.bot" },
+  ]);
+  // Nothing moves until they choose.
+  expect(called("move_to_cloud")).toEqual([]);
+  expect(radioNames(view)).toEqual(["Sam's organization", "Acme"]);
+  const own = view.getByRole("radio", {
+    name: /^Sam's organization/,
+  }) as HTMLInputElement;
+  const acme = view.getByRole("radio", { name: /^Acme/ }) as HTMLInputElement;
+  expect(own.checked).toBe(true);
+  expect(acme.disabled).toBe(false);
+  expect(
+    view.getByText(
+      "Nothing is removed from this computer until everything has arrived in OpenBot Cloud and been checked.",
+    ),
+  ).toBeTruthy();
+  await userEvent.click(acme);
+  expect(acme.checked).toBe(true);
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  expect(called("move_to_cloud").map((call) => call.args)).toEqual([
+    {
+      address: "https://api.open.bot",
+      includeModelKeys: true,
+      organization: "org_acme",
+    },
+  ]);
+  // The result names the organization they chose.
+  expect(
+    view.getByText(/You're signed in as sam@example\.com, in Acme\./),
+  ).toBeTruthy();
+});
+
+test("a person in one organization isn't asked: the move goes straight on into it", async () => {
+  const view = await atConfirm();
+  answers.move_destinations = [ACME];
+  answers.move_to_cloud = () => new Promise(() => {});
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await waitFor(() => expect(called("move_to_cloud")).toHaveLength(1));
+  expect(called("move_to_cloud")[0]?.args).toEqual({
+    address: "https://api.open.bot",
+    includeModelKeys: true,
+    organization: "org_acme",
+  });
+  expect(
+    view.getByRole("heading", { name: "Moving to OpenBot Cloud" }),
+  ).toBeTruthy();
+  expect(
+    view.queryByRole("heading", { name: "Where should your Bots go?" }),
+  ).toBe(null);
+});
+
+/*
+ * An organization that doesn't let the person use Bots is shown, so they know why it isn't theirs
+ * to pick, and can't be picked. If the shell refuses one anyway (OpenBot Cloud changed its mind),
+ * the move stopped with nothing removed, and Try again asks again, their last choice picked.
+ */
+test("an organization that doesn't let the person use Bots is shown but can't be picked, and a refused move removed nothing", async () => {
+  const view = await atConfirm();
+  answers.move_destinations = [
+    SAMS_OWN,
+    { ...ACME, canMoveIn: false },
+    {
+      id: "org_lab",
+      name: "Research Lab",
+      personal: false,
+      canMoveIn: true,
+    },
+  ];
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "Where should your Bots go?" });
+  expect(radioNames(view)).toEqual([
+    "Sam's organization",
+    "Acme",
+    "Research Lab",
+  ]);
+  const acme = view.getByRole("radio", { name: /^Acme/ }) as HTMLInputElement;
+  expect(acme.disabled).toBe(true);
+  expect(acme.closest("label")?.textContent).toContain(
+    "An admin of this organization hasn't let you use Bots here.",
+  );
+  await userEvent.click(acme.closest("label") as HTMLElement);
+  expect(acme.checked).toBe(false);
+  expect(
+    (
+      view.getByRole("radio", {
+        name: /^Sam's organization/,
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(true);
+
+  // Research Lab, which the shell then refuses: nothing moved.
+  const said =
+    "An admin of Research Lab hasn't let you use Bots there. Ask them to let you, or choose another organization.";
+  answers.move_to_cloud = () => {
+    throw { said, detail: null, kind: "move-not-allowed" };
+  };
+  await userEvent.click(view.getByRole("radio", { name: /^Research Lab/ }));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("heading", { name: "Your Bots can't move there" });
+  expect(view.getByText(said)).toBeTruthy();
+  expect(
+    view.getByText("Nothing was removed from this computer."),
+  ).toBeTruthy();
+  expect(called("move_to_cloud")[0]?.args).toEqual({
+    address: "https://api.open.bot",
+    includeModelKeys: true,
+    organization: "org_lab",
+  });
+  // Try again asks where once more, their last choice picked.
+  await userEvent.click(view.getByRole("button", { name: "Try again" }));
+  await view.findByRole("heading", { name: "Where should your Bots go?" });
+  expect(called("move_destinations")).toHaveLength(2);
+  expect(
+    (view.getByRole("radio", { name: /^Research Lab/ }) as HTMLInputElement)
+      .checked,
+  ).toBe(true);
 });
 
 test("counts keep the kinds there are words for, in order, and skip zeros; space reads in GB or MB", () => {

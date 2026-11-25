@@ -4,10 +4,10 @@ import {
   IconUsers,
   type TablerIcon,
 } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Badge, type Tone } from "@/components/gallery/frame";
 import { cn } from "@/lib/utils";
+import { ScreenLink, type SettingsScreenLink } from "./screen-link";
 
 /**
  * The shared card for a change to OpenBot's settings: what it was, what it is now, in the words the
@@ -283,9 +283,6 @@ function Affected({ affected }: { affected: string | SettingsAffected }) {
   );
 }
 
-/** A screen to open, as a link at the foot of a card. */
-export type SettingsScreenLink = { to: string; label: string };
-
 /**
  * The card a settings change draws in the conversation: what changed (or would have), its state,
  * and the screen it lives on.
@@ -297,11 +294,14 @@ export function SettingsChangeCard({
   state,
   reason,
   link,
+  lead,
   children,
 }: {
   /** What was changed, as its screen is titled: "Your settings", "Organization settings". */
   title: string;
   icon?: TablerIcon;
+  /** What the rows are about, drawn over them: the app a Bot's actions are in. */
+  lead?: ReactNode;
   /** Null while it runs, or when it was refused before a change was worked out. */
   change: SettingsChange | null;
   state: SettingsChangeState;
@@ -312,7 +312,7 @@ export function SettingsChangeCard({
 }) {
   const badge = STATE[state];
   // Nothing under the header yet (a change still running): the header is the whole card.
-  const body = Boolean(reason || change || children || link);
+  const body = Boolean(reason || change || lead || children || link);
   return (
     <figure
       aria-busy={state === "running"}
@@ -341,6 +341,7 @@ export function SettingsChangeCard({
       </figcaption>
       {body ? (
         <div className="flex flex-col gap-3 px-4 py-3">
+          {lead}
           {reason ? (
             <p
               className={cn(
@@ -356,14 +357,7 @@ export function SettingsChangeCard({
           ) : null}
           {change ? <SettingsChangeRows change={change} state={state} /> : null}
           {children}
-          {link ? (
-            <Link
-              className="self-start text-sm underline underline-offset-2 hover:text-foreground/80"
-              to={link.to as never}
-            >
-              {link.label}
-            </Link>
-          ) : null}
+          {link ? <ScreenLink {...link} /> : null}
         </div>
       ) : null}
     </figure>
