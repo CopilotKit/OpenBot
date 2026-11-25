@@ -153,7 +153,8 @@ The platform draws everything around a screen. HeroUI Native draws what is insid
 | --- | --- |
 | Stacks, headers, titles, back buttons | Expo Router's native `Stack`, set in the route's layout or the screen's options. |
 | Tabs | Expo Router's native tabs. |
-| Header and toolbar buttons, header menus, search in the header | The native `Stack` toolbar and search bar. |
+| Header buttons (menu, back, a Bot's computer and settings) | `IconButton`s placed with `plainHeaderLeft` and `plainHeaderRight` (`mobile/src/header.tsx`), as plain icons the way the web app's header draws them. On iOS 26 they would otherwise sit in a gray glass bubble, and the system's back button can't lose its bubble, so iOS gets a plain chevron in its place; swiping back works the same. |
+| Header menus, search in the header, a bottom toolbar | The native `Stack` toolbar and search bar. |
 | Sheets and modals | Expo Router's native presentations (`formSheet`, `modal`). |
 | Pickers, switches, sliders, system menus | `@expo/ui`, so they look and behave as the platform's own. |
 | Buttons, fields, cards, chips, alerts, and the rest of a screen's content | HeroUI Native. |

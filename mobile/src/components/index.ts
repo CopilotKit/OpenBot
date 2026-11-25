@@ -3,6 +3,7 @@
  * A screen uses these first, then HeroUI Native's, and builds its own only when neither fits
  * (docs/app-guidelines.md). `src/ui.tsx` is the old way, for screens not moved yet.
  */
+export { BotIntro } from "./bot-intro";
 export { BotOrb } from "./bot-orb";
 export { BotTile } from "./bot-tile";
 export { cn } from "./cn";

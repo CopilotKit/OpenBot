@@ -15,8 +15,10 @@ export { default as IconBrandWindows } from "@tabler/icons-react-native/IconBran
 export { default as IconBuilding } from "@tabler/icons-react-native/IconBuilding";
 export { default as IconCheck } from "@tabler/icons-react-native/IconCheck";
 export { default as IconChecks } from "@tabler/icons-react-native/IconChecks";
+export { default as IconChevronLeft } from "@tabler/icons-react-native/IconChevronLeft";
 export { default as IconChevronRight } from "@tabler/icons-react-native/IconChevronRight";
 export { default as IconClock } from "@tabler/icons-react-native/IconClock";
+export { default as IconDeviceDesktop } from "@tabler/icons-react-native/IconDeviceDesktop";
 export { default as IconInfoCircle } from "@tabler/icons-react-native/IconInfoCircle";
 export { default as IconKey } from "@tabler/icons-react-native/IconKey";
 export { default as IconLogout } from "@tabler/icons-react-native/IconLogout";

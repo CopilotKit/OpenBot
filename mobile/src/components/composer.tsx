@@ -6,9 +6,9 @@ import { cn } from "./cn";
 import { IconButton } from "./icon-button";
 
 /**
- * The message box: a flat card at rest that lights in the focus color while someone types in it,
- * the one control that does (docs/app-guidelines.md, "The look"). Attach on the left; speak, or
- * send once there is something to send, on the right.
+ * The message box, shaped as the web app's: the text across the full width, and under it attach on
+ * the left, and speak and send on the right. A flat card at rest that lights in the focus color
+ * while someone types in it, the one control that does (docs/app-guidelines.md, "The look").
  */
 export function Composer({
   value,
@@ -39,20 +39,11 @@ export function Composer({
   return (
     <View
       className={cn(
-        "flex-row items-end gap-1 rounded-xl border bg-surface p-1.5",
+        "gap-1 rounded-3xl border bg-surface px-2 pt-2 pb-2",
         focused ? "border-focus" : "border-border",
         disabled && "opacity-60",
       )}
     >
-      {onAttach ? (
-        <IconButton
-          icon={IconPlus}
-          label="Add a file"
-          size="sm"
-          onPress={onAttach}
-          disabled={disabled}
-        />
-      ) : null}
       <TextInput
         accessibilityLabel={placeholder}
         multiline
@@ -64,25 +55,40 @@ export function Composer({
         placeholderTextColor={placeholderColor}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        className="max-h-36 min-h-8 flex-1 px-2 py-1.5 font-normal text-base text-field-foreground"
+        className="max-h-36 min-h-10 px-2 pt-1.5 pb-1 font-normal text-base text-field-foreground"
       />
-      {onSpeak && !value.trim() ? (
-        <IconButton
-          icon={IconMicrophone}
-          label="Speak a message"
-          size="sm"
-          onPress={onSpeak}
-          disabled={disabled}
-        />
-      ) : null}
-      <IconButton
-        icon={IconArrowUp}
-        label={sending ? "Sending" : "Send"}
-        size="sm"
-        variant="primary"
-        onPress={onSend}
-        disabled={!canSend}
-      />
+      <View className="flex-row items-center justify-between">
+        <View className="flex-row items-center">
+          {onAttach ? (
+            <IconButton
+              icon={IconPlus}
+              label="Add a file"
+              size="sm"
+              onPress={onAttach}
+              disabled={disabled}
+            />
+          ) : null}
+        </View>
+        <View className="flex-row items-center gap-1">
+          {onSpeak ? (
+            <IconButton
+              icon={IconMicrophone}
+              label="Speak a message"
+              size="sm"
+              onPress={onSpeak}
+              disabled={disabled}
+            />
+          ) : null}
+          <IconButton
+            icon={IconArrowUp}
+            label={sending ? "Sending" : "Send"}
+            size="sm"
+            variant="primary"
+            onPress={onSend}
+            disabled={!canSend}
+          />
+        </View>
+      </View>
     </View>
   );
 }

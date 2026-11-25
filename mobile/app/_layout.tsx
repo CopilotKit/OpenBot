@@ -18,7 +18,12 @@ import { AppMenu, SECTIONS } from "../src/app-menu";
 import { authClient } from "../src/auth";
 import { DrawerProvider, useDrawer } from "../src/drawer";
 import { withSecurityFloor } from "../src/floor-gate";
-import { MenuButton } from "../src/header";
+import {
+  MenuButton,
+  NO_HEADER_LEFT,
+  plainBackButton,
+  plainHeaderLeft,
+} from "../src/header";
 import { notificationDestination } from "../src/links";
 import { renewPush } from "../src/notifications";
 import { aboutShownConversation } from "../src/on-screen";
@@ -53,6 +58,8 @@ function useHeaderOptions() {
     headerLargeTitleStyle: { fontFamily: "Inter_700Bold", color: foreground },
     headerLargeTitleShadowVisible: false,
     contentStyle: { backgroundColor: background },
+    // A pushed screen's way back, as a plain chevron (../src/header.tsx).
+    ...plainBackButton(),
   } as const;
 }
 
@@ -61,7 +68,7 @@ const section = (title: string) =>
   ({
     title,
     headerLargeTitle: true,
-    headerLeft: () => <MenuButton />,
+    ...plainHeaderLeft(() => <MenuButton />),
   }) as const;
 
 function Layout() {
@@ -140,6 +147,7 @@ function Layout() {
               options={{
                 title: "Your account",
                 presentation: "formSheet",
+                ...NO_HEADER_LEFT,
                 sheetAllowedDetents: [0.6, 1],
                 sheetGrabberVisible: true,
               }}
@@ -149,6 +157,7 @@ function Layout() {
               options={{
                 title: "New conversation",
                 presentation: "formSheet",
+                ...NO_HEADER_LEFT,
                 sheetAllowedDetents: [0.6, 1],
                 sheetGrabberVisible: true,
               }}
@@ -158,6 +167,7 @@ function Layout() {
               options={{
                 title: "New Bot",
                 presentation: "formSheet",
+                ...NO_HEADER_LEFT,
                 sheetAllowedDetents: [1],
                 sheetGrabberVisible: true,
               }}

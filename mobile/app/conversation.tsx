@@ -23,10 +23,10 @@ import {
 } from "../src/api/generated/conversations/conversations";
 import { authClient } from "../src/auth";
 import {
+  BotIntro,
   BotOrb,
   Composer,
   cn,
-  EmptyState,
   IconButton,
   KeyboardBar,
   Message,
@@ -36,7 +36,8 @@ import {
   Screen,
   Text,
 } from "../src/components";
-import { IconSettings, IconTool } from "../src/icons";
+import { plainHeaderRight } from "../src/header";
+import { IconDeviceDesktop, IconSettings, IconTool } from "../src/icons";
 import { conversationOf, showConversation } from "../src/on-screen";
 import { useLoad } from "../src/use-load";
 import { dayAndTime } from "../src/when";
@@ -131,7 +132,16 @@ export default function ConversationScreen() {
   }, [inFront, channelId, newest]);
   const botsHere = (conversation?.botIds ?? []).map((id) => {
     const bot = bots.data?.find((item) => item.id === id);
-    return { id, name: bot?.name ?? "Bot", seed: bot?.avatarSeed || id };
+    return {
+      id,
+      name: bot?.name ?? "Bot",
+      seed: bot?.avatarSeed || id,
+      // What the Bot does, as the web app's introduction says it.
+      about:
+        [bot?.title, bot?.roleDescription]
+          .filter((part) => part?.trim())
+          .join(" · ") || undefined,
+    };
   });
   const current = botsHere.find((bot) => bot.id === agentId);
   const working = Boolean(conversation?.work?.length);
@@ -198,17 +208,35 @@ export default function ConversationScreen() {
               </Text>
             </View>
           ),
-          headerRight: () =>
+          // Plain icons, as the web app's conversation header has: the Bot's computer, and its settings.
+          ...plainHeaderRight(() =>
             agentId ? (
-              <IconButton
-                icon={IconSettings}
-                label={`${current?.name ?? "Bot"} settings`}
-                size="sm"
-                onPress={() =>
-                  router.push({ pathname: "/bot", params: { botId: agentId } })
-                }
-              />
-            ) : null,
+              <View className="flex-row items-center">
+                <IconButton
+                  icon={IconDeviceDesktop}
+                  label={`${current?.name ?? "Bot"}'s computer`}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/computer",
+                      params: { botId: agentId },
+                    })
+                  }
+                />
+                <IconButton
+                  icon={IconSettings}
+                  label={`${current?.name ?? "Bot"} settings`}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/bot",
+                      params: { botId: agentId },
+                    })
+                  }
+                />
+              </View>
+            ) : (
+              <View />
+            ),
+          ),
         }}
       />
       <KeyboardAvoidingView
@@ -263,11 +291,13 @@ export default function ConversationScreen() {
               <MessageLine message={item.message} />
             )
           }
-          ListEmptyComponent={
-            history.data ? (
-              <EmptyState
-                title={`Say hello to ${current?.name ?? "this Bot"}`}
-                description="Ask it for something, and it reports back here."
+          // The list is drawn bottom up, so its footer is the top of the conversation: the Bot it is with.
+          ListFooterComponent={
+            history.data && current ? (
+              <BotIntro
+                seed={current.seed}
+                name={current.name}
+                about={current.about}
               />
             ) : undefined
           }
