@@ -492,6 +492,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **`config.productAnalytics`** (on) is the product analytics switch (Before upgrading).
 - **`config.cloudAnalytics`** (off) is OpenBot Cloud's own counts for CopilotKit's staff console.
   Leave it off.
+- **An upgrade that stops the server first waits for its runs to drain.** Before a backup, the
+  management agent (and `bun scripts/update.ts kubernetes`) scales the server to zero and waits for
+  its pods to go. That wait gave up after 15 minutes, so a server whose termination grace period is
+  longer, still draining a long run, had its upgrade undone and tried again 30 minutes later, after
+  serving nothing for those 15 minutes. The wait now lasts the server's own termination grace period
+  plus a minute, and never less than 15 minutes.
 
 ### Smaller changes
 
