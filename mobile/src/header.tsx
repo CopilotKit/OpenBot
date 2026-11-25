@@ -20,6 +20,8 @@ export function useHeaderOptions() {
      */
     headerUserInterfaceStyle: scheme === "dark" ? "dark" : "light",
     headerBackTitle: "Back",
+    // Centered, as iOS centers it, so a pushed screen reads the same on Android.
+    headerTitleAlign: "center",
     headerShadowVisible: false,
     headerTintColor: foreground,
     headerStyle: { backgroundColor: background },
@@ -32,11 +34,16 @@ export function useHeaderOptions() {
   } as const;
 }
 
-/** A tab's own screen: a large title, and the person's account where a back button would be. */
+/**
+ * A tab's own screen: a large title, and the person's account where a back button would be. Android's
+ * header has no large title, so there the screen draws it at the top of its content (`TabTitle`) and
+ * the header keeps only its buttons, as iOS's does before the page is scrolled.
+ */
 export const tabRoot = (title: string) =>
   ({
     title,
     headerLargeTitle: true,
+    ...(Platform.OS === "android" ? { headerTitle: "" } : {}),
     ...plainHeaderLeft(() => <AccountButton />),
   }) as const;
 
@@ -93,10 +100,10 @@ export function AccountButton() {
 /**
  * The way back on a pushed screen. On iOS 26 the system's back button sits in a glass bubble that
  * can't be taken away, so iOS gets this plain chevron in its place, as the web app's header has no
- * bubbles; swiping back from the edge works as before. Android keeps its own back arrow.
+ * bubbles; swiping back from the edge works as before. Android gets the same chevron in place of its
+ * arrow, so the two look alike; its back gesture and button work as before.
  */
 export function plainBackButton() {
-  if (Platform.OS !== "ios") return {};
   return {
     headerBackVisible: false,
     ...plainHeaderLeft(() => (

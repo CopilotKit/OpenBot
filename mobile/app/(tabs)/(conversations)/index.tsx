@@ -1,8 +1,7 @@
 import { router, Stack } from "expo-router";
 import { Button } from "heroui-native/button";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, View } from "react-native";
-import { useCSSVariable } from "uniwind";
+import { FlatList, Platform, View } from "react-native";
 import {
   type ConversationSummary,
   everyBot,
@@ -25,6 +24,8 @@ import {
   Notice,
   Refresh,
   Screen,
+  SearchField,
+  TabTitle,
 } from "../../../src/components";
 import { plainHeaderRight } from "../../../src/header";
 import { homeView } from "../../../src/home-view";
@@ -46,10 +47,6 @@ export default function Conversations() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
-  const [foreground, muted] = useCSSVariable([
-    "--color-foreground",
-    "--color-muted",
-  ]) as (string | undefined)[];
   const [older, setOlder] = useState<ConversationSummary[]>([]);
   const [olderCursor, setOlderCursor] = useState<string | null | undefined>();
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload for whoever is signed in now, not the previous person
@@ -218,17 +215,18 @@ export default function Conversations() {
     <Screen>
       <Stack.Screen
         options={{
-          headerSearchBarOptions: {
-            placeholder: "Search conversations",
-            // Under the title: iOS 26 would otherwise float it at the bottom, over the dock.
-            placement: "stacked",
-            // Android's search field takes no colors from the header's own light or dark.
-            textColor: foreground,
-            hintTextColor: muted,
-            headerIconColor: foreground,
-            onChangeText: (event) => setQuery(event.nativeEvent.text),
-            onCancelButtonPress: () => setQuery(""),
-          },
+          // iOS's own search field, under the title. Android's header offers search only as an icon,
+          // so Android draws the same field at the top of the list instead (`SearchField`).
+          headerSearchBarOptions:
+            Platform.OS === "ios"
+              ? {
+                  placeholder: "Search conversations",
+                  // Under the title: iOS 26 would otherwise float it at the bottom, over the dock.
+                  placement: "stacked",
+                  onChangeText: (event) => setQuery(event.nativeEvent.text),
+                  onCancelButtonPress: () => setQuery(""),
+                }
+              : undefined,
           ...plainHeaderRight(() => (
             <IconButton
               icon={IconPlus}
@@ -248,8 +246,16 @@ export default function Conversations() {
           <Refresh refreshing={pull.refreshing} onRefresh={pull.onRefresh} />
         }
         ListHeaderComponent={
-          problem || renewal ? (
+          Platform.OS === "android" || problem || renewal ? (
             <View className="gap-2 px-4 pt-2 pb-2">
+              <TabTitle title="Conversations" />
+              {Platform.OS === "android" ? (
+                <SearchField
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search conversations"
+                />
+              ) : null}
               <Notice message={problem} />
               {renewal ? (
                 <Notice

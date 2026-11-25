@@ -2,7 +2,13 @@ import { router } from "expo-router";
 import { useCallback } from "react";
 import { organizationChoices } from "../../../src/api";
 import { authClient } from "../../../src/auth";
-import { Row, Rows, ScrollScreen, Section } from "../../../src/components";
+import {
+  Row,
+  Rows,
+  ScrollScreen,
+  Section,
+  TabTitle,
+} from "../../../src/components";
 import {
   IconBook,
   IconBrain,
@@ -26,6 +32,7 @@ export default function More() {
   const person = session?.user.name || session?.user.email || "";
   return (
     <ScrollScreen>
+      <TabTitle title="More" className="-mt-2 -mb-3" />
       <Section title="Your Bots">
         <Rows>
           <Row

@@ -1,6 +1,6 @@
 import { router, Stack } from "expo-router";
 import { useCallback } from "react";
-import { FlatList, View } from "react-native";
+import { FlatList, Platform, View } from "react-native";
 import { everyBot } from "../../../src/api";
 import { authClient } from "../../../src/auth";
 import {
@@ -10,6 +10,7 @@ import {
   Notice,
   Refresh,
   Screen,
+  TabTitle,
 } from "../../../src/components";
 import { plainHeaderRight } from "../../../src/header";
 import { IconPlus, IconRobot } from "../../../src/icons";
@@ -46,8 +47,9 @@ export default function Bots() {
           <Refresh refreshing={pull.refreshing} onRefresh={pull.onRefresh} />
         }
         ListHeaderComponent={
-          bots.error ? (
-            <View className="px-2 pb-2">
+          Platform.OS === "android" || bots.error ? (
+            <View className="gap-2 px-2 pb-2">
+              <TabTitle title="Bots" />
               <Notice message={bots.error} />
             </View>
           ) : undefined

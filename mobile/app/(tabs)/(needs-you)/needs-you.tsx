@@ -15,6 +15,7 @@ import {
   Notice,
   ScrollScreen,
   Section,
+  TabTitle,
 } from "../../../src/components";
 import { IconBell } from "../../../src/icons";
 import { showNeedsYouCount } from "../../../src/needs-you-count";
@@ -72,6 +73,7 @@ export default function NeedsYouScreen() {
         void tasks.refresh();
       }}
     >
+      <TabTitle title="Needs you" className="-mt-2" />
       <Notice
         message={
           action.error || items.error || tasks.error || bots.error || undefined

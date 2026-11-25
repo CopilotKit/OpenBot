@@ -153,7 +153,7 @@ The platform draws everything around a screen. HeroUI Native draws what is insid
 | --- | --- |
 | Stacks, headers, titles, back buttons | Expo Router's native `Stack`, set in the route's layout or the screen's options. |
 | Tabs | The dock (`mobile/src/dock.tsx`), on Expo Router's JS tabs. The one piece of chrome the app draws itself: iOS 26's native tab bar is a floating glass pill, and the dock is flat, as the web app's sidebar is. |
-| Header buttons (your account, back, new, a Bot's computer and settings) | `IconButton`s placed with `plainHeaderLeft` and `plainHeaderRight` (`mobile/src/header.tsx`), as plain icons the way the web app's header draws them. On iOS 26 they would otherwise sit in a gray glass bubble, and the system's back button can't lose its bubble, so iOS gets a plain chevron in its place; swiping back works the same. |
+| Header buttons (your account, back, new, a Bot's computer and settings) | `IconButton`s placed with `plainHeaderLeft` and `plainHeaderRight` (`mobile/src/header.tsx`), as plain icons the way the web app's header draws them. On iOS 26 they would otherwise sit in a gray glass bubble, and the system's back button can't lose its bubble, so a plain chevron takes its place, on Android too so the two look alike; swiping back and Android's back work the same. |
 | Header menus, search in the header, a bottom toolbar | The native `Stack` toolbar and search bar. |
 | Sheets and modals | Expo Router's native presentations (`formSheet`, `modal`). |
 | Pickers, switches, sliders, system menus | `@expo/ui`, so they look and behave as the platform's own. |
@@ -236,6 +236,11 @@ Native's, and builds its own only when neither fits. The development build shows
   Bot and everything else opened from a tab open in the app's stack over the tabs, so the dock
   steps aside and the message box has the bottom to itself; what opens from More stays in More.
   Search sits in the header, under the title.
+- **Android looks like iOS.** Android's header has no large title and offers search only as an
+  icon, so on Android a tab's screen draws its title at the top of its content (`TabTitle`), and
+  Conversations draws its search field there (`SearchField`), at iOS's sizes. Titles of pushed
+  screens are centered on both. What stays each platform's own is the system's: switches, the
+  keyboard, sheets and the status bar. Check a change on both before it lands.
 
 ## The web app and OpenBot Desktop
 

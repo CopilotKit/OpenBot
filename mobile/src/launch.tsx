@@ -363,9 +363,7 @@ function LaunchCover({
       />
       <View style={styles.center} pointerEvents="none">
         <Animated.View style={orbStyle}>
-          <Animated.View style={[styles.glow, glowStyle]}>
-            <Image source={ORB} blurRadius={40} style={styles.fill} />
-          </Animated.View>
+          <Animated.View style={[styles.glow, glowStyle]} />
           <View ref={orbRef} collapsable={false} style={styles.orb}>
             <Image source={ORB} style={styles.fill} />
           </View>
@@ -455,12 +453,18 @@ const styles = StyleSheet.create({
   },
   orb: { width: LAUNCH_ORB_SIZE, height: LAUNCH_ORB_SIZE },
   fill: { width: "100%", height: "100%" },
+  /*
+   * The glow: the orb's colors, fading to nothing before the edge of its square. A blurred copy of the
+   * orb was blurred only inside its own square on Android, so the glow stopped at a hard square edge.
+   */
   glow: {
     position: "absolute",
-    left: -LAUNCH_ORB_SIZE * 0.25,
-    top: -LAUNCH_ORB_SIZE * 0.25,
-    width: LAUNCH_ORB_SIZE * 1.5,
-    height: LAUNCH_ORB_SIZE * 1.5,
+    left: -LAUNCH_ORB_SIZE * 0.5,
+    top: -LAUNCH_ORB_SIZE * 0.5,
+    width: LAUNCH_ORB_SIZE * 2,
+    height: LAUNCH_ORB_SIZE * 2,
+    backgroundImage:
+      "radial-gradient(circle closest-side, rgba(196, 112, 222, 0.75) 0%, rgba(150, 120, 240, 0.45) 50%, rgba(96, 140, 230, 0.15) 75%, rgba(96, 140, 230, 0) 100%)",
   },
   // Below the orb, out of the way of where it was, so the orb stays exactly where the phone's splash put it.
   slow: {

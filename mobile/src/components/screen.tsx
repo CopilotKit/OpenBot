@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { RefreshControl, View } from "react-native";
+import { RefreshControl, type RefreshControlProps, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useCSSVariable, withUniwind } from "uniwind";
 import { cn } from "./cn";
@@ -67,13 +67,14 @@ export function ScrollScreen({
 export function Refresh({
   refreshing,
   onRefresh,
-}: {
-  refreshing: boolean;
-  onRefresh: () => void;
-}) {
+  ...passed
+}: RefreshControlProps) {
   const color = useCSSVariable("--color-muted") as string | undefined;
   return (
     <RefreshControl
+      // What a scroll view hands its refresh control: on Android the control wraps the scroll view, so it
+      // gets the scroll view as its child and the scroll view's size as its style. Dropped, the list is lost.
+      {...passed}
       refreshing={refreshing}
       onRefresh={onRefresh}
       tintColor={color}

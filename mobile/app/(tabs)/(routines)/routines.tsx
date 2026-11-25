@@ -20,6 +20,7 @@ import {
   Rows,
   ScrollScreen,
   Section,
+  TabTitle,
   Toggle,
 } from "../../../src/components";
 import { IconClock } from "../../../src/icons";
@@ -64,6 +65,7 @@ export default function Routines() {
   }
   return (
     <ScrollScreen refreshing={pull.refreshing} onRefresh={pull.onRefresh}>
+      <TabTitle title="Routines" className="-mt-2 -mb-3" />
       <Notice message={action.error || routines.error || bots.error} />
       {byBot.map(([botId, list]) => {
         const bot = bots.data?.find((item) => item.id === botId);

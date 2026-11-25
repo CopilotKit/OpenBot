@@ -30,6 +30,7 @@ export { default as IconPlayerPause } from "@tabler/icons-react-native/IconPlaye
 export { default as IconPlug } from "@tabler/icons-react-native/IconPlug";
 export { default as IconPlus } from "@tabler/icons-react-native/IconPlus";
 export { default as IconRobot } from "@tabler/icons-react-native/IconRobot";
+export { default as IconSearch } from "@tabler/icons-react-native/IconSearch";
 export { default as IconSelector } from "@tabler/icons-react-native/IconSelector";
 export { default as IconSettings } from "@tabler/icons-react-native/IconSettings";
 export { default as IconTool } from "@tabler/icons-react-native/IconTool";

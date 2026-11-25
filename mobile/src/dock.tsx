@@ -71,12 +71,14 @@ export function Dock({
             }
             className="flex-1 items-center gap-1 py-0.5 active:opacity-60"
           >
-            <View
-              className={cn(
-                "h-8 w-14 items-center justify-center rounded-full",
-                focused && "bg-sidebar-accent",
-              )}
-            >
+            <View className="h-8 w-14 items-center justify-center">
+              {/*
+               * The highlight is a view of its own, made with its color and its round corners at once.
+               * Set as the background of the view that was already there, Android sometimes drew it square.
+               */}
+              {focused ? (
+                <View className="absolute inset-0 rounded-full bg-sidebar-accent" />
+              ) : null}
               <Icon
                 icon={tab.icon}
                 size={22}
@@ -90,8 +92,11 @@ export function Dock({
                 </View>
               ) : null}
             </View>
+            {/* A long label shrinks a little to fit its fifth of a narrow phone, rather than being cut. */}
             <Text
               numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
               className={cn(
                 "text-[11px] leading-4",
                 focused ? "font-semibold text-foreground" : "text-muted",
