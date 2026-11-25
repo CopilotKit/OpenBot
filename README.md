@@ -93,13 +93,22 @@ OpenBot has three parts. On your laptop, setup runs the backend and Intelligence
 
 | Part | What it does |
 | --- | --- |
-| **OpenBot frontends** | Mac, Windows, web, iOS, Android, Slack, and Teams connect people to the same workspace. Conversations, interactive results, computer view, and approvals adapt to each surface. [Choose a frontend](#getting-started). |
+| **OpenBot frontends** | Mac, Windows, web, iOS, Android, Slack, and Teams connect people to the same workspace. Conversations, interactive results, computer view, and approvals adapt to each surface. Fully open source and configurable, or build your own on the [OpenBot API](#api). [Choose a frontend](#getting-started). |
 | **OpenBot backend** | Runs the workspace API and built-in Bots, connects external agents and tools, manages Bot computers, and enforces identity, permissions, action policies, and audit. Published as signed images and Helm charts, and reached through [one API](#api). Deploys on Kubernetes with PostgreSQL and persistent storage. |
-| **CopilotKit Intelligence** | Durable conversations, memory, Automatic Learning, and enterprise governance services. Separately licensed; runs on Kubernetes alongside OpenBot. |
+| **CopilotKit Intelligence** | Durable conversations, memory, Automatic Learning, and enterprise governance services, running with the OpenBot backend. Included with OpenBot for Business, and free for local use and evaluation. [Licensing](#open-source-local-operation-and-licensing). |
 
-OpenBot enforces sign-in, tool permissions, action policies, and audit at its API, alongside Intelligence's platform services. Built-in Bots run in the OpenBot server; your own agents can run alongside OpenBot or on any agent execution platform. Both use AG-UI and can share the same workspace.
+OpenBot works out of the box, and every major part of it is modular. For each one, use what's built in, bring your own, or mix both.
 
-Computer execution is pluggable: use the default Kubernetes setup or connect a compatible external computer provider.
+| Lane | Built in | Or bring your own |
+| --- | --- | --- |
+| **Agents** | Built-in Bots, or your own custom agents, in the OpenBot backend. | Any agent, like ADK, LangChain, Claude Agent SDK, and more, connected through AG-UI. Hosted on AgentCore, LangSmith, Gemini Agent Runtime, or elsewhere. |
+| **Computers** | A secure, persistent virtual machine for every user, and for every bot. | Your own sandbox, like Daytona, E2B, or Modal. |
+| **Tools** | Thousands of connectors out of the box, with granular subtools. | Any MCP server or hub. |
+| **Vaults** | The built-in vault. | Your own, like 1Password, HashiCorp Vault, or AWS Secrets Manager. |
+
+More lanes follow the same pattern.
+
+OpenBot enforces sign-in, tool permissions, action policies, and audit at its API, alongside Intelligence's platform services. Built-in Bots and your own agents both use AG-UI and can share the same workspace.
 
 [Architecture details](docs/architecture.md) · [Services and ports](#services-and-ports) · [Kubernetes deployment](#deploy-on-kubernetes)
 
