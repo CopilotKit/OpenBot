@@ -460,6 +460,7 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/saved-logins: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1saved-logins' }
   /api/v2/organizations/{organizationId}/people/{personId}/saved-logins/{savedLoginId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1saved-logins~1{savedLoginId}' }
   /api/v2/organizations/{organizationId}/saved-logins/purge: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1saved-logins~1purge' }
+  /api/v2/organizations/{organizationId}/saved-logins/unusable: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1saved-logins~1unusable' }
   /api/v2/organizations/{organizationId}/people/{personId}/recorder-connect-codes: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connect-codes' }
   /api/v2/organizations/{organizationId}/people/{personId}/recorder-connections: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connections' }
   /api/v2/organizations/{organizationId}/people/{personId}/recorder-connections/{recorderConnectionId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connections~1{recorderConnectionId}' }
@@ -677,7 +678,7 @@ components:
             host-access:write: Give a Bot a folder on the signed-in person's own computer, take one away, and stop folder access.
             sign-in-requests:read: Read the sign-in requests the signed-in person's Bots are waiting on, never a credential.
             sign-in-requests:write: Open, answer and decline sign-in requests for the signed-in person.
-            saved-logins:read: Read which logins the signed-in person saved, never a password.
+            saved-logins:read: Read which logins the signed-in person saved, never a password, and for an administrator how many saved logins nobody in the organization may use any more.
             saved-logins:write: Delete the signed-in person's saved logins, and for an administrator the saved logins nobody in the organization may use any more.
             recorder:read: Read the signed-in person's connected browsers and their recordings.
             recorder:write: Connect and disconnect the signed-in person's browsers.

@@ -4,7 +4,11 @@
 import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
-import type { SavedLoginPage, SavedLoginsPurged } from "../model";
+import type {
+  SavedLoginCounts,
+  SavedLoginPage,
+  SavedLoginsPurged,
+} from "../model";
 
 export const getListSavedLoginsResponseMock = (): SavedLoginPage => ({
   savedLogins: [
@@ -23,6 +27,11 @@ export const getListSavedLoginsResponseMock = (): SavedLoginPage => ({
 
 export const getPurgeSavedLoginsResponseMock = (): SavedLoginsPurged => ({
   deleted: { switchedOff: 12, removed: 3 },
+});
+
+export const getGetUnusableSavedLoginsResponseMock = (): SavedLoginCounts => ({
+  switchedOff: 12,
+  removed: 0,
 });
 
 export const getListSavedLoginsMockHandler = (
@@ -119,8 +128,35 @@ export const getPurgeSavedLoginsMockHandler = (
     options,
   );
 };
+
+export const getGetUnusableSavedLoginsMockHandler = (
+  overrideResponse?:
+    | SavedLoginCounts
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<SavedLoginCounts> | SavedLoginCounts),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/saved-logins/unusable",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetUnusableSavedLoginsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getSavedLoginsMock = () => [
   getListSavedLoginsMockHandler(),
   getDeleteSavedLoginMockHandler(),
   getPurgeSavedLoginsMockHandler(),
+  getGetUnusableSavedLoginsMockHandler(),
 ];

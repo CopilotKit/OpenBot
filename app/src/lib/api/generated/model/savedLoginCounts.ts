@@ -3,17 +3,17 @@
  */
 
 /**
- * How many saved logins were deleted, for each reason.
+ * How many saved logins nobody may use, for each reason: those a purge deleted, or those it would delete.
  */
-export type SavedLoginsPurgedDeleted = {
+export interface SavedLoginCounts {
   /**
    * Those of current members the Password manager switch is off for.
    * @minimum 0
    */
   switchedOff: number;
   /**
-   * Those of people removed from the organization, or whose address can't sign in any more.
+   * Those of people removed from the organization, or whose address can't sign in any more. Almost always 0: a safety net.
    * @minimum 0
    */
   removed: number;
-};
+}

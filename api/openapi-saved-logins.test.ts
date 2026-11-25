@@ -9,6 +9,9 @@ import * as savedLogins from "../app/src/lib/api/generated/saved-logins/saved-lo
  * the Password manager switch is off for, and those of people removed from the organization. Only an
  * administrator does it, it takes no body, and it answers with a count for each group. Every example
  * the spec shows is one the generated client accepts.
+ *
+ * Before it, an administrator can read the same two counts without deleting anything
+ * (`getUnusableSavedLogins`), so a confirmation can say how many it will delete.
  */
 
 type Example = { value?: unknown; $ref?: string };
@@ -33,6 +36,8 @@ const spec = parse(
 
 const PURGE = "/api/v2/organizations/{organizationId}/saved-logins/purge";
 const purge = spec.paths[PURGE]?.post;
+const UNUSABLE = "/api/v2/organizations/{organizationId}/saved-logins/unusable";
+const unusable = spec.paths[UNUSABLE]?.get;
 
 function exampleValue(example: Example): unknown {
   if (!example.$ref) return example.value;
@@ -77,4 +82,43 @@ test("the answer counts each group, and every example the spec shows parses", ()
   expect(
     Answer?.safeParse({ deleted: { switchedOff: -1, removed: 0 } }).success,
   ).toBe(false);
+});
+
+test("an administrator reads, without deleting anything, the two counts the purge would delete", () => {
+  expect(unusable?.operationId).toBe("getUnusableSavedLogins");
+  expect(unusable?.tags).toEqual(["Saved logins"]);
+  expect(unusable?.requestBody).toBeUndefined();
+  expect(unusable?.security).toContainEqual({
+    appOAuth: ["saved-logins:read"],
+  });
+  expect(unusable?.responses["403"]?.$ref).toContain("AdminOnly");
+  expect(unusable?.responses["404"]?.$ref).toContain("OrganizationNotFound");
+  expect(unusable?.description).toContain("personal edition");
+  expect(unusable?.description).toContain("exactly what purgeSavedLogins");
+});
+
+test("the read's answer is the two counts, and every example the spec shows parses", () => {
+  const Answer = (savedLogins as Record<string, unknown>)
+    .GetUnusableSavedLoginsResponse as
+    | { safeParse: (value: unknown) => { success: boolean } }
+    | undefined;
+  expect(Answer).toBeDefined();
+  const answers = Object.values(
+    unusable?.responses["200"]?.content?.["application/json"]?.examples ?? {},
+  ).map(exampleValue);
+  expect(answers.length).toBeGreaterThan(0);
+  for (const answer of answers) {
+    expect(Answer?.safeParse(answer).success).toBe(true);
+  }
+  expect(Answer?.safeParse({ switchedOff: 12, removed: 0 }).success).toBe(true);
+  expect(Answer?.safeParse({ switchedOff: 12 }).success).toBe(false);
+  expect(Answer?.safeParse({ switchedOff: 0, removed: -1 }).success).toBe(
+    false,
+  );
+});
+
+test("both say the removed group is a safety net, almost always 0", () => {
+  for (const operation of [purge, unusable]) {
+    expect(operation?.description).toContain("almost always 0");
+  }
 });
