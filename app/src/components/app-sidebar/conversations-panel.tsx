@@ -1,5 +1,5 @@
 import { IconMessagePlus, IconSearch } from "@tabler/icons-react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -34,6 +34,7 @@ import {
   type MessageListEmphasis,
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
+import { delegatingConversationsQueryOptions } from "@/lib/tasks/queries";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -126,6 +127,25 @@ export function hasUnseenActivity(channel: ChannelSummary): boolean {
   );
 }
 
+/**
+ * Whether a conversation's row says Working: a turn running in it, work it waits on (another Bot it
+ * asked, a routine firing into it), or work its Bot handed out to a task that is still under way
+ * (`delegating`, from `delegatingConversationsQueryOptions`).
+ */
+export function isWorking(
+  channel: ChannelSummary,
+  delegating: readonly string[],
+): boolean {
+  return (
+    (channel.busy ?? false) ||
+    (channel.work?.length ?? 0) > 0 ||
+    delegating.includes(channel.id)
+  );
+}
+
+/** No conversation's work handed out and still working: the answer before the task list is read. */
+export const NONE_DELEGATING: readonly string[] = [];
+
 /** Unseen activity somewhere you are not looking. The open channel never shows the dot. */
 export function isUnread(
   channel: ChannelSummary,
@@ -146,11 +166,13 @@ function ChannelRow({
   animateOrder,
   emphasis,
   view,
+  delegating,
 }: {
   channel: ChannelSummary;
   animateOrder: boolean;
   emphasis: MessageListEmphasis;
   view: ConversationView;
+  delegating: readonly string[];
 }) {
   const shouldReduceMotion = useReducedMotion();
   // Whether this row is unread, as a boolean, for the same reason `Channel` computes `isOpen`
@@ -187,8 +209,8 @@ function ChannelRow({
         pinned={channel.pinned}
         canRename={channel.canRename ?? false}
         unread={unread}
-        // A turn running, or work the conversation waits on between turns: a hop, a routine.
-        busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
+        // A turn running, work the conversation waits on (a hop, a routine), or a task it handed out.
+        busy={isWorking(channel, delegating)}
       />
     </motion.div>
   );
@@ -211,6 +233,7 @@ function SearchResults({
   settled,
   emphasis,
   view,
+  delegating,
 }: {
   /** The search as it was when typing last paused, normalised. This is what is asked for. */
   term: string;
@@ -218,6 +241,7 @@ function SearchResults({
   settled: boolean;
   emphasis: MessageListEmphasis;
   view: ConversationView;
+  delegating: readonly string[];
 }) {
   const results = useInfiniteQuery(channelSearchInfiniteQueryOptions(term));
 
@@ -274,6 +298,7 @@ function SearchResults({
             key={channel.id}
             animateOrder={false}
             channel={channel}
+            delegating={delegating}
           />
         ))}
       </AnimatePresence>
@@ -312,6 +337,8 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
   const emphasis = useMessageListEmphasis();
   const [view] = useConversationView();
   const channels = useInfiniteQuery(channelListQueryOptions());
+  const delegating =
+    useQuery(delegatingConversationsQueryOptions()).data ?? NONE_DELEGATING;
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounced(search, SEARCH_DEBOUNCE_MS);
   const scrollRoot = useRef<HTMLDivElement>(null);
@@ -406,6 +433,7 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
                 <SearchResults
                   view={view}
                   emphasis={emphasis}
+                  delegating={delegating}
                   settled={debouncedTerm === term}
                   term={debouncedTerm}
                 />
@@ -442,6 +470,7 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
                       key={channel.id}
                       animateOrder={animateOrder}
                       channel={channel}
+                      delegating={delegating}
                     />
                   ))}
                 </AnimatePresence>

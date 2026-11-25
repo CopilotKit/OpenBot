@@ -12,7 +12,7 @@ import { ComputerView } from "@/components/computer/computer-view";
 import { HelpRequestCard } from "@/components/computer/help-request-card";
 import {
   commandStatus,
-  TerminalBlock,
+  TerminalStep,
 } from "@/components/computer/terminal-block";
 import { reportBotDecline } from "@/lib/api/generated/bots/bots";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
@@ -861,15 +861,16 @@ export function ComputerTools() {
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       /*
-       * A terminal block: the prompt and the command, the end of what it printed (the rest folds
-       * away), and how it exited, clicking through to the live terminal in the Computer panel. This
-       * ran on a machine holding somebody's logins, so what it printed is always reachable here
-       * rather than taken on the model's word.
+       * One line saying what ran, folded like every step of a Bot's work, which opens to a terminal
+       * block: the prompt and the command, the end of what it printed (the rest folds away), and how
+       * it exited, clicking through to the live terminal in the Computer panel. This ran on a machine
+       * holding somebody's logins, so what it printed is always reachable here rather than taken on
+       * the model's word.
        */
       const byYou = byPerson(outcome);
       const refused = outcome.refused === true;
       return (
-        <TerminalBlock
+        <TerminalStep
           command={typeof args?.command === "string" ? args.command : ""}
           computerId={bot.current}
           output={

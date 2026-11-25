@@ -18,6 +18,9 @@
  *    own last-step notice (shared/run-notices.ts), so a run always ends by saying something rather
  *    than on its fortieth search (`answersOnLastStep` in the built-in engine).
  *  - History sanitising, so no dangling tool call reaches the model.
+ *  - Room in the conversation (`context-room.ts`): old tool results cleared from what each step
+ *    sends, harder retries when a provider still says too long, and `recall_earlier_results` to read
+ *    a cleared result back. Without it a long task outgrew the model's window and stopped.
  */
 import { randomUUID } from "node:crypto";
 import type {
@@ -44,7 +47,22 @@ import {
   StateGraph,
 } from "@langchain/langgraph";
 import { LAST_STEP_NOTICE } from "../../shared/run-notices.ts";
-import { ModelDeclinedError, runFailure } from "./errors.ts";
+import {
+  clearsOnServer,
+  LAST_STAGE,
+  RECALL,
+  recall,
+  refusesContextEditing,
+  roomFor,
+  stopContextEditing,
+  tooLong,
+  withRecall,
+} from "./context-room.ts";
+import {
+  MessageTooLongError,
+  ModelDeclinedError,
+  runFailure,
+} from "./errors.ts";
 import { modelMessages, STANDING_ROLE_PREFIX } from "./history.ts";
 import {
   chatModel,
@@ -73,6 +91,11 @@ export type RunContext = {
   maxSteps: number;
   env: Env;
   fetch: typeof fetch;
+  /**
+   * How hard this run clears what it sends (`STAGES` in context-room.ts). A stage that got a
+   * too-long request through is where every later step starts, so it is not refused again first.
+   */
+  room: { stage: number };
 };
 
 export type RunOptions = {
@@ -287,16 +310,40 @@ async function answer(state: StateType, config: RunnableConfig) {
   const step = state.steps + 1;
   const offered = boundTools(run.tools);
   const last = offered.length > 0 && step >= run.maxSteps;
-  // The notice is this call's only: the conversation keeps what the model said and did.
-  const messages = last
-    ? [...state.messages, new HumanMessage(LAST_STEP_NOTICE)]
-    : state.messages;
-  const model =
-    offered.length && run.model.bindTools
-      ? run.model.bindTools(offered, last ? { tool_choice: "none" } : {})
-      : run.model;
-  const message = await streamStep(model, messages, run, last);
-  return { messages: [message], steps: step };
+  const toolChars = JSON.stringify(offered).length;
+  for (;;) {
+    // Only what this call sends is cleared: the run's own thread stays whole, for recall and for
+    // the snapshot it hands back.
+    const sent = roomFor(state.messages, {
+      stage: run.room.stage,
+      clearsOnServer: clearsOnServer(run.model),
+      extraChars: toolChars,
+    });
+    // The notice is this call's only: the conversation keeps what the model said and did.
+    const messages = last
+      ? [...sent, new HumanMessage(LAST_STEP_NOTICE)]
+      : sent;
+    const model =
+      offered.length && run.model.bindTools
+        ? run.model.bindTools(offered, last ? { tool_choice: "none" } : {})
+        : run.model;
+    try {
+      const message = await streamStep(model, messages, run, last);
+      return { messages: [message], steps: step };
+    } catch (error) {
+      if (run.signal?.aborted) throw error;
+      // A proxy in front of Claude that does not take context editing: clear here instead.
+      if (clearsOnServer(run.model) && refusesContextEditing(error)) {
+        stopContextEditing(run.model);
+        continue;
+      }
+      const words = tooLong(error);
+      if (words === undefined) throw error;
+      // Everything earlier is already cleared and cut: what is too long is the latest message.
+      if (run.room.stage >= LAST_STAGE) throw new MessageTooLongError(words);
+      run.room.stage += 1;
+    }
+  }
 }
 
 /** Where a step goes next: the server's tools here, or back to the surface (`next_step` in Python). */
@@ -313,8 +360,11 @@ export function nextStep(
   // it, through its own governance, or refuses a name it holds nothing for.
   if (calls.some((call) => !offered.has(call.name))) return END;
   // Mixed turns yield too: never invent a UI result or run a governed action while the surface
-  // still owns an unanswered call.
-  if (calls.some((call) => !run.deployment.has(call.name))) return END;
+  // still owns an unanswered call. A recall is answered here, from the run's own thread.
+  if (
+    calls.some((call) => call.name !== RECALL && !run.deployment.has(call.name))
+  )
+    return END;
   return "tools";
 }
 
@@ -395,6 +445,24 @@ async function callTool(
   });
 }
 
+/** A recall, read from the whole thread this run holds rather than from what the model was sent. */
+async function recalled(
+  call: { id?: string; name: string; args: unknown },
+  thread: readonly BaseMessage[],
+): Promise<ToolMessage> {
+  const args =
+    call.args && typeof call.args === "object"
+      ? (call.args as Record<string, unknown>)
+      : {};
+  return new ToolMessage({
+    id: randomUUID(),
+    content: recall(thread, args),
+    tool_call_id: call.id ?? "",
+    name: call.name,
+    status: "success",
+  });
+}
+
 async function tools(state: StateType, config: RunnableConfig) {
   const run = runOf(config);
   if (nextStep(state, config) !== "tools") {
@@ -416,7 +484,11 @@ async function tools(state: StateType, config: RunnableConfig) {
     Promise.all(
       calls
         .filter((call) => !call.name.startsWith("computer_"))
-        .map((call) => callTool(call, run)),
+        .map((call) =>
+          call.name === RECALL
+            ? recalled(call, state.messages)
+            : callTool(call, run),
+        ),
     ),
   ]);
   const fromComputer = ordered[Symbol.iterator]();
@@ -571,7 +643,8 @@ export async function runAgent(
   try {
     const model = (options.makeModel ?? chatModel)(choice, env);
     const run: RunContext = {
-      tools: input.tools ?? [],
+      // A Bot with tools can read back a result cleared to make room (context-room.ts).
+      tools: withRecall(input.tools ?? []),
       context: input.context ?? [],
       deployment: new Set(
         Array.isArray(names)
@@ -585,6 +658,7 @@ export async function runAgent(
       maxSteps: options.maxSteps ?? MAX_STEPS,
       env,
       fetch: options.fetch ?? fetch,
+      room: { stage: 0 },
     };
     const thread = modelMessages(input.messages ?? [], {
       systemPrompt,

@@ -200,8 +200,10 @@ screens read `src/scheme.ts`. No other file in `mobile/` has a color value in it
 
 ## The web app and OpenBot Desktop
 
-Beyond the color scheme above, no product guidelines yet. How a screen is laid out, worded, and
-reads and writes its data is already written down, in the skills under `.claude/skills/`:
+Beyond the color scheme above, no product guidelines yet. What the design system is built on, and
+the rules for changing a token or a primitive or building from a design, are in
+[design-system.md](design-system.md). How a screen is laid out, worded, and reads and writes its
+data is already written down, in the skills under `.claude/skills/`:
 
 - `openbot-screen-layout`: the default layout of a screen.
 - `openbot-copy`: the words and the voice of anything a person reads.

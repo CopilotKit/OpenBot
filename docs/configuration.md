@@ -863,7 +863,7 @@ them, including a saved off. See [automatic-learning.md](automatic-learning.md).
 | `OPENBOT_LEARNING_AUTO_ASSIGN`           | `false` or `0` stops the server assigning the project's `openbot` container automatically. On otherwise. Stands aside for a `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` the configured Intelligence has. |
 | `INTELLIGENCE_SERVICE_TOKEN`             | An Intelligence service token that creates the `openbot` Learning container (local evaluation installs only; see [Creating the container](automatic-learning.md#creating-the-container)). Requires `INTELLIGENCE_PROJECT_ID`. |
 | `INTELLIGENCE_PROJECT_ID`                | The numeric ID of the runtime key's Intelligence project, where the service token creates the container. Set both or neither, or the server refuses to start. |
-| `OPENBOT_MEMORY_SOURCE_DEFAULTS`         | `false` or `0` stops OpenBot making each app a person connected into a memory source for the Bots they talk to. On otherwise. Existing sources are left as they are. |
+| `OPENBOT_MEMORY_SOURCE_DEFAULTS`         | `true` or `1` makes each app a person connected into a memory source for the Bots they talk to, as OpenBot did before, and imports that app's records (pages, files, issues) for review. Off otherwise: memory holds facts about the person, and a person adds a memory source by hand on a Bot's Memory page. |
 | `OPENBOT_PROACTIVE_DEFAULTS`             | `true` or `1` switches on an hourly check-in on everything a Bot can read the first time a person talks to it alone, as OpenBot did before. Off otherwise: a Bot offers a check-in on one thing in the conversation, and it runs only once the person accepts. Existing settings are left as they are. |
 
 ## OpenTelemetry export
