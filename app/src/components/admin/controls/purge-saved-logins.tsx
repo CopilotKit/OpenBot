@@ -73,9 +73,9 @@ export function PurgeSavedLogins() {
             </ItemDescription>
           ) : answer?.served ? (
             <ItemDescription className="line-clamp-none" role="status">
-              Deleted {savedLogins(answer.deleted.switchedOff)} of people it's
-              off for, and {answer.deleted.removed} of people no longer in the
-              organization.
+              Deleted {savedLogins(answer.deleted.switchedOff)} of people
+              Password manager is off for, and {answer.deleted.removed} of
+              people no longer in the organization.
             </ItemDescription>
           ) : (
             <ItemDescription className="line-clamp-none">
