@@ -315,6 +315,8 @@ function RouteComponent() {
             key={restores}
             // Files wait in the box until the message has a conversation to go to; see `start`.
             holdsFilesUntilSent
+            // An unsent first message stays in the box when somebody looks elsewhere.
+            draftKey="home"
             attachmentLimits={attachmentLimits}
             modelPicker={
               <ModelPicker
