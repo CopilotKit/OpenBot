@@ -188,7 +188,7 @@ export function labelSlackMentions(text: string, names: SlackNames): string {
       if (kind === "!" && !target.startsWith("!subteam^")) return whole;
       const sanitized = names
         .get(id)
-        ?.replace(/[|>\r\n]/g, " ")
+        ?.replace(/[|>\r\n\t]/g, " ")
         .trim();
       if (!sanitized) return whole;
       if (kind === "!") {
