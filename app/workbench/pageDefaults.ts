@@ -125,6 +125,8 @@ const handbacks = Object.fromEntries(
 ) as Record<(typeof HANDBACK_COMMANDS)[number], null>;
 
 export const PAGE_DEFAULTS: Partial<Record<PageCommand, unknown>> = {
+  "plugin:openbot-desktop|record_problem": null,
+  "plugin:openbot-desktop|save_logs": null,
   "plugin:openbot-desktop|connection": {
     mode: "local",
     address: null,
