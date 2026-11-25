@@ -8,8 +8,8 @@
  * installers, not the feed, so a field there would be unauthenticated. So the floor carries its own
  * Ed25519 signature over the exact bytes of its payload, and an app acts on it only once that
  * signature verifies against a key built into the app (`security-floor.json` in this folder). Each
- * app names where it reads the floor itself (`SECURITY_FLOOR_ADDRESSES` in the Recorder and the phone
- * app, `ADDRESSES` in security_floor.rs); tests/security-floor-addresses.test.ts holds them equal.
+ * app names where it reads the floor itself (`SECURITY_FLOOR_ADDRESSES` in the Recorder and OpenBot
+ * Mobile, `ADDRESSES` in security_floor.rs); tests/security-floor-addresses.test.ts holds them equal.
  *
  * Only up: an app keeps the floor with the highest `serial` it has verified and ignores any with a
  * lower or equal one, so a replayed old floor can't lift a block. Offline, the kept floor still
@@ -64,7 +64,7 @@ export type SecurityFloor = {
 /** The published document: the payload's exact bytes and a signature over them, both in base64. */
 export type SignedFloor = { payload: string; signature: string };
 
-/** Ed25519 verification, so an app without WebCrypto's Ed25519 (the phone app) can bring its own. */
+/** Ed25519 verification, so an app without WebCrypto's Ed25519 (OpenBot Mobile) can bring its own. */
 export type Ed25519Verify = (
   publicKey: Uint8Array,
   signature: Uint8Array,

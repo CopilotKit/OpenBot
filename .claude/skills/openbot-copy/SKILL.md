@@ -33,6 +33,7 @@ One word for one thing, everywhere a person can see it.
 | **team**, **Teams** | A named group of people inside one organization, made in Admin under Teams or kept in step with the company's directory. Whatever can be given to everyone can be given to a team. | group (for a team), and never the whole organization |
 | **shared account** | An app account the organization connects once, which Bots act as. | team account |
 | **OpenBot** | The product the person is using, and their account with it: "Sign in to OpenBot", "your OpenBot account". | this deployment, the server, the instance, CopilotKit |
+| **OpenBot Mobile** | OpenBot on a phone or a tablet, from the App Store or Google Play. Named like OpenBot Desktop, with no "the". | the phone app, the mobile app, the native app |
 | **OpenBot by CopilotKit** | The company, only where it has to be named: the license agreement's name, a legal or privacy line, the one place setup says who makes OpenBot. | CopilotKit alone |
 | **the CopilotKit account your licence is under** | Managed updates only: the account an admin signs in to on CopilotKit's approval page, named as that page and its sign-in card name it, like GitHub's and Slack's own words. On the same screen, "CopilotKit" alone may say who sees the install's version and health and who the maintenance window is agreed with, in the approval page's own words. | OpenBot by CopilotKit account, your OpenBot account |
 | **turn on / turn off** | An admin switching an app or a feature. | enable / disable (in sentences; a switch may still read "Enabled") |

@@ -34,7 +34,7 @@ import { queryClient } from "@/query-client";
 
 /**
  * How each channel is turned on: Slack and Teams through an OpenTag pairing, text messages through Twilio, push through
- * the OpenBot phone app. Each is a setting where OpenBot runs, read at start-up, so the docs say what to set; the two
+ * OpenBot Mobile. Each is a setting where OpenBot runs, read at start-up, so the docs say what to set; the two
  * sections sit together there. The setup checklist links the same page for Slack and Teams.
  */
 export const CHANNEL_SETUP_DOCS =

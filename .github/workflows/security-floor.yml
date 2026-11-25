@@ -1,6 +1,6 @@
 name: Security floor
 
-# Raises the security floor: the lowest safe release of OpenBot Desktop, its back end, the phone app
+# Raises the security floor: the lowest safe release of OpenBot Desktop, its back end, OpenBot Mobile
 # and the Recorder (shared/security-floor.ts, docs/releasing.md "Security floor"). Below it, an app
 # shows one notice, "This version of OpenBot has a security problem. Update to keep using it.", and
 # nothing else until it is updated. Used only when a release has a security problem, and never for
@@ -28,7 +28,7 @@ on:
         default: ""
         required: false
       mobile:
-        description: Lowest safe phone app release. Empty keeps the published floor; none removes it.
+        description: Lowest safe OpenBot Mobile release. Empty keeps the published floor; none removes it.
         type: string
         default: ""
         required: false

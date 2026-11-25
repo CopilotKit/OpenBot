@@ -1,5 +1,5 @@
 /**
- * Whether this phone app is new enough for the OpenBot it was built for, asked before anybody signs in.
+ * Whether this build of OpenBot Mobile is new enough for the OpenBot it was built for, asked before anybody signs in.
  *
  * The app reads the OpenBot's `deployment` (which answers before sign-in) and decides by the rule in ./client-version.
  * Only an app too old for its OpenBot is stopped, with "Update OpenBot". Anything else decides nothing: the screens say

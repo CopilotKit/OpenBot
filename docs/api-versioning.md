@@ -2,7 +2,7 @@
 
 The rules for changing OpenBot's API and the apps that call it, what CI checks, and how to fix a
 failure. Read this before you change the spec (`api/`), an app's requests (the web app, OpenBot
-Desktop, the phone app, the Recorder), what OpenBot Desktop hands the OpenBot it starts, or a
+Desktop, OpenBot Mobile, the Recorder), what OpenBot Desktop hands the OpenBot it starts, or a
 release's `release-policy.json`.
 
 The short version, and the rules for the database, are in
@@ -185,7 +185,7 @@ in `shared/client-version.ts`).
   comparing versions.
 
 `shared/client-version.ts` holds these rules and `shared/fixtures/client-version/cases.json` holds
-the cases. The web app and the Recorder read the module; OpenBot Desktop (Rust) and the phone app
+the cases. The web app and the Recorder read the module; OpenBot Desktop (Rust) and OpenBot Mobile
 carry their own copy, and their tests run every case.
 
 ### Where minimums come from
@@ -207,7 +207,7 @@ Each app's minimum is the highest of the three. Nothing lowers a minimum.
 | Web app | "Update OpenBot", "This page is from an older version of OpenBot.", with **Update**, which loads the new page. A tab left open across an upgrade gets it on its next request. Inside the OpenBot Desktop window, when the refusal names Desktop, **Update and restart**. | "This version of OpenBot has a security problem. Update to keep using it." |
 | OpenBot Desktop, its own OpenBot | "Update OpenBot" with **Update and restart**, before the window opens. | The same security sentence. |
 | OpenBot Desktop, connected | "The OpenBot at {host} needs a newer version of this app. Update OpenBot, then connect again.", with **Update and restart**, when the person connects and on every launch. | The same security sentence. |
-| Phone app | "Update OpenBot" with the server's sentence and **Try again**. | The same security sentence. |
+| OpenBot Mobile | "Update OpenBot" with the server's sentence and **Try again**. | The same security sentence. |
 | Recorder | The server's sentence on the popup, the Connect page and Connect with OpenBot Desktop. | The same security sentence. |
 
 When the server is older than the app can use (it serves only older API majors), the web app says
@@ -265,7 +265,7 @@ reads it yet.
 ## The security floor
 
 A forced update, for a release with a security problem and for nothing else. The floor names the
-lowest safe release of OpenBot Desktop, the OpenBot Desktop runs on the computer, the phone app and
+lowest safe release of OpenBot Desktop, the OpenBot Desktop runs on the computer, OpenBot Mobile and
 the Recorder. Below it an app shows one notice, "This version of OpenBot has a security problem.
 Update to keep using it.", and nothing else until it is updated.
 
@@ -322,7 +322,7 @@ The live channels are compared with the base branch only.
 | `api/openapi-extensible-enums.test.ts` | A parameter or request body reaches an open enum, or an open enum also has `enum`. |
 | `app/tests/tolerant-reader.test.ts`, `mobile/tests/tolerant-reader.test.ts` | A generated client throws on an unknown field or enum value. |
 | `app/tests/unknown-enum-values.test.tsx`, `mobile/tests/unknown-statuses.test.ts` | A screen crashes, says "undefined" or guesses a known value for a status, role or kind it doesn't know. |
-| `shared/tests/client-version.test.ts`, and Desktop's, the phone app's and the Recorder's client-version tests | An app decides differently from a case in `shared/fixtures/client-version/cases.json`, or drops its `OpenBot-Client` header. |
+| `shared/tests/client-version.test.ts`, and Desktop's, OpenBot Mobile's and the Recorder's client-version tests | An app decides differently from a case in `shared/fixtures/client-version/cases.json`, or drops its `OpenBot-Client` header. |
 | `desktop/src-tauri/src/deployment_release.rs` tests | OpenBot Desktop lays out or starts a release whose `launcherApi` is above its own. |
 | `tests/release-policy.test.ts` | `release-manifest.ts --validate-policy` accepts a policy whose `requiresDowntime` disagrees with the chart. |
 

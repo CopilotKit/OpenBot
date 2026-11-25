@@ -1,5 +1,5 @@
 /*
- * The phone app's one stylesheet: Tailwind, Uniwind, HeroUI Native, and OpenBot's color scheme.
+ * OpenBot Mobile's one stylesheet: Tailwind, Uniwind, HeroUI Native, and OpenBot's color scheme.
  *
  * The colors between the markers are written by `bun run tokens:generate` from tokens/src/scheme.ts,
  * under HeroUI Native's names (docs/app-guidelines.md, "The color scheme on the phone"). Don't edit

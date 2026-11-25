@@ -6,7 +6,7 @@
  * of each app it still serves. When the two don't fit, the person reads one sentence: "Update
  * OpenBot" when the app is too old, "Ask whoever runs your OpenBot to update it" when the server is.
  *
- * The web app, the Recorder and the server read this file. OpenBot Desktop (Rust) and the phone app
+ * The web app, the Recorder and the server read this file. OpenBot Desktop (Rust) and OpenBot Mobile
  * carry the same few rules in their own code; their tests hold them to the cases in
  * `shared/fixtures/client-version/`.
  */
@@ -183,7 +183,7 @@ export function clientUpdateDetail(
     case "desktop":
       return `This OpenBot needs OpenBot Desktop ${version} or later. Update OpenBot, then try again.`;
     case "mobile":
-      return `This OpenBot needs the OpenBot phone app ${version} or later. Update OpenBot, then try again.`;
+      return `This OpenBot needs OpenBot Mobile ${version} or later. Update OpenBot, then try again.`;
     case "recorder":
       return `This OpenBot needs the OpenBot Recorder ${version} or later. Update OpenBot, then try again.`;
   }

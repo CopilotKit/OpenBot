@@ -1,5 +1,5 @@
 /**
- * The phone app's security floor. Metro bundles only mobile/, so the app carries its own copy of
+ * OpenBot Mobile's security floor. Metro bundles only mobile/, so the app carries its own copy of
  * shared/security-floor.ts; this holds the copy to the original and drives the phone's decision
  * through the same signed documents the other apps read (shared/fixtures/security-floor/cases.json).
  *
@@ -64,7 +64,7 @@ const phone = (release: string, origin = CLOUD) => ({
   keys,
 });
 
-test("the phone app's copies of the floor rule and its keys are the shared ones, byte for byte", () => {
+test("OpenBot Mobile's copies of the floor rule and its keys are the shared ones, byte for byte", () => {
   for (const name of ["security-floor.ts", "security-floor.json"]) {
     const copy = readFileSync(join(REPO, "mobile", "src", name));
     const original = readFileSync(join(REPO, "shared", name));
@@ -110,7 +110,7 @@ describe("the phone's Ed25519", () => {
   });
 });
 
-describe("whether the phone app stops", () => {
+describe("whether OpenBot Mobile stops", () => {
   test("below the floor it stops and names the release to update to; at or above it runs", async () => {
     const current = await verifySecurityFloor(
       doc("current"),

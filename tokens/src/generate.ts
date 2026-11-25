@@ -18,7 +18,7 @@ import { REGIONS, WHOLE_FILES } from "./targets";
  *
  * `all` names every token. An entry written `field=token` writes a Rust struct field holding the
  * token as an RGB tuple, for the desktop app's native first paint. One written `--name=token` writes
- * a CSS custom property under another library's name (the phone app's HeroUI Native names);
+ * a CSS custom property under another library's name (OpenBot Mobile's HeroUI Native names);
  * otherwise a line is a CSS custom property under the token's own name. The region keeps the start
  * marker's indent.
  */
@@ -92,7 +92,7 @@ export function fillRegions(text: string, file: string) {
   return out.join("\n");
 }
 
-/** The phone app's copy: hex, since React Native draws no `oklch()`. */
+/** OpenBot Mobile's copy: hex, since React Native draws no `oklch()`. */
 function mobileScheme() {
   const palette = (mode: Mode) =>
     TOKENS.map(

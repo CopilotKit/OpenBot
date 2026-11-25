@@ -2,7 +2,7 @@
  * Where each app reads the security floor (shared/security-floor.ts). The addresses live with each
  * app, never in shared/, which every self-hosted OpenBot ships (app/tests/update-banner.test.tsx
  * fails a self-hosted OpenBot that names downloads.copilotkit.ai). So there are three copies, and
- * this holds them equal: the Recorder's, the phone app's and OpenBot Desktop's.
+ * this holds them equal: the Recorder's, OpenBot Mobile's and OpenBot Desktop's.
  */
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";

@@ -34,7 +34,7 @@ describe("the scheme", () => {
   });
 });
 
-describe("the phone app's copy", () => {
+describe("OpenBot Mobile's copy", () => {
   // The web app's own tokens, as its stylesheet declares them.
   const web = (mode: "light" | "dark") => {
     const css = readFileSync(join(root, "app/src/theme.css"), "utf8");

@@ -14,12 +14,12 @@ export const REGIONS = [
   "desktop/src/styles.css",
   "desktop/src-tauri/src/connected/sign_in.rs",
   "desktop/src-tauri/src/first_paint.rs",
-  // The phone app's stylesheet, under HeroUI Native's names (docs/app-guidelines.md).
+  // OpenBot Mobile's stylesheet, under HeroUI Native's names (docs/app-guidelines.md).
   "mobile/global.css",
 ] as const;
 
 /** Files the generator writes whole. */
 export const WHOLE_FILES = [
-  // The phone app, which builds from mobile/ alone and can't import a workspace package.
+  // OpenBot Mobile, which builds from mobile/ alone and can't import a workspace package.
   "mobile/src/scheme.ts",
 ] as const;
