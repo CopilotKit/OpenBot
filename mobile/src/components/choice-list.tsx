@@ -5,6 +5,14 @@ import { cn } from "./cn";
 import { Icon } from "./icon";
 import { Text } from "./text";
 
+export type ChoiceListProps<T extends string> = {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  disabled?: boolean;
+  label: string;
+};
+
 /**
  * One choice from a short list whose options are sentences, too long for a segmented control: the
  * options as rows, the chosen one with a check, as the platforms' own settings lists draw it.
@@ -15,13 +23,7 @@ export function ChoiceList<T extends string>({
   onChange,
   disabled,
   label,
-}: {
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (value: T) => void;
-  disabled?: boolean;
-  label: string;
-}) {
+}: ChoiceListProps<T>) {
   return (
     <View
       accessibilityRole="radiogroup"
