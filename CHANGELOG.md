@@ -501,6 +501,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the answer sat below a screen of output. A running step's line has a soft band of light sweeping
   across it, which stops when the step is done and doesn't move under reduced motion; it replaces
   the slow pulse, "Thinking" included. (#2201)
+- **A conversation's row says Working for as long as its Bot works.** In the Conversations list, and
+  under each Bot in the Bots panel, a row whose Bot is answering keeps Working when the list is read
+  again mid-turn, as giving an app, a rename, a pin or a new conversation makes it. A conversation
+  whose Bot handed part of its work to a task reads Working until that task is done, across a reload
+  too. Before, a Bot running three subtasks showed "Working on 3 subtasks…" in the conversation while
+  its row said "1m", as if it were done. (#2204)
 - **A long task keeps going instead of stopping as too long.** A Bot on a task of a few hundred
   steps used to stop with "…turned down the request because this conversation is too long for the
   model. Start a new conversation, then try again.", because every earlier app result was sent with
