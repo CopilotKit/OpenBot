@@ -23,6 +23,8 @@ export function hostedSignInAddress(
   if (invitation) {
     if (invitation.ticket)
       query.push(`invitationTicket=${encodeURIComponent(invitation.ticket)}`);
+    if (invitation.ticket && invitation.signUp)
+      query.push("invitationSignUp=true");
     if (invitation.organizationId)
       query.push(
         `organizationId=${encodeURIComponent(invitation.organizationId)}`,
@@ -37,10 +39,14 @@ export function hostedSignInAddress(
  * sign-in takes the ticket instead of asking the person to sign up again, and the server lands them
  * working in that organization. An invitation the hosted sign-in has already accepted has no ticket
  * left to carry, only the organization to land in.
+ *
+ * `signUp` is the hosted sign-in saying the invited address has no account there yet. The hosted
+ * sign-in then opens its sign-up with the ticket, which takes the address from the invitation, in
+ * place of a sign-in that can only say there is no such account.
  */
 export type HostedInvitation =
-  | { ticket: string; organizationId?: string }
-  | { ticket?: undefined; organizationId: string };
+  | { ticket: string; organizationId?: string; signUp?: boolean }
+  | { ticket?: undefined; organizationId: string; signUp?: undefined };
 
 /**
  * The address that signs this browser out of OpenBot by CopilotKit and brings it back to `returnTo`, an address
