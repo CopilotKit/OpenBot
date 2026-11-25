@@ -289,3 +289,83 @@ main:has(> .sheet.welcome.page-first) .rail .tile.with-marks > .cloud-marks {
   background: transparent;
   padding-inline: 0;
 }
+
+/* Local shutdown uses the selected Progress rail; connected sessions never open this page. */
+.standalone-layout.quit-layout
+> :is(.setup-header-block, .setup-body, .setup-footer) {
+  max-width: 840px;
+}
+
+.quit-layout > .setup-body > .setup-content {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 48px;
+}
+
+.quit-rail {
+  display: flex;
+  align-items: safe center;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.quit-rail > .steps {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.quit-rail .step {
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-areas: "mark label" ". status" ". detail";
+  gap: 4px 10px;
+  padding: 14px 0;
+  border: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.quit-rail .step-status {
+  justify-self: start;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.quit-rail .step:has(> .mark.good) > :is(.step-label, .step-status) {
+  color: var(--text-secondary);
+}
+
+.quit-rail .step:has(> .mark.active) > .detail,
+.quit-rail .detail:empty {
+  display: none;
+}
+
+.quit-current {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+}
+
+.quit-current > .journey {
+  margin: 0;
+  gap: 22px;
+}
+
+.quit-explanation {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 860px) {
+  .quit-layout > .setup-body > .setup-content {
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 28px;
+  }
+}

@@ -2766,6 +2766,234 @@ const DOCKER_STARTING =
   "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.";
 
 /** The update screen as a person sees it: its words, and where the progress and the note sit. */
+describe.skipIf(!asked)("approved layout: shutdown Progress rail", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const)
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`${width}x${height} ${colorScheme}: native stages, optional cleanup and failure stay reachable`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        type QuitRow = {
+          step: string;
+          ok: boolean;
+          running: boolean;
+          detail: string;
+        };
+        let seq = 0;
+        const emit = async (steps: QuitRow[]) => {
+          await page.evaluate(
+            ({ seq, steps }) =>
+              globalThis.__workbench!.emit("quit:progress", { seq, steps }),
+            { seq: ++seq, steps },
+          );
+          await page
+            .getByRole("heading", {
+              name: "Shutting down OpenBot",
+              exact: true,
+            })
+            .waitFor();
+          await settled(page);
+        };
+        const done = (step: string): QuitRow => ({
+          step,
+          ok: true,
+          running: false,
+          detail: "",
+        });
+        const current = (step: string): QuitRow => ({
+          step,
+          ok: true,
+          running: true,
+          detail: "Waiting for this shutdown operation to finish.",
+        });
+        let headingTop: number | undefined,
+          footerTop: number | undefined,
+          fraction = 0;
+        const check = async (operation: string, count: number) => {
+          const seen = await page.evaluate(() => {
+            const sheet = document.querySelector<HTMLElement>(".quit-layout")!;
+            const rail = sheet.querySelector<HTMLElement>(".quit-rail")!;
+            const current = sheet.querySelector<HTMLElement>(".quit-current")!;
+            const body = sheet.querySelector<HTMLElement>(".setup-body")!;
+            const footer = sheet.querySelector<HTMLElement>(".setup-footer")!;
+            const r = rail.getBoundingClientRect(),
+              c = current.getBoundingClientRect(),
+              b = body.getBoundingClientRect(),
+              f = footer.getBoundingClientRect();
+            const active = rail.querySelector<HTMLElement>(
+              ".step:has(.mark.active)",
+            );
+            const detail = active?.querySelector<HTMLElement>(".detail");
+            return {
+              pageFits:
+                document.documentElement.scrollHeight <= innerHeight &&
+                document.documentElement.scrollWidth <= innerWidth,
+              horizontal: [sheet, rail, current, body].some(
+                (el) => el.scrollWidth > el.clientWidth + 1,
+              ),
+              columns:
+                r.right <= c.left && r.left >= 0 && c.right <= innerWidth,
+              footerFits: b.bottom <= f.top + 1 && f.bottom <= innerHeight,
+              headingTop: sheet.querySelector("h1")!.getBoundingClientRect()
+                .top,
+              footerTop: f.top,
+              stages: rail.querySelectorAll(".step").length,
+              operation: current.querySelector(".journey-said")?.textContent,
+              bars: sheet.querySelectorAll("progress").length,
+              fraction: Number(
+                sheet.querySelector("progress")?.getAttribute("value"),
+              ),
+              spinners: sheet.querySelectorAll(".step-spinner").length,
+              railSpinners: rail.querySelectorAll(".step-spinner").length,
+              buttons: sheet.querySelectorAll("button").length,
+              activeDetailVisible: !!detail && detail.offsetHeight > 0,
+              explanation: footer.textContent,
+            };
+          });
+          expect(seen.pageFits).toBe(true);
+          expect(seen.horizontal).toBe(false);
+          expect(seen.columns).toBe(true);
+          expect(seen.footerFits).toBe(true);
+          if (headingTop === undefined) headingTop = seen.headingTop;
+          else expect(seen.headingTop).toBe(headingTop);
+          if (footerTop === undefined) footerTop = seen.footerTop;
+          else expect(seen.footerTop).toBe(footerTop);
+          expect(seen.stages).toBe(count);
+          expect(seen.operation).toBe(operation);
+          expect(seen.bars).toBe(1);
+          expect(seen.fraction).toBeGreaterThanOrEqual(fraction);
+          fraction = seen.fraction;
+          expect(seen.spinners).toBe(1);
+          expect(seen.railSpinners).toBe(0);
+          expect(seen.buttons).toBe(0);
+          expect(seen.activeDetailVisible).toBe(false);
+          expect(seen.explanation).toBe(
+            "OpenBot is stopping what it started on this computer, then it closes.",
+          );
+        };
+        try {
+          await open(page);
+          await page
+            .getByRole("heading", { name: "Set up OpenBot", exact: true })
+            .waitFor();
+          await emit([current("finish-update")]);
+          await check("Finishing the update so nothing is left half done", 1);
+          expect(
+            await page
+              .getByText("Starting your Podman again", { exact: true })
+              .count(),
+          ).toBe(0);
+          expect(
+            await page
+              .getByText("Stopping the software OpenBot runs on", {
+                exact: true,
+              })
+              .count(),
+          ).toBe(0);
+          await emit([done("finish-update"), current("stop-openbot")]);
+          await check("Closing OpenBot's apps", 2);
+          await emit([
+            done("finish-update"),
+            done("stop-openbot"),
+            current("stop-intelligence"),
+          ]);
+          await check("Closing OpenBot's services", 3);
+          await emit([
+            done("finish-update"),
+            done("stop-openbot"),
+            done("stop-intelligence"),
+            current("stop-engine"),
+          ]);
+          await check("Stopping the software OpenBot runs on", 4);
+          await emit([
+            done("finish-update"),
+            done("stop-openbot"),
+            done("stop-intelligence"),
+            done("stop-engine"),
+            current("start-your-podman"),
+          ]);
+          await check("Starting your Podman again", 5);
+          // A stale native packet must not replace the newest phase.
+          await page.evaluate(() =>
+            globalThis.__workbench!.emit("quit:progress", {
+              seq: 1,
+              steps: [],
+            }),
+          );
+          await check("Starting your Podman again", 5);
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/shutdown-rail-${width}x${height}-${colorScheme}.png`,
+            });
+          const failureDetail =
+            "Your Podman did not start again. Its machine still needs attention. ".repeat(
+              12,
+            );
+          await emit([
+            done("finish-update"),
+            done("stop-openbot"),
+            done("stop-intelligence"),
+            done("stop-engine"),
+            {
+              step: "start-your-podman",
+              ok: false,
+              running: false,
+              detail: failureDetail,
+            },
+          ]);
+          expect(
+            await page.getByRole("region", { name: "How far along" }).count(),
+          ).toBe(0);
+          expect(
+            await page
+              .getByText(
+                "Part of it could not be stopped. OpenBot says what happened the next time it opens.",
+                { exact: true },
+              )
+              .count(),
+          ).toBe(1);
+          const failed = await page.evaluate(() => {
+            const sheet = document.querySelector<HTMLElement>(".quit-layout")!;
+            const rail = sheet.querySelector<HTMLElement>(".quit-rail")!;
+            const detail = rail.querySelector<HTMLElement>(
+              ".step:has(.mark.bad) .detail",
+            )!;
+            detail.scrollIntoView({ block: "end" });
+            const d = detail.getBoundingClientRect(),
+              r = rail.getBoundingClientRect();
+            return {
+              detail: detail.textContent,
+              visible: detail.offsetHeight > 0,
+              reachable: d.bottom <= r.bottom + 1,
+              spinners: sheet.querySelectorAll(".step-spinner").length,
+              buttons: sheet.querySelectorAll("button").length,
+              fits:
+                document.documentElement.scrollHeight <= innerHeight &&
+                document.documentElement.scrollWidth <= innerWidth,
+            };
+          });
+          expect(failed).toEqual({
+            detail: failureDetail,
+            visible: true,
+            reachable: true,
+            spinners: 0,
+            buttons: 0,
+            fits: true,
+          });
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/shutdown-rail-${width}x${height}-${colorScheme}-failure.png`,
+            });
+        } finally {
+          await page.close();
+        }
+      }, 30000);
+});
+
 function updateScreen(page: Page) {
   return page.evaluate(() => {
     const sheet = document.querySelector<HTMLElement>(

@@ -9,6 +9,7 @@ import {
   position,
   steadyLeft,
 } from "./journey";
+import { SetupPage } from "./SetupPage";
 import { formatElapsed, type Progress, SetupProgress } from "./SetupProgress";
 
 /**
@@ -227,26 +228,38 @@ export function ShuttingDown({ status }: { status: QuitStatus | null }) {
    */
   const clock = useRef<QuitClock | null>(null);
   const running = !failed && status !== null;
+  const explanation = failed
+    ? "Part of it could not be stopped. OpenBot says what happened the next time it opens."
+    : "OpenBot is stopping what it started on this computer, then it closes.";
   return (
-    <main>
-      <div className="sheet connection-sheet">
-        <h1>Shutting down OpenBot</h1>
-        <p className="lede" role="status">
-          {failed
-            ? "Part of it could not be stopped. OpenBot says what happened the next time it opens."
-            : "OpenBot is stopping what it started on this computer, then it closes."}
-        </p>
-        {running && <QuitJourney steps={steps} clock={clock} />}
-        {/* While the journey runs, its spinner is the one on the screen: the row it is on is
-            marked, not spun. Two spinners read as two waits. */}
+    <SetupPage
+      className="quit-layout"
+      heading="Shutting down OpenBot"
+      footer={
+        !failed && (
+          <p className="quit-explanation" role="status">
+            {explanation}
+          </p>
+        )
+      }
+    >
+      <aside className="quit-rail" aria-label="Shutdown stages">
         <SetupProgress
           steps={steps}
           label="Shutdown progress"
-          showElapsed={!running}
-          quiet={running}
+          showElapsed={false}
+          quiet
         />
+      </aside>
+      <div className="quit-current">
+        {running && <QuitJourney steps={steps} clock={clock} />}
+        {failed && (
+          <p className="caution" role="status">
+            {explanation}
+          </p>
+        )}
       </div>
-    </main>
+    </SetupPage>
   );
 }
 

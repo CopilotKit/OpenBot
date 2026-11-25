@@ -196,3 +196,26 @@ test("a Quit that stopped partway shows no journey, so its rows keep their own m
   expect(view.container.querySelector(".journey")).toBeNull();
   expect(view.container.querySelectorAll(".step-spinner")).toHaveLength(0);
 });
+
+test("local shutdown separates its progress rail from the operation and stable explanation", () => {
+  const view = render(
+    <ShuttingDown
+      status={{
+        seq: 2,
+        steps: [
+          { step: "stop-openbot", ok: true, running: false, detail: "" },
+          { step: "stop-intelligence", ok: true, running: true, detail: "" },
+        ],
+      }}
+    />,
+  );
+  const rail = view.getByRole("complementary", { name: "Shutdown stages" });
+  expect(rail.querySelectorAll(".step")).toHaveLength(2);
+  expect(
+    view
+      .getByRole("region", { name: "How far along" })
+      .closest(".quit-current"),
+  ).not.toBeNull();
+  expect(view.getByRole("status").closest(".setup-footer")).not.toBeNull();
+  expect(view.queryAllByRole("button")).toHaveLength(0);
+});
