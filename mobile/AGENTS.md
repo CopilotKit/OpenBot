@@ -16,5 +16,8 @@ is a tolerant reader: it ignores a field it doesn't know, reads an enum value it
 "other" and never sends it back, and shows a feature only when the server's `deployment` answer
 offers it. `tests/tolerant-reader.test.ts` and `tests/unknown-statuses.test.ts` hold it to that.
 
+How to run the app, the checks CI makes, and how a build is started: [README.md](README.md). Add a
+dependency with `npx expo install <name>` and commit `package-lock.json`.
+
 Never edit `src/api/generated` by hand. Change the spec under `api/openapi/` and run
 `bun run api:generate` from the repository root.

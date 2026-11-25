@@ -7,7 +7,9 @@
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "doctor": "expo-doctor",
+    "bundle": "expo export --platform ios --platform android"
   },
   "dependencies": {
     "@better-auth/core": "1.7.1",
@@ -21,6 +23,7 @@
     "expo-crypto": "~55.0.8",
     "expo-dev-client": "~55.0.8",
     "expo-device": "~55.0.9",
+    "expo-font": "~55.0.8",
     "expo-linking": "~55.0.7",
     "expo-network": "~55.0.8",
     "expo-notifications": "~55.0.10",
@@ -34,8 +37,9 @@
     "react-native-screens": "~4.23.0"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
+    "@types/node": "^24.0.0",
     "@types/react": "~19.2.0",
-    "@types/node": "^24.0.0"
+    "expo-doctor": "^1.21.8",
+    "typescript": "^5.9.3"
   }
 }
