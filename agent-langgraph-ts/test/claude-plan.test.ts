@@ -181,7 +181,7 @@ test("The claude-plan route asks the Claude engine's /model, with the deployment
     );
     assert.deepEqual(
       (body.tools as { name: string }[]).map((tool) => tool.name),
-      ["get_weather"],
+      ["get_weather", "recall_earlier_results"],
     );
   } finally {
     await claude.close();

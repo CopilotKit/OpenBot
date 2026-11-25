@@ -75,7 +75,7 @@ test("OpenAI: Chat Completions with the chosen model, its effort, the tools and 
       (body.tools as { function: { name: string } }[]).map(
         (tool) => tool.function.name,
       ),
-      ["get_weather"],
+      ["get_weather", "recall_earlier_results"],
     );
     const messages = body.messages as { role: string; content: unknown }[];
     assert.equal(
@@ -191,7 +191,7 @@ test("Anthropic: one top-level system prompt, output_config.effort, the tools", 
     assert.deepEqual(body.output_config, { effort: "medium" });
     assert.deepEqual(
       (body.tools as { name: string }[]).map((tool) => tool.name),
-      ["get_weather"],
+      ["get_weather", "recall_earlier_results"],
     );
     const system = JSON.stringify(body.system);
     assert.ok(
@@ -254,7 +254,7 @@ test("Gemini key: streamGenerateContent with the key, systemInstruction, thinkin
     ).flatMap((tool) => tool.functionDeclarations ?? []);
     assert.deepEqual(
       declarations.map((declaration) => declaration.name),
-      ["get_weather"],
+      ["get_weather", "recall_earlier_results"],
     );
     for (const marker of MARKERS)
       assert.ok(JSON.stringify(body).includes(marker), marker);
