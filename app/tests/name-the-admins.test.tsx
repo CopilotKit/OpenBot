@@ -34,7 +34,11 @@ import type { AppAccess } from "@/lib/app-access/queries";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
-import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  APPS_SETTING_PATH,
+  appsSettingResponse,
+  DEPLOYMENT_PATH,
+} from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
 import {
   APP_ACCESS_REQUESTS_PATH,
@@ -134,6 +138,8 @@ function serving(options: {
   gmail: AppAccess;
   members?: OrganizationMember[];
   edition?: "team" | "personal";
+  /** Whether apps are open. Locked down unless said: naming the admins is locked down's. */
+  open?: boolean;
 }) {
   const { role, members = NORTHWIND, edition = "team" } = options;
   const sent: Sent[] = [];
@@ -144,6 +150,8 @@ function serving(options: {
     sent.push({ method, url });
     const path = url.split("?")[0] ?? url;
     if (path === DEPLOYMENT_PATH) return Response.json({ edition });
+    if (path === APPS_SETTING_PATH)
+      return appsSettingResponse(options.open !== true);
     if (path === ME_PATH)
       return meResponse({ user: { id: "usr_me", role, name: "Me" } });
     if (path === MEMBERS_PATH) return membersResponse(url, members);
@@ -181,12 +189,16 @@ function serving(options: {
 const askedForMembers = (sent: Sent[]) =>
   sent.some((each) => each.url.split("?")[0] === MEMBERS_PATH);
 
-/** Gmail on the Bot, which this Bot hasn't been given: only an admin can give it. */
+/**
+ * Gmail on the Bot, which this Bot hasn't been given, and which an admin kept to admins: only an
+ * admin can give it. (Open to owners, the default, its owner could give it too.)
+ */
 const notGiven = appAccess({
   key: GMAIL,
   state: "not_granted",
   granted: false,
   requestKind: "grant",
+  ownerGrants: "admin",
 });
 
 function drawn(children: ReactNode) {
@@ -364,6 +376,31 @@ describe("a member is told who the admins are", () => {
         "Gmail isn't turned on yet. Only an admin can turn it on: Priya Raman (priya@northwind.test) or kit@northwind.test.",
       ),
     );
+  });
+
+  test("apps open: an app not added yet names nobody, and the members are never read", async () => {
+    const sent = serving({
+      role: "member",
+      gmail: appAccess({
+        key: GMAIL,
+        state: "disabled",
+        unavailable: "absent",
+        granted: false,
+        requestKind: "enable",
+      }),
+      members: SMALL,
+      open: true,
+    });
+    const view = drawn(<AppAccessCard prompt={prompt()} />);
+    const found = await card(view);
+    await waitFor(() =>
+      expect(found.textContent).toContain(
+        "Gmail isn't connected yet. Connect it, and this Bot's owner can give it to the Bot.",
+      ),
+    );
+    await settleReactWork();
+    expect(found.textContent).not.toMatch(/admin|northwind/i);
+    expect(askedForMembers(sent)).toBe(false);
   });
 
   test("while the members can't be read, the sentence stands on its own", async () => {

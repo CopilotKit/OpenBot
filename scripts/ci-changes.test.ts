@@ -544,6 +544,35 @@ describe("the rules name the jobs the workflows run", () => {
     }
   });
 
+  test("ci.yml: each real-browser job runs its files side by side, in one step", () => {
+    // The WebKit job began with one file and no --parallel. Files were added to its list, and as
+    // steps of their own, until it ran 30 files in two engines one after another: 35 minutes, the
+    // whole length of a run. A run narrowed to some of a file's tests (-t) is the one exception.
+    const parsed = Bun.YAML.parse(
+      readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8"),
+    ) as { jobs: Record<string, { steps?: { run?: string }[] }> };
+    for (const job of [
+      "app-browser",
+      "app-browser-webkit",
+      "app-browser-desktop",
+    ]) {
+      const lists = (parsed.jobs[job]?.steps ?? [])
+        .map((step) => step.run ?? "")
+        .filter((run) => /\bbun test\b/.test(run) && !/\s-t\s/.test(run));
+      expect({ job, steps: lists.length }).toEqual({ job, steps: 1 });
+      const files = lists[0]?.match(/\S+\.test\.tsx?\b/g) ?? [];
+      if (files.length > 1) {
+        expect({
+          job,
+          parallel: /\bbun test --parallel\b/.test(lists[0] ?? ""),
+        }).toEqual({
+          job,
+          parallel: true,
+        });
+      }
+    }
+  });
+
   test("desktop.yml: core, each platform the shared build makes, and the live tests beside them", () => {
     const names = jobNames("desktop.yml");
     expect(names).toContain("core");

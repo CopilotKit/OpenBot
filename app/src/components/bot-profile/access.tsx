@@ -17,6 +17,7 @@ import {
   AppAccessAction,
   appAccessSentence,
   namesAnAdmin,
+  useOpenApps,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
@@ -181,7 +182,7 @@ function YourApps({ agent }: { agent: AgentProfile }) {
   ];
   return (
     <PageSection
-      description={`Turn on an app to let ${agent.name} use it. It always uses the account of whoever is asking.`}
+      description={`Choose which of your apps ${agent.name} can use. It always uses the account of whoever is asking.`}
       title="Your apps"
     >
       {error ? (
@@ -390,15 +391,19 @@ function Granted({
     ...botAppsQueryOptions(agentId),
     enabled: kind === "apps",
   });
+  // Apps open: the Bot's owner gives it apps, and nobody is told to ask an admin for that.
+  const knownOpen = useOpenApps(agentId);
+  const open = knownOpen ?? null;
   /*
    * Who a member is told to go to, read only once one of the rows says only an admin can take the
-   * step, and only once it is known the person is not an admin themselves.
+   * step, and only once it is known the person is not an admin themselves, and whether apps are open.
    */
   const admins = useOrganizationAdmins(
     me !== undefined &&
+      knownOpen !== undefined &&
       kind === "apps" &&
       (apps.data ?? []).some((app) =>
-        namesAnAdmin(app, edition, isOrganizationAdmin(me?.role)),
+        namesAnAdmin(app, edition, isOrganizationAdmin(me?.role), open),
       ),
   );
   /*
@@ -470,10 +475,14 @@ function Granted({
             <>
               Connect one on <Link to="/connections">Connections</Link>.
             </>
+          ) : open && mine ? (
+            "Give it one under Your apps. Until then this Bot can only talk with you."
+          ) : open ? (
+            "Its owner can give it some. Until then this Bot can only talk with you."
           ) : mine ? (
-            "Turn one on under Your apps, or ask an admin. Until then this Bot can only talk with you."
+            "Give it one under Your apps, or ask an admin. Until then this Bot can only talk with you."
           ) : (
-            "An admin has to add them. Until then this Bot can only talk with you."
+            "An admin has to give it some. Until then this Bot can only talk with you."
           )}
         </PageEmpty>
       ) : (
@@ -504,6 +513,7 @@ function Granted({
                             edition,
                             admin,
                             admins,
+                            open,
                           )}
                     </ItemDescription>
                   </ItemContent>

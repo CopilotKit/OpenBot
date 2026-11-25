@@ -30,6 +30,18 @@ export const quietRunPeriod = { ms: QUIET_RUN_MS };
 export const LIVENESS_ANSWER_MS = 15_000;
 
 /**
+ * ONE ASK THE SERVER COULD NOT ANSWER IS NOT THE END OF THE RUN. Found on OpenBot Cloud: a long
+ * answer across four apps went quiet on a slow app, the one ask about it never reached a server,
+ * and the turn ended "lost touch" while the run went on, unharmed, on a server that was up all along.
+ * Opened again, the conversation showed the run as it was and the notice and its Carry on were gone.
+ * So an ask that is not answered is asked again {@link UNANSWERED_RETRY_MS} later, and only
+ * {@link UNANSWERED_TRIES} in a row end the turn: about a minute and a half of a server that does
+ * not answer, longer than a dropped connection or a server being replaced.
+ */
+export const UNANSWERED_RETRY_MS = 10_000;
+export const UNANSWERED_TRIES = 3;
+
+/**
  * What the server said: the conversation has a run going, it has none, or it could not say (it
  * refused, failed, or did not answer in time).
  */
@@ -113,6 +125,10 @@ export async function askRunLiveness(
 export function watchQuietRun(options: {
   ask: () => Promise<RunLiveness>;
   quietMs?: number;
+  /** How long after an ask the server could not answer it is asked again. */
+  retryMs?: number;
+  /** How many asks in a row it may not answer before the turn is ended as unreachable. */
+  unansweredTries?: number;
 }): {
   heard: () => void;
   /**
@@ -125,10 +141,14 @@ export function watchQuietRun(options: {
   over: Promise<Exclude<RunLiveness, "live">>;
 } {
   const quietMs = options.quietMs ?? QUIET_RUN_MS;
+  const retryMs = options.retryMs ?? UNANSWERED_RETRY_MS;
+  const unansweredTries = options.unansweredTries ?? UNANSWERED_TRIES;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let asking = false;
   let resting = false;
+  // The asks in a row the server could not answer.
+  let unanswered = 0;
   // Whether anything arrived (or the run came to rest) while the server was being asked: its
   // answer is then about a moment that has passed.
   let heardSince = false;
@@ -136,7 +156,7 @@ export function watchQuietRun(options: {
   const over = new Promise<Exclude<RunLiveness, "live">>((resolve) => {
     settle = resolve;
   });
-  const wait = () => {
+  const wait = (ms = quietMs) => {
     clearTimeout(timer);
     if (stopped) return;
     timer = setTimeout(() => {
@@ -149,14 +169,22 @@ export function watchQuietRun(options: {
         .then((answer) => {
           asking = false;
           if (stopped) return;
-          if (heardSince) return wait();
-          // While resting no run is expected: a server that answers at all is still taking the step.
-          if (answer === "live" || (askedResting && answer === "over"))
+          if (heardSince) {
+            unanswered = 0;
             return wait();
+          }
+          // While resting no run is expected: a server that answers at all is still taking the step.
+          if (answer === "live" || (askedResting && answer === "over")) {
+            unanswered = 0;
+            return wait();
+          }
+          // Not answered: asked again soon, and only a server that stays silent ends the turn.
+          if (answer === "unreachable" && ++unanswered < unansweredTries)
+            return wait(retryMs);
           stopped = true;
           settle(answer);
         });
-    }, quietMs);
+    }, ms);
   };
   wait();
   return {
@@ -164,6 +192,7 @@ export function watchQuietRun(options: {
     // has since spoken, so it is not taken.
     heard: () => {
       resting = false;
+      unanswered = 0;
       if (asking) heardSince = true;
       else wait();
     },

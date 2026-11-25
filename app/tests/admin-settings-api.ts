@@ -32,6 +32,13 @@ export const SETUP_CHECKLIST_PATH = `${ORGANIZATION}/setup-checklist`;
 export const CHECK_SETUP_PATH = `${SETUP_CHECKLIST_PATH}/check`;
 /** The switches as they apply to the person asking. */
 export const MY_CAPABILITIES_PATH = `${ORGANIZATION}/people/me/capabilities`;
+/** Whether the organization's apps are open or locked down, which every member may read. */
+export const APPS_SETTING_PATH = `${SETTINGS_PATH}/apps`;
+
+/** The apps switch as the API answers it (getAppsSetting). */
+export function appsSettingResponse(lockedDown: boolean): Response {
+  return NativeResponse.json({ lockedDown });
+}
 
 /** One switch's address, which a change to it is sent to. */
 export function capabilityPath(capability: string): string {

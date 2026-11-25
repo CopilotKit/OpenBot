@@ -49,6 +49,7 @@ import { MISSING_TEAM } from "@/lib/teams/names";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
 import { ControlsSection } from "./controls-section";
+import { PurgeSavedLogins } from "./purge-saved-logins";
 
 /**
  * Admin, Permissions: what people may do, for the whole organization, with the row that opens the
@@ -114,6 +115,13 @@ export function CapabilitiesSection() {
                       </ItemActions>
                     </Item>
                     <Separator />
+                    {/* Beside the switch it is about: deleting the saved logins nobody may use. */}
+                    {capability.capability === "passwordManager" ? (
+                      <>
+                        <PurgeSavedLogins />
+                        <Separator />
+                      </>
+                    ) : null}
                   </div>
                 );
               })}

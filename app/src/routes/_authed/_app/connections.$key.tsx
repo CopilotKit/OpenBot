@@ -49,8 +49,10 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useDropBrokerReturn } from "@/lib/connections/broker-return";
+import { useConnectApp } from "@/lib/connections/connect-app";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
@@ -367,6 +369,12 @@ function AppConnectionPage({
     paths.edition === "team" &&
     signedIn.isSuccess &&
     !isOrganizationAdmin(role);
+  /*
+   * APPS OPEN (the organization's switch): a member adds an app nobody has added, as an admin does,
+   * and is never told an admin has to turn it on. Locked down, they are.
+   */
+  const open = useAppsOpen() === true;
+  const openToMember = member && open;
   const noticeNamesAdmin = notice !== null && /\badmin\b/i.test(notice.message);
   const notSetUp =
     setup.data !== undefined &&
@@ -378,7 +386,7 @@ function AppConnectionPage({
     server === undefined &&
     entry?.auth === "user-oauth";
   const admins = useOrganizationAdmins(
-    member && (noticeNamesAdmin || notSetUp || notOn),
+    member && (noticeNamesAdmin || notSetUp || (notOn && !open)),
   );
   /* The server's refusal as it said it, and beside it who the admins are where it names one. */
   const shownNotice: Failure | null =
@@ -389,6 +397,20 @@ function AppConnectionPage({
     paths.edition === "team" &&
     isOrganizationAdmin(role) &&
     server !== undefined;
+  /*
+   * AN ADMIN'S CONNECT ON AN APP NOBODY HAS ADDED adds it for everyone and goes straight on to their
+   * own sign-in, the press Connections' tiles make (`useConnectApp`). So does a member's, with apps
+   * open; locked down, a member is told an admin has to make it available. An app with no client to
+   * sign in against yet goes to Admin's page for it, which is where the client is typed in; a member
+   * stays here, where the server's refusal says it has to be set up first.
+   */
+  const mayAdd =
+    paths.edition === "team" && (isOrganizationAdmin(role) || openToMember);
+  const connectApp = useConnectApp((app) =>
+    openToMember
+      ? { to: "/connections/$key", params: { key: app } }
+      : paths.plugin(app),
+  );
   /* In the card under the row above it, where the page has one. */
   const switchRow =
     removable && server ? (
@@ -726,8 +748,10 @@ function AppConnectionPage({
            * does from Connections.
            */}
           {signsInForDirectory(server) &&
-          (paths.edition === "personal" || isOrganizationAdmin(role)) ? (
-            <KeyVersionOffer appId={key} mode="connect" title={server.title} />
+          (paths.edition === "personal" ||
+            isOrganizationAdmin(role) ||
+            openToMember) ? (
+            <KeyVersionOffer appId={key} title={server.title} />
           ) : null}
         </PageSection>
 
@@ -806,6 +830,11 @@ function AppConnectionPage({
           {failureSaid(shownNotice)}
         </p>
       ) : null}
+      {connectApp.error ? (
+        <p className="break-words text-destructive text-sm" role="alert">
+          {failureSaid(connectApp.error)}
+        </p>
+      ) : null}
 
       {/* One decision, so no heading: it would only repeat the row's own title. */}
       <PageSection>
@@ -816,14 +845,16 @@ function AppConnectionPage({
                   read for both. */}
               <ItemTitle>Your account</ItemTitle>
               <ItemDescription>
-                {!enabled
-                  ? withAdmins(
-                      "Not available yet. An admin has to turn this on first.",
-                      admins,
-                    )
-                  : connection
-                    ? "Bots you allow use this as you, and see only what you can see."
-                    : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}
+                {!enabled && mayAdd
+                  ? `No Bot can use this yet. Connecting makes it available to everyone in the organization and takes you to ${app.vendor} to approve access.`
+                  : !enabled
+                    ? withAdmins(
+                        "Not available yet. An admin has to turn this on first.",
+                        admins,
+                      )
+                    : connection
+                      ? "Bots you allow use this as you, and see only what you can see."
+                      : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -883,10 +914,15 @@ function AppConnectionPage({
                    * vendor's own consent page, and a control that navigates away should look like one.
                    */}
                   <Button
-                    disabled={!enabled || connect.isPending}
+                    disabled={
+                      (!enabled && !mayAdd) ||
+                      connect.isPending ||
+                      connectApp.pending === key
+                    }
                     onClick={() => {
                       setNotice(null);
-                      connect.mutate(key);
+                      if (enabled) connect.mutate(key);
+                      else void connectApp.run(key, "connect");
                     }}
                     size="sm"
                     type="button"

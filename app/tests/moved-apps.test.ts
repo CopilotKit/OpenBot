@@ -7,7 +7,9 @@ import {
   movedAppNoticeId,
   movedApps,
   movedAppsInView,
+  needsNoAccountOfYours,
 } from "@/lib/moves/moved-apps";
+import { appBody } from "./apps-api";
 
 /**
  * The rules behind the apps a move to OpenBot Cloud left to connect again: the notice id a dismissal
@@ -127,6 +129,98 @@ describe("the apps a move left to connect again", () => {
         "moved-app-googledrive",
       ]).map((app) => app.appId),
     ).toEqual(["gmail"]);
+  });
+
+  /*
+   * Found by the move's end-to-end run: a server added by its address, reached with the
+   * organization's key, stayed on the list after an admin added it, because only the person's own
+   * connections marked an app done. An app that needs no account of theirs is done once it's here.
+   */
+  test("an app here that needs no account of the person's is done once it's here", () => {
+    const byKey = appBody({
+      id: "s4-orders",
+      title: "S4 Orders",
+      provenance: "custom",
+      url: "https://orders.s4.test/mcp",
+      signIn: false,
+    });
+    const signsIn = appBody({
+      id: "docs-search",
+      title: "Docs Search",
+      provenance: "custom",
+      url: "https://mcp.docs.test/mcp",
+      signIn: true,
+    });
+    const shared = (connected: boolean) =>
+      appBody({
+        id: "composio-notion",
+        title: "Notion",
+        provenance: "composio",
+        url: "composio://notion",
+        authScheme: "OAUTH2",
+        accountMode: "shared",
+        sharedVendorConnected: connected,
+      });
+    const personal = appBody({
+      id: "composio-gmail",
+      title: "Gmail",
+      provenance: "composio",
+      url: "composio://gmail",
+      authScheme: "OAUTH2",
+      accountMode: "personal",
+    });
+    const noAuth = appBody({
+      id: "composio-hackernews",
+      title: "Hacker News",
+      provenance: "composio",
+      url: "composio://hackernews",
+      authScheme: "NO_AUTH",
+      accountMode: null,
+    });
+    const catalogue = appBody({
+      id: "gdrive",
+      title: "Google Drive",
+      provenance: "first-party",
+    });
+    expect(
+      [
+        byKey,
+        signsIn,
+        shared(true),
+        shared(false),
+        personal,
+        noAuth,
+        catalogue,
+      ].map((app) => needsNoAccountOfYours(app)),
+    ).toEqual([true, false, true, false, false, true, false]);
+    // A catalogue app, by how the catalogue says it is reached.
+    expect(
+      (["deployment-bearer", "none", "builtin", "user-oauth"] as const).map(
+        (auth) => needsNoAccountOfYours(catalogue, auth),
+      ),
+    ).toEqual([true, true, true, false]);
+
+    const here = [byKey, signsIn];
+    const cloudIdOf = (appId: string) => cloudAppFor(appId, here)?.id;
+    const doneHere = (id: string) =>
+      here.some((app) => app.id === id && needsNoAccountOfYours(app));
+    expect(
+      movedAppsInView(
+        [
+          { appId: "s4-orders", appName: "S4 Orders" },
+          { appId: "docs-search", appName: "Docs Search" },
+          { appId: "linear", appName: "Linear" },
+        ],
+        cloudIdOf,
+        new Set(),
+        [],
+        doneHere,
+      ).map((app) => [app.appId, app.reconnected]),
+    ).toEqual([
+      ["s4-orders", true],
+      ["docs-search", false],
+      ["linear", false],
+    ]);
   });
 
   test("the Bots that used it read as a list", () => {

@@ -20,6 +20,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import { setEnterpriseSettingMutationOptions } from "@/lib/enterprise/mutations";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
 import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
@@ -44,35 +45,59 @@ type Refusal = Extract<AddServerByUrlOutcome, { added: false }>;
  * `from` is the list it was opened from: Connections, or Admin's Apps page, which offers the same
  * form so an admin finds it where the apps are set up. Back, Cancel and a server added with nothing
  * more to do go to that list, and a server's own page is that list's page for it.
+ *
+ * `reconnect` is a moved app's id, when the list of apps to reconnect after a move opened the form
+ * for a server the person had added by its address on their computer: its name (`title`) is filled
+ * in, and Back, Cancel and a server added with nothing more to do go back to that list. The move
+ * doesn't bring the address or the key, so those are the admin's to type.
  */
 export function AddServerPage({
   from = "connections",
+  title = "",
+  reconnect,
 }: {
   from?: "connections" | "admin";
+  title?: string;
+  reconnect?: string;
 } = {}) {
   const navigate = useNavigate();
   const admin = from === "admin";
-  const back = admin
-    ? { label: "Apps", linkProps: { to: "/admin/plugins" as const } }
-    : { label: "Connections", linkProps: { to: "/connections" as const } };
+  const back = reconnect
+    ? {
+        label: "Your apps to reconnect",
+        linkProps: { to: "/reconnect" as const },
+      }
+    : admin
+      ? { label: "Apps", linkProps: { to: "/admin/plugins" as const } }
+      : { label: "Connections", linkProps: { to: "/connections" as const } };
   /** A server's own page, under the list this form was opened from. */
   const openServer = (key: string) =>
     admin
       ? navigate({ to: "/admin/plugins/$key", params: { key } })
       : navigate({ to: "/connections/$key", params: { key } });
-  /** Added with nothing more to do: Connections opens it, Admin goes back to Apps, where it's listed. */
+  /**
+   * Added with nothing more to do: Connections opens it, Admin goes back to Apps, where it's listed,
+   * and the list of apps to reconnect takes the person back to it, where it reads done.
+   */
   const added = (key: string) =>
-    admin ? navigate({ to: "/admin/plugins" }) : openServer(key);
+    reconnect
+      ? navigate({ to: "/reconnect" })
+      : admin
+        ? navigate({ to: "/admin/plugins" })
+        : openServer(key);
   const me = useQuery(currentUserQueryOptions()).data;
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   /*
-   * A server is added for everyone in the organization, so only an admin adds one, with its key if
-   * it needs one. Personal: the one person. Read as allowed until the role is known, so the form
-   * doesn't flash away for an admin; the server refuses anybody else whatever is drawn.
+   * A server is added for everyone in the organization. Locked down, only an admin adds one; with
+   * apps open (the organization's switch) anybody does. Its key is always an admin's to give: a key
+   * typed here would be every Bot's, so a member's would become everybody's. Personal: the one
+   * person. Read as allowed until the role and the switch are known, so the form doesn't flash away;
+   * the server refuses anybody else whatever is drawn.
    */
+  const open = useAppsOpen();
   const mayGiveKey = personal || isOrganizationAdmin(me?.role);
-  const mayAdd = mayGiveKey || me === undefined;
+  const mayAdd = mayGiveKey || me === undefined || open !== false;
   const add = useMutation(addServerByUrlMutationOptions(queryClient));
   // The sign-in comes back to the server's page under the same list.
   const connect = useMutation(
@@ -131,7 +156,7 @@ export function AddServerPage({
     await added(outcome.server.id);
   }
 
-  const defaultValues: AddServerFormValues = { title: "", url: "", token: "" };
+  const defaultValues: AddServerFormValues = { title, url: "", token: "" };
   const form = useForm({
     defaultValues,
     validators: { onSubmit: addServerFormSchema },
@@ -172,7 +197,11 @@ export function AddServerPage({
   return (
     <PageShell
       backButton={back}
-      description="Give your Bots the tools of an MCP server OpenBot doesn't list, from its address. If it asks you to sign in, you'll go to its sign-in page next."
+      description={
+        reconnect && title
+          ? `${title} was added by its address in OpenBot on your computer. Add it here with the same address, and its key if it needs one.`
+          : "Give your Bots the tools of an MCP server OpenBot doesn't list, from its address. If it asks you to sign in, you'll go to its sign-in page next."
+      }
       title="Add custom MCP"
     >
       <form

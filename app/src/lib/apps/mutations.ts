@@ -237,6 +237,25 @@ export function setOwnerGrantsMutationOptions(queryClient: QueryClient) {
 }
 
 /**
+ * Give an app to every Bot in the organization, Bots made later included, or take back what giving
+ * it to every Bot gave (updateApp). What a Bot was given any other way stays. An admin's.
+ */
+export function setEveryBotMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: { serverId: string; everyBot: boolean }) => {
+      await updateApp(
+        organizationId(),
+        variables.serverId,
+        { everyBot: variables.everyBot },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't change which Bots can use this app." },
+      );
+    },
+    onSettled: () => invalidatePlugins(queryClient),
+  });
+}
+
+/**
  * What switching an app's account mode would do, asked before it is done.
  *
  * `wouldRevoke` is who loses their account: a person's own connection when the switch is into

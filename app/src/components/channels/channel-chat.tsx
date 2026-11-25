@@ -33,6 +33,10 @@ import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { ProgressRow } from "@/components/channels/progress-row";
 import {
+  openComposerModelPicker,
+  StoppedConnectionNotice,
+} from "@/components/channels/stopped-connection-notice";
+import {
   seedMessage,
   takeFirstMessage,
   transcriptMessages,
@@ -2122,6 +2126,8 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            // An unsent reply stays with this conversation when somebody looks at another one.
+            draftKey={`conversation:${channel.id}`}
             attachmentLimits={attachmentLimits}
             starterSuggestions={
               channel.agentIds.length === 1 ? (
@@ -2170,6 +2176,7 @@ export function ChannelChat({
                 disabled={!channel.active}
                 onChange={runModel.choose}
                 saving={runModel.saving}
+                stopped={runModel.stopped !== null}
                 value={runModel.value}
               />
             }
@@ -2332,6 +2339,23 @@ export function ChannelChat({
             stopped={runError ?? undefined}
             // Each turn the server refused, under its own message, kept as later turns are sent.
             refusals={refused.refusals}
+            /*
+             * A run on a connection that stopped working is refused, so this is drawn under the
+             * latest refusal as well as under `stopped`; it draws nothing unless the server says
+             * the conversation's connection stopped.
+             */
+            stoppedNotice={
+              (runError !== null || refused.refusals.size > 0) && picksModel ? (
+                <StoppedConnectionNotice
+                  channelId={channel.id}
+                  onChooseModel={() => openComposerModelPicker()}
+                  said={[
+                    ...(runError !== null ? [runError.message] : []),
+                    ...refused.refusals.values(),
+                  ]}
+                />
+              ) : undefined
+            }
             /*
              * A turn cut off part way (its backend stopped answering, its run ended unheard, its
              * stream broke, or the server says its reply came back incomplete or its model's

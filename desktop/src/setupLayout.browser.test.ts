@@ -3408,6 +3408,17 @@ describe.skipIf(!asked)(
         noButtons: true,
       },
       { hash: "#move-failed", heading: "The move didn't finish", move: true },
+      // In more than one organization on OpenBot Cloud: where the Bots go, one of them held.
+      {
+        hash: "#move-where",
+        heading: "Where should your Bots go?",
+        move: true,
+      },
+      {
+        hash: "#move-not-allowed",
+        heading: "Your Bots can't move there",
+        move: true,
+      },
       {
         hash: "#move-failed-detail",
         heading: "The move didn't finish",
@@ -3441,6 +3452,25 @@ describe.skipIf(!asked)(
         move: true,
       },
       { hash: "#move-done-ai", heading: "You're on OpenBot Cloud", move: true },
+      // Apps connected with a key come across connected, apart from those signed in to again: two
+      // lists, which scroll inside the card above its buttons, as many apps do.
+      {
+        hash: "#move-confirm-carried",
+        heading: "Move to OpenBot Cloud",
+        scrolls: true,
+      },
+      {
+        hash: "#move-done-carried",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+        scrolls: true,
+      },
+      {
+        hash: "#move-done-ai-carried",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+        scrolls: true,
+      },
     ];
     /*
      * The move screen's choices: OpenBot Cloud, then OpenBot for Business as the first screen draws
@@ -3533,7 +3563,10 @@ describe.skipIf(!asked)(
               await page
                 .getByRole("heading", { name: screen.heading, exact: true })
                 .waitFor();
-              if (screen.hash === "#move-confirm")
+              if (
+                screen.hash === "#move-confirm" ||
+                screen.hash === "#move-confirm-carried"
+              )
                 await page.getByRole("list", { name: "What moves" }).waitFor();
               if (screen.openDetail) {
                 await page
@@ -3571,6 +3604,21 @@ describe.skipIf(!asked)(
                 await page.screenshot({
                   path: `${shots}/${name}-${width}x${height}-${colorScheme}-${engine}.png`,
                 });
+              // What scrolls inside the card, scrolled to its end for a look, then back.
+              if (shots && screen.scrolls) {
+                await page.evaluate(() => {
+                  const sheet = document.querySelector("main > .sheet");
+                  if (sheet) sheet.scrollTop = sheet.scrollHeight;
+                });
+                await page.waitForTimeout(200);
+                await page.screenshot({
+                  path: `${shots}/${name}-scrolled-${width}x${height}-${colorScheme}-${engine}.png`,
+                });
+                await page.evaluate(() => {
+                  const sheet = document.querySelector("main > .sheet");
+                  if (sheet) sheet.scrollTop = 0;
+                });
+              }
               const fit = await page.evaluate(() => {
                 const sheet = document.querySelector("main > .sheet");
                 const card = sheet?.getBoundingClientRect();
@@ -3644,6 +3692,42 @@ describe.skipIf(!asked)(
                 );
               if (screen.hash.startsWith("#move-done"))
                 expect(said).toContain("20.2 GB of OpenBot files removed");
+              // Their own organization first and picked, then the others; one held, saying why.
+              if (screen.hash === "#move-where")
+                expect(
+                  await page.evaluate(() =>
+                    [
+                      ...document.querySelectorAll<HTMLInputElement>(
+                        "fieldset.picker > .tile > .tile-input",
+                      ),
+                    ].map((input) => [
+                      input.closest(".tile")?.querySelector(".tile-name")
+                        ?.textContent,
+                      input.checked,
+                      input.disabled,
+                      input.closest(".tile")?.querySelector(".tile-summary")
+                        ?.textContent,
+                    ]),
+                  ),
+                ).toEqual([
+                  ["Sam's organization", true, false, "Your own organization."],
+                  [
+                    "Northwind Traders",
+                    false,
+                    false,
+                    "An organization you belong to.",
+                  ],
+                  [
+                    "Research Lab",
+                    false,
+                    true,
+                    "An admin of this organization hasn't let you use Bots here.",
+                  ],
+                ]);
+              if (screen.hash === "#move-not-allowed")
+                expect(said).toContain(
+                  "Nothing was removed from this computer.",
+                );
               expect(said.includes("of that is free space on your disk")).toBe(
                 screen.hash === "#move-done-held",
               );

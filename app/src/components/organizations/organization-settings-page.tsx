@@ -72,8 +72,19 @@ import {
   roleName,
 } from "@/lib/organizations/words";
 import { SEARCH_MAX } from "@/lib/people/queries";
-import { needsCard, usePlan } from "@/lib/plan/queries";
-import { cardAction, planSummary, trialUsed } from "@/lib/plan/words";
+import {
+  employeePaysForOthers,
+  employeeTrialUsedUp,
+  organizationNeedsCard,
+  usePlan,
+} from "@/lib/plan/queries";
+import {
+  COPILOTKIT_EMPLOYEE_LINE,
+  cardAction,
+  OTHERS_NEED_A_CARD,
+  planSummary,
+  trialUsed,
+} from "@/lib/plan/words";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { PersonAvatar } from "./person-avatar";
@@ -190,7 +201,8 @@ function NameRow({
  *
  * On the free trial it shows how much of it is used, as a bar and a percentage
  * (`freeRunsUsedPercent`, the person's own share). Never a count or a limit: the server sends
- * neither while runs are left.
+ * neither while runs are left. A CopilotKit employee who has used it all keeps the full bar, with
+ * the line that says their runs are free.
  */
 function PlanRow() {
   const plan = usePlan();
@@ -218,6 +230,32 @@ function PlanRow() {
                 {() => trialUsed(used)}
               </ProgressValue>
             </Progress>
+            {employeeTrialUsedUp(plan) ? (
+              <ItemDescription className="mt-1.5 line-clamp-none">
+                {COPILOTKIT_EMPLOYEE_LINE}
+              </ItemDescription>
+            ) : null}
+            {/*
+             * An employee admin can pay for the members who aren't employees. Under the bar, not
+             * beside it, so the bar keeps its width in a narrow window.
+             */}
+            {employeePaysForOthers(plan) && plan.addCardUrl ? (
+              <>
+                {/* Whole on a phone too: a row's description stops at two lines. */}
+                <ItemDescription className="mt-1.5 line-clamp-none">
+                  {OTHERS_NEED_A_CARD}
+                </ItemDescription>
+                <a
+                  className={cn(
+                    buttonVariants({ size: "sm", variant: "outline" }),
+                    "mt-2 self-start",
+                  )}
+                  href={plan.addCardUrl}
+                >
+                  {cardAction(plan)}
+                </a>
+              </>
+            ) : null}
           </ItemContent>
         </Item>
       </>
@@ -233,7 +271,8 @@ function PlanRow() {
           <ItemTitle>Plan</ItemTitle>
           <ItemDescription>{planSummary(plan)}</ItemDescription>
         </ItemContent>
-        {needsCard(plan) && plan.addCardUrl ? (
+        {/* The organization's bill: shown to a CopilotKit employee too, whose own runs go on. */}
+        {organizationNeedsCard(plan) && plan.addCardUrl ? (
           <ItemActions>
             <a
               className={cn(buttonVariants({ size: "sm", variant: "outline" }))}

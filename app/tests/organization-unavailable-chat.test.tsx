@@ -280,24 +280,43 @@ async function send(page: Page, where: "conversation" | "bot", words: string) {
   else await page.keyboard.press("Enter");
 }
 
-/** The audit log's Add filter, opened on the Bot filter's choices. */
-async function openBotChoices(page: Page) {
+/**
+ * The audit log's Add filter, opened on the Bot filter's choices, then what they say in their place
+ * once it is `words`, waited for as the menu draws it.
+ *
+ * The page is styled only for the classes it draws (`style`), so a menu that has just opened is
+ * drawn unstyled until it is styled again. Styled after Bot was pressed, the Add filter menu moved
+ * and shrank under the pointer, the browser told the menu the pointer had left, and Bot's choices
+ * closed, as they do when a person moves off them. The test then read them while they faded out,
+ * and failed whenever the machine was slower than the fade. So the menu is styled as soon as it
+ * opens, and Bot is pressed where the app draws it.
+ *
+ * A press opens Bot's choices at once; a hover first opens them after a delay, and the press could
+ * close them.
+ */
+async function openBotChoices(page: Page, words: string) {
   await page.getByRole("button", { name: "Add filter" }).click();
-  // A press opens it at once; a hover first opens it after a delay, and the press could close it.
-  await page.getByRole("menuitem", { name: "Bot", exact: true }).click();
-  await page
+  const bot = page.getByRole("menuitem", { name: "Bot", exact: true });
+  await bot.waitFor({ timeout: 8_000 });
+  await style(page);
+  await bot.click();
+  const said = page
     .locator("[data-slot=dropdown-menu-label]")
-    .first()
-    .waitFor({ timeout: 8_000 })
-    .catch(() => undefined);
+    .filter({ hasText: words });
+  await said.waitFor({ timeout: 15_000 });
+  return said;
 }
 
-/** What the open filter menu says in place of its choices, or the page's words when it says nothing. */
-async function choicesSay(page: Page): Promise<string> {
-  const label = page.locator("[data-slot=dropdown-menu-label]").first();
-  return (await label.count())
-    ? (await label.innerText()).trim()
-    : (await page.locator("body").innerText()).trim().slice(0, 120);
+/**
+ * Whether Bot's choices are still open, after the page has been styled for them and measured: they
+ * stay open until the pointer leaves them or a choice is made.
+ */
+async function botChoicesOpen(page: Page): Promise<boolean> {
+  return (
+    (await page
+      .getByRole("menuitem", { name: "Bot", exact: true })
+      .getAttribute("aria-expanded")) === "true"
+  );
 }
 
 const CALM = { red: false, boxedInRed: false, redIcon: false };
@@ -387,12 +406,7 @@ describe.skipIf(!asked)(
                 .getByRole("button", { name: "Add filter" })
                 .waitFor({ timeout: 15_000 });
               hold(server, MOVING);
-              await openBotChoices(page);
-              await page
-                .getByText(MOVING, { exact: true })
-                .waitFor({ timeout: 8_000 })
-                .catch(() => undefined);
-              await page.waitForTimeout(300);
+              const said = await openBotChoices(page, MOVING);
               await shoot(
                 page,
                 "organization-unavailable-chat",
@@ -401,8 +415,9 @@ describe.skipIf(!asked)(
                 look,
               );
               seen.auditFilters = {
-                says: await choicesSay(page),
+                says: (await said.innerText({ timeout: 5_000 })).trim(),
                 drawn: await drawn(page, MOVING),
+                open: await botChoicesOpen(page),
               };
             } finally {
               await page.close();
@@ -412,7 +427,7 @@ describe.skipIf(!asked)(
           expect(seen).toEqual({
             conversation: { says: MOVING, drawn: CALM, backendUnreachable: 0 },
             botPage: { says: UNAVAILABLE, drawn: CALM, backendUnreachable: 0 },
-            auditFilters: { says: MOVING, drawn: CALM },
+            auditFilters: { says: MOVING, drawn: CALM, open: true },
           });
         }, 180_000);
 
@@ -471,10 +486,7 @@ describe.skipIf(!asked)(
             await page
               .getByRole("button", { name: "Add filter" })
               .waitFor({ timeout: 15_000 });
-            await openBotChoices(page);
-            await page
-              .getByText(CHOICES_FAILED, { exact: true })
-              .waitFor({ timeout: 15_000 });
+            await openBotChoices(page, CHOICES_FAILED);
             await shoot(
               page,
               "organization-unavailable-chat",
@@ -482,12 +494,10 @@ describe.skipIf(!asked)(
               engine,
               look,
             );
-            // Measured with the pointer on Bot, as a person's is: a submenu opened by a press while
-            // its choices were still being asked closes once they fail, until the pointer is back.
-            await page
-              .getByRole("menuitem", { name: "Bot", exact: true })
-              .hover();
-            seen.auditFilters = await drawn(page, CHOICES_FAILED);
+            seen.auditFilters = {
+              ...(await drawn(page, CHOICES_FAILED)),
+              open: await botChoicesOpen(page),
+            };
           } finally {
             await page.close();
           }
@@ -496,7 +506,12 @@ describe.skipIf(!asked)(
         expect(seen).toEqual({
           conversation: { red: false, boxedInRed: false, redIcon: true },
           botPage: { red: true, boxedInRed: true, redIcon: false },
-          auditFilters: { red: true, boxedInRed: false, redIcon: false },
+          auditFilters: {
+            red: true,
+            boxedInRed: false,
+            redIcon: false,
+            open: true,
+          },
         });
       }, 120_000);
   },

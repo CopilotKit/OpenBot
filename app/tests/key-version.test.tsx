@@ -28,6 +28,7 @@ import {
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { APPS_SETTING_PATH, appsSettingResponse } from "./admin-settings-api";
 import {
   APPS_PATH,
   answerAppsApi,
@@ -128,13 +129,18 @@ let servers: TodayServer[] = [];
 /** Every createApp body the screen sent, in order. */
 const adds: Record<string, unknown>[] = [];
 
+/** The organization's apps switch: locked down unless a test opens it. */
+let lockedDown = true;
+
 const originalFetch = global.fetch;
 beforeEach(() => {
   adds.length = 0;
   servers = [];
+  lockedDown = true;
   global.fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = String(input).split("?")[0] ?? "";
+      if (path === APPS_SETTING_PATH) return appsSettingResponse(lockedDown);
       if (init?.method === "POST" && path === APPS_PATH) {
         const body = JSON.parse(String(init.body)) as {
           directoryEntryId: string;
@@ -297,7 +303,9 @@ describe("Browse apps, for somebody who connects as they add", () => {
 
     const row = await view.findByTestId("directory-posthog");
     // The sign-in is still the row's own action, and its count is the sign-in's.
-    expect(within(row).getByRole("button", { name: "Add" })).toBeTruthy();
+    expect(
+      within(row).getByRole("button", { name: "Connect PostHog" }),
+    ).toBeTruthy();
     const keyInstead = within(row).getByRole("button", {
       name: "Connect with a key instead",
     });
@@ -322,7 +330,7 @@ describe("Browse apps, for somebody who connects as they add", () => {
     expect(tabs).toHaveLength(0);
   });
 
-  test("an app with no key version offers nothing more, and Add still starts its sign-in", async () => {
+  test("an app with no key version offers nothing more, and Connect still starts its sign-in", async () => {
     directory = [posthog(null), linear];
     const { view, user } = browse("personal", "connections");
 
@@ -330,7 +338,7 @@ describe("Browse apps, for somebody who connects as they add", () => {
     expect(within(row).queryByTestId("key-version")).toBeNull();
     expect(row.textContent).not.toContain("with a key instead");
 
-    await user.click(within(row).getByRole("button", { name: "Add" }));
+    await user.click(within(row).getByRole("button", { name: /^Connect / }));
     await waitFor(() => expect(tabs).toHaveLength(1));
     expect(adds).toEqual([
       { from: "directory", directoryEntryId: "directory:linear" },
@@ -359,25 +367,31 @@ describe("Browse apps, for somebody who connects as they add", () => {
       within(row).queryByRole("button", { name: /with a key instead/ }),
     ).toBeNull();
     // The sign-in is still offered as the row's own action.
-    expect(within(row).getByRole("button", { name: "Add" })).toBeTruthy();
+    expect(
+      within(row).getByRole("button", { name: "Connect PostHog" }),
+    ).toBeTruthy();
   });
 });
 
 describe("Admin's directory", () => {
-  test("Add with a key instead only adds, and the row then links to the key version", async () => {
+  /*
+   * One press here too: Admin's line used to say "Add with a key instead" and only add, so the
+   * admin then had to find the key version and connect it as a second step.
+   */
+  test("Connect with a key instead adds the key version and opens its key form", async () => {
     directory = [posthog(null)];
     const { view, user, history } = browse("team", "admin");
 
     const row = await view.findByTestId("directory-posthog");
+    expect(row.textContent).not.toContain("Add with a key instead");
     await user.click(
-      within(row).getByRole("button", { name: "Add with a key instead" }),
+      within(row).getByRole("button", { name: "Connect with a key instead" }),
     );
 
-    const link = await within(row).findByRole("link", {
-      name: "PostHog (key)",
-    });
-    expect(link.getAttribute("href")).toBe(`/admin/plugins/${KEY_APP}`);
-    expect(history.location.pathname).toBe("/browse");
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(`/connections/${KEY_APP}`),
+    );
+    expect(history.location.search).toContain("connect=true");
     expect(adds).toEqual([
       {
         from: "directory",
@@ -385,20 +399,41 @@ describe("Admin's directory", () => {
         connectsWith: "key",
       },
     ]);
-    // The sign-in is untouched: still Add, and nothing about it says it is being added.
-    expect(within(row).getByRole("button", { name: "Add" })).toBeTruthy();
   });
 });
 
-test("a member, who asks for apps, is offered no key version", async () => {
+test("apps locked down, a member, who asks for apps, is offered no key version", async () => {
   directory = [posthog(null)];
   const { view } = browse("team", "connections", "member");
 
   const row = await view.findByTestId("directory-posthog");
   expect(
-    within(row).getByRole("button", { name: "Request PostHog" }),
+    await within(row).findByRole("button", { name: "Request PostHog" }),
   ).toBeTruthy();
   expect(within(row).queryByTestId("key-version")).toBeNull();
+});
+
+test("apps open, a member connects as an admin does, the key version too", async () => {
+  lockedDown = false;
+  directory = [posthog(null)];
+  const { view, user, history } = browse("team", "connections", "member");
+
+  const row = await view.findByTestId("directory-posthog");
+  await within(row).findByRole("button", { name: "Connect PostHog" });
+  expect(within(row).queryByRole("button", { name: /Request/ })).toBeNull();
+  await user.click(
+    within(row).getByRole("button", { name: "Connect with a key instead" }),
+  );
+  await waitFor(() =>
+    expect(history.location.pathname).toBe(`/connections/${KEY_APP}`),
+  );
+  expect(adds).toEqual([
+    {
+      from: "directory",
+      directoryEntryId: "directory:posthog",
+      connectsWith: "key",
+    },
+  ]);
 });
 
 describe("the sign-in version's own page", () => {

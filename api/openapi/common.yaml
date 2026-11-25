@@ -183,6 +183,7 @@ paths:
   /api/v2/organizations/{organizationId}/deployment: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1deployment' }
   /api/v2/organizations/{organizationId}/settings: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings' }
   /api/v2/organizations/{organizationId}/settings/stop-inactive-computers: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1stop-inactive-computers' }
+  /api/v2/organizations/{organizationId}/settings/apps: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1apps' }
   /api/v2/organizations/{organizationId}/capabilities: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities' }
   /api/v2/organizations/{organizationId}/capabilities/{capabilityId}: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities~1{capabilityId}' }
   /api/v2/organizations/{organizationId}/capabilities/batch-update: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities~1batch-update' }
@@ -234,6 +235,15 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins' }
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins~1{signInId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}/code: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins~1{signInId}~1code' }
+  /api/v2/organizations/{organizationId}/ai-connections: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connections' }
+  /api/v2/organizations/{organizationId}/ai-connections/{connectionId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connections~1{connectionId}' }
+  /api/v2/organizations/{organizationId}/ai-connections/{connectionId}/make-default: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connections~1{connectionId}~1make-default' }
+  /api/v2/organizations/{organizationId}/ai-connection-sign-ins: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection-sign-ins' }
+  /api/v2/organizations/{organizationId}/ai-connection-sign-ins/{signInId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection-sign-ins~1{signInId}' }
+  /api/v2/organizations/{organizationId}/ai-connection-sign-ins/{signInId}/code: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection-sign-ins~1{signInId}~1code' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connections' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections/{connectionId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connections~1{connectionId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections/{connectionId}/make-default: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connections~1{connectionId}~1make-default' }
   /api/v2/organizations/{organizationId}/apps: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps' }
   /api/v2/organizations/{organizationId}/apps/{appId}: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}' }
   /api/v2/organizations/{organizationId}/apps/{appId}/refresh: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1refresh' }
@@ -459,6 +469,8 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}/cancel: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}~1cancel' }
   /api/v2/organizations/{organizationId}/people/{personId}/saved-logins: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1saved-logins' }
   /api/v2/organizations/{organizationId}/people/{personId}/saved-logins/{savedLoginId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1saved-logins~1{savedLoginId}' }
+  /api/v2/organizations/{organizationId}/saved-logins/purge: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1saved-logins~1purge' }
+  /api/v2/organizations/{organizationId}/saved-logins/unusable: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1saved-logins~1unusable' }
   /api/v2/organizations/{organizationId}/people/{personId}/recorder-connect-codes: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connect-codes' }
   /api/v2/organizations/{organizationId}/people/{personId}/recorder-connections: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connections' }
   /api/v2/organizations/{organizationId}/people/{personId}/recorder-connections/{recorderConnectionId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connections~1{recorderConnectionId}' }
@@ -676,8 +688,8 @@ components:
             host-access:write: Give a Bot a folder on the signed-in person's own computer, take one away, and stop folder access.
             sign-in-requests:read: Read the sign-in requests the signed-in person's Bots are waiting on, never a credential.
             sign-in-requests:write: Open, answer and decline sign-in requests for the signed-in person.
-            saved-logins:read: Read which logins the signed-in person saved, never a password.
-            saved-logins:write: Delete the signed-in person's saved logins.
+            saved-logins:read: Read which logins the signed-in person saved, never a password, and for an administrator how many saved logins nobody in the organization may use any more.
+            saved-logins:write: Delete the signed-in person's saved logins, and for an administrator the saved logins nobody in the organization may use any more.
             recorder:read: Read the signed-in person's connected browsers and their recordings.
             recorder:write: Connect and disconnect the signed-in person's browsers.
             learning:read: Read what Learning proposed in the signed-in person's own spaces, their Learning choices and skills, and for an administrator the organization's Learning settings, spaces, people's proposals and sharing requests.
@@ -980,6 +992,8 @@ components:
     OrganizationSettings: { $ref: './admin-settings.yaml#/components/schemas/OrganizationSettings' }
     OrganizationSettingsContext: { $ref: './admin-settings.yaml#/components/schemas/OrganizationSettingsContext' }
     UpdateOrganizationSettingsRequest: { $ref: './admin-settings.yaml#/components/schemas/UpdateOrganizationSettingsRequest' }
+    AppsSetting: { $ref: './admin-settings.yaml#/components/schemas/AppsSetting' }
+    UpdateAppsSettingRequest: { $ref: './admin-settings.yaml#/components/schemas/UpdateAppsSettingRequest' }
     InactiveComputersStopped: { $ref: './admin-settings.yaml#/components/schemas/InactiveComputersStopped' }
     PersonComputersStopped: { $ref: './admin-settings.yaml#/components/schemas/PersonComputersStopped' }
     CapabilityId: { $ref: './admin-settings.yaml#/components/schemas/CapabilityId' }

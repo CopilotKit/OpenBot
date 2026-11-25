@@ -117,22 +117,22 @@ export function directoryDescriptions(
   switch (reader) {
     case "personal":
       return {
-        page: "Add an app and connect your account so your Bots can use it.",
+        page: "Connect an app so your Bots can use it.",
         search: "Search by name. OpenBot hasn't reviewed these apps.",
       };
     case "connect":
       return {
-        page: "Add an app for everyone in your organization and connect your own account.",
+        page: "Connect an app to use it yourself. Everyone in your organization can then connect their own account.",
         search,
       };
     case "request":
       return {
-        page: "Find an app and ask an admin to add it. Once it's added, connect your own account.",
+        page: "Find an app and ask an admin for it. Once it's ready, connect your own account.",
         search,
       };
     default:
       return {
-        page: "Add an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
+        page: "Connect an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
         search,
       };
   }

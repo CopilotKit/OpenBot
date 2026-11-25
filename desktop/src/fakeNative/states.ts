@@ -185,6 +185,13 @@ export const STATE_NAMES: readonly {
     title: "Move: confirm, many apps",
     step: null,
   },
+  ...[
+    ["#move-where", "Move: choose organization"],
+    ["#move-not-allowed", "Move: organization refused"],
+    ["#move-confirm-carried", "Move: confirm carried apps"],
+    ["#move-done-carried", "Move: carried apps result"],
+    ["#move-done-ai-carried", "Move: carried apps, AI needed"],
+  ].map(([hash, title]) => ({ hash, search: "", title, step: null })),
   { hash: "#move-signin", search: "", title: "Move: sign in", step: null },
   { hash: "#move-midway", search: "", title: "Move: midway", step: null },
   { hash: "#move-failed", search: "", title: "Move: failed", step: null },
@@ -273,6 +280,34 @@ const MORE_APPS: MoveApp[] = [
   { appId: "hubspot", appName: "HubSpot" },
 ];
 
+const SIGN_IN_APPS: MoveApp[] = MOVE_APPS.slice(0, 2);
+const KEY_APPS: MoveApp[] = [
+  { appId: "fireflies", appName: "Fireflies", botNames: ["Standup"] },
+  { appId: "posthog", appName: "PostHog", botNames: ["Metrics"] },
+];
+const TEAM_WIKI: MoveApp = {
+  appId: "team-wiki",
+  appName: "Team wiki",
+  botNames: ["Research"],
+};
+const NOT_ALLOWED =
+  "Your organization doesn't allow Team wiki yet. Ask an admin to approve it, then connect it here.";
+const MOVE_DESTINATIONS = [
+  {
+    id: "org_northwind",
+    name: "Northwind Traders",
+    personal: false,
+    canMoveIn: true,
+  },
+  {
+    id: "org_mine",
+    name: "Sam's organization",
+    personal: true,
+    canMoveIn: true,
+  },
+  { id: "org_lab", name: "Research Lab", personal: false, canMoveIn: false },
+];
+
 // This app too old for its OpenBot, as the shell says it: connected to an OpenBot (such as OpenBot
 // Cloud) that needs a newer app; one whose sign-in ended, as it always was; and the OpenBot on
 // this computer needing a newer app once Start has it running.
@@ -326,6 +361,7 @@ function createStates(where: Where): States {
   // the move due. The window asks before anything starts; the update runs until
   // `__fake.finishUpdate()`.
   const moveFirst = move === "first";
+  const carriedMove = Boolean(move?.endsWith("-carried"));
   let finishUpdate: (value: unknown) => void = () => {};
   const updated = new Promise((resolve) => {
     finishUpdate = resolve;
@@ -357,7 +393,13 @@ function createStates(where: Where): States {
       { kind: "files", count: 64 },
       { kind: "settings", count: 1 },
     ],
-    apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
+    apps:
+      move === "confirm-many"
+        ? MORE_APPS
+        : carriedMove
+          ? SIGN_IN_APPS
+          : MOVE_APPS,
+    ...(carriedMove ? { carried: [...KEY_APPS, TEAM_WIKI] } : {}),
     // `#move-first` is measured again once its update has added the new release's files.
     footprintBytes: moveFirst ? 26_600_000_000 : 20_200_000_000,
     modelKeysAvailable: true,
@@ -371,9 +413,23 @@ function createStates(where: Where): States {
       };
     if (command === "move_preview")
       return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
+    if (command === "move_destinations") {
+      if (move === "where") return MOVE_DESTINATIONS;
+      if (move === "not-allowed")
+        return [{ ...MOVE_DESTINATIONS[1], canMoveIn: true }];
+      return undefined;
+    }
     if (command !== "move_to_cloud") return undefined;
     const progress = (stage: string, state: string, share?: number) =>
       emit("move:progress", { stage, state, progress: share });
+    if (move === "not-allowed") {
+      progress("sign-in", "done");
+      throw {
+        said: "An admin of Northwind Traders hasn't let you use Bots there. Ask them to let you, or choose another organization.",
+        detail: null,
+        kind: "move-not-allowed",
+      };
+    }
     if (move === "signin") {
       progress("sign-in", "running");
       return new Promise(() => {});
@@ -408,10 +464,13 @@ function createStates(where: Where): States {
     // `#move-done-held`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
     // `#move-done-ai`: OpenBot Cloud still needs the person's AI, so the result leads with it.
     return {
-      connectAi: move === "done-ai",
+      connectAi: move === "done-ai" || move === "done-ai-carried",
       removedBytes: 20_200_000_000,
       diskGainedBytes: move === "done-held" ? 4_500_000_000 : 20_100_000_000,
-      apps: MOVE_APPS,
+      apps: carriedMove
+        ? [...SIGN_IN_APPS, { ...TEAM_WIKI, reason: NOT_ALLOWED }]
+        : MOVE_APPS,
+      ...(carriedMove ? { carried: KEY_APPS } : {}),
       notes:
         move === "done" || move === "done-held"
           ? [

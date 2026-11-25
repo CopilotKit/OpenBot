@@ -117,13 +117,13 @@ import {
   folderStepBody,
   folderStepSubject,
 } from "@/lib/folders/folder-steps";
+import { type Failure, failureSaid, isHeld } from "@/lib/load-failure";
 import {
   BotMarkdown,
   markdownComponents,
   markdownPlugins,
   replyRemarkPluginsFor,
 } from "@/lib/markdown";
-import { type Failure, failureSaid, isHeld } from "@/lib/load-failure";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import {
   RESEARCH_RESULTS_LABELS,
@@ -172,6 +172,7 @@ import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
 import { ResearchResults } from "./research-results";
 import { TeamBotConsentCard } from "./team-bot-consent";
+import { ReplyToolbar } from "./telemetry-assistant-message";
 import {
   dropRepeatedAppCards,
   groupToolSteps,
@@ -188,6 +189,7 @@ import {
   AT_END_PX,
   currentTurn,
   isPersonSentMessage,
+  replyCopies,
   type Turn,
   turnsOf,
 } from "./transcript-turns";
@@ -235,6 +237,12 @@ type ChatTranscriptProps = {
    * that message, so a second refusal must not take the first one's notice away.
    */
   refusals?: ReadonlyMap<string, string>;
+  /**
+   * Drawn under `stopped` while it shows, or else under the latest of `refusals`: what the
+   * conversation itself knows about why, such as the AI connection it runs on having stopped
+   * working (stopped-connection-notice.tsx, which draws nothing unless the server says so).
+   */
+  stoppedNotice?: React.ReactNode;
   /**
    * Carry on with a turn that was cut off part way, drawn as a button beside `stopped`. Absent for
    * a turn that ended for a reason carrying on would not fix (a refusal, a Bot no longer shared).
@@ -432,10 +440,13 @@ function useAllInView(
 function Stopped({
   reason,
   onCarryOn,
+  notice,
 }: {
   reason: Failure;
   /** A turn cut off part way can be carried on from here. See `onCarryOn` on the transcript. */
   onCarryOn?: () => void;
+  /** More about why, drawn under it. See `stoppedNotice` on the transcript. */
+  notice?: React.ReactNode;
 }) {
   /*
    * OpenBot holding off (a move, or the organization's database briefly out of reach) is no failure:
@@ -448,7 +459,7 @@ function Stopped({
    * phone, under it). Drawn as plain red text it read as a fault in the screen, not as something the
    * person could act on.
    */
-  return (
+  const row = (
     <Item
       /*
        * Card-filled, and framed in both themes as every card in a conversation is (the help-request
@@ -492,6 +503,14 @@ function Stopped({
         )}
       </ItemActions>
     </Item>
+  );
+  return notice ? (
+    <div className="flex w-full flex-col items-start gap-2">
+      {row}
+      {notice}
+    </div>
+  ) : (
+    row
   );
 }
 
@@ -990,6 +1009,7 @@ function ResponsibilityFiring({
  */
 const TranscriptMessage = memo(function TranscriptMessage({
   commandLabels = "",
+  copy,
   role,
   slackNames = NO_SLACK_NAMES,
   streaming = false,
@@ -1001,6 +1021,11 @@ const TranscriptMessage = memo(function TranscriptMessage({
   refused = false,
 }: {
   commandLabels?: string;
+  /**
+   * The words of the finished reply this message ends, when it ends one: the toolbar under it copies
+   * them. See `replyCopies`.
+   */
+  copy?: string;
   role: "user" | "assistant";
   /** The turn this message asked for was refused before it ran: a routine's says it didn't run. */
   refused?: boolean;
@@ -1102,7 +1127,10 @@ const TranscriptMessage = memo(function TranscriptMessage({
             className={isUser ? undefined : "w-full"}
           >
             <BubbleContent
-              className={cn("text-[1rem]/[1.5]", !isUser && "w-full")}
+              className={cn(
+                "text-(length:--text-conversation)/(--text-conversation--line-height)",
+                !isUser && "w-full",
+              )}
             >
               {isUser ? (
                 // A person's own message is shown exactly as they typed it. Rendering it as markdown
@@ -1179,6 +1207,27 @@ const TranscriptMessage = memo(function TranscriptMessage({
               )}
             </BubbleContent>
           </Bubble>
+          {/*
+           * The Bot chat page's own toolbar, under a finished reply: Copy, as it has there, and as
+           * far below the last line as it sits there (a paragraph's space).
+           *
+           * Its room is kept while the reply is still being written, unseen and out of reach, so the
+           * reply does not move when its turn ends and the toolbar shows: the transcript holds a
+           * reply still at that moment (transcript-room.test.tsx).
+           */}
+          {!isUser && copy !== undefined ? (
+            <div
+              aria-hidden={settled ? undefined : true}
+              className={cn("mt-5", !settled && "invisible")}
+              inert={!settled}
+            >
+              <ReplyToolbar
+                messageId={messageId}
+                text={copy}
+                threadId={threadId}
+              />
+            </div>
+          ) : null}
           {isUser && threadId ? (
             <MessageReactions messageId={messageId} threadId={threadId} />
           ) : null}
@@ -2190,6 +2239,7 @@ export function ChatTranscript({
   restoring = false,
   stopped,
   refusals = NO_REFUSALS,
+  stoppedNotice,
   onCarryOn,
   working,
 }: ChatTranscriptProps) {
@@ -2235,6 +2285,14 @@ export function ChatTranscript({
     folds,
     lastAskId: [...folds.at.values()].at(-1)?.askId,
   };
+  /*
+   * Each finished reply's words, under its last line. A task's folded working is not what it said
+   * back, and a steer note is the person's words, not the Bot's.
+   */
+  const replies = replyCopies(
+    items,
+    (id) => folds.inside.has(id) || readTaskReport(id)?.kind === "steer",
+  );
   /*
    * The folders this conversation's "Check your folders" steps named, for its other folder steps.
    * The same map while the names are the same: a new one on every render is a new context value,
@@ -2610,6 +2668,13 @@ export function ChatTranscript({
       if (row !== undefined) refusedUnder.set(row, sentence);
     }
   }
+  /*
+   * `stoppedNotice` goes under the latest refusal when no other failure is drawn: a run refused
+   * because its AI connection stopped working is a refusal, said under its message.
+   */
+  const noticeUnder = stopped
+    ? undefined
+    : items.findLast((item) => refusedUnder.has(item.id))?.id;
 
   const rowContent = (item: TranscriptItem, index: number) =>
     item.kind === "tools" || item.kind === "tool" ? (
@@ -2627,6 +2692,7 @@ export function ChatTranscript({
       <TranscriptMessage
         threadId={threadId}
         messageId={item.id}
+        copy={replies.get(item.id)}
         settled={!busy || index < turnStart}
         commandLabels={commandLabels}
         role={item.role}
@@ -2697,7 +2763,10 @@ export function ChatTranscript({
          */}
         {refusal !== undefined ? (
           <div className="mt-6">
-            <Stopped reason={{ message: refusal }} />
+            <Stopped
+              notice={item.id === noticeUnder ? stoppedNotice : undefined}
+              reason={{ message: refusal }}
+            />
           </div>
         ) : null}
       </MessageScrollerItem>
@@ -2812,7 +2881,11 @@ export function ChatTranscript({
                   </ArrivalsLiveContext.Provider>
                   <div className="contents [&>*]:order-1">
                     {stopped ? (
-                      <Stopped onCarryOn={onCarryOn} reason={stopped} />
+                      <Stopped
+                        notice={stoppedNotice}
+                        onCarryOn={onCarryOn}
+                        reason={stopped}
+                      />
                     ) : waitingOnTheModel ? (
                       <Thinking />
                     ) : null}

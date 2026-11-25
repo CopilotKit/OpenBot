@@ -280,7 +280,6 @@ export function SignInForm({
       >
         <form
           className="mt-4 flex flex-col gap-3"
-          autoComplete="off"
           onSubmit={(event) => {
             event.preventDefault();
             if (!password) return;

@@ -53,6 +53,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   type AiConnectionOwner,
+  type DescribedConnection,
   describeConnection,
 } from "@/lib/ai-connection/describe";
 import {
@@ -66,13 +67,13 @@ import {
   type Plan,
 } from "@/lib/ai-connection/desktop";
 import {
+  addAiConnectionMutationOptions,
   type Connected as ConnectedResult,
   type ConnectPhase,
   connectAiMutationOptions,
   connectPersonalAiMutationOptions,
-  finishPersonalSignIn,
-  readPersonalSignIn,
-  startPersonalSignIn,
+  personalSignInSteps,
+  signInStepsFor,
 } from "@/lib/ai-connection/mutations";
 import {
   AI_PROVIDERS,
@@ -87,6 +88,7 @@ import {
   sharedLogins,
   signInWords,
 } from "@/lib/ai-connection/providers";
+import type { ConnectionScope } from "@/lib/ai-connection/queries";
 import {
   awaitSignInRedirect,
   beginSignInRedirect,
@@ -150,7 +152,24 @@ export type ChooserMode =
         mine: AiConnection | null;
       };
     }
-  | { kind: "personal"; signIns: readonly AiConnectionProviderAnswer[] };
+  | { kind: "personal"; signIns: readonly AiConnectionProviderAnswer[] }
+  /**
+   * One more connection beside the others, in a list of several (connectAiConnection or
+   * connectPersonalAiConnection). Like `personal`, the server runs each sign-in it names in
+   * `signIns` (for the organization: startAiSignIn), and every other provider connects with a key
+   * or an address. `connected`: the providers already connected, which choosing replaces.
+   */
+  | {
+      kind: "adding";
+      scope: ConnectionScope;
+      signIns: readonly AiConnectionProviderAnswer[];
+      connected: readonly AiConnectionProviderAnswer[];
+      /** Open on this provider, to fix its connection: `reconnecting` names it in the title. */
+      provider?: AiConnectionProviderAnswer;
+      /** And on the connection's own way in, where the provider offers it: a key asks for the key. */
+      login?: AiConnectionLogin | null;
+      reconnecting?: string;
+    };
 
 export type ChooserSurface = "dialog" | "card";
 
@@ -272,7 +291,8 @@ function loginLabel(login: AiConnectionLogin): string {
 
 /** The ways in this chooser offers for a provider. */
 function loginsFor(provider: AiProvider, mode: ChooserMode) {
-  if (mode.kind === "personal") return personalLogins(provider, mode.signIns);
+  if (mode.kind === "personal" || mode.kind === "adding")
+    return personalLogins(provider, mode.signIns);
   if (mode.share && !mode.inDesktop)
     return sharedLogins(provider, mode.share.signIns);
   return loginsHere(provider, mode.inDesktop);
@@ -348,13 +368,18 @@ export function ChooseConnection({
   onBack,
   onConnected,
 }: {
-  connection: AiConnection;
+  /** The connection in use, for its kept keys. Absent when adding one more beside it. */
+  connection?: AiConnection;
   mode: ChooserMode;
   /** Back from a chosen provider, or Cancel from the list. Absent: the list has no way back. */
   onBack?: () => void;
   onConnected: (connected: ConnectedResult) => void;
 }) {
   const personal = mode.kind === "personal";
+  const adding = mode.kind === "adding" ? mode : null;
+  // A person's own, or one more in a list: the server runs sign-ins, keys elsewhere, Back to the list.
+  const serverOwned = personal || adding !== null;
+  const steps = adding ? signInStepsFor(adding.scope) : personalSignInSteps;
   const inDesktop = mode.kind === "organization" && mode.inDesktop;
   const organizationWide =
     mode.kind === "organization" && mode.organizationWide === true;
@@ -364,7 +389,7 @@ export function ChooseConnection({
       ? mode.share
       : null;
   // The server runs the sign-in (Connect your AI's), never OpenBot Desktop.
-  const serverRun = personal || share !== null;
+  const serverRun = serverOwned || share !== null;
   // Inside OpenBot Desktop, which can take a plan's redirect for the server's sign-in.
   const inDesktopWindow = desktopShell() !== null;
   // ChatGPT's first way: its browser sign-in where Desktop takes the redirect, a code elsewhere.
@@ -412,9 +437,11 @@ export function ChooseConnection({
   } | null>(null);
   const run = useRef(0);
   const connect = useMutation(
-    personal
-      ? connectPersonalAiMutationOptions(queryClient)
-      : connectAiMutationOptions(queryClient),
+    adding
+      ? addAiConnectionMutationOptions(queryClient, adding.scope)
+      : personal
+        ? connectPersonalAiMutationOptions(queryClient)
+        : connectAiMutationOptions(queryClient),
   );
 
   /** Stop a sign-in still waiting in the browser, so its tab can't finish into a closed chooser. */
@@ -432,15 +459,28 @@ export function ChooseConnection({
   const stopLatest = useRef(stopSignIn);
   stopLatest.current = stopSignIn;
   useEffect(() => () => stopLatest.current(), []);
+  // Reconnecting one connection: open on its provider, ready to sign in or take its key.
+  const opening = useRef(adding?.provider);
+  const chooseLatest = useRef<(next: AiProvider | null) => void>(() => {});
+  useEffect(() => {
+    const id = opening.current;
+    opening.current = undefined;
+    if (id) chooseLatest.current(providerById(id) ?? null);
+  }, []);
 
   function choose(next: AiProvider | null) {
     stopSignIn();
     connect.reset();
     setProviderId(next?.id ?? null);
     const nextLogins = next ? loginsFor(next, mode) : [];
-    setLogin(nextLogins[0] ?? null);
+    // Fixing one connection opens on its own way in; anything else on the provider's first.
+    const own =
+      adding?.provider && adding.provider === next?.id ? adding.login : null;
+    const nextLogin =
+      own && nextLogins.includes(own) ? own : (nextLogins[0] ?? null);
+    setLogin(nextLogin);
     const nextPreset = next ? ENDPOINT_PRESETS[next.id] : undefined;
-    const nextKept = keptSignIn(mode, next ?? undefined, nextLogins[0] ?? null);
+    const nextKept = keptSignIn(mode, next ?? undefined, nextLogin);
     setApiKey("");
     setBaseUrl(nextPreset?.baseUrl ?? "");
     setModel(nextKept?.model ?? nextPreset?.model ?? "");
@@ -452,6 +492,7 @@ export function ChooseConnection({
     setPasteBack(false);
     minted.current = null;
   }
+  chooseLatest.current = choose;
 
   /** Switch ChatGPT's way in, before a sign-in starts: what failed the other way no longer applies. */
   function chooseChatGptWay(next: ChatGptWay) {
@@ -475,7 +516,7 @@ export function ChooseConnection({
   const savedKey =
     provider &&
     (login === "api-key" || login === "endpoint") &&
-    connection.saved.some(
+    (connection?.saved ?? []).some(
       (saved) =>
         saved.provider === provider.id &&
         saved.login === login &&
@@ -520,7 +561,12 @@ export function ChooseConnection({
      * Unbiased AI's sign-in, run by the server: its key is kept for the person, for the provider's
      * own address. A plan or a Google or xAI sign-in the server ran connects as itself, below.
      */
-    if (login === "oauth" && personal && provider.id === "unbiased" && preset)
+    if (
+      login === "oauth" &&
+      serverOwned &&
+      provider.id === "unbiased" &&
+      preset
+    )
       return {
         provider: provider.id,
         login: "endpoint",
@@ -575,11 +621,11 @@ export function ChooseConnection({
         begin: beginSignInRedirect,
         start: (loopbackPort) =>
           redirectProvider === "anthropic"
-            ? startPersonalSignIn(redirectProvider, method, { loopbackPort })
-            : startPersonalSignIn(redirectProvider, "browser"),
+            ? steps.start(redirectProvider, method, { loopbackPort })
+            : steps.start(redirectProvider, "browser"),
         wait: awaitSignInRedirect,
         cancel: cancelSignInRedirect,
-        finish: finishPersonalSignIn,
+        finish: steps.finish,
         hold: (redirectId) => {
           attempt.current = redirectId ? { redirectId } : null;
         },
@@ -608,7 +654,7 @@ export function ChooseConnection({
     }
     const begun =
       started ??
-      (await startPersonalSignIn(chosen.id, method).catch((error: unknown) => {
+      (await steps.start(chosen.id, method).catch((error: unknown) => {
         // OpenAI gave no code (the server's 422): most often, device code sign-in is off. Said so.
         if (
           method === "device" &&
@@ -633,7 +679,7 @@ export function ChooseConnection({
     for (;;) {
       await wait(interval);
       if (!current()) return false;
-      const status = await readPersonalSignIn(begun.id);
+      const status = await steps.read(begun.id);
       if (!current()) return false;
       if (status.status === "approved") return "approved";
       if (status.status === "failed" || status.status === "expired")
@@ -728,7 +774,7 @@ export function ChooseConnection({
     setSigningIn(true);
     try {
       if (signInId) {
-        const status = await finishPersonalSignIn(signInId, pasted);
+        const status = await steps.finish(signInId, pasted);
         if (run.current !== mine) return;
         if (status.status !== "approved")
           throw new Error(status.detail ?? SIGN_IN_DIDNT_FINISH);
@@ -806,7 +852,9 @@ export function ChooseConnection({
    * Back from a chosen provider: to the dialog's previous screen for the organization's AI, as it
    * always was; to the list for a person's own, which has no screen before it on a page.
    */
-  const back = personal && provider ? () => choose(null) : onBack;
+  // Reconnecting one connection has no list to go back to: Back is the dialog's.
+  const back =
+    serverOwned && provider && !adding?.provider ? () => choose(null) : onBack;
 
   return (
     <form
@@ -819,21 +867,29 @@ export function ChooseConnection({
       <ChooserHeader
         description={
           provider
-            ? "OpenBot checks the connection before it switches. Nothing changes if the check fails."
-            : personal
-              ? "Choose the AI your Bots use when they work for you. It's yours alone."
-              : organizationWide
-                ? "Choose an AI for everyone in your organization. Bots use it for anyone who hasn't connected their own."
-                : "Choose the AI your Bots use. OpenBot keeps running while it switches."
+            ? adding
+              ? "OpenBot checks the connection before it saves it. Nothing changes if the check fails."
+              : "OpenBot checks the connection before it switches. Nothing changes if the check fails."
+            : adding
+              ? "Choose another AI your Bots can use. The ones already connected keep working."
+              : personal
+                ? "Choose the AI your Bots use when they work for you. It's yours alone."
+                : organizationWide
+                  ? "Choose an AI for everyone in your organization. Bots use it for anyone who hasn't connected their own."
+                  : "Choose the AI your Bots use. OpenBot keeps running while it switches."
         }
         title={
-          personal
-            ? "Connect your AI"
-            : organizationWide
-              ? describeConnection(connection)
-                ? "Change your organization's AI"
-                : "Set up your organization's AI"
-              : "Change AI connection"
+          adding
+            ? adding.reconnecting
+              ? `Reconnect ${adding.reconnecting}`
+              : "Connect another AI"
+            : personal
+              ? "Connect your AI"
+              : organizationWide
+                ? connection && describeConnection(connection)
+                  ? "Change your organization's AI"
+                  : "Set up your organization's AI"
+                : "Change AI connection"
         }
       />
       <ChooserBody className="flex flex-col gap-4">
@@ -853,11 +909,19 @@ export function ChooseConnection({
             <Item
               key={row.id}
               render={
-                <button
-                  disabled={busy}
-                  onClick={() => choose(provider ? null : row)}
-                  type="button"
-                />
+                /*
+                 * Changing one connection keeps to its provider: picking another here would connect
+                 * that one beside it instead of changing this one.
+                 */
+                provider && adding?.provider ? (
+                  <div />
+                ) : (
+                  <button
+                    disabled={busy}
+                    onClick={() => choose(provider ? null : row)}
+                    type="button"
+                  />
+                )
               }
               // A button centres its text; a row reads from the left like every other.
               className="text-left"
@@ -870,8 +934,12 @@ export function ChooseConnection({
                 <ItemDescription>{providerSummary(row, mode)}</ItemDescription>
               </ItemContent>
               <ItemActions>
-                {provider ? (
+                {provider && adding?.provider ? null : provider ? (
                   <span className="text-muted-foreground text-xs">Change</span>
+                ) : adding?.connected.includes(row.id) ? (
+                  <span className="text-muted-foreground text-xs">
+                    Connected
+                  </span>
                 ) : (
                   <IconChevronRight className="size-4 text-muted-foreground" />
                 )}
@@ -1489,7 +1557,7 @@ export function ConnectedRow({
   connection,
   owner = "you",
 }: {
-  connection: AiConnection;
+  connection: DescribedConnection;
   owner?: AiConnectionOwner;
 }) {
   // Who is reading, only to say "your" of a sign-in they shared themselves.
@@ -1521,11 +1589,14 @@ export function Connected({
   desktopProblem,
   onClose,
   owner = "you",
+  added = false,
 }: {
-  connection: AiConnection;
+  connection: DescribedConnection;
   desktopProblem: string | null;
   onClose: () => void;
   owner?: AiConnectionOwner;
+  /** Connected beside the others, not as the default: it runs when one of its models is picked. */
+  added?: boolean;
 }) {
   const described = describeConnection(connection);
   return (
@@ -1535,9 +1606,11 @@ export function Connected({
           Connected to {described?.provider ?? "your AI"}
         </DialogTitle>
         <DialogDescription>
-          {owner === "organization"
-            ? "Bots use it for anyone in your organization who hasn't connected their own AI."
-            : "Your next message runs on it. Anything already running finishes on the connection it started with."}
+          {added
+            ? "Pick one of its models in a conversation to use it. The AI connected before stays the default."
+            : owner === "organization"
+              ? "Bots use it for anyone in your organization who hasn't connected their own AI."
+              : "Your next message runs on it. Anything already running finishes on the connection it started with."}
         </DialogDescription>
       </DialogHeader>
       <DialogBody className="mt-4 flex flex-col gap-3 text-sm">

@@ -30,7 +30,13 @@ const THEMES = ["light", "dark"] as const;
 const ADD_CARD =
   "/api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe";
 
-type State = { name: string; plan: string; admin: boolean };
+type State = {
+  name: string;
+  plan: string;
+  admin: boolean;
+  employee?: boolean;
+  pays?: boolean;
+};
 const STATES: State[] = [
   { name: "free", plan: "free", admin: true },
   { name: "none-admin", plan: "none", admin: true },
@@ -39,6 +45,17 @@ const STATES: State[] = [
   { name: "active", plan: "active", admin: true },
   { name: "not-required", plan: "not_required", admin: true },
 ];
+/** A CopilotKit employee past the free allowance: still free, never a card, never blocked. */
+const EMPLOYEE: State = {
+  name: "employee",
+  plan: "free",
+  admin: true,
+  employee: true,
+};
+const EMPLOYEE_LINE =
+  "Free because you're a CopilotKit employee. Thanks, Uncle Atai!";
+const SENTRY_ALT =
+  "Sentry, a white golden retriever, sitting on a rock above a mountain meadow";
 const SCENES = ["shell", "settings", "chat"] as const;
 type Scene = (typeof SCENES)[number] | "dialog" | "signin";
 
@@ -51,8 +68,17 @@ async function bundle(): Promise<string> {
   if (!built.success) throw new AggregateError(built.logs, "bundle failed");
   const script = built.outputs.find((output) => output.kind === "entry-point");
   if (!script) throw new Error("bundle has no entry point");
+  // The pictures it imports, served beside it under the names the bundle gave them.
+  for (const output of built.outputs)
+    if (output.kind === "asset")
+      assets.set(
+        output.path.split("/").pop() ?? "",
+        Buffer.from(await output.arrayBuffer()),
+      );
   return script.text();
 }
+
+const assets = new Map<string, Buffer>();
 
 function packageDir(name: string): string {
   const dir = [
@@ -139,13 +165,19 @@ async function open(
       });
     if (path === "/plan.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
+    const asset = assets.get(path.split("/").pop() ?? "");
+    if (asset)
+      return route.fulfill({
+        contentType: path.endsWith(".webp") ? "image/webp" : "image/png",
+        body: asset,
+      });
     const font = join(inter, path.split("/").pop() ?? "");
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     return route.fulfill({ status: 404 });
   });
   await page.goto(
-    `${ORIGIN}/?scene=${scene}&plan=${state.plan}&admin=${state.admin ? 1 : 0}&width=${width}&theme=${theme}`,
+    `${ORIGIN}/?scene=${scene}&plan=${state.plan}&admin=${state.admin ? 1 : 0}&employee=${state.employee ? 1 : 0}&pays=${state.pays ? 1 : 0}&width=${width}&theme=${theme}`,
   );
   await page.waitForFunction(
     () => (document.getElementById("root")?.textContent?.length ?? 0) > 0,
@@ -184,6 +216,16 @@ async function shot(page: Page, name: string) {
   if (!shots) return;
   mkdirSync(shots, { recursive: true });
   await page.screenshot({ path: join(shots, `plan-${name}.png`) });
+}
+
+/** Waits for Sentry's photo to have loaded and been drawn. */
+async function sentryDrawn(page: Page) {
+  await page.waitForFunction((alt) => {
+    const img = document.querySelector(
+      `img[alt="${alt}"]`,
+    ) as HTMLImageElement | null;
+    return img?.complete === true && img.naturalWidth > 0;
+  }, SENTRY_ALT);
 }
 
 /** Whether anything on the page runs off its right edge. */
@@ -359,6 +401,147 @@ describe.skipIf(!asked)(
               await page.close();
             }
           }, 60_000);
+
+        test(`a CopilotKit employee's trial-used-up dialog, ${theme}, ${width}px`, async () => {
+          const page = await open("dialog", EMPLOYEE, {
+            width,
+            theme,
+            ready: "[role=dialog]",
+          });
+          try {
+            const dialog = page.getByRole("dialog");
+            const said = (await dialog.textContent()) ?? "";
+            expect(said).toContain("Your free trial was 500 Bot runs");
+            expect(said).toContain(EMPLOYEE_LINE);
+            expect(said).toContain("Sentry loves you too.");
+            // Sentry's photo, drawn, as wide as the dialog's text and no wider.
+            const photo = dialog.getByAltText(SENTRY_ALT);
+            await sentryDrawn(page);
+            await shot(page, `dialog-employee-${theme}-${width}`);
+            const laid = await photo.evaluate((img) => {
+              const box = img.getBoundingClientRect();
+              const body = img.parentElement?.getBoundingClientRect();
+              const line = img.previousElementSibling?.getBoundingClientRect();
+              return {
+                drawn: (img as HTMLImageElement).naturalWidth > 0,
+                fits:
+                  !!body &&
+                  box.left >= body.left - 0.5 &&
+                  box.right <= body.right + 0.5,
+                full: !!line && Math.abs(box.width - line.width) < 1,
+              };
+            });
+            expect(laid).toEqual({ drawn: true, fits: true, full: true });
+            expect(said).not.toContain("Ask an admin");
+            // Only a way to close, and nothing over the page.
+            await expect(dialog.getByRole("link").count()).resolves.toBe(0);
+            await expect(
+              page.getByRole("complementary", { name: "Plan" }).count(),
+            ).resolves.toBe(0);
+            expect(await sideways(page)).toBe(false);
+          } finally {
+            await page.close();
+          }
+        }, 60_000);
+
+        /*
+         * On a short window the photo takes the dialog past the screen: the dialog stays on it and
+         * its body scrolls, down to Sentry's line.
+         */
+        test(`a CopilotKit employee's dialog on a short window scrolls, ${theme}, ${width}px`, async () => {
+          const page = await open("dialog", EMPLOYEE, {
+            width,
+            theme,
+            ready: "[role=dialog]",
+          });
+          try {
+            await page.setViewportSize({ width, height: 520 });
+            await sentryDrawn(page);
+            const before = await page.evaluate(() => {
+              const dialog = document.querySelector("[role=dialog]");
+              const body = document.querySelector("[data-slot=dialog-body]");
+              const box = dialog?.getBoundingClientRect();
+              return {
+                onScreen: !!box && box.top >= 0 && box.bottom <= innerHeight,
+                scrolls: !!body && body.scrollHeight > body.clientHeight,
+              };
+            });
+            expect(before).toEqual({ onScreen: true, scrolls: true });
+            await page
+              .locator("[data-slot=dialog-body]")
+              .evaluate((body) => body.scrollTo({ top: body.scrollHeight }));
+            await expect(
+              page.getByText("Sentry loves you too.").isVisible(),
+            ).resolves.toBe(true);
+            await shot(page, `dialog-employee-short-${theme}-${width}`);
+            expect(await sideways(page)).toBe(false);
+          } finally {
+            await page.close();
+          }
+        }, 60_000);
+
+        test(`a CopilotKit employee admin's Plan row with Add a card for the others, ${theme}, ${width}px`, async () => {
+          const page = await open(
+            "settings",
+            { ...EMPLOYEE, name: "employee-pays", pays: true },
+            { width, theme, ready: "[role=progressbar]" },
+          );
+          try {
+            await shot(page, `settings-employee-pays-${theme}-${width}`);
+            await expect(
+              page
+                .getByRole("link", { name: "Add a card" })
+                .getAttribute("href"),
+            ).resolves.toBe(ADD_CARD);
+            await expect(
+              page
+                .getByText(
+                  "Everyone else in this organization needs a card added to keep their Bots running.",
+                  { exact: false },
+                )
+                .count(),
+            ).resolves.toBe(1);
+            // Found on the first run: at 390px the line was cut off after two lines. It's whole.
+            const cut = await page
+              .getByText("Everyone else in this organization", { exact: false })
+              .evaluate((line) => line.scrollHeight > line.clientHeight + 1);
+            expect(cut).toBe(false);
+            // The bar keeps its width with the button under it.
+            const track = await page
+              .locator("[data-slot=progress-track]")
+              .boundingBox();
+            expect(track?.width ?? 0).toBeGreaterThan(width < 600 ? 200 : 400);
+            await expect(
+              page.getByRole("complementary", { name: "Plan" }).count(),
+            ).resolves.toBe(0);
+            expect(await sideways(page)).toBe(false);
+          } finally {
+            await page.close();
+          }
+        }, 60_000);
+
+        test(`a CopilotKit employee's Plan row, ${theme}, ${width}px`, async () => {
+          const page = await open("settings", EMPLOYEE, {
+            width,
+            theme,
+            ready: "[role=progressbar]",
+          });
+          try {
+            await shot(page, `settings-employee-${theme}-${width}`);
+            await expect(
+              page.getByRole("progressbar").getAttribute("aria-valuenow"),
+            ).resolves.toBe("100");
+            await expect(page.getByText(EMPLOYEE_LINE).count()).resolves.toBe(
+              1,
+            );
+            await expect(
+              page.getByRole("link", { name: "Add a card" }).count(),
+            ).resolves.toBe(0);
+            expect(await sideways(page)).toBe(false);
+          } finally {
+            await page.close();
+          }
+        }, 60_000);
 
         // One of the app's own dialogs, from the same page, to hold the new one beside.
         test(`the app's Remove member dialog, for comparison, ${theme}, ${width}px`, async () => {

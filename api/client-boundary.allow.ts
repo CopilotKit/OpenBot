@@ -360,9 +360,9 @@ export const ALLOWED: Allowed[] = [
   },
   {
     file: "desktop/src-tauri/src/move_to_cloud/tests.rs",
-    what: /^\/api\/v2\/(people\/me\/organizations|organizations\/(default|org_mine)\/((exports|imports)(\/[a-z0-9_]+)*\/?|people\/me(\/ai-connection)?))$/,
+    what: /^\/api\/v2\/(people\/me\/organizations|organizations\/(default|org_mine|org_acme|\{\})\/((exports|imports)(\/[a-z0-9_]+)*\/?|export-estimate|people\/me(\/ai-connection)?))$/,
     rule: "hand-built-v2",
-    why: "the move's tests, against an OpenBot here and an OpenBot Cloud that answer as the API describes",
+    why: "the move's tests, against an OpenBot here and an OpenBot Cloud that answer as the API describes, in each organization a person may choose",
   },
   {
     file: "desktop/src-tauri/src/install_token.rs",
