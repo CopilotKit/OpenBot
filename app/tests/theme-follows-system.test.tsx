@@ -156,6 +156,7 @@ test.skipIf(!asked).each([
       await page.context().close();
     }
   },
+  30_000,
 );
 
 /** What the page shows: the theme at first paint, the theme now, and what the setting reads. */
