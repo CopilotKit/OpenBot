@@ -498,6 +498,20 @@ mod connected_ipc {
         assert_eq!(quit_status(shell.handle().clone()), None);
         assert_eq!(shell.window.url().unwrap(), showing);
 
+        // The Cloud sign-in uses the same direct-quit path, with no local stack or progress page.
+        let cloud = Connected::new();
+        cloud.choose(choice::Mode::Connected, "https://api.open.bot", None);
+        remember_selected_root(&cloud.app.state::<Shell>(), &root);
+        let showing = cloud.window.url().unwrap();
+        assert_eq!(quit_cleanup_shown(cloud.handle()), Vec::<String>::new());
+        assert_eq!(quit_status(cloud.handle().clone()), None);
+        assert_eq!(cloud.window.url().unwrap(), showing);
+        assert!(
+            desktop_connected::is_connected(cloud.handle()),
+            "Quit does not sign out"
+        );
+        drop(cloud);
+
         assert!(!asked_the_engine(), "{:?}", std::fs::read_to_string(&record));
         assert!(!root.exists(), "the installation's folder was made");
         assert_eq!(shell.config_files(), ["connection.json"]);

@@ -15,7 +15,14 @@ import {
   IconUsers,
   IconUsersGroup,
 } from "@tabler/icons-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   BOOK_A_DEMO_LINE,
   BOOKING_CALENDAR_ORIGIN,
@@ -26,6 +33,7 @@ import {
   type BusinessFeatureIcon,
   bookingCalendarSrc,
 } from "../../shared/openbot-for-business";
+import { CloudMarks } from "./CloudMarks";
 import { ExternalLink } from "./ExternalLink";
 
 /** The same icons the app's OpenBot for Business dialog draws each feature with. */
@@ -45,21 +53,190 @@ const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
   audit: IconHistory,
 };
 
+/** Which of OpenBot for Business's two ways to run is picked on the first screen. */
+export type BusinessWay = "cloud" | "self-hosted";
+
+/** The page's line for each way: who runs it, and where. */
+export const BUSINESS_WAY_LINES: Record<BusinessWay, string> = {
+  cloud: "We run OpenBot for you on OpenBot Cloud.",
+  "self-hosted": "Run it in your own VPC on AWS, Azure or GCP, or on-prem.",
+};
+
 /**
- * The first screen's lower half when OpenBot for Business is picked: the app's OpenBot for Business
- * view, stacked for the setup card. Its name, then where it runs and what it adds, then the calendar
- * to book a call. The words and the Calendly event are the app's own (`shared/openbot-for-business`).
+ * OpenBot for Business, as the first screen's page draws it (`layout` "page", the default): the
+ * picked way's line, Book a demo, and what it adds: one row per group, its name beside a sentence
+ * that sums it up, then every feature in a short two-column list. Everything shows; nothing opens.
+ * The detail pane scrolls when its copy needs more room.
+ *
+ * Book a demo swaps the page for the booking step: Back, its own heading (which takes the focus),
+ * what booking is for, and the calendar sized to the room the page has (`BookingCalendar` `fit`).
+ * The page's own heading (`head`) is the features view's, and gives way to the step's.
  *
  * A calendar that can't load (offline, blocked, silent) gives way to Book a demo, which opens the
  * OpenBot for Business page in the person's browser, as the app's does on the Desktop.
  *
- * The calendar sits below the lists, past the bottom of the setup window, and the card scrolls to
- * it. Book a demo under the first line takes the person there, so the way to book is in view the
- * moment OpenBot for Business is picked: its heading comes to the top of the card and takes the
- * focus, and the calendar follows it.
+ * The move screen's card keeps the app's view stacked (`layout` "card"): where it runs in big
+ * letters, the three lists with their icons, then the calendar below them, which Book a demo
+ * scrolls the card to. The words and the Calendly event are the app's own
+ * (`shared/openbot-for-business`).
  */
-export function BusinessBooker() {
+export function BusinessBooker({
+  way,
+  head,
+  layout = "page",
+}: {
+  /** The picked way: its line, and for Self-Hosted the clouds it runs on. */
+  way?: BusinessWay;
+  /** The page's heading, shown with the features and not over the booking step. */
+  head?: ReactNode;
+  layout?: "page" | "card";
+}) {
+  const [booking, setBooking] = useState(false);
+  const bookButton = useRef<HTMLButtonElement>(null);
+  const backToFeatures = useRef(false);
+  useEffect(() => {
+    if (booking || !backToFeatures.current) return;
+    backToFeatures.current = false;
+    bookButton.current?.focus();
+  }, [booking]);
+  if (layout === "card") return <StackedBooker />;
+  if (booking) {
+    return (
+      <BookADemo
+        page
+        onBack={() => {
+          backToFeatures.current = true;
+          setBooking(false);
+        }}
+      />
+    );
+  }
+  return (
+    <>
+      {head}
+      <section
+        className="business-page"
+        aria-labelledby={way ? "business-way" : undefined}
+        aria-label={way ? undefined : "OpenBot for Business"}
+      >
+        {way && (
+          <div className="business-way">
+            <p id="business-way">{BUSINESS_WAY_LINES[way]}</p>
+            {way === "self-hosted" && <CloudMarks />}
+          </div>
+        )}
+        <div className="business-book">
+          <button
+            type="button"
+            ref={bookButton}
+            onClick={() => setBooking(true)}
+          >
+            Book a demo
+          </button>
+        </div>
+        <div className="business-features">
+          {BUSINESS_FEATURE_GROUPS.map((group) => (
+            <section className="business-row" key={group.title}>
+              <h3>{group.title}</h3>
+              <p>{group.summary}</p>
+            </section>
+          ))}
+        </div>
+        <ul className="business-all" aria-label="Everything it adds">
+          {BUSINESS_FEATURE_GROUPS.flatMap((group) =>
+            group.features.map((feature) => (
+              <li key={feature.title}>{feature.title}</li>
+            )),
+          )}
+          <li>{BUSINESS_FEATURES_MORE}</li>
+        </ul>
+      </section>
+    </>
+  );
+}
+
+/**
+ * Book a demo: its heading, what booking is for, and the calendar, or the way to book in the
+ * browser when the calendar can't load. Its own step (`page`) keeps Back in the footer and
+ * focuses the heading as it shows.
+ */
+function BookADemo({
+  page = false,
+  onBack,
+  heading,
+}: {
+  page?: boolean;
+  onBack?: () => void;
+  heading?: Ref<HTMLHeadingElement>;
+}) {
   const [failed, setFailed] = useState(false);
+  const own = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (page) own.current?.focus({ preventScroll: true });
+  }, [page]);
+  const header = (
+    <>
+      <h2 id="book-a-demo-title" ref={page ? own : heading} tabIndex={-1}>
+        Book a demo
+      </h2>
+      <p className={page ? "book-a-demo-line lede" : "book-a-demo-line"}>
+        {BOOK_A_DEMO_LINE}
+      </p>
+    </>
+  );
+  const calendar = failed ? (
+    <div className="book-a-demo-fallback">
+      <p role="status">
+        Couldn't load the calendar. Book a demo opens it in your browser.
+      </p>
+      <ExternalLink className="button-link primary" href={BUSINESS_URL}>
+        Book a demo
+        <IconArrowUpRight aria-hidden="true" stroke={1.75} />
+      </ExternalLink>
+    </div>
+  ) : (
+    <BookingCalendar fit={page} onFailed={() => setFailed(true)} />
+  );
+  return (
+    <section
+      className={page ? "book-a-demo booking-step setup-layout" : "book-a-demo"}
+      aria-labelledby="book-a-demo-title"
+    >
+      {page ? (
+        <>
+          <header className="setup-header-block">{header}</header>
+          <div className="setup-body">
+            <div className="setup-booking-surface">{calendar}</div>
+          </div>
+          <footer className="setup-footer">
+            {onBack && (
+              <button
+                type="button"
+                className="quiet booking-back"
+                onClick={onBack}
+              >
+                Back
+              </button>
+            )}
+          </footer>
+        </>
+      ) : (
+        <>
+          {header}
+          {calendar}
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The app's OpenBot for Business view stacked for the move screen's card: where it runs and what
+ * it adds, then the calendar to book a call. The calendar sits below the lists, past the bottom of
+ * the window, and the card scrolls to it. Book a demo under the first line takes the person there:
+ * its heading comes to the top of the card and takes the focus, and the calendar follows it.
+ */
+function StackedBooker() {
   const booking = useRef<HTMLHeadingElement>(null);
   const toBooking = () => {
     const heading = booking.current;
@@ -96,25 +273,7 @@ export function BusinessBooker() {
         </section>
       ))}
       <p className="business-more">{BUSINESS_FEATURES_MORE}</p>
-      <section className="book-a-demo" aria-labelledby="book-a-demo-title">
-        <h2 id="book-a-demo-title" ref={booking} tabIndex={-1}>
-          Book a demo
-        </h2>
-        <p className="book-a-demo-line">{BOOK_A_DEMO_LINE}</p>
-        {failed ? (
-          <div className="book-a-demo-fallback">
-            <p role="status">
-              Couldn't load the calendar. Book a demo opens it in your browser.
-            </p>
-            <ExternalLink className="button-link primary" href={BUSINESS_URL}>
-              Book a demo
-              <IconArrowUpRight aria-hidden="true" stroke={1.75} />
-            </ExternalLink>
-          </div>
-        ) : (
-          <BookingCalendar onFailed={() => setFailed(true)} />
-        )}
-      </section>
+      <BookADemo heading={booking} />
     </section>
   );
 }
@@ -182,15 +341,36 @@ type CalendlyMessage = {
  * counts as there only once Calendly, from its own origin and this frame, says so. Until then a
  * spinner stands in its place. Offline, an `error` from the frame, or no word from it in
  * {@link BOOKING_CALENDAR_TIMEOUT_MS} on screen, and `onFailed` hands back to Book a demo. Its height
- * follows what it reports, so it never scrolls inside the card.
+ * follows what it reports, so it never scrolls inside the card. As the booking step (`fit`) it is
+ * fitted into the available page surface at its full reported height, including the day's times.
  */
-function BookingCalendar({ onFailed }: { onFailed: () => void }) {
+function BookingCalendar({
+  fit = false,
+  onFailed,
+}: {
+  /** Fill the reserved page surface; card embeds retain Calendly’s reported height. */
+  fit?: boolean;
+  onFailed: () => void;
+}) {
   const frame = useRef<HTMLIFrameElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState(0);
   const [src] = useState(() =>
     bookingCalendarSrc(window.location.host, windowColors()),
   );
   const [ready, setReady] = useState(false);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!fit || !element) return;
+    const measure = () => setRoom(element.clientHeight);
+    measure();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [fit]);
+  const scale = fit && room > 0 ? Math.min(1, room / height) : 1;
   const failed = useRef(onFailed);
   failed.current = onFailed;
 
@@ -257,7 +437,11 @@ function BookingCalendar({ onFailed }: { onFailed: () => void }) {
   }, []);
 
   return (
-    <div className="booking-calendar" data-ready={ready ? "" : undefined}>
+    <div
+      ref={box}
+      className="booking-calendar"
+      data-ready={ready ? "" : undefined}
+    >
       <iframe
         ref={frame}
         referrerPolicy="strict-origin-when-cross-origin"
@@ -269,13 +453,21 @@ function BookingCalendar({ onFailed }: { onFailed: () => void }) {
          * whose scheme differs from its element's is painted on an opaque white canvas: in the dark
          * theme its last pixels, below its content, showed as a white line in the app.
          */
-        style={{ colorScheme: "light", height }}
+        style={{
+          colorScheme: "light",
+          height,
+          ...(fit && {
+            width: `${100 / scale}%`,
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+          }),
+        }}
         title="Booking calendar"
       />
       {ready ? null : (
         <div className="booking-calendar-loading" role="status">
           <span className="step-spinner" aria-hidden="true" />
-          <span className="sr-only">Loading the calendar</span>
+          <span>Loading available times…</span>
         </div>
       )}
     </div>
