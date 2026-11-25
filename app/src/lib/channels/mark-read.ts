@@ -3,14 +3,70 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { hasUnseenActivity } from "@/components/app-sidebar/app-sidebar";
+import { inSight } from "@/lib/notifications/show";
 import { markChannelReadMutationOptions } from "./mutations";
 import { channelListQueryOptions } from "./queries";
 
+const runEndListeners = new Map<string, Set<() => void>>();
+
 /**
- * Opening a conversation marks it read; a Bot replying while it is open marks it read again. Used by
- * every screen that shows one conversation, one Bot or several.
+ * A run in this conversation ended here, however it ended: an answer, an error, or a card waiting on
+ * the person. Said by the chat that streamed it, so the conversation open on screen is marked read
+ * even when the roster never hears of the end: a failed run and a card with no words are not
+ * reported as activity, and a task's thread has no row in the roster at all.
+ */
+export function runEndedIn(channelId: string): void {
+  for (const listener of [...(runEndListeners.get(channelId) ?? [])])
+    listener();
+}
+
+function onRunEndedIn(channelId: string, listener: () => void): () => void {
+  let heard = runEndListeners.get(channelId);
+  if (!heard) {
+    heard = new Set();
+    runEndListeners.set(channelId, heard);
+  }
+  const forChannel = heard;
+  forChannel.add(listener);
+  return () => {
+    forChannel.delete(listener);
+    if (forChannel.size === 0) runEndListeners.delete(channelId);
+  };
+}
+
+/**
+ * Whether OpenBot is in front of the person now (`inSight`: its page shown and its window focused),
+ * kept current as they switch away and back.
+ */
+function useInSight(): boolean {
+  const [seen, setSeen] = useState(inSight);
+  useEffect(() => {
+    const update = () => setSeen(inSight());
+    update();
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+    };
+  }, []);
+  return seen;
+}
+
+/**
+ * Opening a conversation marks it read; a Bot replying while it is open marks it read again, and so
+ * does any run in it ending (`runEndedIn`). Used by every screen that shows one conversation, one Bot
+ * or several.
+ *
+ * ONLY WHILE THE PERSON CAN SEE IT. A conversation left open in a window behind others, or in OpenBot
+ * Desktop while the person is away from the computer, is not read: what the Bot said there waits as
+ * unread until they come back to it. The server tells the person's phone about an answer that is
+ * still unread a while after it ended, so marking it read unseen would keep that from them, and not
+ * marking it read when they did see it would tell them about what they just watched.
  *
  * Read off the roster the sidebar renders, since the socket keeps its lastMessageAt live: it is the
  * one honest source for "has something new been said". Keyed on primitives, deliberately: the
@@ -23,8 +79,14 @@ export function useMarkOpenChannelRead(channelId: string) {
   const roster = useInfiniteQuery(channelListQueryOptions());
   const summary = roster.data?.find((row) => row.id === channelId);
   const unseen = summary !== undefined && hasUnseenActivity(summary);
+  const seen = useInSight();
+  // A run ended here since the conversation was last marked read: read once the person sees it.
+  const [ended, setEnded] = useState(false);
+  useEffect(() => onRunEndedIn(channelId, () => setEnded(true)), [channelId]);
   const markReadMutate = markRead.mutate;
   useEffect(() => {
-    if (unseen) markReadMutate(channelId);
-  }, [channelId, unseen, markReadMutate]);
+    if (!seen || !(unseen || ended)) return;
+    setEnded(false);
+    markReadMutate(channelId);
+  }, [channelId, unseen, ended, seen, markReadMutate]);
 }
