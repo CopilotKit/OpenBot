@@ -1,6 +1,6 @@
-import { Redirect } from "expo-router";
+import { Redirect, useLocalSearchParams } from "expo-router";
 import { Button } from "heroui-native/button";
-import { useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { View } from "react-native";
 import { Uniwind, useUniwind } from "uniwind";
 import {
@@ -46,12 +46,34 @@ const BOTS = [
   },
 ];
 
+/** One part of the gallery, shown unless `only` names another. */
+function Part({
+  only,
+  title,
+  children,
+}: {
+  only?: string;
+  title: string;
+  children: ReactNode;
+}) {
+  if (only && !title.toLowerCase().startsWith(only.toLowerCase())) return null;
+  return <Section title={title}>{children}</Section>;
+}
+
 /**
  * Every component in `src/components`, with sample content, in light and dark. Only in a
- * development build: open it at /gallery. Add a component here when you add it to the library.
+ * development build: open it at /gallery, or one part of it at /gallery?only=messages (add
+ * &theme=dark for dark). Add a component here when you add it to the library.
  */
 export default function Gallery() {
   const { theme } = useUniwind();
+  // `/gallery?only=messages&theme=dark`: one part, in one theme, for a screenshot without scrolling.
+  const params = useLocalSearchParams<{ only?: string; theme?: string }>();
+  useEffect(() => {
+    if (params.theme === "light" || params.theme === "dark")
+      Uniwind.setTheme(params.theme);
+  }, [params.theme]);
+
   const [segment, setSegment] = useState<"conversations" | "settings">(
     "conversations",
   );
@@ -75,7 +97,7 @@ export default function Gallery() {
           </Button>
         </View>
 
-        <Section title="Text">
+        <Part only={params.only} title="Text">
           <View className="gap-1">
             <Text variant="title">Your conversations</Text>
             <Text variant="heading">Settings for this Bot</Text>
@@ -86,9 +108,9 @@ export default function Gallery() {
               Today, 11:45 AM
             </Text>
           </View>
-        </Section>
+        </Part>
 
-        <Section title="Bot orbs">
+        <Part only={params.only} title="Bot orbs">
           <View className="flex-row flex-wrap items-center gap-3">
             {[
               "a",
@@ -106,9 +128,9 @@ export default function Gallery() {
             <BotOrb seed="research" name="Working" size={36} state="working" />
             <BotOrb seed="openbot" name="OpenBot" size={72} />
           </View>
-        </Section>
+        </Part>
 
-        <Section title="Buttons">
+        <Part only={params.only} title="Buttons">
           <View className="gap-2">
             <Button>New Bot</Button>
             <Button variant="outline">Sign in with Google</Button>
@@ -130,9 +152,9 @@ export default function Gallery() {
               <IconButton icon={IconSettings} label="Settings" disabled />
             </View>
           </View>
-        </Section>
+        </Part>
 
-        <Section title="Segmented">
+        <Part only={params.only} title="Segmented">
           <Segmented
             label="What to show"
             options={[
@@ -142,9 +164,9 @@ export default function Gallery() {
             value={segment}
             onChange={setSegment}
           />
-        </Section>
+        </Part>
 
-        <Section title="Rows">
+        <Part only={params.only} title="Rows">
           <Rows>
             <Row
               icon={IconPlayerPause}
@@ -180,9 +202,9 @@ export default function Gallery() {
             />
             <Row title="Sign out" tone="danger" onPress={() => {}} />
           </Rows>
-        </Section>
+        </Part>
 
-        <Section title="Conversation rows">
+        <Part only={params.only} title="Conversation rows">
           <View className="-mx-4">
             <ConversationRow
               name="Pizza in San Francisco"
@@ -208,9 +230,9 @@ export default function Gallery() {
               onPress={() => {}}
             />
           </View>
-        </Section>
+        </Part>
 
-        <Section title="Bot tiles">
+        <Part only={params.only} title="Bot tiles">
           <View className="flex-row gap-1">
             <BotTile
               name="Research"
@@ -220,9 +242,9 @@ export default function Gallery() {
             />
             <BotTile name="Analyst" seed="analyst" onPress={() => {}} />
           </View>
-        </Section>
+        </Part>
 
-        <Section title="Messages">
+        <Part only={params.only} title="Messages">
           <View className="gap-3">
             <MessageDay label="November 23, 10:45 AM" />
             <Message
@@ -246,9 +268,9 @@ export default function Gallery() {
             />
             <Message from="person" text="Sending…" pending />
           </View>
-        </Section>
+        </Part>
 
-        <Section title="Message box">
+        <Part only={params.only} title="Message box">
           <Composer
             value={draft}
             onChangeText={setDraft}
@@ -257,9 +279,9 @@ export default function Gallery() {
             onSpeak={() => {}}
             placeholder="Message Research"
           />
-        </Section>
+        </Part>
 
-        <Section title="Notices">
+        <Part only={params.only} title="Notices">
           <View className="gap-2">
             <Notice message="Couldn't load your conversations. Try again in a moment." />
             <Notice
@@ -271,23 +293,23 @@ export default function Gallery() {
               message="This conversation has ended. Start a new one from the Bot's page."
             />
           </View>
-        </Section>
+        </Part>
 
-        <Section title="People">
+        <Part only={params.only} title="People">
           <View className="flex-row gap-3">
             <PersonAvatar name="Tyler Slaton" />
             <PersonAvatar name="someone@example.com" />
           </View>
-        </Section>
+        </Part>
 
-        <Section title="Empty state">
+        <Part only={params.only} title="Empty state">
           <EmptyState
             icon={IconMessages}
             title="No conversations yet"
             description="Start one with a Bot with the + button."
             action={<Button size="sm">New conversation</Button>}
           />
-        </Section>
+        </Part>
       </ScrollScreen>
       <SearchBar
         value={query}

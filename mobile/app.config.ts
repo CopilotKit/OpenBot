@@ -22,6 +22,9 @@ const config: ExpoConfig = {
   ...(ownProjectId ? {} : { owner: "copilotkit" }),
   version: "0.0.1",
   scheme: "openbotmobile",
+  // Follow the phone's light or dark setting. Expo's default is light only, which kept the app light
+  // under a dark phone even though every color has a dark value.
+  userInterfaceStyle: "automatic",
   ios: { bundleIdentifier: "ai.openbot.mobile", supportsTablet: true },
   android: { package: "ai.openbot.mobile" },
   plugins: [
