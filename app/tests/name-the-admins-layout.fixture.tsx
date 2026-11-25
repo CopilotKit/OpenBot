@@ -75,6 +75,8 @@ let gmail: AppAccess = appAccess({
   state: "not_granted",
   granted: false,
   requestKind: "grant",
+  // Kept to admins: only an admin can give it, so the sentence names them in either mode.
+  ownerGrants: "admin",
 });
 
 /** Five admins, so the sentence names three and counts the rest. */
