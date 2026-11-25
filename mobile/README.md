@@ -77,13 +77,38 @@ eas build --profile development --platform ios
 An iOS `development` or `preview` build installs only on phones the project knows. Register a
 phone with `eas device:create`, then build.
 
-To start a build from GitHub, run the **OpenBot Mobile build** workflow (Actions, then OpenBot Mobile
-build, then Run workflow) and pick a profile and a platform. It starts the same build as a robot user and
-prints the link.
+To start a build from GitHub, run the **OpenBot Mobile build** workflow (Actions, then OpenBot
+Mobile build, then Run workflow). Pick the branch to build, a profile and a platform. It starts
+the same build as a robot user and prints the link.
 
 The first Android build, and the first iOS build for a phone, must be started by a person from a
 terminal. EAS asks then to create the Android keystore and the iOS certificate, and it keeps both.
 After that the workflow builds without questions.
+
+## Builds for the stores
+
+The `production` profile makes the build the stores take: an `.aab` for Google Play and an `.ipa`
+for the App Store. Start it from the same workflow, with the `production` profile. That run uses
+the `mobile-release` environment: a reviewer approves it first, and it starts only from `main` or
+`mobile`.
+
+Turn **submit** on, and Expo uploads the build when it is done: to TestFlight on iOS, and to the
+internal testing track on Google Play. Nobody outside the team gets the app from there. A release
+to the public is made by hand, in App Store Connect and in the Play Console.
+
+Expo holds what an upload needs. This repository holds none of it.
+
+| Store | What Expo holds | What `eas.json` says |
+| --- | --- | --- |
+| App Store | An App Store Connect API key, the distribution certificate, the provisioning profile and the push key. | `submit.production.ios`: `ascAppId`, the number of the app's record in App Store Connect, and `appleTeamId`. Not set yet. |
+| Google Play | The upload keystore, and the key of a Google service account that may release to testing tracks. | `submit.production.android`: the `internal` track. |
+
+Add or replace a key with `eas credentials`, from a terminal. Expo takes no new key from a run
+that cannot ask questions, so the workflow cannot do it.
+
+Until `ascAppId` is in `eas.json`, an upload for iOS stops before the build starts and says so.
+An upload for Android needs the app to exist in the Play Console, and the service account key to
+be on Expo.
 
 ## Push notifications on Android
 
@@ -138,4 +163,4 @@ publishes to `production` is not set up yet.
 
 A `development` build takes no updates. It loads its JavaScript from your machine.
 
-Not set up yet: the workflow that publishes updates, and uploads to the stores.
+Not set up yet: the workflow that publishes updates.
