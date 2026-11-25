@@ -155,21 +155,27 @@ test("a finished reply in a conversation has one Copy, which copies the reply's 
   ]);
 });
 
-test("a reply still being written has no toolbar; the reply before it keeps its own", () => {
+test("a reply still being written has no toolbar to reach, only its room; the reply before it keeps its own", () => {
   const next: Message[] = [
     ...conversation,
     { id: "ask-2", role: "user", content: "And tomorrow?" },
     { id: "reply-2", role: "assistant", content: "Tomorrow you have" },
   ];
   const view = render(transcript(next, true));
-  const buttons = view.getAllByTestId("copilot-copy-button");
+  const buttons = view.getAllByRole("button", { name: "Copy" });
   expect(buttons).toHaveLength(1);
   expect(
     buttons[0]?.closest("[data-message-id]")?.getAttribute("data-message-id"),
   ).toBe("reply-end");
+  // The room is kept, so the reply does not move when it ends, but nothing in it can be reached.
+  const writing = view.container.querySelector('[data-message-id="reply-2"]');
+  const room = writing?.querySelector("[inert]");
+  expect(room?.getAttribute("aria-hidden")).toBe("true");
+  expect(room?.classList.contains("invisible")).toBe(true);
 
   view.rerender(transcript(next));
-  expect(view.getAllByTestId("copilot-copy-button")).toHaveLength(2);
+  expect(view.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
+  expect(writing?.querySelector("[inert]")).toBeNull();
 });
 
 test("the conversation's toolbar is the Bot chat page's toolbar", () => {

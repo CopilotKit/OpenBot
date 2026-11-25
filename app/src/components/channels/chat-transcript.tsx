@@ -1190,9 +1190,17 @@ const TranscriptMessage = memo(function TranscriptMessage({
           {/*
            * The Bot chat page's own toolbar, under a finished reply: Copy, as it has there, and as
            * far below the last line as it sits there (a paragraph's space).
+           *
+           * Its room is kept while the reply is still being written, unseen and out of reach, so the
+           * reply does not move when its turn ends and the toolbar shows: the transcript holds a
+           * reply still at that moment (transcript-room.test.tsx).
            */}
           {!isUser && copy !== undefined ? (
-            <div className="mt-5">
+            <div
+              aria-hidden={settled ? undefined : true}
+              className={cn("mt-5", !settled && "invisible")}
+              inert={!settled}
+            >
               <ReplyToolbar
                 messageId={messageId}
                 text={copy}
@@ -2656,7 +2664,7 @@ export function ChatTranscript({
       <TranscriptMessage
         threadId={threadId}
         messageId={item.id}
-        copy={!busy || index < turnStart ? replies.get(item.id) : undefined}
+        copy={replies.get(item.id)}
         settled={!busy || index < turnStart}
         commandLabels={commandLabels}
         role={item.role}
