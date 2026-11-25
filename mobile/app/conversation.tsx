@@ -7,8 +7,9 @@ import {
   useFocusEffect,
   useLocalSearchParams,
 } from "expo-router";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, FlatList, Pressable, View } from "react-native";
+import { AppState, FlatList, Platform, Pressable, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import {
   type ConversationMessage,
@@ -55,6 +56,8 @@ type Item =
  * with several Bots names the one the next message goes to, and lets the person pick another.
  */
 export default function ConversationScreen() {
+  const headerHeight = useHeaderHeight();
+  const isAndroid = Platform.OS === "android";
   const {
     channelId,
     agentId: requestedAgentId,
@@ -242,9 +245,11 @@ export default function ConversationScreen() {
           ),
         }}
       />
+      {/* Android can lay out this view before the keyboard controller can measure its screen position. */}
       <KeyboardAvoidingView
         behavior="padding"
-        automaticOffset
+        automaticOffset={!isAndroid}
+        keyboardVerticalOffset={isAndroid ? headerHeight : 0}
         className="flex-1"
       >
         {botsHere.length > 1 ? (
