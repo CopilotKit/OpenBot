@@ -181,12 +181,16 @@ function serving(options: {
 const askedForMembers = (sent: Sent[]) =>
   sent.some((each) => each.url.split("?")[0] === MEMBERS_PATH);
 
-/** Gmail on the Bot, which this Bot hasn't been given: only an admin can give it. */
+/**
+ * Gmail on the Bot, which this Bot hasn't been given, and which an admin kept to admins: only an
+ * admin can give it. (Open to owners, the default, its owner could give it too.)
+ */
 const notGiven = appAccess({
   key: GMAIL,
   state: "not_granted",
   granted: false,
   requestKind: "grant",
+  ownerGrants: "admin",
 });
 
 function drawn(children: ReactNode) {

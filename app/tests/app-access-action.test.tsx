@@ -257,10 +257,16 @@ const COPY: [string, Partial<AppAccess>, RegExp][] = [
     { state: "disabled", unavailable },
     /^Gmail isn't fully set up yet\. Only an admin can finish setting it up\.$/,
   ]),
+  // Open to Bot owners by default: its owner can give it, not only an admin.
   [
-    "not_granted",
-    { state: "not_granted" },
-    /This Bot hasn't been given Gmail\. Only an admin can give it\./,
+    "not_granted, open to owners",
+    { state: "not_granted", ownerGrants: "any" },
+    /^This Bot hasn't been given Gmail\. Its owner can give it, or an admin\.$/,
+  ],
+  [
+    "not_granted, kept to admins",
+    { state: "not_granted", ownerGrants: "admin" },
+    /^This Bot hasn't been given Gmail\. Only an admin can give it\.$/,
   ],
 ];
 
