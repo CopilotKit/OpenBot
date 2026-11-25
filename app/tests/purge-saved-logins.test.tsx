@@ -214,7 +214,9 @@ test("an admin is asked first with the real counts, then the purge runs and both
   await waitFor(() => expect(purges).toHaveLength(1));
   expect(purges[0]?.idempotencyKey).toBeTruthy();
   const result = await view.findByRole("status");
-  expect(result.textContent).toContain("Deleted 12 saved logins");
+  expect(result.textContent).toContain(
+    "Deleted 12 saved logins of people Password manager is off for",
+  );
   expect(result.textContent).toContain(
     "3 of people no longer in the organization",
   );
