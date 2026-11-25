@@ -3,8 +3,12 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
 import { ToolLine } from "@/components/channels/tool-line";
 import { ActivityLog } from "@/components/computer/activity-log";
+import {
+  detailsOf,
+  readOutcome,
+  recordActivity,
+} from "@/lib/computers/activity";
 import { failedComputerCall } from "@/lib/computers/call";
-import { detailsOf, recordActivity } from "@/lib/computers/activity";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -44,6 +48,37 @@ test("Activity says the file was not saved, and why", () => {
     "Not done: the computer is waiting for the person in another conversation",
   );
   expect(row?.textContent).not.toMatch(/\bSaved\b/);
+});
+
+/*
+ * FOUND IN AN END-TO-END RUN. The server restarted while the Bot was saving a file, and the runtime
+ * closed the open save with an answer of its own. The step row read "Saved a file" for a file that
+ * was never written.
+ */
+test("a save the run ended under, closed by the runtime, is read as not done", () => {
+  const cut = readOutcome(
+    JSON.stringify({
+      status: "error",
+      reason: "missing_terminal_event",
+      message:
+        "The Bot stopped part way because OpenBot restarted. Ask the Bot to carry on.",
+    }),
+  );
+  expect(cut?.ok).toBe(false);
+  expect(cut?.refused).toBeUndefined();
+  expect(cut?.reason).toBe(
+    "The Bot stopped part way because OpenBot restarted. Ask the Bot to carry on.",
+  );
+  const stopped = readOutcome(
+    JSON.stringify({
+      status: "stopped",
+      reason: "stop_requested",
+      message: "Run stopped by user",
+    }),
+  );
+  expect(stopped?.ok).toBe(false);
+  // A computer's own answer is read as it always was.
+  expect(readOutcome(JSON.stringify({ ok: true, bytes: 120 }))?.ok).toBe(true);
 });
 
 test("a saved file is still said as saved", () => {

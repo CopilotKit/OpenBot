@@ -21,7 +21,7 @@ import {
 import { BotOrb } from "@/components/agents/bot-orb";
 import { attentionSummary } from "@/components/bot-profile/attention";
 import { SectionPanel } from "@/components/layout/section-panel";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -59,12 +59,24 @@ const HeldReads = createContext<(botId: string, held: unknown) => void>(
   () => {},
 );
 
+/** The row under a Bot that is not a conversation: Show more, and New conversation. */
+const BOT_LIST_ACTION_ROW =
+  "w-full justify-start px-2.5 font-normal text-muted-foreground text-sm";
+
 /**
  * One Bot's latest conversations, under its row: {@link BOT_CONVERSATIONS_PAGE} at a time, read from
  * the server by Bot, drawn as the compact conversation row. Show more reads the next page in place.
- * A read that failed says so with Retry, never as no conversations.
+ * A read that failed says so with Retry, never as no conversations. A conversation with the Bot
+ * starts here too, as its page's Message does: "Start one" when it has none, and a New conversation
+ * row first when it has some.
  */
-function BotConversations({ botId }: { botId: string }) {
+function BotConversations({
+  botId,
+  botName,
+}: {
+  botId: string;
+  botName: string;
+}) {
   const emphasis = useMessageListEmphasis();
   const conversations = useInfiniteQuery(
     botConversationsInfiniteQueryOptions(botId, BOT_CONVERSATIONS_PAGE),
@@ -119,12 +131,35 @@ function BotConversations({ botId }: { botId: string }) {
     );
   if (conversations.data.length === 0)
     return (
-      <p className="py-1.5 pl-3 text-muted-foreground text-xs">
-        No conversations with this Bot yet.
+      // The app's inline link, as in an item's description or an empty state.
+      <p className="py-1.5 pl-3 text-muted-foreground text-xs [&>a:hover]:text-primary [&>a]:underline [&>a]:underline-offset-4">
+        No conversations with this Bot yet.{" "}
+        <Link
+          aria-label={`Start one with ${botName}`}
+          // Whole on one line: a link split across two reads as two.
+          className="whitespace-nowrap"
+          search={{ agent: botId }}
+          to="/channel/new"
+        >
+          Start one
+        </Link>
+        .
       </p>
     );
   return (
     <>
+      {/* A link drawn as Show more is, so it opens in a new tab like the rows under it. */}
+      <Link
+        aria-label={`New conversation with ${botName}`}
+        className={cn(
+          buttonVariants({ size: "sm", variant: "ghost" }),
+          BOT_LIST_ACTION_ROW,
+        )}
+        search={{ agent: botId }}
+        to="/channel/new"
+      >
+        New conversation
+      </Link>
       {/* Pinned first, as the Conversations panel draws them: a live patch reorders by time alone. */}
       {pinnedFirst(conversations.data).map((channel) => (
         <Channel
@@ -151,7 +186,7 @@ function BotConversations({ botId }: { botId: string }) {
       ))}
       {conversations.hasNextPage ? (
         <Button
-          className="w-full justify-start px-2.5 font-normal text-muted-foreground text-sm"
+          className={BOT_LIST_ACTION_ROW}
           disabled={conversations.isFetchingNextPage}
           onClick={() => void conversations.fetchNextPage()}
           size="sm"
@@ -236,7 +271,7 @@ function BotRow({
       </div>
       {expanded ? (
         <div className="ml-[21px] border-sidebar-border border-l pl-1.5">
-          <BotConversations botId={bot.id} />
+          <BotConversations botId={bot.id} botName={bot.name} />
         </div>
       ) : null}
     </li>

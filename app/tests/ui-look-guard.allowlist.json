@@ -60,7 +60,6 @@
   },
   "components/channels/chat-transcript.tsx": {
     "cornerStep": 3,
-    "text": 1,
     "darkColor": 1
   },
   "components/channels/coding-tool-cards.tsx": {
