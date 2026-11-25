@@ -3,13 +3,13 @@
   appearance: none;
   position: static;
   opacity: 1;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   margin: 3px 0 0;
   flex: none;
   grid-column: 1;
   grid-row: 1 / span 2;
-  border: 1.5px solid var(--text-disabled);
+  border: 1px solid var(--border);
   border-radius: 50%;
   background: transparent;
 }
@@ -17,7 +17,7 @@
 .rail fieldset.picker.hosting .tile-input:checked {
   border-color: var(--ring);
   background: var(--ring);
-  box-shadow: inset 0 0 0 3px var(--sidebar);
+  box-shadow: inset 0 0 0 3px var(--active-tint);
 }
 
 .rail fieldset.picker.hosting :is(.mark-tile, .tile-option-icon) {
@@ -25,7 +25,7 @@
 }
 
 .rail fieldset.picker.hosting .tile {
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 14px minmax(0, 1fr);
   column-gap: 12px;
   padding: 11px 12px;
 }

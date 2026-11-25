@@ -264,10 +264,10 @@ main {
   gap: 12px;
   min-height: 40px;
   padding: 10px 12px;
-  border-radius: var(--radius-md);
+  border-radius: 7px;
   font-size: var(--text-sm);
   line-height: 20px;
-  font-weight: 500;
+  font-weight: 400;
   color: var(--text-disabled);
 }
 
@@ -276,6 +276,7 @@ main {
 }
 
 .sections li.current {
+  font-weight: 500;
   color: var(--text-primary);
   background: var(--active-tint);
 }
@@ -288,8 +289,7 @@ main {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  border: 1.5px solid currentColor;
-  opacity: 0.7;
+  border: 1px solid var(--border);
 }
 
 .sections li.current .section-mark {
