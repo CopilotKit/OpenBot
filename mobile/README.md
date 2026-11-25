@@ -100,7 +100,7 @@ Expo holds what an upload needs. This repository holds none of it.
 
 | Store | What Expo holds | What `eas.json` says |
 | --- | --- | --- |
-| App Store | An App Store Connect API key, the distribution certificate, the provisioning profile and the push key. | `submit.production.ios`: `appleTeamId` (`FHRBUNLTRH`), and `ascAppId`, the number of the app's record in App Store Connect. `ascAppId` is not set yet. |
+| App Store | An App Store Connect API key, the distribution certificate, the provisioning profile and the push key. | `submit.production.ios`: `appleTeamId` (`FHRBUNLTRH`), and `ascAppId` (`6839378233`), the number of the app's record in App Store Connect, "OpenBot by CopilotKit". |
 | Google Play | The upload keystore, and the key of a Google service account that may release to testing tracks. | `submit.production.android`: the `internal` track. |
 
 Add or replace a key with `eas credentials`, from a terminal. Expo takes no new key from a run
