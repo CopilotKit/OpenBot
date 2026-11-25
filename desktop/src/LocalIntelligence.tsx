@@ -1258,10 +1258,8 @@ export function LocalIntelligence({
   releaseDue = false,
   waitingOn = null,
   room = null,
-  presentation = "default",
 }: {
   sequence: LocalSequence;
-  presentation?: "default" | "rail";
   offerStart?: boolean;
   /**
    * An update this computer has no room for (`local_eval::update_room`), said with its figures
@@ -1284,24 +1282,22 @@ export function LocalIntelligence({
   const { at, running, stopped, problem } = sequence;
   const tooSmall = stopped ? sequence.blocked?.shortfall : undefined;
   const plan = usePodmanPlan(tooSmall);
-  // The journey owns the current operation. Only finished work belongs in its quiet milestones;
-  // update notes and recovery directions stay visible separately, without claiming completion.
+  // While it runs, one journey says what is happening and how far along the whole Start is. The
+  // rows then say which part is done and which is left, and nothing twice.
+  // Paused for room: its row says so, with Try again, and no time left counts down.
   const journeying = offerStart && running && !stopped && !sequence.held;
+  // Its download's bar is the journey's too: the running row keeps only what is particular to it.
   const releasing = open.some((row) => row.step === "release" && row.running);
-  const releaseDetail = at === "start" && releasing;
-  const detail = releaseDetail ? RELEASE_SAID : sequence.detail;
-  const completed = (row: Progress) =>
-    row.ok &&
-    !row.running &&
-    !row.waiting &&
-    !row.paused &&
-    !row.pending &&
-    !row.note;
-  const notices = journeying
-    ? sequence.steps.filter((row) => !completed(row) && !row.running)
-    : [];
   const rows = journeying
-    ? sequence.steps.filter(completed)
+    ? sequence.steps.map((row) =>
+        row.running
+          ? {
+              ...row,
+              downloads: undefined,
+              detail: at === "start" && releasing ? RELEASE_SAID : row.detail,
+            }
+          : row,
+      )
     : waitingOn && stopped
       ? sequence.steps.map((row) =>
           row.ok ? row : { ...row, ok: true, waiting: true, detail: waitingOn },
@@ -1320,48 +1316,16 @@ export function LocalIntelligence({
           : sequence.steps;
 
   return (
-    <section
-      aria-label="OpenBot on this computer"
-      className={
-        presentation === "rail" && journeying ? "update-progress" : undefined
-      }
-    >
+    <section aria-label="OpenBot on this computer">
       {journeying && (
         <StartJourney
           sequence={sequence}
           open={open}
           now={handOff}
           releaseDue={releaseDue}
-          description={
-            presentation === "rail"
-              ? "OpenBot opens by itself when it's ready."
-              : undefined
-          }
         />
       )}
-      {journeying && !releaseDetail && detail && <p>{detail}</p>}
-      {notices.length > 0 && (
-        <SetupProgress steps={notices} presentation="focus" />
-      )}
-      {!(presentation === "rail" && journeying) && (
-        <SetupProgress
-          steps={rows}
-          showElapsed={!journeying}
-          presentation={
-            offerStart ? (journeying ? "milestones" : "focus") : "list"
-          }
-        />
-      )}
-      {/* The release reassurance arrives after Start begins. Keep it below completed work so
-          those milestones stay anchored when the update starts or its download changes. */}
-      {journeying && releaseDetail && presentation !== "rail" && (
-        <p>{detail}</p>
-      )}
-      {journeying && presentation === "rail" && (
-        <p className="update-data-reassurance">
-          Your Bots, sign-ins and data stay as they are.
-        </p>
-      )}
+      <SetupProgress steps={rows} showElapsed={!journeying} />
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && !waitingOn && !room && (
@@ -1649,7 +1613,7 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <div className="local-needs">
-      <Lockup byCopilotKit size={22} />
+      <Lockup byCopilotKit />
       <p>Sign in to finish setting up OpenBot.</p>
       {waiting ? (
         <CopilotKitSignInWait

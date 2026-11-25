@@ -1,7 +1,6 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { watchDragRegions } from "./dragRegions";
 import { startHeartbeat } from "./heartbeat";
 import { PageErrorBoundary, watchPageErrors } from "./PageError";
 import {
@@ -13,8 +12,6 @@ import { isShuttingDownPage, ShuttingDownWindow } from "./ShuttingDown";
 import { isStatusPage, StatusWindow } from "./StatusWindow";
 import "@fontsource-variable/inter";
 import "./styles.css";
-import "./setup-layout.css";
-import "./setup-page-first.css";
 import { UpdateOffer } from "./UpdateOffer";
 
 /**
@@ -36,10 +33,6 @@ if (!root)
 watchPageErrors();
 
 const hash = window.location.hash;
-
-// On macOS the main window's page runs under an overlay title bar and names what drags the window
-// (`dragRegions.ts`). The Status window keeps the system's title bar.
-if (!isStatusPage(hash)) watchDragRegions();
 
 // Sent here by Quit: only the Shutting down screen, so none of setup's launch checks run again.
 // The update offer sits beside the setup flow rather than inside it. `App` returns a different

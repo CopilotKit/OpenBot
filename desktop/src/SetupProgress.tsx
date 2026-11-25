@@ -175,67 +175,23 @@ export function trayPlace(userAgent = navigator.userAgent): string {
     : "the system tray";
 }
 
-/**
- * The row shows a spinner (unless its list is `quiet`): it runs, and is not paused or waiting on
- * the person. A screen that shows such a row keeps every other wait on it still.
- */
-export function spins(step: Progress): boolean {
-  return (
-    !step.pending && !step.waiting && !step.paused && (step.running ?? false)
-  );
-}
-
 export function SetupProgress({
   steps,
   label = "Setup progress",
   showElapsed = true,
-  quiet = false,
-  presentation = "list",
 }: {
   steps: Progress[];
   label?: string;
   showElapsed?: boolean;
-  presentation?: "list" | "focus" | "milestones";
-  /**
-   * A running row is marked without a spinner: something else on the screen is already the one
-   * thing that spins (the step's own wait, or the Start's journey), and two read as two waits.
-   */
-  quiet?: boolean;
 }) {
   if (steps.length === 0) return null;
-  const current =
-    presentation === "focus"
-      ? steps.findIndex(
-          (step) =>
-            !step.pending &&
-            (step.running ||
-              step.waiting ||
-              step.paused ||
-              (!step.ok && !step.note)),
-        )
-      : -1;
-  const rows =
-    current > 0
-      ? [
-          steps[current],
-          ...steps.slice(0, current),
-          ...steps.slice(current + 1),
-        ]
-      : steps;
-  const className =
-    presentation === "focus"
-      ? "steps setup-progress-focus"
-      : presentation === "milestones"
-        ? "steps setup-milestones"
-        : "steps";
   return (
-    <ol className={className} aria-label={label} aria-live="polite">
-      {rows.map((step, index) => (
+    <ol className="steps" aria-label={label} aria-live="polite">
+      {steps.map((step) => (
         <SetupProgressRow
           key={step.step}
           step={step}
           showElapsed={showElapsed}
-          quiet={quiet || (presentation === "focus" && index > 0)}
         />
       ))}
     </ol>
@@ -379,11 +335,9 @@ export function plainInstallSteps(
 function SetupProgressRow({
   step,
   showElapsed,
-  quiet,
 }: {
   step: Progress;
   showElapsed: boolean;
-  quiet: boolean;
 }) {
   if (step.pending)
     return (
@@ -392,17 +346,15 @@ function SetupProgressRow({
         <span className="step-label">{label(step.step)}</span>
       </li>
     );
-  return <StartedRow step={step} showElapsed={showElapsed} quiet={quiet} />;
+  return <StartedRow step={step} showElapsed={showElapsed} />;
 }
 
 function StartedRow({
   step,
   showElapsed,
-  quiet = false,
 }: {
   step: Progress;
   showElapsed: boolean;
-  quiet?: boolean;
 }) {
   const waiting = step.waiting ?? false;
   const paused = !waiting && (step.paused ?? false);
@@ -441,7 +393,7 @@ function StartedRow({
         {waiting || paused ? (
           <span className="step-waiting" />
         ) : running ? (
-          <span className={quiet ? "step-current" : "step-spinner"} />
+          <span className="step-spinner" />
         ) : note ? (
           "–"
         ) : step.ok ? (
@@ -933,8 +885,6 @@ export function formatDownloadBytes(bytes: number): string {
 
 function label(step: string): string {
   switch (step) {
-    case INSTALLING_BEHIND:
-      return "Preparing OpenBot";
     case "engine":
     case "install-engine":
       return "Software OpenBot runs on";
