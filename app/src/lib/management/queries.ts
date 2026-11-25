@@ -1,7 +1,8 @@
 import { queryOptions } from "@tanstack/react-query";
 import { getManagementEnrollment } from "@/lib/api/generated/copilotkit-management/copilotkit-management";
-import { organizationId } from "@/lib/api/request";
+import { DEPLOYMENT_ORGANIZATION, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { currentOrganizationId } from "@/lib/organizations/current";
 
 /**
  * Where connecting this OpenBot to CopilotKit's management service stands.
@@ -93,15 +94,26 @@ export function managementWaiting(state: ManagementState | undefined) {
 }
 
 /**
- * Whether to ask at all: never on the personal edition, which has no management to answer for, so
- * Admin there makes no request that fails. Asked once the deployment's edition is known, and also
- * when it couldn't be read: then the server's 404 says the same.
+ * Whether to ask at all: only where the server could answer it, so Admin makes no request that
+ * fails. Never on the personal edition, which has no management to answer for; never on a hosted
+ * OpenBot (`hostedSignIn`, OpenBot Cloud), where it is never the admin's; and never in any
+ * organization but `default`, the only one it is answered in. On OpenBot Cloud every Admin page
+ * asked, and every one of them was answered 404. Asked once the deployment's edition is known, and
+ * also when it couldn't be read: then the server's 404 says the same.
  */
-export function asksForManagement(capabilities: {
-  isPending: boolean;
-  data?: { edition: "team" | "personal" };
-}): boolean {
-  return !capabilities.isPending && capabilities.data?.edition !== "personal";
+export function asksForManagement(
+  capabilities: {
+    isPending: boolean;
+    data?: { edition: "team" | "personal"; hostedSignIn?: boolean };
+  },
+  organization: string | undefined = currentOrganizationId(),
+): boolean {
+  return (
+    !capabilities.isPending &&
+    capabilities.data?.edition !== "personal" &&
+    capabilities.data?.hostedSignIn !== true &&
+    organization === DEPLOYMENT_ORGANIZATION
+  );
 }
 
 export function managementQueryOptions() {
