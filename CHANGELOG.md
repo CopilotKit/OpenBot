@@ -10,12 +10,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **Before upgrading.**
 
-- **Migrations run at start: twenty-eight, and none removes anything.** The database moves from
-  `0151_sign_up_switch`, where 1.1.3 left it, to `0181_organization_ai_sign_in_credentials`, and
-  from `0164_schedules_held_by_move`, where 1.2.0-rc.4 left it, through the last seventeen.
-  1.2.0-rc.5 already left it at `0181_organization_ai_sign_in_credentials`. Every one is an expand:
-  a 1.1.3, 1.2.0-rc.4 or 1.2.0-rc.5 server works against the new schema, so each upgrades with its
-  servers rolling one by one, with no downtime. There is no `0154` or `0155`.
+- **Migrations run at start: twenty-nine, and none removes a table or a column.** The database moves
+  from `0151_sign_up_switch`, where 1.1.3 left it, to `0182_withdraw_default_source_imports`, from
+  `0164_schedules_held_by_move`, where 1.2.0-rc.4 left it, through the last eighteen, and from
+  `0181_organization_ai_sign_in_credentials`, where 1.2.0-rc.5 left it, through the last one. Every
+  one but the last is an expand, and the last is a backfill that changes no schema: a 1.1.3 or any
+  1.2.0 candidate's server works against the new schema, so each upgrades with its servers rolling
+  one by one, with no downtime. There is no `0154` or `0155`.
   - `0152_bot_run_client_and_outcome` keeps, for each Bot run, which app asked for it (web,
     Desktop, the API or another) and how it ended.
   - `0153_personal_ai_connections` keeps a person's own AI connection (below), sealed with the
@@ -75,6 +76,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     server sees it.
   - `0181_organization_ai_sign_in_credentials` keeps, sealed, what a provider hands back when an
     admin signs the organization in to it (below).
+  - `0182_withdraw_default_source_imports` withdraws what the memory sources OpenBot made by itself
+    imported (the next item).
+- **OpenBot no longer makes an app a memory source by itself, and the upgrade withdraws what those
+  sources imported.** Memory holds facts about the person: what they tell their Bots, and what a Bot
+  notices about them. Before, each app a person connected became a memory source for the Bots they
+  talked to, and every page, file or issue its list returned became a memory waiting for review
+  ("Imported · needs review"), such as a Notion page called "Cycle 62". Now an app's records reach
+  memory only from a source a person adds on a Bot's Memory page, and a Bot reads an app when the
+  work needs it. The migration, run once in every organization: every import from those sources
+  that nobody reviewed is deleted; one the person confirmed or rewrote is kept as that Bot's own
+  memory, still recalled while the Bot holds the app; and the sources are switched off, so they read
+  nothing more, and a person can switch one on again. Sources a person added, forgotten memories,
+  facts a person added or asked a Bot to remember, and what a Bot noticed are untouched.
+  `config.memory.sourceDefaults: true` (`OPENBOT_MEMORY_SOURCE_DEFAULTS=true`) brings back the old
+  default for new connections; the migration runs either way.
 - **Product analytics are on by default.** While an install is connected to CopilotKit management,
   it sends a daily rollup of counts with its health metrics: how many people, organizations and Bots
   there are, how many people are active, how many come back, and how many Bot runs there were. It is
@@ -568,15 +584,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   you have control, the line under "You have control." says the same. Before, the browser opened its
   own passkey window out of sight, and the page took no clicks or typing, Try another way included.
   A Bot using the Chrome on your own computer is unchanged, and your passkeys work there. (#2167)
-- **Imported memories read as words, and say where they came from.** A memory source OpenBot turns on
-  for an app no longer reads the app's accounts, users, teams or settings. Nothing is imported as raw
-  JSON any more: each record becomes its title and its readable fields, with its own link as Open
-  record. A source OpenBot turned on that finds nothing worth remembering is turned off and what it
-  imported is cleared (a memory you rewrote stays), and it isn't turned on again. Earlier imports are
-  rewritten at the source's next sync, with nothing to do. On the Memory page, each imported memory
-  says "Read in by" the Bot and its source, with Turn off or remove this source, which opens that
-  Bot's Memory page. Before, connecting an app could fill the Memory page with one raw JSON memory
-  per account. (#2123)
+- **Memory is about you, not an app's pages.** OpenBot no longer turns an app you connect into a
+  memory source by itself (Before upgrading). The Memory page says what your Bots remember: facts
+  about you, like your role and how you like to work, used in every conversation; facts you add or
+  ask a Bot to remember reach all your Bots, and one a Bot notices by itself stays with that Bot for
+  you to confirm or forget. A Bot's Memory page says a source copies an app's records into that
+  Bot's memory, to add only for records it should always have at hand, and its empty state says to
+  use Add source. Before, connecting Notion could fill the Memory page with its pages, each waiting
+  for review. (#2196)
+- **Imported memories read as words, and say where they came from.** A memory source no longer reads
+  an app's accounts, users, teams or settings, and nothing is imported as raw JSON any more: each
+  record becomes its title and its readable fields, with its own link as Open record. Earlier
+  imports are rewritten at the source's next sync, with nothing to do. On the Memory page, each
+  imported memory says "Read in by" the Bot and its source, with Turn off or remove this source,
+  which opens that Bot's Memory page. (#2123)
 - The message box's text is now the size of the conversation's, 16px instead of 14px, and still
   opens two lines tall. At 125% zoom in Safari and OpenBot Desktop, a draft no longer scrolls
   sideways. (#2165)
@@ -984,6 +1005,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   their own on the `intelligence-platform` organization authority (Before upgrading). Anything but
   `true` or `false` is refused at install and at start.
 - **`config.productAnalytics`** (on) is the product analytics switch (Before upgrading).
+- **`config.memory.sourceDefaults`** is now off (it was on): only `true` makes each app a person
+  connected a memory source (Before upgrading). Under `--reuse-values` an absent value is off too.
 - **`config.cloudAnalytics`** (off) is OpenBot Cloud's own counts for CopilotKit's staff console.
   Leave it off.
 - **An upgrade that stops the server first waits for its runs to drain.** Before a backup, the
