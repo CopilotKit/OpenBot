@@ -494,7 +494,14 @@ test("Connect another AI is a page: it marks connected providers and posts conne
   await view.findByRole("heading", { name: "Connect another AI" });
   expect(at(router)).toBe("/settings/providers/new");
   const anthropic = view.getByRole("button", { name: /Anthropic/ });
-  expect(within(anthropic).getByText("Connected")).toBeDefined();
+  expect(
+    within(anthropic).getByRole("img", { name: "Connected" }),
+  ).toBeDefined();
+  expect(
+    within(anthropic).getByText("Signed in with your Claude plan."),
+  ).toBeDefined();
+  // One connection: nothing to tell apart, so no Default.
+  expect(within(anthropic).queryByText("Default")).toBeNull();
   await user.click(view.getByRole("button", { name: /^OpenAI/ }));
   await user.type(view.getByLabelText(/API key/), "sk-example");
   await user.click(view.getByRole("button", { name: /Connect/ }));
@@ -514,6 +521,37 @@ test("Connect another AI is a page: it marks connected providers and posts conne
   expect(
     await view.findByText(/Pick one of its models in a conversation/),
   ).toBeDefined();
+});
+
+test("Connect another AI tags the default among several, and a stopped one offers Reconnect on its own way in", async () => {
+  const sentence = "Google refuses this key. Connect it with another.";
+  orgList = [
+    entry("anthropic", { isDefault: true }),
+    entry("google", {
+      login: "endpoint",
+      ready: false,
+      problem: { code: "key-refused", detail: sentence },
+    }),
+  ];
+  orgSignIns = ["anthropic", "google"];
+  const user = userEvent.setup({ document });
+  const { view } = renderAt("/settings/providers/new");
+  const anthropic = await view.findByRole("button", { name: /Anthropic/ });
+  expect(within(anthropic).getByText("Default")).toBeDefined();
+  expect(
+    within(anthropic).getByRole("img", { name: "Connected" }),
+  ).toBeDefined();
+  const google = view.getByRole("button", { name: /Google/ });
+  expect(within(google).getByText(sentence)).toBeDefined();
+  expect(within(google).getByText("Reconnect")).toBeDefined();
+  expect(within(google).queryByRole("img", { name: "Connected" })).toBeNull();
+  expect(within(google).queryByText("Default")).toBeNull();
+  await user.click(google);
+  // Its own way in, a key, not the provider's first (its sign-in, which the server offers here).
+  expect(await view.findByLabelText(/API key/)).toBeDefined();
+  expect(
+    view.queryByRole("button", { name: /Sign in with Google/ }),
+  ).toBeNull();
 });
 
 test("a provider missing from signIns offers only its key", async () => {
