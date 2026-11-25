@@ -24,6 +24,11 @@ import {
   plainBackButton,
   plainHeaderLeft,
 } from "../src/header";
+import {
+  LaunchProvider,
+  useLaunchExpectsOrb,
+  useLaunchSettled,
+} from "../src/launch";
 import { notificationDestination } from "../src/links";
 import { renewPush } from "../src/notifications";
 import { aboutShownConversation } from "../src/on-screen";
@@ -113,6 +118,14 @@ function Layout() {
    */
   const answered = useRef(false);
   if (!isPending) answered.current = true;
+  // The launch cover (src/launch.tsx) stays over the app until this answer, and the version check's, are in.
+  useLaunchSettled("session", answered.current);
+  useLaunchExpectsOrb(answered.current ? !signedIn : undefined);
+  useLaunchSettled(
+    "version",
+    verdict !== "checking",
+    verdict !== "checking" && verdict.kind !== "ok",
+  );
   const header = useHeaderOptions();
   const drawer = useDrawer();
   const pathname = usePathname();
@@ -133,7 +146,11 @@ function Layout() {
         overlayStyle={{ backgroundColor: backdrop }}
       >
         <Stack screenOptions={header}>
-          <Stack.Protected guard={signedIn}>
+          {/*
+           * Each guard says where it sends a person. Without one, expo-router picks the first screen no guard
+           * covers by file name, which is the gallery: a signed-out start opened there rather than on Welcome.
+           */}
+          <Stack.Protected guard={signedIn} redirectTo="/sign-in">
             <Stack.Screen name="index" options={section("Conversations")} />
             <Stack.Screen name="bots" options={section("Bots")} />
             <Stack.Screen name="routines" options={section("Routines")} />
@@ -194,7 +211,7 @@ function Layout() {
           />
           {/* The component gallery, in development builds only (app/gallery.tsx). */}
           <Stack.Screen name="gallery" options={{ title: "Components" }} />
-          <Stack.Protected guard={!signedIn}>
+          <Stack.Protected guard={!signedIn} redirectTo="/">
             <Stack.Screen name="sign-in" options={{ headerShown: false }} />
           </Stack.Protected>
         </Stack>
@@ -215,18 +232,23 @@ export default function RootLayout() {
     Inter_700Bold,
   });
   // A font that fails to load draws in the system face rather than leaving the app blank.
-  if (!fontsLoaded && !fontError) return null;
+  const fontsReady = fontsLoaded || Boolean(fontError);
+  // The launch cover is drawn from the first frame, the fonts or not, so the phone's splash has it to hand over to.
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <KeyboardProvider>
-        <HeroUINativeProvider
-          config={{ devInfo: { stylingPrinciples: false } }}
-        >
-          <DrawerProvider>
-            <SecuredLayout />
-          </DrawerProvider>
-        </HeroUINativeProvider>
-      </KeyboardProvider>
+      <LaunchProvider fontsReady={fontsReady}>
+        {fontsReady && (
+          <KeyboardProvider>
+            <HeroUINativeProvider
+              config={{ devInfo: { stylingPrinciples: false } }}
+            >
+              <DrawerProvider>
+                <SecuredLayout />
+              </DrawerProvider>
+            </HeroUINativeProvider>
+          </KeyboardProvider>
+        )}
+      </LaunchProvider>
     </GestureHandlerRootView>
   );
 }

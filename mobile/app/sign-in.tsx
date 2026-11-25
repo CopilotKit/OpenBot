@@ -4,10 +4,12 @@ import { useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { authClient, serverUrl, signIn } from "../src/auth";
-import { BotOrb, Notice, Text } from "../src/components";
+import { Notice, Text } from "../src/components";
+import { LaunchOrb, LaunchReveal } from "../src/launch";
 
 /**
- * Sign in: OpenBot's orb, a welcome, and one Sign in button. It opens this OpenBot's own sign-in
+ * Sign in: OpenBot's orb, a welcome, and one Sign in button. Opening the app signed out, the launch splash's orb
+ * glides into this one and the rest rises in after it (../src/launch.tsx). It opens this OpenBot's own sign-in
  * page in the system browser (../src/oauth.ts), which offers every way in it has, OpenBot Cloud's
  * included.
  */
@@ -43,25 +45,31 @@ export default function SignIn() {
       }}
     >
       <View className="items-center gap-5">
-        <BotOrb seed="openbot" name="OpenBot" size={96} />
+        <LaunchOrb size={96} />
         <View className="items-center gap-1.5">
-          <Text variant="title">Welcome to OpenBot</Text>
-          <Text tone="muted" className="text-center">
-            {isPending
-              ? "Checking your session…"
-              : "Sign in with your OpenBot account to pick up where you left off."}
-          </Text>
+          <LaunchReveal order={0}>
+            <Text variant="title">Welcome to OpenBot</Text>
+          </LaunchReveal>
+          <LaunchReveal order={1}>
+            <Text tone="muted" className="text-center">
+              {isPending
+                ? "Checking your session…"
+                : "Sign in with your OpenBot account to pick up where you left off."}
+            </Text>
+          </LaunchReveal>
         </View>
       </View>
-      <View className="gap-3">
+      <LaunchReveal order={2} className="gap-3">
         <Notice message={error} />
         <Button isDisabled={busy || isPending} onPress={() => void start()}>
           Sign in
         </Button>
-      </View>
-      <Text variant="caption" tone="muted" className="text-center">
-        {serverUrl}
-      </Text>
+      </LaunchReveal>
+      <LaunchReveal order={3}>
+        <Text variant="caption" tone="muted" className="text-center">
+          {serverUrl}
+        </Text>
+      </LaunchReveal>
     </ScrollView>
   );
 }

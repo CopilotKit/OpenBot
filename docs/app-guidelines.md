@@ -224,6 +224,11 @@ Native's, and builds its own only when neither fits. The development build shows
   rather than HeroUI's pills, rows as one card with hairline dividers and 32px icon tiles, the
   person's messages in a quiet bubble and a Bot's as plain text, and the message box the one
   control that lights while someone types.
+- **Opening the app** is one movement (`mobile/src/launch.tsx`): the phone's splash is OpenBot's orb
+  on the screen's background, the app draws the same frame over everything until the fonts, the
+  security floor, the session and the version check have answered, and then the orb glides into
+  Welcome, or swells and fades into a signed-in screen. Nothing else draws a loading screen of its
+  own while the app opens.
 - **The menu** slides in from the left over the native stack (`react-native-drawer-layout`), so
   every screen keeps the native header. A section's screen (Conversations, Bots, Routines, Memory,
   Skills, Connections) has the menu button where a back button would be.
