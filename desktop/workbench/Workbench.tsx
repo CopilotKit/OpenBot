@@ -28,12 +28,7 @@ import { RequestLog } from "./RequestLog";
 import { SceneList } from "./SceneList";
 import { Fold, NoticeList, tell } from "./Shell";
 import { StreamPanel } from "./StreamPanel";
-import {
-  ALL_SCENE_GROUPS,
-  isApp,
-  loadScenes,
-  type SceneEntry,
-} from "./sceneCatalog";
+import { isApp, loadScenes, type SceneEntry } from "./sceneCatalog";
 import { resolveTarget } from "./sourceLines";
 import { windowButtonsBox } from "./titleBar";
 import {
@@ -403,12 +398,7 @@ export function WorkbenchLoaded({
         <p className="text-xs text-muted-foreground">
           Open a view, then use the real app.
         </p>
-        <SceneList
-          scenes={catalog}
-          current={state.scene}
-          onPick={pickView}
-          groups={ALL_SCENE_GROUPS}
-        />
+        <SceneList scenes={catalog} current={state.scene} onPick={pickView} />
       </aside>
       <main className="relative flex min-h-0 min-w-0 flex-col bg-background">
         <NoticeList

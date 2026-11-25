@@ -2,9 +2,9 @@
  * The scene catalog: the desktop scenes, then the app scenes. The app scenes live in
  * app/workbench/scenes, and the page loads them at run time from the app server.
  */
-import { APP_SCENE_GROUPS, type AppScene, isAppScene } from "./appContract";
+import { type AppScene, isAppScene } from "./appContract";
 import { SCENES } from "./scenes";
-import { SCENE_GROUPS, type Scene } from "./scenes/types";
+import type { Scene } from "./scenes/types";
 
 export type DesktopSceneEntry = Scene & { kind?: "desktop" };
 export type SceneEntry = DesktopSceneEntry | AppScene;
@@ -14,11 +14,6 @@ export const APP_SCENES_URL = "/__app/workbench/scenes/index.ts";
 /** What to do when the app scenes did not load. The workbench starts the app server itself. */
 export const APP_SERVER_HINT =
   "The app server did not start or does not answer. Look in the workbench server's log (the terminal of bun run workbench, or <tmpdir>/openbot-workbench-<port>/server.log when the CLI or a test started it), then stop and start the workbench.";
-
-export const ALL_SCENE_GROUPS: readonly string[] = [
-  ...APP_SCENE_GROUPS,
-  ...SCENE_GROUPS,
-];
 
 export function isApp(scene: SceneEntry): scene is AppScene {
   return scene.kind === "app";

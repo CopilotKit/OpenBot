@@ -139,9 +139,6 @@ export type Session =
       onboarded: boolean;
     };
 
-export type AppSceneGroup = "App";
-export const APP_SCENE_GROUPS: readonly AppSceneGroup[] = ["App"];
-
 export type AppSceneStart = {
   route: string;
   host: AppHost;
@@ -162,7 +159,7 @@ export type AppScene = {
   kind: "app";
   id: string;
   title: string;
-  group: AppSceneGroup;
+  group: "App";
   start: AppSceneStart;
 };
 
@@ -247,9 +244,7 @@ export function isAppScene(value: unknown): value is AppScene {
   if (typeof value.id !== "string" || typeof value.title !== "string") {
     return false;
   }
-  if (!(APP_SCENE_GROUPS as readonly unknown[]).includes(value.group)) {
-    return false;
-  }
+  if (value.group !== "App") return false;
   const start = value.start;
   if (!isRecord(start)) return false;
   if (typeof start.route !== "string" || !start.route.startsWith("/")) {

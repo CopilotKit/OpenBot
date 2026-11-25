@@ -8,6 +8,7 @@ bun run workbench
 ```
 
 The page starts on Home. Eight app presets and three setup presets provide small starting points.
+The App and Setup starting points stay visible; Tab and Enter or Space open a view.
 Use the app's navigation, or enter a route and press Go. Back uses the real router history.
 Reload restarts the view at the current route with the selected settings.
 

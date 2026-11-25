@@ -1,4 +1,4 @@
-// Per-viewer settings of the workbench page: panel sizes and folded scene groups. They live in
+// Per-viewer preferences of the comment box. They live in
 // this browser's localStorage only. Every read and write is in try/catch: a private window or
 // blocked site data gives the defaults, and the page still works.
 
@@ -25,16 +25,4 @@ export function writePref(name: string, value: unknown): void {
   } catch {
     // The setting still works until the page closes.
   }
-}
-
-export function isNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-export function isStringList(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((v) => typeof v === "string");
-}
-
-export function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
