@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { BOOKING_CALENDAR_ORIGIN } from "../../shared/openbot-for-business";
-import { sharedChromium } from "../workbench/server";
+import { sharedChromium } from "../../tests/support/shared-browser";
 
 /**
  * The AI step's form holds still while the install behind it comes and goes.

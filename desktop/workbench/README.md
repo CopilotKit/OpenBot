@@ -554,7 +554,7 @@ The workbench server (`findingsServer.ts`) answers these requests:
 | `POST /__workbench/findings/run` | Starts `workbench:check` with the server's own ports, so it uses this server and its leases. A 409 when a check already runs |
 | `GET /__workbench/findings/status` | Whether a check runs, how many scenes are done of how many, and the last lines of its errors |
 
-CI keeps `findings.json` of each check as the artifact `workbench-findings`, also when the check fails.
+The manual check keeps `findings.json` locally, including findings from a failed check.
 
 ## Add a desktop scene
 
@@ -617,13 +617,13 @@ bun run typecheck
 bun run typecheck:workbench
 ```
 
-`bun run typecheck` checks the desktop without the workbench. The desktop's build jobs install only the `desktop` folder, and the workbench uses the app's components, whose packages only the `app` folder installs. `bun run typecheck:workbench` checks the workbench with `workbench/tsconfig.json`, which maps `@/` to `app/src`. CI runs it in the static job, where both folders are installed. `workbench/desktopOnlyInstall.test.ts` fails if the desktop's typecheck or its test preloads need the app's packages.
+`bun run typecheck` checks the desktop without the workbench. The desktop's build jobs install only the `desktop` folder, and the workbench uses the app's components, whose packages only the `app` folder installs. `bun run typecheck:workbench` checks the workbench with `workbench/tsconfig.json`, which maps `@/` to `app/src`. Run it manually after both folders are installed; CI does not check Workbench. `workbench/desktopOnlyInstall.test.ts` fails if the desktop's typecheck or its test preloads need the app's packages.
 
 Run these commands in the `app` folder:
 
 ```sh
 bun test workbench
-bun run typecheck
+bun run typecheck:workbench
 ```
 
 The browser tests drive a real browser. They need `OPENBOT_APP_BROWSER=1`. Run them in the `desktop` folder:
@@ -640,7 +640,6 @@ OPENBOT_APP_BROWSER=1 bun test workbench/critique.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/motion.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/findings.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/stateSteps.browser.test.ts
-OPENBOT_APP_BROWSER=1 bun test workbench/oneSpinner.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/appUi.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/popups.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/keys.browser.test.ts
@@ -655,10 +654,9 @@ OPENBOT_APP_BROWSER=1 bun test workbench/keys.browser.test.ts
 - `popups.browser.test.ts` checks that a popup of the page (a list, a box) over the window shows above the window. The inspector does not measure it, and in Comment mode a click in it does not start a comment.
 - `keys.browser.test.ts` checks that the page's keys (`C`, `.`, `/`, Space) do nothing while the focus is in a list, the Time slider or a popup, so a typed comment is not lost. Space and Enter still open a list, and the slider keeps its arrow keys.
 - `stateSteps.browser.test.ts` opens each state scene and checks that the window shows the setup step that the state names.
-- `oneSpinner.browser.test.ts` walks each install run to each of its run steps and to its end, and opens each state scene that shows a setup step. It names each frame that shows more than one spinner at the same time.
 - `findings.browser.test.ts` runs the check on one scene, then opens the Findings page. It checks that the page lists the findings, that a finding opens its scene at its time with the warning marked, and that the next time works.
 
-You can also run all fifteen files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
+You can also run these files together in one manual `bun test` command. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
 
 `desktop/workbench/shippedBuild.test.ts` runs a full build. It takes up to three minutes. To run the full build check of the app, run this in the repository root:
 
@@ -666,14 +664,14 @@ You can also run all fifteen files in one `bun test` command, as CI does. Each f
 OPENBOT_APP_BUILD_GUARD=1 bun test app/workbench/shippedBuild.test.ts
 ```
 
-## CI
+## Manual checks only
 
-The CI job "app (real browser, desktop setup window)" runs the workbench checks. It runs when a change touches code that is not a test or a doc. The job does these steps:
+Workbench is a development tool and does not run in CI. The production CI workflow stays separate: its normal test discovery excludes `workbench/` and `fakeNative/`, and its normal app typecheck excludes the Workbench configuration and mocks.
 
-1. It runs `bun run generate:app-config`.
-2. It runs the full build check of the app with `OPENBOT_APP_BUILD_GUARD=1`, on the runner. It runs before the steps in the image: those run as root, and after them the build cannot write its config into `app/node_modules/.vite-temp`.
-3. It runs the fourteen browser tests in the Playwright image.
-4. It runs `bun run workbench:check` in the Playwright image.
-5. It keeps `workbench-shots/check/findings.json` as the artifact `workbench-findings`.
+Run the unit and browser commands above when changing Workbench. To walk all scenes and write findings, run this in `desktop/`:
 
-Both image steps run with `docker run --init`. Then tini is PID 1 and reaps the app servers whose workbench server exited. Without it, such an app server stays a zombie that looks alive, and each stop waits out its time limits.
+```sh
+bun run workbench:check
+```
+
+The report is written to `workbench-shots/check/findings.json`. Open it in the Findings page for review. These checks and the optional shipped-build guard are manual; no Workbench CI job or artifact upload is installed.

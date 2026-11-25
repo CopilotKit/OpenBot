@@ -344,6 +344,101 @@ describe("a pull request push", () => {
   });
 });
 
+describe("manual Workbench changes", () => {
+  const passed = {
+    c2: [...ALL_CI, ...DESKTOP_RULES.flatMap((rule) => rule.checks)],
+  };
+  test("Workbench-only changes and fixture unit tests schedule no production jobs or partial tests", () => {
+    for (const path of [
+      "app/workbench/frameBoot.ts",
+      "desktop/workbench/Workbench.tsx",
+      "app/workbench/session.test.ts",
+      "desktop/workbench/motion.browser.test.ts",
+      "app/vite.workbench.config.ts",
+      "desktop/vite.workbench.config.ts",
+      "desktop/src/fakeNative/control.test.ts",
+    ]) {
+      for (const workflow of ["ci", "desktop"] as const) {
+        const decision = decide(
+          workflow,
+          PR,
+          deps({
+            passed,
+            changes: { c2: [path] },
+            mentions: { [path]: ["tests/production.test.ts"] },
+          }),
+        );
+        expect({ path, workflow, running: running(decision) }).toEqual({
+          path,
+          workflow,
+          running: [],
+        });
+        expect([
+          ...decision.tests,
+          ...decision.browserTests,
+          ...decision.desktopBrowserTests,
+        ]).toEqual([]);
+      }
+    }
+  });
+  test("mentioned manual tests stay out of changed-file jobs while production tests remain", () => {
+    const decision = decide(
+      "ci",
+      PR,
+      deps({
+        passed,
+        changes: { c2: ["docs/a-guide.md"] },
+        mentions: {
+          "docs/a-guide.md": [
+            "app/workbench/session.test.ts",
+            "desktop/workbench/motion.browser.test.ts",
+            "desktop/src/fakeNative/control.test.ts",
+            "tests/production.test.ts",
+          ],
+        },
+      }),
+    );
+    expect(decision.tests).toEqual(["tests/production.test.ts"]);
+    expect(decision.browserTests).toEqual([]);
+    expect(decision.desktopBrowserTests).toEqual([]);
+  });
+  test("real app, native, shared, dependency and production-fixture changes still require checks", () => {
+    for (const path of [
+      "app/src/main.tsx",
+      "desktop/src/App.tsx",
+      "desktop/src-tauri/src/main.rs",
+      "shared/app-storage-keys.ts",
+      "app/package.json",
+      "bun.lock",
+      "desktop/src/fakeNative/states.ts",
+    ]) {
+      const decision = decide(
+        "ci",
+        PR,
+        deps({ passed, changes: { c2: [path] } }),
+      );
+      expect({
+        path,
+        suite: decision.run.suite,
+        browser: decision.run.app_browser,
+        build: decision.run.build,
+      }).toEqual({ path, suite: true, browser: true, build: true });
+    }
+    for (const path of [
+      "desktop/src/App.tsx",
+      "desktop/src-tauri/src/main.rs",
+      "package.json",
+    ]) {
+      const decision = decide(
+        "desktop",
+        PR,
+        deps({ passed, changes: { c2: [path] } }),
+      );
+      expect({ path, build: decision.run.app }).toEqual({ path, build: true });
+    }
+  });
+});
+
 describe("everything runs", () => {
   test("on any event but a pull request: main, the release's call, a schedule", () => {
     const decision = decide("ci", undefined, deps({ passed: {}, changes: {} }));

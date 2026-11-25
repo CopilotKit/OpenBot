@@ -100,13 +100,6 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
-      # The desktop workbench draws with the app's components, so its types are checked here, where
-      # app/ is installed too, and not by the desktop's own typecheck: the desktop's build jobs
-      # install only desktop/ (desktop/workbench/desktopOnlyInstall.test.ts).
-      - run: bun install --frozen-lockfile
-        working-directory: desktop
-      - run: bun run typecheck:workbench
-        working-directory: desktop
       - name: Desktop version tracks the release version
         run: bun desktop/scripts/desktop-version.ts check
       # What each recorded OpenBot Desktop launch hands Compose, read with this tree's
@@ -471,10 +464,8 @@ jobs:
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own
-  # dependencies. A few files, so it is its own job rather than one of the list's workers. In the
-  # image, as above. The workbench's app scenes run here too: the real app (app/) in the workbench's
-  # app frame, on the fake Desktop bridge and the fake API. The app needs its generated config before
-  # its workbench server starts, and a full build of the app must hold nothing of the workbench.
+  # dependencies. One file, so it is its own job rather than one of the list's workers. In the
+  # image, as above.
   app-browser-desktop:
     name: app (real browser, desktop setup window)
     needs: changes
@@ -492,41 +483,13 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
         working-directory: desktop
-      - run: bun run generate:app-config
-      # A full build of the app holds nothing of the workbench. On the runner, not in the image, and
-      # before the image's steps: those run as root, and Vite writes its bundled config into
-      # app/node_modules/.vite-temp, so after them that folder is root's and this build, as the
-      # runner's user, fails with EACCES.
-      - run: OPENBOT_APP_BUILD_GUARD=1 bun test app/workbench/shippedBuild.test.ts
-      # `--init` on both image steps: tini is PID 1 and reaps the orphans. Without it, bun is PID 1,
-      # and an app server whose workbench server exited stays a zombie that still answers
-      # `kill(pid, 0)`, so each stop waits out its time limits.
       - run: |
-          docker run --rm --init --ipc=host \
+          docker run --rm --ipc=host \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/desktop" \
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 \
             "$PLAYWRIGHT_IMAGE" \
-            bun test src/setupLayout.browser.test.ts workbench/determinism.browser.test.ts workbench/layoutWatch.browser.test.ts workbench/shot.browser.test.ts workbench/appFrame.browser.test.ts workbench/appDeterminism.browser.test.ts workbench/appShot.browser.test.ts workbench/critique.browser.test.ts workbench/motion.browser.test.ts workbench/findings.browser.test.ts workbench/stateSteps.browser.test.ts workbench/appUi.browser.test.ts workbench/popups.browser.test.ts workbench/keys.browser.test.ts
-      # The workbench's run check: every scene's run walked to its end, failing on a step that has
-      # nothing to click or type into, or a run that stalls. It walks the app scenes too, and fails
-      # on an app request that has no answer or an error in the app.
-      - run: |
-          docker run --rm --init --ipc=host \
-            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/desktop" \
-            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
-            "$PLAYWRIGHT_IMAGE" \
-            bun run workbench:check
-      # Every layout warning and run problem of the check, merged into findings: open it in the
-      # workbench's Findings page, or read it. Also when the check failed, since that is when it
-      # helps most.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() }}
-        with:
-          name: workbench-findings
-          path: desktop/workbench-shots/check/findings.json
-          if-no-files-found: warn
-          retention-days: 14
+            bun test src/setupLayout.browser.test.ts
 
   # The suite in shards, one runner each, so the run takes as long as its slowest shard rather than
   # as long as every file one after another. `bun test --shard` does the split, cut by the per-file
