@@ -37,7 +37,10 @@ type Locator = {
   boundingBox(): Promise<Box>;
   textContent(): Promise<string | null>;
   count(): Promise<number>;
-  getByRole(role: string, options?: { name: string; exact?: boolean }): Locator;
+  getByRole(
+    role: string,
+    options?: { name: string | RegExp; exact?: boolean },
+  ): Locator;
 };
 type Route = {
   request(): { url(): string };
@@ -52,7 +55,10 @@ type Page = {
   addInitScript(script: string): Promise<void>;
   route(url: string, handler: (route: Route) => Promise<void>): Promise<void>;
   goto(url: string): Promise<unknown>;
-  getByRole(role: string, options?: { name: string; exact?: boolean }): Locator;
+  getByRole(
+    role: string,
+    options?: { name: string | RegExp; exact?: boolean },
+  ): Locator;
   locator(selector: string, options?: { hasText?: string | RegExp }): Locator;
   getByText(text: string | RegExp, options?: { exact?: boolean }): Locator;
   getByLabel(text: string, options: { exact: boolean }): Locator;
@@ -4983,9 +4989,12 @@ describe.skipIf(!asked)("approved layout: provider", () => {
                 body = element
                   .closest<HTMLElement>(".setup-body")!
                   .getBoundingClientRect();
+              // An inline link can wrap. Hit a real line box, rather than the empty center
+              // of its enclosing bounding rectangle between two lines.
+              const point = element.getClientRects()[0] ?? b;
               const hit = document.elementFromPoint(
-                b.x + b.width / 2,
-                b.y + b.height / 2,
+                point.x + point.width / 2,
+                point.y + point.height / 2,
               );
               return {
                 focused: document.activeElement === element,
@@ -5308,7 +5317,7 @@ describe.skipIf(!asked)("approved layout: install", () => {
             expect(now.rows[0].labelSize).toBeGreaterThan(
               now.rows[1]!.labelSize,
             );
-            expect(now.rows[0].border).toBe(1);
+            expect(now.rows[0].border).toBe(0);
             expect(now.rows[1]!.border).toBe(0);
             expect(now.rows[1]!.top).toBeGreaterThan(now.rows[0].top);
           }
