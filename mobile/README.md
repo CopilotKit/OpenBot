@@ -107,8 +107,8 @@ Add or replace a key with `eas credentials`, from a terminal. Expo takes no new 
 that cannot ask questions, so the workflow cannot do it.
 
 Until `ascAppId` is in `eas.json`, an upload for iOS stops before the build starts and says so.
-Google Play takes no upload from Expo until the app has its first release, which a person uploads
-by hand in the Play Console.
+An upload for Android needs the app to exist in the Play Console, and the service account key to
+be on Expo.
 
 ## Push notifications on Android
 
