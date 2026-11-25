@@ -1,5 +1,5 @@
 /**
- * The phone app reaches OpenBot's API through the client generated from api/openapi.yaml, and every call it makes goes
+ * OpenBot Mobile reaches OpenBot's API through the client generated from api/openapi.yaml, and every call it makes goes
  * through its mutator (src/api/request.ts). There is no simulator here, so this drives the generated functions and the
  * mutator for real, over HTTP, against a stand-in deployment that answers only at the API's addresses and records what
  * reached it.
@@ -228,7 +228,7 @@ const server = Bun.serve({
           title: "This app is too old for this OpenBot.",
           status: 400,
           detail:
-            "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+            "This OpenBot needs OpenBot Mobile 1.2.0 or later. Update OpenBot, then try again.",
           code: "CLIENT_UPDATE_REQUIRED",
           category: "validation",
           retryable: false,
@@ -666,7 +666,7 @@ test("switching a skill on gives the Bot its grant, the grant's id one path segm
   ]);
 });
 
-test("every request names the phone app and the OpenBot release it was built from, not Expo's own app version", async () => {
+test("every request names OpenBot Mobile and the OpenBot release it was built from, not Expo's own app version", async () => {
   // The release comes from the repository's root package.json as the app is built, never the store version.
   expect(appConfig.extra?.openbotRelease).toBe(RELEASE);
   expect(appConfig.version).not.toBe(RELEASE);
@@ -677,7 +677,7 @@ test("every request names the phone app and the OpenBot release it was built fro
   for (const header of named) expect(header).toBe(`mobile/${RELEASE}`);
 });
 
-test("before sign-in the app reads the deployment and decides: this release's OpenBot is fine, one that serves only newer phone apps says Update OpenBot", async () => {
+test("before sign-in the app reads the deployment and decides: this release's OpenBot is fine, one that serves only newer versions of OpenBot Mobile says Update OpenBot", async () => {
   token = null;
   expect(await checkVersion()).toEqual({ kind: "ok" });
   expect(named).toEqual([`mobile/${RELEASE}`]);
@@ -693,14 +693,14 @@ test("before sign-in the app reads the deployment and decides: this release's Op
   expect(await checkVersion()).toEqual({
     kind: "app",
     detail:
-      "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+      "This OpenBot needs OpenBot Mobile 1.2.0 or later. Update OpenBot, then try again.",
   });
 
   deploymentAnswer = { status: 200, body: fixture.deployments["v3-only"] };
   expect(await checkVersion()).toEqual({
     kind: "app",
     detail:
-      "This OpenBot needs a newer OpenBot phone app. Update OpenBot, then try again.",
+      "This OpenBot needs a newer version of OpenBot Mobile. Update OpenBot, then try again.",
   });
 });
 
@@ -720,7 +720,7 @@ test("anything but an app too old for its OpenBot decides nothing: the app opens
   expect(await checkVersion()).toEqual({ kind: "ok" });
 });
 
-test("an OpenBot that raised the phone app's minimum for a security problem says so, from its deployment and from a refusal", async () => {
+test("an OpenBot that raised OpenBot Mobile's minimum for a security problem says so, from its deployment and from a refusal", async () => {
   deploymentAnswer = { status: 200, body: fixture.deployments.security };
   expect(await checkVersion()).toEqual({
     kind: "app",
@@ -776,10 +776,10 @@ test("a refusal of this app as too old, on any request, reaches the root layout 
       status: 400,
       code: "CLIENT_UPDATE_REQUIRED",
       message:
-        "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+        "This OpenBot needs OpenBot Mobile 1.2.0 or later. Update OpenBot, then try again.",
     });
     expect(heard).toEqual([
-      "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+      "This OpenBot needs OpenBot Mobile 1.2.0 or later. Update OpenBot, then try again.",
     ]);
 
     // The deployment read itself can be refused too; the gate says the same.
@@ -787,7 +787,7 @@ test("a refusal of this app as too old, on any request, reaches the root layout 
       status: 400,
       body: {
         detail:
-          "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+          "This OpenBot needs OpenBot Mobile 1.2.0 or later. Update OpenBot, then try again.",
         code: "CLIENT_UPDATE_REQUIRED",
         minimumVersion: "1.2.0",
       },
@@ -795,7 +795,7 @@ test("a refusal of this app as too old, on any request, reaches the root layout 
     expect(await checkVersion()).toEqual({
       kind: "app",
       detail:
-        "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+        "This OpenBot needs OpenBot Mobile 1.2.0 or later. Update OpenBot, then try again.",
     });
   } finally {
     stop();

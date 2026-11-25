@@ -1,7 +1,7 @@
 /**
- * Whether this phone app and the OpenBot it talks to can work together, and the header it names itself in.
+ * Whether OpenBot Mobile and the OpenBot it talks to can work together, and the header it names itself in.
  *
- * The phone app is bundled on its own (Metro serves only mobile/), so it carries its own copy of the few rules in
+ * OpenBot Mobile is bundled on its own (Metro serves only mobile/), so it carries its own copy of the few rules in
  * shared/client-version.ts. tests/client-version.test.ts holds this copy to every case in
  * shared/fixtures/client-version/cases.json, the same cases the web app, the Recorder and OpenBot Desktop run. It
  * imports nothing, so it can be tested without a phone.
@@ -82,7 +82,7 @@ function major(version: string): number | undefined {
  * - `ok`: they can. Features the server lacks are hidden by the fields that offer them, never by a version.
  * - `app`: the app is too old. "Update OpenBot". `security` when the minimum it is below was raised for a security
  *   problem in older releases (the server names the app in `securityMinimumClients` above its version too).
- * - `server`: the server serves only API versions older than any the app speaks. The phone app adds nothing for it:
+ * - `server`: the server serves only API versions older than any the app speaks. OpenBot Mobile adds nothing for it:
  *   whoever runs that OpenBot keeps it and their apps matched, and the screens say what failed, as they always have.
  */
 export type Compatibility =
@@ -142,7 +142,7 @@ function below(version: string, minimum: string): boolean {
 
 /**
  * What the update screen says under "Update OpenBot": OpenBot's own sentence for refusing this app (as
- * shared/client-version.ts `clientUpdateDetail` words it for the phone app), with the release it needs when known, or
+ * shared/client-version.ts `clientUpdateDetail` words it for OpenBot Mobile), with the release it needs when known, or
  * the security sentence when the minimum was raised for a security problem.
  */
 export function phoneUpdateDetail(
@@ -151,8 +151,8 @@ export function phoneUpdateDetail(
 ): string {
   if (security) return SECURITY_UPDATE_SENTENCE;
   return isVersion(minimum)
-    ? `This OpenBot needs the OpenBot phone app ${minimum.replace(/^v/, "")} or later. Update OpenBot, then try again.`
-    : "This OpenBot needs a newer OpenBot phone app. Update OpenBot, then try again.";
+    ? `This OpenBot needs OpenBot Mobile ${minimum.replace(/^v/, "")} or later. Update OpenBot, then try again.`
+    : "This OpenBot needs a newer version of OpenBot Mobile. Update OpenBot, then try again.";
 }
 
 /** What the root layout shows: the app, or "Update OpenBot" (`security` when it is for a security problem). */

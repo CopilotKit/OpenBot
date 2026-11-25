@@ -3,7 +3,7 @@
  * uses, shows a settings change's before, after and who it reaches, and never offers "Always allow"
  * on a change the organization set to ask every time.
  *
- * FOUND IN THE PHONE APP (iOS simulator, local stack): an admin's organization change read
+ * FOUND IN OPENBOT MOBILE (iOS simulator, local stack): an admin's organization change read
  * "general-assistant asks to use openbot-settings/update_organization_settings" over
  * `{"settings": {"proactiveDailyRuns": 22}}`, with "Always allow this scope", which the server
  * refuses for it. The approval below is that one, as the API sent it.

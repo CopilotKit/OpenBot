@@ -818,7 +818,7 @@ some of a provider's variables and not all of them stops the server at start-up 
 | `TWILIO_AUTH_TOKEN`         | Twilio auth token. Used to send and to check the signature on every request Twilio makes.                                                                                                                                                         |
 | `TWILIO_VERIFY_SERVICE_SID` | The Twilio Verify service that texts the code a person enters under a Bot's **Reaching you** to confirm their number.                                                                                                                            |
 | `TWILIO_FROM_NUMBER`        | The Twilio number OpenBot sends from.                                                                                                                                                                                                              |
-| `EXPO_PROJECT_ID`           | The native app's EAS project id, a UUID. Switches on push notifications and sign-in from the native app (without it, the server does not trust the app's `openbotmobile://` sign-in redirect). A device registers only when the app reports this same project id; any other value is refused. A value that is not a UUID stops the server at start-up.                  |
+| `EXPO_PROJECT_ID`           | OpenBot Mobile's EAS project id, a UUID. Switches on push notifications and sign-in from OpenBot Mobile (without it, the server does not trust the app's `openbotmobile://` sign-in redirect). A device registers only when the app reports this same project id; any other value is refused. A value that is not a UUID stops the server at start-up.                  |
 | `EXPO_ACCESS_TOKEN`         | Optional. Sent as `Authorization: Bearer` on every request to Expo's push service; without it those requests carry no token.                                                                                                                       |
 
 With SMS on, point the Twilio number's incoming-message webhook at
@@ -826,7 +826,7 @@ With SMS on, point the Twilio number's incoming-message webhook at
 `<DELIVERY_PUBLIC_URL>/api/delivery/webhooks/sms/status` to Twilio as the status callback on each
 message it sends.
 
-The native app in `mobile/` reads two variables of its own when it is built, from `mobile/.env`:
+OpenBot Mobile in `mobile/` reads two variables of its own when it is built, from `mobile/.env`:
 `EXPO_PUBLIC_SERVER_URL`, the deployment's public URL (required, `https` outside development, no
 credentials or query string), and `EXPO_PUBLIC_EAS_PROJECT_ID`, the same project id as
 `EXPO_PROJECT_ID` above. Without a project id the app is built for OpenBot Cloud's own Expo

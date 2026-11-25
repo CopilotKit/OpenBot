@@ -1433,7 +1433,7 @@ export const GetCompanySignInResponse = zod
   );
 
 /**
- * Return an address for a browser to link the person's company account at one of the organization's identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app's own sign-in. The ticket is the person's, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser's sign-in does: the provider must give the person's own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), there is no company account to link: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
+ * Return an address for a browser to link the person's company account at one of the organization's identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to OpenBot Mobile once the account is linked. The address carries a ticket, never the app's own sign-in. The ticket is the person's, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser's sign-in does: the provider must give the person's own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), there is no company account to link: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
  * @summary Get a ticket to link a company account from an app
  */
 
@@ -1484,7 +1484,7 @@ export const CreateCompanySignInTicketBody = zod.object({
     .enum(["app"])
     .optional()
     .describe(
-      "app when the phone app asks: once the company account is linked, the browser is sent back to the app at openbotmobile://company-sign-in/linked, which ends its sign-in session. Without it the browser stays on a page saying the account is linked. Nothing else is a place to go back to.",
+      "app when OpenBot Mobile asks: once the company account is linked, the browser is sent back to the app at openbotmobile://company-sign-in/linked, which ends its sign-in session. Without it the browser stays on a page saying the account is linked. Nothing else is a place to go back to.",
     ),
 });
 

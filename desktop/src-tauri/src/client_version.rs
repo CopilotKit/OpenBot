@@ -8,8 +8,8 @@ this app is too old for that OpenBot, the person reads "Update OpenBot" and is o
 update. An OpenBot too old for this app is told as it always was (`connected::Kind::TooOld`).
 
 The rules are `shared/client-version.ts`'s, carried here in Rust. The tests hold them to every case
-in `shared/fixtures/client-version/cases.json`, the same cases the web app, the Recorder and the
-phone app run.
+in `shared/fixtures/client-version/cases.json`, the same cases the web app, the Recorder and
+OpenBot Mobile run.
 */
 
 use crate::problem::Problem;

@@ -38,7 +38,7 @@ import { clientHeaders } from "./release";
 const configured = process.env.EXPO_PUBLIC_SERVER_URL;
 if (!configured)
   throw new Error(
-    "Set EXPO_PUBLIC_SERVER_URL to your OpenBot deployment before building the native app.",
+    "Set EXPO_PUBLIC_SERVER_URL to your OpenBot deployment before building OpenBot Mobile.",
   );
 const endpoint = new URL(configured);
 if (

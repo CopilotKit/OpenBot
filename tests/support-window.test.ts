@@ -131,7 +131,7 @@ describe("a minimum app version", () => {
   });
 
   // Each app's first release that calls /api/v2: 1.1.0 for all four. v1.0.3's web app, Desktop,
-  // phone app and Recorder call none of it, and the addresses they did call were retired in 1.1.0.
+  // OpenBot Mobile and Recorder call none of it, and the addresses they did call were retired in 1.1.0.
   const FIRST_ONE_API_RELEASES = {
     web: "1.1.0",
     desktop: "1.1.0",

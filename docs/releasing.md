@@ -923,15 +923,15 @@ behavior it is never reached, and on the default behavior it serves what `latest
 
 A forced update, for a release with a security problem and for nothing else. The security floor
 names the lowest safe release of OpenBot Desktop, the back end OpenBot Desktop runs on the computer,
-the phone app and the Recorder. An app below its floor shows one notice, "This version of OpenBot
+OpenBot Mobile and the Recorder. An app below its floor shows one notice, "This version of OpenBot
 has a security problem. Update to keep using it.", and nothing else until it is updated. OpenBot
 Desktop also stops the back end it runs on the computer: no Bot runs and routines pause, and nothing
 is deleted. Update and restart then upgrades the back end at the next start, as every update does.
 
 **Never for a company's own OpenBot.** OpenBot Desktop's own back end always follows the floor,
 because it ships with the app. Any other OpenBot follows it only when the floor lists its address
-under `cloud`, which names OpenBot Cloud's addresses and nothing else. So OpenBot Desktop, the phone
-app and the Recorder connected to a company's server ignore the floor, and so does that server.
+under `cloud`, which names OpenBot Cloud's addresses and nothing else. So OpenBot Desktop, OpenBot
+Mobile and the Recorder connected to a company's server ignore the floor, and so does that server.
 
 ### How it works
 

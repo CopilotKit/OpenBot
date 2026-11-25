@@ -1,7 +1,7 @@
 //! The security floor, in OpenBot Desktop: the lowest safe release of this app and of the back end
 //! it runs on this computer, which CopilotKit raises only when a release has a security problem.
 //!
-//! The same rules as `shared/security-floor.ts`, which the phone app, the Recorder and OpenBot Cloud
+//! The same rules as `shared/security-floor.ts`, which OpenBot Mobile, the Recorder and OpenBot Cloud
 //! follow. A small document beside the update feed, signed with Ed25519 over its payload's exact
 //! bytes (Tauri's own signatures cover the installers, not `latest.json`). The app reads nothing in
 //! it until the signature verifies against a key it was built with (`keys` in
@@ -62,8 +62,8 @@ struct Config {
 
 /// Where the floor is read, in order: beside the update feed on downloads.copilotkit.ai, then on
 /// the Latest GitHub release. Kept with the app, never in shared/, which every self-hosted OpenBot
-/// ships. tests/security-floor-addresses.test.ts holds it equal to the Recorder's and the phone
-/// app's.
+/// ships. tests/security-floor-addresses.test.ts holds it equal to the Recorder's and OpenBot
+/// Mobile's.
 pub const ADDRESSES: [&str; 2] = [
     "https://downloads.copilotkit.ai/latest/security-floor.json",
     "https://github.com/CopilotKit/OpenBot/releases/latest/download/security-floor.json",

@@ -1,5 +1,5 @@
 /**
- * Generates the phone app's API client from api/openapi.yaml: `bun run api:generate` at the root.
+ * Generates OpenBot Mobile's API client from api/openapi.yaml: `bun run api:generate` at the root.
  *
  * Only the areas the app's screens use, by the spec's tags, so the phone carries the part of the API it speaks: add a
  * tag here when a screen starts using another area. Into src/api/generated, checked in. CI regenerates it and fails when

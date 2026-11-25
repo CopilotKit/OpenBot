@@ -1,5 +1,5 @@
 /**
- * The phone app's generated client is a tolerant reader (api/README.md, Enums that grow): a newer
+ * OpenBot Mobile's generated client is a tolerant reader (api/README.md, Enums that grow): a newer
  * server may answer with a field this app has never heard of, or a value it doesn't know in an enum the
  * spec declares open, and neither may break a read. This drives the generated functions and the
  * mutator for real, over HTTP, against a stand-in deployment that answers as a newer release would.

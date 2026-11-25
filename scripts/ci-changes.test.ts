@@ -161,7 +161,7 @@ describe("a pull request push", () => {
     expect(decision.run.partial).toBe(false);
   });
 
-  test("an app change runs the app's jobs, not the native app, the TypeScript engine or the harnesses", () => {
+  test("an app change runs the app's jobs, not OpenBot Mobile, the TypeScript engine or the harnesses", () => {
     const decision = decide(
       "ci",
       PR,
@@ -180,7 +180,7 @@ describe("a pull request push", () => {
     ]);
   });
 
-  test("a Recorder change runs the code jobs, not the native app, the TypeScript engine or the harnesses", () => {
+  test("a Recorder change runs the code jobs, not OpenBot Mobile, the TypeScript engine or the harnesses", () => {
     const decision = decide(
       "ci",
       PR,

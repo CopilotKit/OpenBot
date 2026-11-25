@@ -1,5 +1,5 @@
 /**
- * The phone app's components, drawn with Uniwind and HeroUI Native from OpenBot's color scheme.
+ * OpenBot Mobile's components, drawn with Uniwind and HeroUI Native from OpenBot's color scheme.
  * A screen uses these first, then HeroUI Native's, and builds its own only when neither fits
  * (docs/app-guidelines.md).
  */

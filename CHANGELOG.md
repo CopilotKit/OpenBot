@@ -501,6 +501,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **The phone app is now called OpenBot Mobile.** The docs and the API descriptions say so, and an
+  OpenBot that needs a newer one says "This OpenBot needs OpenBot Mobile 1.2.0 or later. Update
+  OpenBot, then try again." Nothing a client reads changed: the client is still `mobile` in
+  `OpenBot-Client`, and the refusal keeps its code.
 - **A sharper look, at the same sizes.** Corners come from one 8px radius, cards are flat with a
   hairline border you can see in both themes, and shadows show only on what floats: menus and
   popovers, then dialogs and sheets over the app. The grays are slate, a quiet blue-gray in dark,

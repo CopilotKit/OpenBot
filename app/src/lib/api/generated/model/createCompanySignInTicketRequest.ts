@@ -10,6 +10,6 @@ export interface CreateCompanySignInTicketRequest {
    * @maxLength 256
    */
   providerId: string;
-  /** app when the phone app asks: once the company account is linked, the browser is sent back to the app at openbotmobile://company-sign-in/linked, which ends its sign-in session. Without it the browser stays on a page saying the account is linked. Nothing else is a place to go back to. */
+  /** app when OpenBot Mobile asks: once the company account is linked, the browser is sent back to the app at openbotmobile://company-sign-in/linked, which ends its sign-in session. Without it the browser stays on a page saying the account is linked. Nothing else is a place to go back to. */
   returnTo?: CreateCompanySignInTicketRequestReturnTo;
 }

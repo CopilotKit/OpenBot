@@ -2,7 +2,7 @@
  * The security floor's notice: when this build is below the floor, one screen covers the whole app,
  * headers included, and nothing behind it can be used until the app is updated.
  *
- * The phone app has no updater of its own; a person updates it from their app store and comes back.
+ * OpenBot Mobile has no updater of its own; a person updates it from their app store and comes back.
  * "Check again" reads the floor once more, so a floor corrected after it was published lifts the
  * notice without a restart.
  *

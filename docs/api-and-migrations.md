@@ -1,6 +1,6 @@
 # Don't break the API. Don't break the database.
 
-OpenBot is live. People run released apps (the web app, OpenBot Desktop, the phone app, the
+OpenBot is live. People run released apps (the web app, OpenBot Desktop, OpenBot Mobile, the
 Recorder) against released servers, and they don't all upgrade on the same day. Every change has to
 keep working for them.
 

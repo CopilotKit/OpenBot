@@ -1,5 +1,5 @@
 /**
- * The phone app's side of the security floor (security-floor.ts, a copy of shared/security-floor.ts):
+ * OpenBot Mobile's side of the security floor (security-floor.ts, a copy of shared/security-floor.ts):
  * whether this build must stop and ask to be updated.
  *
  * Hermes has no WebCrypto Ed25519, so the floor's signature is checked with @noble/curves, in strict
