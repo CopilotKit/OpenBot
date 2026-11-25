@@ -615,7 +615,7 @@ export function CopilotKitAccount({
       >
         <Sections at="Account" />
       </SetupRail>
-      <div className="sheet setup-layout account-layout">
+      <div className="sheet setup-layout page-first account-layout">
         <header className="setup-header-block">{header}</header>
         <div className="setup-body">
           <div className="setup-content">

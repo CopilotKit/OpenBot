@@ -1258,8 +1258,10 @@ export function LocalIntelligence({
   releaseDue = false,
   waitingOn = null,
   room = null,
+  presentation = "default",
 }: {
   sequence: LocalSequence;
+  presentation?: "default" | "journey";
   offerStart?: boolean;
   /**
    * An update this computer has no room for (`local_eval::update_room`), said with its figures
@@ -1318,7 +1320,20 @@ export function LocalIntelligence({
           : sequence.steps;
 
   return (
-    <section aria-label="OpenBot on this computer">
+    <section
+      aria-label="OpenBot on this computer"
+      className={
+        presentation === "journey" && journeying ? "update-journey" : undefined
+      }
+    >
+      {presentation === "journey" && journeying && (
+        <SetupProgress
+          steps={sequence.steps.filter((row) => !row.note && !row.pending)}
+          presentation="timeline"
+          showElapsed={false}
+          quiet
+        />
+      )}
       {journeying && (
         <StartJourney
           sequence={sequence}
@@ -1331,16 +1346,25 @@ export function LocalIntelligence({
       {notices.length > 0 && (
         <SetupProgress steps={notices} presentation="focus" />
       )}
-      <SetupProgress
-        steps={rows}
-        showElapsed={!journeying}
-        presentation={
-          offerStart ? (journeying ? "milestones" : "focus") : "list"
-        }
-      />
+      {!(presentation === "journey" && journeying) && (
+        <SetupProgress
+          steps={rows}
+          showElapsed={!journeying}
+          presentation={
+            offerStart ? (journeying ? "milestones" : "focus") : "list"
+          }
+        />
+      )}
       {/* The release reassurance arrives after Start begins. Keep it below completed work so
           those milestones stay anchored when the update starts or its download changes. */}
-      {journeying && releaseDetail && <p>{detail}</p>}
+      {journeying && releaseDetail && presentation !== "journey" && (
+        <p>{detail}</p>
+      )}
+      {journeying && presentation === "journey" && (
+        <p className="update-data-reassurance">
+          Your Bots, sign-ins and data stay as they are.
+        </p>
+      )}
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && !waitingOn && !room && (

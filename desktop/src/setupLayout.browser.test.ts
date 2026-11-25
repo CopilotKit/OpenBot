@@ -869,7 +869,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
      * sidebar's foot. All of it fits, and so does Self-Contained opened, with Install, and the
      * address.
      */
-    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on opens on Cloud's sign-in, Cloud and Business in the sidebar and Self-Contained in its foot, without a scroll`, async () => {
+    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on offers all three hosting choices and keeps the selected page in view`, async () => {
       const page = await browser.newPage({
         viewport: { width: 1000, height: 760 },
         colorScheme: theme,
@@ -894,14 +894,6 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
             ...rail.querySelectorAll("fieldset.picker.hosting > .tile"),
           ];
           const boxes = rows.map((row) => row.getBoundingClientRect());
-          const foot = rail.querySelector(
-            ":scope > .rail-foot > .this-computer-foot",
-          ) as HTMLElement | null;
-          const footBox = foot?.getBoundingClientRect();
-          const size = (element: Element | null | undefined) =>
-            element
-              ? Number.parseFloat(getComputedStyle(element).fontSize)
-              : Number.NaN;
           const business = rail.querySelector(
             ".tile.with-marks",
           ) as HTMLElement;
@@ -939,16 +931,9 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
             signIn: [...sheet.querySelectorAll("button")].some(
               (button) => button.textContent === "Sign in to OpenBot Cloud",
             ),
-            // Self-Contained in the sidebar's foot, below the rows, its line no larger than the
-            // rows' names, in the window. Never in the page.
-            foot:
-              !!foot &&
-              !!footBox &&
-              footBox.top >= (boxes[boxes.length - 1]?.bottom ?? 1e9) &&
-              footBox.bottom <= window.innerHeight &&
-              size(foot.querySelector(".this-computer-aside")) <=
-                size(rail.querySelector("fieldset.picker.hosting .tile-name")),
-            inPage: sheet.querySelectorAll(".this-computer-foot").length,
+            localChoice:
+              rows[2]?.querySelector<HTMLInputElement>("input")?.value ===
+              "this-computer",
             // The four clouds' marks inside OpenBot for Business's row, on one line.
             marks:
               marks.length === 4 &&
@@ -976,13 +961,16 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
             ["google-cloud", true],
             ["kubernetes", true],
           ],
-          rows: ["OpenBot Cloud", "OpenBot for Business"],
+          rows: [
+            "OpenBot Cloud",
+            "OpenBot for Business",
+            "OpenBot (Self-Contained)",
+          ],
           stacked: true,
           picked: "OpenBot Cloud",
           page: "OpenBot Cloud",
           signIn: true,
-          foot: true,
-          inPage: 0,
+          localChoice: true,
           marks: true,
           whole: true,
         });
@@ -1090,7 +1078,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         // Self-Contained opened at the foot: what this computer needs and Install, still without a
         // scrollbar.
         await page
-          .getByRole("button", { name: "Use OpenBot (Self-Contained)" })
+          .getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ })
           .click();
         await page
           .getByRole("button", { name: "Install", exact: true })
@@ -1314,6 +1302,90 @@ async function routeCalendar(page: Page, automatic = true) {
     }),
   );
 }
+
+describe.skipIf(!asked)("approved layout: Cloud hosting narrow", () => {
+  for (const colorScheme of ["light", "dark"] as const)
+    test(`720x560 ${colorScheme}: all three choices, local install, connect and calendar stay reachable`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 720, height: 560 },
+        colorScheme,
+      });
+      const check = async (selector: string) => {
+        const seen = await page.evaluate((selector) => {
+          const action = document.querySelector<HTMLElement>(selector)!;
+          action.scrollIntoView({ block: "nearest" });
+          action.focus();
+          const r = action.getBoundingClientRect(),
+            hit = document.elementFromPoint(
+              r.x + r.width / 2,
+              r.y + r.height / 2,
+            );
+          const rail = document.querySelector<HTMLElement>("main > .rail")!;
+          return {
+            page: document.documentElement.scrollHeight <= innerHeight,
+            sideways: document.documentElement.scrollWidth <= innerWidth,
+            rail: rail.scrollHeight <= rail.clientHeight + 1,
+            action: r.top >= 0 && r.bottom <= innerHeight,
+            hit: !!hit && action.contains(hit),
+          };
+        }, selector);
+        expect(seen).toEqual({
+          page: true,
+          sideways: true,
+          rail: true,
+          action: true,
+          hit: true,
+        });
+      };
+      try {
+        await routeCalendar(page);
+        await open(page, "", cloudBuilt);
+        await settled(page);
+        expect(
+          await page.evaluate(() =>
+            [
+              ...document.querySelectorAll<HTMLInputElement>(".hosting input"),
+            ].map((x) => x.value),
+          ),
+        ).toEqual(["cloud", "business", "this-computer"]);
+        await check(".cloud-sign-in button");
+        await page
+          .getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ })
+          .click();
+        await check(".welcome .row button");
+        await page.getByRole("button", { name: "Connect to it" }).click();
+        await page
+          .getByLabel("Your company's OpenBot address", { exact: true })
+          .waitFor();
+        await check(".connect-to-openbot input");
+        await page.getByRole("button", { name: "Back", exact: true }).click();
+        await page
+          .getByRole("radio", { name: /^OpenBot for Business/ })
+          .click();
+        await page
+          .getByRole("button", { name: "Book a demo", exact: true })
+          .click();
+        await page.locator('iframe[title="Booking calendar"]').waitFor();
+        await check(".booking-back");
+        expect(
+          await page.evaluate(() => {
+            const frame = document
+              .querySelector<HTMLIFrameElement>(
+                'iframe[title="Booking calendar"]',
+              )!
+              .getBoundingClientRect();
+            return (
+              frame.top >= 0 &&
+              frame.bottom <= innerHeight &&
+              frame.height > 180
+            );
+          }),
+        ).toBe(true);
+      } finally {
+        await page.close();
+      }
+    }, 30000);
+});
 
 describe.skipIf(!asked)("the first screen while its downloads run", () => {
   for (const [width, height] of [
@@ -2690,221 +2762,111 @@ const DOCKER_STARTING =
 /** The update screen as a person sees it: its words, and where the progress and the note sit. */
 function updateScreen(page: Page) {
   return page.evaluate(() => {
-    const sheet = document.querySelector("main > .sheet") as HTMLElement;
+    const sheet = document.querySelector<HTMLElement>(
+      ".standalone-layout.update-layout",
+    )!;
     const body = sheet.querySelector<HTMLElement>(".setup-body")!;
-    const note = body.querySelector<HTMLElement>(".self-contained");
-    const journey = document.querySelector(".journey");
-    const why = note?.querySelector(".self-contained-why") as HTMLElement;
-    const box = (element: Element | null | undefined) => {
-      const rect = element?.getBoundingClientRect();
-      return rect ? { top: rect.top, bottom: rect.bottom } : null;
+    const box = (element: Element | null) => {
+      const r = element?.getBoundingClientRect();
+      return r
+        ? { top: r.top, bottom: r.bottom, left: r.left, right: r.right }
+        : null;
     };
     return {
-      shell: Boolean(document.querySelector("main > .rail + .sheet")),
-      heading: document.querySelector("main h1")?.textContent,
-      headingBox: box(document.querySelector("main h1")),
-      bodyOverflow: body.scrollWidth > body.clientWidth,
-      // What shows, as a person reads it.
-      note: note?.innerText ?? null,
-      // Whether the sentence that says why shows.
-      said: Boolean(why && why.offsetHeight > 0),
-      noteBox: box(note),
-      sheetBox: box(sheet),
+      heading: sheet.querySelector("h1")?.textContent,
+      headingBox: box(sheet.querySelector("h1")),
       bodyBox: box(body),
-      journey: box(journey),
-      journeyHeight: journey?.getBoundingClientRect().height ?? 0,
-      operationHeight:
-        document.querySelector(".journey-said")?.getBoundingClientRect()
-          .height ?? 0,
-      rows: box(document.querySelector(".setup-milestones")),
-      scrolls: body.scrollHeight - body.clientHeight,
-      page: document.documentElement.scrollHeight,
-      window: window.innerHeight,
-      cut: note ? note.scrollWidth > note.clientWidth : null,
-      buttons: note?.querySelectorAll("button").length ?? null,
-      link: note?.querySelector("a")?.getAttribute("href") ?? null,
+      operation: box(sheet.querySelector(".journey")),
+      reassurance: box(sheet.querySelector(".update-data-reassurance")),
+      stages: [...sheet.querySelectorAll(".setup-timeline > .step")].map(
+        (row) => ({ name: row.getAttribute("aria-label"), box: box(row) }),
+      ),
+      promo: sheet.querySelectorAll(".self-contained").length,
+      sidebars: document.querySelectorAll("main > .rail").length,
+      bars: sheet.querySelectorAll("progress").length,
+      sideways: body.scrollWidth > body.clientWidth,
+      overflow: document.documentElement.scrollHeight > window.innerHeight,
+      reassuranceCopy: sheet.querySelector(".update-data-reassurance")
+        ?.textContent,
+      safety: sheet.querySelector(".cannot-cancel")?.textContent,
     };
   });
 }
 
-/** The note follows progress and can be read and acted on inside the scrolling body. */
-async function expectWholeUnderProgress(
-  seen: Awaited<ReturnType<typeof updateScreen>>,
-  page: Page,
-) {
-  const { journey, rows, noteBox, sheetBox, bodyBox } = seen;
-  expect(journey && rows && noteBox && sheetBox && bodyBox).toBeTruthy();
-  if (journey && rows && noteBox && sheetBox && bodyBox) {
-    expect(noteBox.top).toBeGreaterThan(journey.bottom);
-    expect(noteBox.top).toBeGreaterThan(rows.bottom);
-    expect(sheetBox.bottom).toBeLessThanOrEqual(seen.window);
-  }
-  expect(seen.shell).toBe(true);
-  expect(seen.page).toBeLessThanOrEqual(seen.window);
-  expect(seen.cut).toBe(false);
-  expect(seen.bodyOverflow).toBe(false);
-  await page.evaluate(() =>
-    document.querySelector(".self-contained")!.scrollIntoView({ block: "end" }),
-  );
-  const revealed = await updateScreen(page);
-  expect(revealed.headingBox).toEqual(seen.headingBox);
-  expect(revealed.noteBox!.top).toBeGreaterThanOrEqual(revealed.bodyBox!.top);
-  // Scrolling rounds scrollTop while text keeps fractional line heights.
-  expect(revealed.noteBox!.bottom).toBeLessThanOrEqual(
-    revealed.bodyBox!.bottom + 0.5,
-  );
-  expect(revealed.noteBox!.bottom).toBeLessThanOrEqual(revealed.window);
-  expect(
-    await page.evaluate(() => {
-      const link =
-        document.querySelector<HTMLAnchorElement>(".self-contained a")!;
-      link.focus();
-      const a = link.getBoundingClientRect();
-      const body = link
-        .closest<HTMLElement>(".setup-body")!
-        .getBoundingClientRect();
-      const hit = document.elementFromPoint(
-        a.x + a.width / 2,
-        a.y + a.height / 2,
-      );
-      return {
-        focused: document.activeElement === link,
-        whole: a.top >= body.top && a.bottom <= body.bottom,
-        hit: !!hit && link.contains(hit),
-      };
-    }),
-  ).toEqual({ focused: true, whole: true, hit: true });
-}
-
-describe.skipIf(!asked)(
-  "the Start screen that updates OpenBot says why",
-  () => {
-    for (const [width, height] of [
-      [1000, 800],
-      [1000, 760],
-      [720, 560],
-    ] as const)
-      for (const scheme of ["light", "dark"] as const) {
-        test(`in ${scheme}, at ${width}x${height}, it says it runs on this computer under the progress in the setup shell`, async () => {
-          const page = await browser.newPage({
-            viewport: { width, height },
-            colorScheme: scheme,
+describe.skipIf(!asked)("approved layout: update Journey", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const)
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`${width}x${height} ${colorScheme}: real stages, one operation and data reassurance fit`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        try {
+          await toStart(page);
+          await emitProgress(page, {
+            step: "release",
+            ok: true,
+            running: true,
+            detail: "Downloading the update.",
           });
-          try {
-            await toStart(page);
-            // OpenBot updating itself, its download under way, as in the report.
-            await emitProgress(page, {
-              step: "release",
-              ok: true,
-              running: true,
-              detail: "Downloading the update.",
+          await page
+            .locator(".journey-said", { hasText: "Downloading the update" })
+            .waitFor();
+          const seen = await updateScreen(page);
+          expect(seen.heading).toBe("Updating OpenBot (Self-Contained)");
+          expect(seen.sidebars).toBe(0);
+          expect(seen.promo).toBe(0);
+          expect(seen.bars).toBe(1);
+          expect(seen.sideways).toBe(false);
+          expect(seen.overflow).toBe(false);
+          expect(seen.reassuranceCopy).toContain(
+            "Your Bots, sign-ins and data stay as they are.",
+          );
+          expect(seen.safety).toContain("You can't cancel this last step");
+          expect(seen.stages.map((row) => row.name)).toEqual([
+            "Setting up OpenBot",
+            "Connecting OpenBot",
+            "Getting OpenBot ready",
+            "Opening OpenBot",
+          ]);
+          const stages = seen.stages.map((row) => row.box!);
+          expect(
+            stages.every((row) => Math.abs(row.top - stages[0].top) < 1),
+          ).toBe(true);
+          expect(
+            stages.every(
+              (row, i) => i === 0 || row.left >= stages[i - 1].right,
+            ),
+          ).toBe(true);
+          expect(seen.operation!.top).toBeGreaterThanOrEqual(seen.bodyBox!.top);
+          expect(seen.reassurance!.bottom).toBeLessThanOrEqual(
+            seen.bodyBox!.bottom + 1,
+          );
+          await emitProgress(page, {
+            step: "engine",
+            ok: true,
+            running: true,
+            elsewhere: true,
+            detail: DOCKER_STARTING,
+          });
+          await page.locator(".journey.handing-off").waitFor();
+          const handoff = await updateScreen(page);
+          expect(handoff.headingBox).toEqual(seen.headingBox);
+          expect(handoff.reassurance!.bottom).toBeLessThanOrEqual(
+            handoff.bodyBox!.bottom + 1,
+          );
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/update-journey-${width}x${height}-${colorScheme}.png`,
             });
-            await page
-              .locator(".journey-said", { hasText: "Downloading the update" })
-              .waitFor();
-            await page.waitForTimeout(400);
-            const shots = process.env.OPENBOT_APP_SHOTS;
-            if (shots)
-              await page.screenshot({
-                path: `${shots}/update-screen-${width}x${height}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}.png`,
-              });
-
-            const seen = await updateScreen(page);
-            expect(seen.heading).toBe("Updating OpenBot (Self-Contained)");
-            expect(seen.note).toContain("Everything runs on this computer");
-            expect(seen.note).toContain("This OpenBot is self-contained.");
-            expect(seen.said).toBe(true);
-            expect(seen.note).toContain("OpenBot for Business");
-            expect(seen.note).not.toMatch(/—/);
-            // Nothing to click to go on: its one link opens a page, and the update carries on.
-            expect(seen.buttons).toBe(0);
-            expect(seen.link).toBe("https://open.bot/business");
-            await expectWholeUnderProgress(seen, page);
-
-            // Docker Desktop's hand-off, its three lines, while the update waits on Docker: the
-            // journey grows by the operation text's extra lines. The note says less while it shows.
-            await emitProgress(page, {
-              step: "engine",
-              ok: true,
-              running: true,
-              elsewhere: true,
-              detail: DOCKER_STARTING,
-            });
-            await page.locator(".journey.handing-off").waitFor();
-            await page.waitForTimeout(400);
-            if (shots)
-              await page.screenshot({
-                path: `${shots}/update-screen-${width}x${height}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}-docker.png`,
-              });
-            const handingOff = await updateScreen(page);
-            expect(handingOff.journeyHeight - seen.journeyHeight).toBeCloseTo(
-              handingOff.operationHeight - seen.operationHeight,
-              3,
-            );
-            expect(handingOff.heading).toBe(
-              "Updating OpenBot (Self-Contained)",
-            );
-            expect(handingOff.note).toContain(
-              "Everything runs on this computer",
-            );
-            expect(handingOff.said).toBe(false);
-            expect(handingOff.note).toContain("OpenBot for Business");
-            expect(handingOff.link).toBe("https://open.bot/business");
-            await expectWholeUnderProgress(handingOff, page);
-            if (height < 760) {
-              await page.evaluate(() =>
-                document
-                  .querySelector(".self-contained")
-                  ?.scrollIntoView({ block: "end" }),
-              );
-              const scrolled = await updateScreen(page);
-              expect(scrolled.noteBox?.bottom).toBeLessThanOrEqual(height);
-              expect(scrolled.noteBox?.top).toBeGreaterThanOrEqual(0);
-            }
-
-            // Docker answers and the hand-off goes: the note says all of it again.
-            await emitProgress(page, {
-              step: "engine",
-              ok: true,
-              running: false,
-              detail: "Docker is answering.",
-            });
-            await page
-              .locator(".journey.handing-off")
-              .waitFor({ state: "hidden" });
-            expect((await updateScreen(page)).said).toBe(true);
-
-            // Book a demo opens OpenBot for Business's page in the person's browser.
-            if (width === 720) {
-              await page.evaluate(() =>
-                document
-                  .querySelector<HTMLAnchorElement>(".self-contained a")!
-                  .focus(),
-              );
-              await page.keyboard.press("Enter");
-            } else
-              await page.getByRole("link", { name: "Book a demo" }).click();
-            await page.waitForTimeout(200);
-            expect(
-              await page.evaluate(
-                () =>
-                  (globalThis as unknown as { __fake: { opened: string[] } })
-                    .__fake.opened,
-              ),
-            ).toEqual(["https://open.bot/business"]);
-            // Still the update, on the same screen.
-            expect(
-              await page.evaluate(
-                () => document.querySelector("main h1")?.textContent,
-              ),
-            ).toBe("Updating OpenBot (Self-Contained)");
-          } finally {
-            await page.close();
-          }
-        }, 30_000);
-      }
-  },
-);
+        } finally {
+          await page.close();
+        }
+      }, 30000);
+});
 
 describe.skipIf(!asked)(
   "the account step for a person already signed in",
@@ -4338,7 +4300,7 @@ describe.skipIf(!asked)("approved layout: account", () => {
           if (titleY !== undefined) expect(now.titleY).toBe(titleY);
           expect(now.bodyTop).toBeGreaterThanOrEqual(now.headerBottom - 1);
           expect(now.bodyBottom).toBeLessThanOrEqual(height);
-          expect(now.contentWidth).toBeLessThanOrEqual(480);
+          expect(now.contentWidth).toBeLessThanOrEqual(600);
           if (
             now.contentHeight + (width === 1000 ? 60 : 36) <=
             now.bodyHeight
@@ -4899,7 +4861,7 @@ describe.skipIf(!asked)("approved layout: provider", () => {
               identityOutsideScroller: identity.parentElement === sheet,
               bodyOverflow: body.scrollWidth > body.clientWidth,
               panelWidth: p.width,
-              centerX: (p.left + p.right - b.left - b.right) / 2,
+              leftOffset: p.left - b.left,
               centerY: (p.top + p.bottom - b.top - b.bottom) / 2,
               topOffset:
                 p.top -
@@ -4917,8 +4879,8 @@ describe.skipIf(!asked)("approved layout: provider", () => {
           expect(now.actionHit).toBe(true);
           expect(now.identityOutsideScroller).toBe(true);
           expect(now.bodyOverflow).toBe(false);
-          expect(now.panelWidth).toBeLessThanOrEqual(480);
-          expect(Math.abs(now.centerX)).toBeLessThanOrEqual(1);
+          expect(now.panelWidth).toBeLessThanOrEqual(600);
+          expect(Math.abs(now.leftOffset)).toBeLessThanOrEqual(1);
           if (baseline) {
             expect(
               Math.abs(now.actionY - baseline.actionY),
@@ -5250,7 +5212,7 @@ describe.skipIf(!asked)("approved layout: install", () => {
           expect(now.bodyTop).toBeGreaterThanOrEqual(now.headerBottom - 1);
           expect(now.bodyBottom).toBeLessThanOrEqual(now.footerTop + 1);
           expect(now.footerBottom).toBeLessThanOrEqual(height);
-          expect(now.contentWidth).toBeLessThanOrEqual(480);
+          expect(now.contentWidth).toBeLessThanOrEqual(600);
           expect(Math.abs(now.centerX)).toBeLessThanOrEqual(1);
           if (width === 1000 && now.contentHeight + 60 <= now.bodyHeight)
             expect(Math.abs(now.centerY)).toBeLessThanOrEqual(1);
@@ -5548,7 +5510,7 @@ describe.skipIf(!asked)("approved layout: finishing", () => {
           expect(now.bodyBottom).toBeLessThanOrEqual(now.footerTop + 1);
           expect(now.checkboxWhole).toBe(true);
           expect(now.checkboxHit).toBe(true);
-          expect(now.contentWidth).toBeLessThanOrEqual(480);
+          expect(now.contentWidth).toBeLessThanOrEqual(600);
           expect(Math.abs(now.centerX)).toBeLessThanOrEqual(1);
           if (width === 720)
             expect(Math.abs(now.topOffset)).toBeLessThanOrEqual(1);

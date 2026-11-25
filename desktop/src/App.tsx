@@ -47,7 +47,8 @@ import {
   recordedModel,
 } from "./ProviderPicker";
 import { Sections, SetupRail } from "./Sections";
-import { SelfContainedNote, UPDATING_SELF_CONTAINED } from "./SelfContained";
+import { UPDATING_SELF_CONTAINED } from "./SelfContained";
+import { SetupPage } from "./SetupPage";
 import {
   engineNow,
   goAheadNow,
@@ -1453,12 +1454,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   // Nothing else on this screen can be done until the machine allows it, so nothing else is shown.
   if (blockerFailure) {
     return (
-      <main>
-        <div className="sheet">
-          <h1>OpenBot could not check Windows setup</h1>
-          <Failure problem={blockerFailure} />
-        </div>
-      </main>
+      <SetupPage heading="OpenBot could not check Windows setup">
+        <Failure problem={blockerFailure} />
+      </SetupPage>
     );
   }
 
@@ -1476,22 +1474,16 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
 
   if (checkingResume || checkingWindows) {
     return (
-      <main>
-        <SetupRail>
-          <Sections />
-        </SetupRail>
-        <div className="sheet connection-sheet">
-          <h1>Getting OpenBot ready</h1>
-          <p className="lede" role="status">
-            {windowsBusy
-              ? WINDOWS_BUSY
-              : checkingWindows
-                ? "Checking this computer…"
-                : "Checking your saved setup…"}
-          </p>
-          <SetupProgress steps={steps} />
-        </div>
-      </main>
+      <SetupPage heading="Getting OpenBot ready">
+        <p className="lede" role="status">
+          {windowsBusy
+            ? WINDOWS_BUSY
+            : checkingWindows
+              ? "Checking this computer…"
+              : "Checking your saved setup…"}
+        </p>
+        <SetupProgress steps={steps} />
+      </SetupPage>
     );
   }
 
@@ -1544,7 +1536,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         <SetupRail>
           <Sections at="Install" />
         </SetupRail>
-        <div className="sheet setup-layout install-layout">
+        <div className="sheet setup-layout page-first install-layout">
           <div className="setup-header-block">
             <h1>
               {installationReady
@@ -1792,7 +1784,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   if (starting && returning && !refreshIntelligence) {
     // A Start that moves the installation to this app's release is an update, and says so:
     // "Starting OpenBot" over "Updating OpenBot..." read as if nothing were updated. It says why
-    // an update has a screen at all, too: this OpenBot runs on this computer (`SelfContainedNote`).
+    // the real update stages replace setup navigation while the operation runs.
     const updatingSelf = localStarting && releaseDue && !installingAfresh;
     /*
      * An update this computer has no room for, OpenBot's own or the back end's: what it needs is
@@ -1816,122 +1808,115 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     const appBehind =
       !localStarting && !installingAfresh && appTooOld(displayedFailure);
     return (
-      <main>
-        <SetupRail />
-        <div className="sheet connection-sheet setup-layout finishing-layout returning-layout">
-          <header className="setup-header-block">
-            <h1>
-              {updatingSelf
-                ? UPDATING_SELF_CONTAINED
-                : localStarting || installingAfresh
-                  ? "Starting OpenBot"
-                  : appBehind
-                    ? forSecurity(displayedFailure) && displayedFailure
-                      ? displayedFailure.said
-                      : "Update OpenBot"
-                    : roomShort
-                      ? ROOM_HEADING
-                      : "OpenBot is stopped"}
-            </h1>
-            {!appBehind && (
-              <p className="lede">
-                {localStarting || installingAfresh
-                  ? // No time of its own: the card under it says how long is left, from how long each
-                    // part takes. "This usually takes a minute or two" sat over "About 3 minutes left"
-                    // on Windows G, and the start took four.
-                    "OpenBot is getting ready and opens by itself."
-                  : roomShort
-                    ? resourcesShortSaid(roomShort)
-                    : "Your installation and saved connections are ready to reopen."}
-              </p>
-            )}
-          </header>
-          <div className="setup-body">
-            <div className="setup-content">
-              {roomShort && (
-                <div className="row room-retry">
-                  <button type="button" disabled={busy} onClick={local.retry}>
-                    Retry
-                  </button>
-                </div>
-              )}
-              {freshInstall || appBehind || (
-                <LocalIntelligence
-                  sequence={local}
-                  offerStart
-                  handOff={handOff}
-                  open={steps}
-                  releaseDue={releaseDue}
-                  room={
-                    roomShort
-                      ? {
-                          reason: ROOM_REASON,
-                          logs: displayedFailure ?? {
-                            said: resourcesShortSaid(roomShort),
-                          },
-                        }
-                      : null
+      <SetupPage
+        className={updatingSelf ? "update-layout" : "returning-layout"}
+        heading={
+          updatingSelf
+            ? UPDATING_SELF_CONTAINED
+            : localStarting || installingAfresh
+              ? "Starting OpenBot"
+              : appBehind
+                ? forSecurity(displayedFailure) && displayedFailure
+                  ? displayedFailure.said
+                  : "Update OpenBot"
+                : roomShort
+                  ? ROOM_HEADING
+                  : "OpenBot is stopped"
+        }
+        lede={
+          !appBehind &&
+          (localStarting || installingAfresh
+            ? // No time of its own: the card under it says how long is left, from how long each
+              // part takes. "This usually takes a minute or two" sat over "About 3 minutes left"
+              // on Windows G, and the start took four.
+              "OpenBot is getting ready and opens by itself."
+            : roomShort
+              ? resourcesShortSaid(roomShort)
+              : "Your installation and saved connections are ready to reopen.")
+        }
+      >
+        {roomShort && (
+          <div className="row room-retry">
+            <button type="button" disabled={busy} onClick={local.retry}>
+              Retry
+            </button>
+          </div>
+        )}
+        {freshInstall || appBehind || (
+          <LocalIntelligence
+            sequence={local}
+            presentation={updatingSelf ? "journey" : "default"}
+            offerStart
+            handOff={handOff}
+            open={steps}
+            releaseDue={releaseDue}
+            room={
+              roomShort
+                ? {
+                    reason: ROOM_REASON,
+                    logs: displayedFailure ?? {
+                      said: resourcesShortSaid(roomShort),
+                    },
                   }
-                />
-              )}
-              {goAhead && <PodmanGoAhead asking={goAhead} />}
-              {pauseCard}
-              {updatingLine}
-              {displayedFailure &&
-                !roomShort &&
-                (appBehind ? (
-                  <AppTooOld problem={displayedFailure} headed={false} />
-                ) : (
-                  <Failure problem={displayedFailure} />
-                ))}
-              {updatingSelf && <SelfContainedNote />}
-              {/* While a local step runs, its Cancel is the only control. */}
-              {!localStarting && !installingAfresh && (
-                <>
-                  <div className="row">
-                    <button
-                      type="button"
-                      className="quiet"
-                      disabled={busy}
-                      onClick={() => setStep("model")}
-                    >
-                      Change AI connection
-                    </button>
-                    {/* Room is what is short: a repair installs again, and needs room too. And a
+                : null
+            }
+          />
+        )}
+        {goAhead && <PodmanGoAhead asking={goAhead} />}
+        {pauseCard}
+        {updatingLine}
+        {displayedFailure &&
+          !roomShort &&
+          (appBehind ? (
+            <AppTooOld problem={displayedFailure} headed={false} />
+          ) : (
+            <Failure problem={displayedFailure} />
+          ))}
+
+        {/* While a local step runs, its Cancel is the only control. */}
+        {!localStarting && !installingAfresh && (
+          <>
+            <div className="row">
+              <button
+                type="button"
+                className="quiet"
+                disabled={busy}
+                onClick={() => setStep("model")}
+              >
+                Change AI connection
+              </button>
+              {/* Room is what is short: a repair installs again, and needs room too. And a
                   release that needs a newer app is not broken: a repair lays the same one out. */}
-                    {displayedFailure && !roomShort && !appBehind && (
-                      <button
-                        type="button"
-                        className="quiet"
-                        disabled={busy}
-                        onClick={() => install()}
-                      >
-                        Repair installation
-                      </button>
-                    )}
-                  </div>
-                  {appUpdates}
-                  <details>
-                    <summary>Installation options</summary>
-                    <button
-                      type="button"
-                      className="quiet"
-                      disabled={busy}
-                      onClick={() => {
-                        setPreparation(null);
-                        setSteps([]);
-                        setStep("install");
-                      }}
-                    >
-                      Change installation
-                    </button>
-                  </details>
-                </>
+              {displayedFailure && !roomShort && !appBehind && (
+                <button
+                  type="button"
+                  className="quiet"
+                  disabled={busy}
+                  onClick={() => install()}
+                >
+                  Repair installation
+                </button>
               )}
             </div>
-          </div>
-        </div>
-      </main>
+            {appUpdates}
+            <details>
+              <summary>Installation options</summary>
+              <button
+                type="button"
+                className="quiet"
+                disabled={busy}
+                onClick={() => {
+                  setPreparation(null);
+                  setSteps([]);
+                  setStep("install");
+                }}
+              >
+                Change installation
+              </button>
+            </details>
+          </>
+        )}
+      </SetupPage>
     );
   }
 
@@ -1956,7 +1941,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     return (
       <main>
         <SetupRail>{!returning && <Sections at="Start" />}</SetupRail>
-        <div className="sheet connection-sheet setup-layout finishing-layout">
+        <div className="sheet connection-sheet setup-layout page-first finishing-layout">
           <header className="setup-header-block">
             {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
             <h1>Finishing setup</h1>
@@ -2032,84 +2017,82 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     );
   }
 
+  const statusActions = (
+    <div className="row">
+      <button
+        type="button"
+        /*
+         * The refusal is shown, not swallowed.
+         *
+         * `show_openbot` answers with "OpenBot is not answering on port 3010 yet, so there is
+         * nothing to show" when the app host process is not up, and this button dropped it on
+         * the floor. Clicking it then did nothing at all, on a screen headed "OpenBot is
+         * running", which is the worst of both: a true sentence was available and the window
+         * threw it away.
+         */
+        onClick={showOpenBot}
+        disabled={busy || showing}
+      >
+        Show OpenBot
+      </button>
+      <button
+        type="button"
+        className="quiet"
+        onClick={stop}
+        disabled={busy || showing}
+      >
+        Stop OpenBot
+      </button>
+    </div>
+  );
   return (
-    <main>
-      <div className="sheet connection-sheet">
-        {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
-          back here, and a heading that still says everything is running while the box underneath
-          names the process that stopped is a screen arguing with itself. */}
-        {/* Running, and needing a newer version of this app: nothing stopped, so the heading says
-          what to do and the card under it offers the update. */}
-        <h1>
-          {forSecurity(displayedFailure) && displayedFailure
-            ? displayedFailure.said
-            : appTooOld(displayedFailure)
-              ? "Update OpenBot"
-              : displayedFailure
-                ? "OpenBot stopped"
-                : "OpenBot is running"}
-        </h1>
-        {/* The back end runs the release it had: information, said where the lede goes. Nothing
+    <SetupPage
+      footer={statusActions}
+      heading={
+        forSecurity(displayedFailure) && displayedFailure
+          ? displayedFailure.said
+          : appTooOld(displayedFailure)
+            ? "Update OpenBot"
+            : displayedFailure
+              ? "OpenBot stopped"
+              : "OpenBot is running"
+      }
+    >
+      {/* The back end runs the release it had: information, said where the lede goes. Nothing
           failed, so it is not drawn as a failure and offers no help. */}
-        {!displayedFailure && backEndNotice && (
-          <p className="lede" role="status">
-            {backEndNotice}
-          </p>
-        )}
-        {!displayedFailure && !releaseNotice && !backEndNotice && (
-          <p className="lede">
-            OpenBot is open in this window. You can also show it or stop it from
-            its icon in {trayPlace()}.
-          </p>
-        )}
-        {/* Start went back to the version this installation had. Said before handing over. */}
-        {!displayedFailure && releaseNotice && (
-          <InlineFailure problem={releaseNotice} />
-        )}
-        {/* The start's rows only when something failed, to show where. Once OpenBot runs they are
+      {!displayedFailure && backEndNotice && (
+        <p className="lede" role="status">
+          {backEndNotice}
+        </p>
+      )}
+      {!displayedFailure && !releaseNotice && !backEndNotice && (
+        <p className="lede">
+          OpenBot is open in this window. You can also show it or stop it from
+          its icon in {trayPlace()}.
+        </p>
+      )}
+      {/* Start went back to the version this installation had. Said before handing over. */}
+      {!displayedFailure && releaseNotice && (
+        <InlineFailure problem={releaseNotice} />
+      )}
+      {/* The start's rows only when something failed, to show where. Once OpenBot runs they are
           all done, and they flashed for the moment before it opened with the native side's own
           words ("settings written, credentials stored"). */}
-        {appTooOld(displayedFailure) && displayedFailure ? (
-          <AppTooOld problem={displayedFailure} headed={false} />
-        ) : (
-          <>
-            {displayedFailure && <SetupProgress steps={steps} />}
-            {displayedFailure && <Failure problem={displayedFailure} />}
-          </>
-        )}
-        {stopping && <StatusLine>Stopping OpenBot…</StatusLine>}
-        {showing && <StatusLine>Loading OpenBot…</StatusLine>}
-        <div className="row">
-          <button
-            type="button"
-            /*
-             * The refusal is shown, not swallowed.
-             *
-             * `show_openbot` answers with "OpenBot is not answering on port 3010 yet, so there is
-             * nothing to show" when the app host process is not up, and this button dropped it on
-             * the floor. Clicking it then did nothing at all, on a screen headed "OpenBot is
-             * running", which is the worst of both: a true sentence was available and the window
-             * threw it away.
-             */
-            onClick={showOpenBot}
-            disabled={busy || showing}
-          >
-            Show OpenBot
-          </button>
-          <button
-            type="button"
-            className="quiet"
-            onClick={stop}
-            disabled={busy || showing}
-          >
-            Stop OpenBot
-          </button>
-        </div>
-        {/* Under the buttons, as on the stopped screen. A disclosure draws a rule above itself, and
+      {appTooOld(displayedFailure) && displayedFailure ? (
+        <AppTooOld problem={displayedFailure} headed={false} />
+      ) : (
+        <>
+          {displayedFailure && <SetupProgress steps={steps} />}
+          {displayedFailure && <Failure problem={displayedFailure} />}
+        </>
+      )}
+      {stopping && <StatusLine>Stopping OpenBot…</StatusLine>}
+      {showing && <StatusLine>Loading OpenBot…</StatusLine>}
+
+      {/* Under the buttons, as on the stopped screen. A disclosure draws a rule above itself, and
           first in the card it opened the card on a line with nothing above it. */}
-        {returningToInstallation && appUpdates}
-      </div>
-    </main>
+      {returningToInstallation && appUpdates}
+    </SetupPage>
   );
 }
 

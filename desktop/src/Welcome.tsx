@@ -268,6 +268,24 @@ export function Welcome({
   // cloud or on-prem: OpenBot Cloud is the row above it.
   const way: BusinessWay =
     cloudOn || businessWay === "own-cloud" ? "self-hosted" : "cloud";
+  const localChoice = (
+    <label className={rowClass(shown === "this-computer")}>
+      <input
+        type="radio"
+        name="hosting"
+        className="tile-input"
+        value="this-computer"
+        checked={shown === "this-computer"}
+        disabled={held}
+        onChange={pickThisComputer}
+      />
+      <HostingMark>
+        <IconDeviceLaptop stroke={1.75} />
+      </HostingMark>
+      <span className="tile-name">OpenBot (Self-Contained)</span>
+      <span className="tile-summary">{SELF_CONTAINED_SUMMARY}</span>
+    </label>
+  );
   return (
     <>
       <SetupRail
@@ -281,57 +299,12 @@ export function Welcome({
             {!resumes && startDownloads && (
               <EarlyDownloadsLine firstScreen quiet />
             )}
-            {cloudOn && (
-              <section
-                className="this-computer-foot"
-                aria-label="Run on this computer"
-              >
-                {shown === "this-computer" ? (
-                  <p className="this-computer-aside">
-                    <span className="this-computer-name">
-                      OpenBot (Self-Contained)
-                    </span>{" "}
-                    {SELF_CONTAINED_SUMMARY}
-                  </p>
-                ) : (
-                  <p className="this-computer-aside">
-                    {SELF_CONTAINED_ASIDE}{" "}
-                    <button
-                      type="button"
-                      className="text-link inline-link"
-                      disabled={held}
-                      onClick={pickThisComputer}
-                    >
-                      Use OpenBot (Self-Contained)
-                    </button>
-                    .
-                  </p>
-                )}
-              </section>
-            )}
           </>
         }
       >
         <fieldset className="picker hosting">
           <legend className="sr-only">Where OpenBot runs</legend>
-          {!cloudOn && (
-            <label className={rowClass(shown === "this-computer")}>
-              <input
-                type="radio"
-                name="hosting"
-                className="tile-input"
-                value="this-computer"
-                checked={shown === "this-computer"}
-                disabled={held}
-                onChange={pickThisComputer}
-              />
-              <HostingMark>
-                <IconDeviceLaptop stroke={1.75} />
-              </HostingMark>
-              <span className="tile-name">OpenBot (Self-Contained)</span>
-              <span className="tile-summary">{SELF_CONTAINED_SUMMARY}</span>
-            </label>
-          )}
+          {!cloudOn && localChoice}
           {cloudOn ? (
             <>
               <label className={rowClass(shown === "cloud")}>
@@ -369,6 +342,7 @@ export function Welcome({
                 <span className="tile-summary">{BUSINESS_SUMMARY}</span>
                 <CloudMarks />
               </label>
+              {localChoice}
             </>
           ) : (
             /* OpenBot for Business, its two ways in one card: both book a demo. */
@@ -424,14 +398,19 @@ export function Welcome({
           )}
         </fieldset>
       </SetupRail>
-      <div className="sheet welcome">
+      <div
+        className={`sheet welcome${shown === "cloud" || shown === "connect" || cloudOn ? " page-first" : ""}`}
+      >
         {shown !== "business" && pageHead}
         {shown === "connect" ? (
-          <ConnectToOpenBot connecting={connecting} onBack={back} />
+          <div className="welcome-task">
+            <ConnectToOpenBot connecting={connecting} onBack={back} />
+          </div>
         ) : shown === "cloud" ? (
-          <CloudSignIn connecting={signingIn} focus={pickedNow} />
+          <div className="welcome-task">
+            <CloudSignIn connecting={signingIn} focus={pickedNow} />
+          </div>
         ) : shown === "business" ? (
-          // Each way is its own page: picking the other one starts it from its features.
           <BusinessBooker key={way} way={way} head={pageHead} />
         ) : (
           <SelfContained

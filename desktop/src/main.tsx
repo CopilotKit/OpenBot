@@ -14,6 +14,7 @@ import { isStatusPage, StatusWindow } from "./StatusWindow";
 import "@fontsource-variable/inter";
 import "./styles.css";
 import "./setup-layout.css";
+import "./setup-page-first.css";
 import { UpdateOffer } from "./UpdateOffer";
 
 /**

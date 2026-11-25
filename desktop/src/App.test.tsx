@@ -1555,11 +1555,9 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
    * keyboard or a screen reader meets them. The screen steers to OpenBot Cloud, first and picked,
    * which this app signs in to, and OpenBot for Business, a company's own cloud or on-prem, which
    * books a demo, with the link to connect to a company's own OpenBot. OpenBot (Self-Contained) is a
-   * line at the very foot of the card, below everything else: never picked, never shaded, never the
-   * way back. Before, Self-Contained came first and was picked, then a smaller row between the
-   * choices.
+   * third native radio choice, alongside Cloud and Business.
    */
-  test("the first screen opens on OpenBot Cloud, then OpenBot for Business and its link, with OpenBot (Self-Contained) a line at its foot", async () => {
+  test("the first screen opens on OpenBot Cloud, then OpenBot for Business and its link, with OpenBot (Self-Contained) the third hosting choice", async () => {
     setupRootConfiguration("/tmp/local-eval-welcome-cloud", async () =>
       emptyConfiguration(),
     );
@@ -1573,10 +1571,12 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
       "OpenBot CloudYour Bots run in our cloud. Free usage-based trial.",
       "OpenBot for BusinessYour own cloud or on-prem. Book a demo.",
+      "OpenBot (Self-Contained)Everything runs on this computer, for trying it or personal use.",
     ]);
     expect(radios.map((radio) => [radio.value, radio.checked])).toEqual([
       ["cloud", true],
       ["business", false],
+      ["this-computer", false],
     ]);
     // The order a keyboard and a screen reader meet them: down the sidebar, Cloud, Business, and
     // at its foot the way to Self-Contained and the link; then the page, Cloud's sign-in.
@@ -1590,19 +1590,12 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     expect(order()).toEqual([
       "cloud",
       "business",
+      "this-computer",
       "Connect to it",
-      "Use OpenBot (Self-Contained)",
       "Sign in to OpenBot Cloud",
     ]);
-    // Self-Contained is a line with a link at the sidebar's foot, under the choices: not a row, not
-    // picked, and not on the page.
-    const foot = view.getByRole("region", { name: "Run on this computer" });
-    expect(foot.textContent).toBe(
-      "Want everything to run on this computer? Use OpenBot (Self-Contained).",
-    );
-    expect(foot.closest("aside.rail > .rail-foot")).not.toBeNull();
-    expect(foot.closest(".sheet")).toBeNull();
-    expect(foot.querySelector(".tile, .chosen")).toBeNull();
+    // All three hosting choices remain in the same keyboard-accessible group.
+    expect(radios[2].closest("fieldset.hosting")).not.toBeNull();
     // The page is the picked choice, under its own name.
     expect(
       view.getByRole("heading", { name: "OpenBot Cloud" }).closest(".sheet"),
@@ -1642,11 +1635,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     expect(
       view.queryByRole("button", { name: "Sign in to OpenBot Cloud" }),
     ).toBeNull();
-    expect(
-      within(view.getByRole("region", { name: "Run on this computer" }))
-        .getByRole("button", { name: "Use OpenBot (Self-Contained)" })
-        .closest(".rail-foot"),
-    ).not.toBeNull();
+    expect(radios[2]?.closest("fieldset.hosting")).not.toBeNull();
     // Book a demo opens the calendar as its own step, its heading focused.
     await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
     expect(document.activeElement).toBe(
@@ -1659,7 +1648,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     const field = view.getByLabelText("Your company's OpenBot address");
     expect(document.activeElement).toBe(field);
     expect(field.getAttribute("aria-describedby")?.split(" ").length).toBe(2);
-    expect(radios.map((radio) => radio.checked)).toEqual([false, false]);
+    expect(radios.map((radio) => radio.checked)).toEqual([false, false, false]);
     expect(view.queryByTitle("Booking calendar")).toBeNull();
     expect(
       view.getByText(
@@ -1675,23 +1664,20 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     // Every choice is this app on this computer, so it is Back, not "use OpenBot on this computer".
     expect(view.queryByText(/on this computer instead/)).toBeNull();
     await userEvent.click(view.getByRole("button", { name: "Back" }));
-    expect(radios.map((radio) => radio.checked)).toEqual([true, false]);
+    expect(radios.map((radio) => radio.checked)).toEqual([true, false, false]);
     expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
     expect(buttons(view)).toEqual([
       "Connect to it",
       "Sign in to OpenBot Cloud",
-      "Use OpenBot (Self-Contained)",
     ]);
     expectPlain(view);
     expect(localCliCalls()).toEqual([]);
   });
 
   /*
-   * OpenBot (Self-Contained), opened from its line at the sidebar's foot: the page is it, under its
-   * own name, with what this computer needs and why, the setup time and Install, and neither row
-   * picked. The foot names it as the one open. Install sets it up.
+   * Self-Contained is the third choice. Selecting it shows local requirements; Install sets it up.
    */
-  test("OpenBot (Self-Contained), opened at the foot, shows what this computer needs and Install, which sets it up", async () => {
+  test("OpenBot (Self-Contained), chosen in the sidebar, shows what this computer needs and Install, which sets it up", async () => {
     setupRootConfiguration("/tmp/cloud-self-contained", async () =>
       emptyConfiguration(),
     );
@@ -1703,17 +1689,13 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     });
     const view = await renderApp();
     await userEvent.click(
-      view.getByRole("button", { name: "Use OpenBot (Self-Contained)" }),
+      view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
     );
     expect(
       (view.getAllByRole("radio") as HTMLInputElement[]).map(
         (radio) => radio.checked,
       ),
-    ).toEqual([false, false]);
-    const foot = view.getByRole("region", { name: "Run on this computer" });
-    expect(foot.querySelector(".this-computer-aside")?.textContent).toBe(
-      "OpenBot (Self-Contained) Everything runs on this computer, for trying it or personal use.",
-    );
+    ).toEqual([false, false, true]);
     const page = view
       .getByRole("heading", { name: "OpenBot (Self-Contained)" })
       .closest(".sheet") as HTMLElement;
@@ -1721,7 +1703,6 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     expect(
       within(page).getByRole("heading", { name: "What this computer needs" }),
     ).toBeTruthy();
-    expect(within(foot).queryByRole("heading")).toBeNull();
     expect(
       [...page.querySelectorAll(".needs-list li")].map(
         (item) => item.textContent,
@@ -1745,7 +1726,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
       view.queryByRole("heading", { name: "What this computer needs" }),
     ).toBeNull();
     await userEvent.click(
-      view.getByRole("button", { name: "Use OpenBot (Self-Contained)" }),
+      view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
     );
     // Not chosen until Install: looking at it is not an answer.
     expect(
@@ -1784,11 +1765,11 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     ).toEqual([
       ["cloud", true],
       ["business", false],
+      ["this-computer", false],
     ]);
     expect(buttons(view)).toEqual([
       "Connect to it",
       "Sign in to OpenBot Cloud",
-      "Use OpenBot (Self-Contained)",
     ]);
   });
 
@@ -1846,7 +1827,6 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     expect(buttons(view)).toEqual([
       "Connect to it",
       "Sign in to OpenBot Cloud",
-      "Use OpenBot (Self-Contained)",
     ]);
     expectPlain(view);
 
@@ -1862,14 +1842,10 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
       (view.getAllByRole("radio") as HTMLInputElement[]).map(
         (radio) => radio.disabled,
       ),
-    ).toEqual([true, true]);
-    expect(buttons(view)).toEqual([
-      "Cancel",
-      "Connect to it",
-      "Use OpenBot (Self-Contained)",
-    ]);
+    ).toEqual([true, true, true]);
+    expect(buttons(view)).toEqual(["Cancel", "Connect to it"]);
     expect(
-      view.getByRole("button", { name: "Use OpenBot (Self-Contained)" }),
+      view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
     ).toHaveProperty("disabled", true);
     await userEvent.click(view.getByRole("button", { name: "Cancel" }));
     expect(asked(from).map((call) => call.command)).toEqual([
@@ -4761,8 +4737,16 @@ test("the running screen opens on its heading, with Updates under the buttons, w
     name: "OpenBot is running",
   });
   const sheet = heading.closest(".sheet") as HTMLElement;
-  expect(order(sheet)).toEqual(["heading", "p", "buttons", "details:Updates"]);
-  expect(sheet.firstElementChild === heading).toBe(true);
+  expect(
+    sheet.querySelector(":scope > .setup-header-block")?.contains(heading),
+  ).toBe(true);
+  expect(order(sheet.querySelector(".setup-content")!)).toEqual([
+    "p",
+    "details:Updates",
+  ]);
+  expect(order(sheet.querySelector(":scope > .setup-footer")!)).toEqual([
+    "buttons",
+  ]);
   expect(view.queryByRole("list", { name: "Setup progress" })).toBeNull();
 
   showFails = true;
@@ -4772,14 +4756,17 @@ test("the running screen opens on its heading, with Updates under the buttons, w
   // The rows still show where it stopped, between the heading and the buttons.
   const rows = view.getByRole("list", { name: "Setup progress" });
   expect(within(rows).getAllByRole("listitem").length).toBeGreaterThan(0);
-  expect(order(failedSheet)).toEqual([
-    "heading",
-    "rows",
-    expect.any(String),
+  expect(
+    failedSheet
+      .querySelector(":scope > .setup-header-block")
+      ?.contains(stopped),
+  ).toBe(true);
+  expect(failedSheet.querySelector(".setup-content")?.contains(rows)).toBe(
+    true,
+  );
+  expect(order(failedSheet.querySelector(":scope > .setup-footer")!)).toEqual([
     "buttons",
-    "details:Updates",
   ]);
-  expect(failedSheet.firstElementChild === stopped).toBe(true);
   expect(view.getByRole("alert").textContent).toContain(
     "OpenBot is not answering on port 3010 yet",
   );
@@ -5101,7 +5088,7 @@ test("relaunch upgrades an older installation to this app's release as part of S
     ).toBe(true),
   );
   const sheet = view.container.querySelector<HTMLElement>(
-    ".sheet.setup-layout.finishing-layout.returning-layout",
+    ".sheet.setup-layout.standalone-layout.update-layout",
   );
   expect(sheet).not.toBeNull();
   const header = sheet?.querySelector<HTMLElement>(
@@ -5122,8 +5109,7 @@ test("relaunch upgrades an older installation to this app's release as part of S
   // Returning installs keep their existing consent and do not ask again.
   expect(view.queryByRole("checkbox")).toBeNull();
   // Said while the upgrade runs, which can take minutes.
-  const said =
-    "Updating OpenBot. Your Bots, sign-ins and data stay as they are.";
+  const said = "Your Bots, sign-ins and data stay as they are.";
   await emitProgress({
     step: "release",
     ok: true,
@@ -5138,15 +5124,14 @@ test("relaunch upgrades an older installation to this app's release as part of S
   expect(view.getByText(said)).toBeTruthy();
   expect(
     view.container.querySelector<HTMLElement>(
-      ".finishing-layout > .setup-header-block",
+      ".update-layout > .setup-header-block",
     ),
   ).toBe(header!);
   expect(content?.contains(view.getByText(said))).toBe(true);
   expect(
-    content?.contains(
-      view.getByRole("heading", { name: "Everything runs on this computer" }),
-    ),
-  ).toBe(true);
+    view.queryByRole("region", { name: "Everything runs on this computer" }),
+  ).toBeNull();
+  expect(sheet?.querySelector(".setup-timeline")).not.toBeNull();
 
   await act(async () =>
     moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
@@ -5524,7 +5509,7 @@ describe("the move to OpenBot Cloud, due at a launch that would update OpenBot",
  * says that everything runs on this computer, then offers OpenBot for Business, whose Book a demo
  * opens its page in the person's browser. Nothing in it is a step: the update goes on by itself.
  */
-test("updating OpenBot says it runs on this computer, and Book a demo opens OpenBot for Business", async () => {
+test("updating OpenBot uses Journey and data reassurance without a promotional card", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-self-contained",
     localStatus("ready", "valid"),
@@ -5549,34 +5534,19 @@ test("updating OpenBot says it runs on this computer, and Book a demo opens Open
       name: "Updating OpenBot (Self-Contained)",
     }),
   ).toBeTruthy();
-  // A returning installation uses the same sidebar and inset page as a first setup.
-  expect(view.getByRole("complementary", { name: /^Setup$/ })).toBeTruthy();
-  const note = view.getByRole("region", {
-    name: "Everything runs on this computer",
-  });
-  expect(note.textContent).toContain(
-    "This OpenBot is self-contained. Its services run here, so they update here too.",
+  expect(view.queryByRole("complementary", { name: /^Setup$/ })).toBeNull();
+  const reassurance = view.getByText(
+    "Your Bots, sign-ins and data stay as they are.",
   );
-  expect(note.textContent).toContain(
-    "For teams and production, OpenBot for Business runs in OpenBot Cloud, your own cloud or on-prem.",
-  );
-  // Under the progress, and nothing in it to press to go on.
   const journey = view.getByRole("region", { name: "How far along" });
   expect(
-    journey.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING,
+    journey.compareDocumentPosition(reassurance) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
-  expect(within(note).queryAllByRole("button")).toHaveLength(0);
-
-  await userEvent.click(
-    within(note).getByRole("link", { name: "Book a demo" }),
-  );
-  await waitFor(() =>
-    expect(
-      invokeCalls
-        .filter((call) => call.command === "plugin:opener|open_url")
-        .map((call) => call.args),
-    ).toEqual([{ url: "https://open.bot/business" }]),
-  );
+  expect(
+    view.queryByRole("region", { name: "Everything runs on this computer" }),
+  ).toBeNull();
+  expect(view.container.querySelector(".setup-timeline")).not.toBeNull();
   // The update carries on, on the same screen, and opens OpenBot when it is done.
   expect(
     view.getByRole("heading", { name: "Updating OpenBot (Self-Contained)" }),
@@ -5650,7 +5620,7 @@ async function handsOverWithoutRunning() {
       view.queryByRole("region", {
         name: "Everything runs on this computer",
       }) !== null,
-    ).toBe(updates);
+    ).toBe(false);
     await act(async () => showing.resolve(null));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
     expect(view.getByRole("heading", { name: heading })).toBeTruthy();
@@ -5802,18 +5772,20 @@ test("the journey says the update step running now, never one that finished, on 
     // The journey owns the update; its reassurance stays visible without a duplicate current row.
     expect(view.queryByRole("list", { name: "Update progress" })).toBeNull();
     expect(
-      view.getByText(
-        "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
-      ),
+      view.getByText("Your Bots, sign-ins and data stay as they are."),
     ).toBeTruthy();
-    expect(
-      view.queryByRole("listitem", { name: "Opening OpenBot" }),
-    ).toBeNull();
-    expectCompletedMilestones(view, [
+    const stages = [
+      ...view.container.querySelectorAll(".setup-timeline > .step"),
+    ];
+    expect(stages.map((row) => row.getAttribute("aria-label"))).toEqual([
       "Setting up OpenBot",
       "Connecting OpenBot",
       "Getting OpenBot ready",
+      "Opening OpenBot",
     ]);
+    expect(
+      stages.slice(0, 3).every((row) => row.textContent?.includes("Complete")),
+    ).toBe(true);
     expect(view.container.querySelectorAll(".step-spinner")).toHaveLength(1);
   }
   // Nothing an earlier step said is left on the screen.

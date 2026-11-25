@@ -748,7 +748,7 @@ export function ProviderPicker({
       <SetupRail foot={background}>
         {!returning && <Sections at="AI" />}
       </SetupRail>
-      <div className="sheet setup-layout provider-layout">
+      <div className="sheet setup-layout page-first provider-layout">
         <div className="setup-header-block">
           <h1>
             {returning ? "Refresh your AI connection" : "Connect your AI"}

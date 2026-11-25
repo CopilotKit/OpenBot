@@ -195,7 +195,7 @@ export function SetupProgress({
   steps: Progress[];
   label?: string;
   showElapsed?: boolean;
-  presentation?: "list" | "focus" | "milestones";
+  presentation?: "list" | "focus" | "milestones" | "timeline";
   /**
    * A running row is marked without a spinner: something else on the screen is already the one
    * thing that spins (the step's own wait, or the Start's journey), and two read as two waits.
@@ -225,9 +225,11 @@ export function SetupProgress({
   const className =
     presentation === "focus"
       ? "steps setup-progress-focus"
-      : presentation === "milestones"
-        ? "steps setup-milestones"
-        : "steps";
+      : presentation === "timeline"
+        ? "steps setup-timeline"
+        : presentation === "milestones"
+          ? "steps setup-milestones"
+          : "steps";
   return (
     <ol className={className} aria-label={label} aria-live="polite">
       {rows.map((step, index) => (
