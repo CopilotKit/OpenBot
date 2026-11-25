@@ -219,7 +219,7 @@ test("Move to OpenBot Cloud says what happens first, then asks the desktop app t
     "Your Bots, conversations, memory, skills, routines and files move to your OpenBot Cloud account.",
   );
   expect(dialog.textContent).toContain(
-    "Your app connections are private, so they can't move.",
+    "Apps connected with a key come across connected. You'll sign in to the rest again in OpenBot Cloud.",
   );
   expect(dialog.textContent).toContain(
     "Nothing is removed from this computer until everything has arrived and been checked.",

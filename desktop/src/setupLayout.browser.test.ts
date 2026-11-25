@@ -141,6 +141,19 @@ const MORE_APPS = [
   { appId: "google-calendar", appName: "Google Calendar", accountLabel: "sam@example.com" },
   { appId: "hubspot", appName: "HubSpot" },
 ];
+// \`#move-confirm-carried\`, \`#move-done-carried\`, \`#move-done-ai-carried\`: apps connected with a key
+// come across connected, the rest are signed in to again, and on the result one Cloud couldn't connect.
+const carriedMove = Boolean(move && move.endsWith("-carried"));
+const SIGN_IN_APPS = [
+  { appId: "gmail", appName: "Gmail", accountLabel: "sam@example.com", botNames: ["Inbox helper", "Standup"] },
+  { appId: "slack", appName: "Slack", accountLabel: "Northwind" },
+];
+const KEY_APPS = [
+  { appId: "fireflies", appName: "Fireflies", botNames: ["Standup"] },
+  { appId: "posthog", appName: "PostHog", botNames: ["Metrics"] },
+];
+const TEAM_WIKI = { appId: "team-wiki", appName: "Team wiki", botNames: ["Research"] };
+const NOT_ALLOWED = "Your organization doesn't allow Team wiki yet. Ask an admin to approve it, then connect it here.";
 const MOVE_PREVIEW = {
   counts: [
     { kind: "bots", count: 3 }, { kind: "skills", count: 9 }, { kind: "conversations", count: 37 },
@@ -148,7 +161,8 @@ const MOVE_PREVIEW = {
     { kind: "goals", count: 1 }, { kind: "check-ins", count: 2 }, { kind: "files", count: 64 },
     { kind: "settings", count: 1 },
   ],
-  apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
+  apps: move === "confirm-many" ? MORE_APPS : carriedMove ? SIGN_IN_APPS : MOVE_APPS,
+  ...(carriedMove ? { carried: [...KEY_APPS, TEAM_WIKI] } : {}),
   // \`#move-first\` is measured again once its update has added the new release's files.
   footprintBytes: moveFirst ? 26_600_000_000 : 20_200_000_000,
   modelKeysAvailable: true,
@@ -186,10 +200,11 @@ function moveAnswer(command) {
   // \`#move-done-held\`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
   // \`#move-done-ai\`: OpenBot Cloud still needs the person's AI, so the result leads with it.
   return {
-    connectAi: move === "done-ai",
+    connectAi: move === "done-ai" || move === "done-ai-carried",
     removedBytes: 20_200_000_000,
     diskGainedBytes: move === "done-held" ? 4_500_000_000 : 20_100_000_000,
-    apps: MOVE_APPS,
+    apps: carriedMove ? [...SIGN_IN_APPS, { ...TEAM_WIKI, reason: NOT_ALLOWED }] : MOVE_APPS,
+    ...(carriedMove ? { carried: KEY_APPS } : {}),
     notes: move === "done" || move === "done-held" ? ["Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers."] : [],
     leftBehind: move === "done-left" ? ["Some of OpenBot's software is still on this computer. Restart your computer to finish removing it."] : [],
     account: { email: "sam.longname-for-wrapping@example.com", organization: "Sam's organization" },
@@ -3212,6 +3227,25 @@ describe.skipIf(!asked)(
         move: true,
       },
       { hash: "#move-done-ai", heading: "You're on OpenBot Cloud", move: true },
+      // Apps connected with a key come across connected, apart from those signed in to again: two
+      // lists, which scroll inside the card above its buttons, as many apps do.
+      {
+        hash: "#move-confirm-carried",
+        heading: "Move to OpenBot Cloud",
+        scrolls: true,
+      },
+      {
+        hash: "#move-done-carried",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+        scrolls: true,
+      },
+      {
+        hash: "#move-done-ai-carried",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+        scrolls: true,
+      },
     ];
     /*
      * The move screen's choices: OpenBot Cloud, then OpenBot for Business as the first screen draws
@@ -3304,7 +3338,10 @@ describe.skipIf(!asked)(
               await page
                 .getByRole("heading", { name: screen.heading, exact: true })
                 .waitFor();
-              if (screen.hash === "#move-confirm")
+              if (
+                screen.hash === "#move-confirm" ||
+                screen.hash === "#move-confirm-carried"
+              )
                 await page.getByRole("list", { name: "What moves" }).waitFor();
               if (screen.openDetail) {
                 await page
@@ -3342,6 +3379,21 @@ describe.skipIf(!asked)(
                 await page.screenshot({
                   path: `${shots}/${name}-${width}x${height}-${colorScheme}-${engine}.png`,
                 });
+              // What scrolls inside the card, scrolled to its end for a look, then back.
+              if (shots && screen.scrolls) {
+                await page.evaluate(() => {
+                  const sheet = document.querySelector("main > .sheet");
+                  if (sheet) sheet.scrollTop = sheet.scrollHeight;
+                });
+                await page.waitForTimeout(200);
+                await page.screenshot({
+                  path: `${shots}/${name}-scrolled-${width}x${height}-${colorScheme}-${engine}.png`,
+                });
+                await page.evaluate(() => {
+                  const sheet = document.querySelector("main > .sheet");
+                  if (sheet) sheet.scrollTop = 0;
+                });
+              }
               const fit = await page.evaluate(() => {
                 const sheet = document.querySelector("main > .sheet");
                 const card = sheet?.getBoundingClientRect();

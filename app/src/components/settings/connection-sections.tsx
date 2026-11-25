@@ -310,7 +310,7 @@ function MoveToCloudRow() {
                 },
                 {
                   icon: IconPlug,
-                  said: "Your app connections are private, so they can't move. You'll reconnect them in OpenBot Cloud.",
+                  said: "Apps connected with a key come across connected. You'll sign in to the rest again in OpenBot Cloud.",
                 },
                 {
                   icon: IconShieldCheck,

@@ -361,11 +361,14 @@ pub(crate) fn note_outcome<R: tauri::Runtime>(
 pub struct MovePreview {
     counts: Vec<moving::Count>,
     apps: Vec<moving::ReconnectApp>,
+    /// The apps that move connected, their keys sealed to the person's Cloud account.
+    carried: Vec<moving::CarriedApp>,
     footprint_bytes: Option<u64>,
     model_keys_available: bool,
 }
 
-/// What moves, which apps to connect again, and what the move frees, from the OpenBot here.
+/// What moves, which apps move connected and which to connect again, and what the move frees, from
+/// the OpenBot here.
 #[tauri::command]
 pub async fn move_preview<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -384,6 +387,7 @@ pub async fn move_preview<R: tauri::Runtime>(
         Ok(MovePreview {
             counts: estimate.counts,
             apps: estimate.reconnect,
+            carried: estimate.carried,
             footprint_bytes,
             model_keys_available: estimate.model_keys_available,
         })

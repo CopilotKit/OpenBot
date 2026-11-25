@@ -286,10 +286,20 @@ function ConnectionStateUnreadable({ error }: { error: unknown }) {
 export function PluginPage({
   pluginKey: key,
   startConnect = false,
+  startAdd,
+  onAdded,
 }: {
   pluginKey: string;
   /** Open the key form on arrival, for an app Browse apps just added that takes a key. */
   startConnect?: boolean;
+  /**
+   * Open the form a catalogue entry needs before it can be added, on arrival: its instance host or
+   * its access token. The list of apps to reconnect after a move opens it, so the admin's Reconnect
+   * is one press.
+   */
+  startAdd?: "instance" | "token";
+  /** Once the app is added here, where the page was opened to add it from somewhere else. */
+  onAdded?: () => void;
 }) {
   const paths = useManagePaths();
   // One person: adding and connecting are one step, and nothing here is about other people.
@@ -356,7 +366,7 @@ export function PluginPage({
 
   // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
   const [error, setError] = useState<Failure | null>(null);
-  const [dialog, setDialog] = useState<OpenDialog>(null);
+  const [dialog, setDialog] = useState<OpenDialog>(startAdd ?? null);
   /** Which way the mode-switch confirmation is asking, or null while it is closed. */
   const [modeTarget, setModeTarget] = useState<"personal" | "shared" | null>(
     null,
@@ -591,6 +601,7 @@ export function PluginPage({
       setToken("");
       setClient({ clientId: "", clientSecret: "" });
       setDialog(null);
+      onAdded?.();
       return true;
     } catch (thrown) {
       setError(failureOf(thrown, String(thrown)));
