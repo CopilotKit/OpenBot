@@ -20,6 +20,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -60,6 +61,16 @@ const SLOW_MS = 1_500;
 const LONGEST_MS = 12_000;
 /** How long the cover waits for Welcome's orb to be laid out, once it knows the person is signed out. */
 const TARGET_WAIT_MS = 400;
+/**
+ * The shortest the cover stays: one breath out, so a quick start still reads as the orb breathing and then moving
+ * rather than a flicker.
+ */
+const SHORTEST_MS = 700;
+/**
+ * How long the cover holds once everything has answered, before it moves. Drawing the first screen's native views
+ * takes the UI thread for a moment; the glide starts after that, not during it.
+ */
+const SETTLE_MS = 120;
 
 /** One breath in or out. */
 const BREATH_MS = 900;
@@ -140,6 +151,7 @@ export function LaunchProvider({
   const [target, setTarget] = useState<Rect | null>(null);
   const [targetLate, setTargetLate] = useState(false);
   const [overdue, setOverdue] = useState(false);
+  const [shownLongEnough, setShownLongEnough] = useState(false);
 
   const settle = useCallback((wait: LaunchWait, blocked: boolean) => {
     setSettled((now) =>
@@ -156,8 +168,12 @@ export function LaunchProvider({
     if (fontsReady) settle("fonts", false);
   }, [fontsReady, settle]);
   useEffect(() => {
-    const timer = setTimeout(() => setOverdue(true), LONGEST_MS);
-    return () => clearTimeout(timer);
+    const longest = setTimeout(() => setOverdue(true), LONGEST_MS);
+    const shortest = setTimeout(() => setShownLongEnough(true), SHORTEST_MS);
+    return () => {
+      clearTimeout(longest);
+      clearTimeout(shortest);
+    };
   }, []);
 
   const allSettled = WAITS.every((wait) => settled.has(wait));
@@ -170,11 +186,17 @@ export function LaunchProvider({
   }, [allSettled, orbExpected, target]);
 
   const waitingForOrb = orbExpected === true && !target && !targetLate;
-  const ready = overdue || (allSettled && (blocked || !waitingForOrb));
-  if (ready && phase === "covering" && exit === null) {
-    setExit(!overdue && !blocked && orbExpected && target ? "glide" : "fade");
-    setPhase("revealing");
-  }
+  const ready =
+    overdue || (shownLongEnough && allSettled && (blocked || !waitingForOrb));
+  const glides = !overdue && !blocked && orbExpected === true && !!target;
+  useEffect(() => {
+    if (!ready || exit !== null) return;
+    const timer = setTimeout(() => {
+      setExit(glides ? "glide" : "fade");
+      setPhase("revealing");
+    }, SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [ready, exit, glides]);
 
   const value = useMemo(
     () => ({ phase, exit, settle, expectOrb, placeOrb }),
@@ -229,19 +251,20 @@ function LaunchCover({
     requestAnimationFrame(() => void SplashScreen.hideAsync().catch(() => {}));
   };
 
-  // Waiting: the orb breathes, and a glow behind it breathes with it.
-  useEffect(() => {
+  // Waiting: the orb breathes, and a glow behind it breathes with it. Started as the cover is committed, not after:
+  // a passive effect waits for the JavaScript thread, which is busy loading the app, and the orb sat still.
+  useLayoutEffect(() => {
     if (reduceMotion || exit) return;
     const ease = Easing.inOut(Easing.sin);
     breath.value = withRepeat(
-      withTiming(0.95, { duration: BREATH_MS, easing: ease }),
+      withTiming(0.93, { duration: BREATH_MS, easing: ease }),
       -1,
       true,
     );
     glow.value = withRepeat(
       withSequence(
-        withTiming(0.55, { duration: BREATH_MS, easing: ease }),
-        withTiming(0.15, { duration: BREATH_MS, easing: ease }),
+        withTiming(0.5, { duration: BREATH_MS, easing: ease }),
+        withTiming(0.12, { duration: BREATH_MS, easing: ease }),
       ),
       -1,
     );
@@ -341,7 +364,7 @@ function LaunchCover({
       <View style={styles.center} pointerEvents="none">
         <Animated.View style={orbStyle}>
           <Animated.View style={[styles.glow, glowStyle]}>
-            <Image source={ORB} blurRadius={24} style={styles.fill} />
+            <Image source={ORB} blurRadius={40} style={styles.fill} />
           </Animated.View>
           <View ref={orbRef} collapsable={false} style={styles.orb}>
             <Image source={ORB} style={styles.fill} />
