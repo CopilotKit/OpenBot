@@ -99,8 +99,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   edition, OpenBot Cloud included:
   - A person's connected apps are on for every Bot they own, Bots made later included, with every
     action, and nobody presses anything. A Bot somebody else owns never gets them, and a teammate
-    using a Bot uses their own account, never its owner's. A shared team account still takes a
-    press.
+    using a Bot uses their own account, never its owner's. A shared team account, once an admin
+    connects it, is on for every Bot, and anybody who can use a Bot uses it through that Bot with
+    nothing to approve; a run steered by email, Slack or a webhook still needs an approval for it.
+    Connecting a shared account stays an admin's. Any member adds an app the organization hasn't
+    added, unless it needs a key or something only an admin can enter, or Only approved connectors
+    leaves it out, and a Bot's owner connects an app and gives it to their Bot in one press (#2174,
+    #2175).
   - One press of give, the card's Connect and give it to, or approving a request that names no
     actions gives every action of the app, not only the ones that read. Actions that change
     something still ask first where the approval rules say so.
@@ -598,8 +603,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Bot that could only read Google Calendar said an admin could give it more, and the admin had to
   find the Bot's settings and tick the actions by name. The card now says what the Bot can't do yet.
   An admin, or the Bot's owner where they may give it, gives exactly those actions in one press, and
-  the conversation carries on. Anybody else presses Request access, and the admin's Requests list
-  names the actions asked for.
+  the conversation carries on. Anybody else is told its owner can give it that. Where apps are
+  locked down, or an admin kept the app to admins, they press Request access, and the admin's
+  Requests list names the actions asked for. (#2175)
 - **Delete the saved logins nobody may use.** Admin, Permissions has Saved logins nobody may use,
   under the Password manager switch. Delete counts them first, then asks with the numbers: those of
   people Password manager is off for, and those of people no longer in the organization, with their
@@ -619,14 +625,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **A member told only an admin can do something is told who the admins are.** An app's card, a
   Bot's Apps row, an app's page under Connections and Reconnect your apps name the organization's
   owners and admins, by name and email, up to three and then how many more. After Request access,
-  Requested says who it was sent to. An admin never sees the list.
+  Requested says who it was sent to. An admin never sees the list. While apps are open, a sentence
+  about a step that is now the member's, or the Bot owner's, names nobody. (#2175)
 - **Add custom MCP, on Connections and on Admin, Apps.** Adding an MCP server by its address was only
   on Connections, and admins looked for it under Admin, Apps. Both now have Add custom MCP (it was
   Add server), which opens the same form. From Admin, Back and Cancel return to Apps, and a server
   added there is listed under Connected. A server added by its address is added for everyone in the
-  organization, so the button shows only to an owner or admin, and to the one person of a personal
-  OpenBot. Anybody else who opens the form reads "Only an admin can add a server, because it's added
-  for everyone in the organization. Ask an admin to add it." (#2126)
+  organization. Where apps are locked down, only an owner or admin sees it on Connections, and
+  anybody else who opens the form reads "Only an admin can add a server, because it's added for
+  everyone in the organization. Ask an admin to add it." While they're open, a member sees it too,
+  with no Key field, because a key typed there would be every Bot's. Admin, Apps offers it only to an
+  owner or admin, and the personal edition to its one person. (#2126, #2175)
 - Admin, Apps: the MCP servers section is now Connectors, and its switches say what each app can do.
   While Only approved connectors is off, every app can be used and its switch can't be changed.
   Turning it on starts with your added apps approved, an app an admin adds is approved in the same
@@ -647,8 +656,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   directory, showing apps nobody has added under Connect an app. An owner or admin of the
   organization, which on OpenBot Cloud is usually you, adds the app and connects their own account
   in one press (a sign-in, a key form, or nothing for an app with no account), from Connections and
-  from Admin's Browse apps alike. A member's press asks an admin to add it, and the request reads
-  "Add Slack for everyone" in the admin's requests. An owner or admin also turns an app off for
+  from Admin's Browse apps alike. While apps are open, a member's press does the same, and
+  Connections also shows tiles for OpenBot's own apps that connect in one press. Where apps are
+  locked down, a member's press asks an admin to add it, and the request reads "Add Slack for
+  everyone" in the admin's requests (#2175). An owner or admin also turns an app off for
   everyone from its own page under Connections, with "On for everyone", so adding and removing
   never need Admin. A member isn't shown it.
 
@@ -688,7 +699,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   status, never a query string, a body or a credential, so a failure an app reports can be found.
 - **Anybody signed in searches the app directory, and asks for an app with no Bot named.**
   `listAppDirectory` answers the wider directory (`source=directory`) to every member, not only to
-  an admin. Only an admin adds from it. `createAppAccessRequest` takes `botId` as optional: left out,
+  an admin. Only an admin adds from it where apps are locked down (below). `createAppAccessRequest` takes `botId` as optional: left out,
   the request is to add an app nobody has added yet, for everyone, its `kind` is `enable` and its
   `botId` is null. `appId` is then the directory entry's slug.
 - **TrustedRouter as an AI connection, and the AI provider in answers can gain values.**
@@ -826,6 +837,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   and OpenBot settings. While apps are open, `giveBotApp`, `approveBotApp` and
   `approveAppAccessRequest` with no actions named give every action of the app, and
   `ownerGrants: null` means open to Bot owners for every app. (#2160, #2163)
+- **While apps are open, any member adds an app, and a shared account needs no approval.** Any
+  member adds an app with `createApp`, from the catalogue, the directory or by address, recorded in
+  their name. A member is still refused an add that carries a `token`, one whose server needs a key,
+  one that needs what only an admin can enter, and one Only approved connectors leaves out
+  (`APP_NOT_APPROVED`); a member's add never approves anything. A Bot's owner may `approveBotApp`
+  on their own Bot, as their own grant. `shared_not_approved` and `needsApproval` happen only where
+  apps are locked down, except for a run steered by outside input. (#2174, #2175)
 - **An app offered as a sign-in can still be added with its key.** In `listAppDirectory`, an entry
   offered as a sign-in in place of its key carries `keyVersion`: the app it was added as with its
   key (or null), its title once added, and how many actions it offers. `createApp` from the
@@ -1003,7 +1021,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   admin's card button reads "Connect and give it to" and the Bot's name, where it said Turn on and
   give it to. An added app's page keeps a switch, "On for everyone", to turn it off for everyone,
   where it showed "Enable for this organization" ahead of any Connect. Explore apps says "Not
-  connected" where it said "Not added". A member's step is still Request access. (#2153)
+  connected" where it said "Not added". Where apps are locked down, a member's step is still
+  Request access. While they're open, a member's Connect adds the app and connects their own
+  account, and the Bot's owner gets Connect and give it to. (#2153, #2175)
 - **Apps added by their address work with MCP servers on the newest protocol.** OpenBot talks to a
   server on MCP's 2026-07-28 revision as well as to the 2025 ones, choosing for each server. Adding
   a server that speaks only the newest revision used to be refused as not an MCP server; it is now
