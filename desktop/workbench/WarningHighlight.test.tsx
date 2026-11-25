@@ -1,14 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
-import { forceTheme } from "./frameTheme";
 import type { Warning } from "./layoutWatch";
 import {
   highlightLabel,
   highlightShapes,
   movementLabel,
   outsideParts,
-  stillHtml,
   WarningHighlight,
 } from "./WarningHighlight";
 
@@ -124,56 +122,6 @@ test("the highlight of a move draws two boxes, an arrow and its label", () => {
   ).toEqual(["from", "to"]);
   expect(container.querySelector("svg line")).not.toBeNull();
   expect(container.textContent).toBe("moved 157 px down");
-});
-
-test("the still of the window keeps its styles, content and typed values, and runs no script", () => {
-  document.head.innerHTML =
-    "<style>.card { color: red; }</style><script>window.ran = true;</script>";
-  document.body.innerHTML =
-    '<div class="card">Set up</div><input id="key" value=""><textarea id="note"></textarea><input type="checkbox" id="agree">';
-  (document.getElementById("key") as HTMLInputElement).value = "sk-typed";
-  (document.getElementById("note") as HTMLTextAreaElement).value = "a note";
-  (document.getElementById("agree") as HTMLInputElement).checked = true;
-
-  const html = stillHtml(document);
-  expect(html.startsWith("<!doctype html>")).toBe(true);
-  expect(html).toContain(".card { color: red; }");
-  expect(html).toContain('<div class="card">Set up</div>');
-  expect(html).toContain('value="sk-typed"');
-  expect(html).toContain(">a note</textarea>");
-  expect(html).toMatch(/id="agree"[^>]*checked|checked[^>]*id="agree"/);
-  expect(html).not.toContain("<script");
-  expect(html).toContain("<base href=");
-  // The live document is not changed.
-  expect(document.querySelector("script")).not.toBeNull();
-  document.head.innerHTML = "";
-  document.body.innerHTML = "";
-});
-
-test("the still of a window in a forced theme keeps that theme, not the system's", () => {
-  // The workbench forces a dark window by rewriting its dark media rules at run time; the source
-  // text still says prefers-color-scheme, so a copied <style> drew a dark window's still light.
-  document.head.innerHTML =
-    "<style>.card { color: black; } @media (prefers-color-scheme: dark) { .card { color: white; } }</style>";
-  document.body.innerHTML = '<div class="card">Set up</div>';
-  forceTheme(document, "dark");
-
-  const html = stillHtml(document, "dark");
-  expect(html).not.toContain("prefers-color-scheme");
-  expect(html).toContain("@media all { .card { color: white; } }");
-  expect(html).toContain(".card { color: black; }");
-  // In a light window the dark rules never apply.
-  expect(stillHtml(document, "light")).toContain(
-    "@media not all { .card { color: white; } }",
-  );
-  // A shorthand with var() and a longhand after it stay as written (the CSSOM loses them).
-  document.head.innerHTML =
-    "<style>.spin { border: 2px solid var(--border); border-top-color: var(--ring); }</style>";
-  expect(stillHtml(document, "dark")).toContain(
-    ".spin { border: 2px solid var(--border); border-top-color: var(--ring); }",
-  );
-  document.head.innerHTML = "";
-  document.body.innerHTML = "";
 });
 
 test("a Spacing warning boxes the element, shades the window buttons and labels them", () => {

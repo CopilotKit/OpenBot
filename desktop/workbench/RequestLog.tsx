@@ -16,7 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ApiControl, ApiRecord, ApiRoute, ApiSource } from "./appContract";
-import { formatTime } from "./RunControls";
+import { formatTime } from "./formatTime";
 import { shortPath } from "./routeText";
 
 export type RequestLogProps = {

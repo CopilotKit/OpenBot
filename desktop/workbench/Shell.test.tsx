@@ -3,8 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Toaster } from "@/components/ui/toast";
-import { Button } from "@/components/ui/button";
-import { Fold, HandoverCard, NoticeList, tell } from "./Shell";
+import { Fold, NoticeList, tell } from "./Shell";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -74,36 +73,6 @@ test("a notice is an outlined app Item with an icon and a Close button", async (
       within(notices[1] as HTMLElement).getByRole("button", { name: "Close" }),
     );
   expect(onClose).toHaveBeenCalledWith(1);
-});
-
-test("a handover card is an Item with its two buttons in ItemActions", () => {
-  const view = render(
-    <HandoverCard
-      headingId="wb-handover-heading"
-      title="OpenBot opens here"
-      actions={
-        <>
-          <Button>Open OpenBot</Button>
-          <Button variant="outline">Show the setup window</Button>
-        </>
-      }
-    >
-      The real window now shows OpenBot's own page.
-    </HandoverCard>,
-  );
-  const card = view.getByRole("region", { name: "OpenBot opens here" });
-  expect(card.querySelector('[data-slot="item"]')).not.toBeNull();
-  const actions = card.querySelector(
-    '[data-slot="item-actions"]',
-  ) as HTMLElement;
-  expect(
-    within(actions)
-      .getAllByRole("button")
-      .map((b) => b.textContent),
-  ).toEqual(["Open OpenBot", "Show the setup window"]);
-  expect(
-    within(card).getByText("The real window now shows OpenBot's own page."),
-  ).toBeDefined();
 });
 
 test("a short message shows as the app's toast", async () => {

@@ -14,9 +14,6 @@ import type { Os } from "./frameConfig";
 /** Where the app runs: inside OpenBot Desktop, or in a plain browser tab. */
 export type AppHost = "desktop" | "browser";
 
-/** "still" stops animations so that each frame is the same; "real" lets them play. */
-export type Motion = "still" | "real";
-
 /** Every skin OpenBot ships: the app's own list (`SKIN_IDS`), never a copy of it. */
 export const APP_SKINS = SKIN_IDS;
 export type AppSkin = SkinId;
@@ -61,7 +58,7 @@ export type ApiAnswer =
 /** Which part of the fake API answered a request. */
 export type ApiSource = "answer" | "stream" | "extra" | "spec" | "none";
 
-/** One request to `/api`. `at` is in milliseconds since the scene start. */
+/** One request to `/api`. `at` is in browser performance milliseconds. */
 export type ApiRecord = {
   id: number;
   method: string;
@@ -142,36 +139,8 @@ export type Session =
       onboarded: boolean;
     };
 
-export type AppSceneGroup =
-  | "App: Home"
-  | "App: Settings"
-  | "App: Conversation"
-  | "App: Account"
-  | "App: Skins";
-
-export const APP_SCENE_GROUPS: readonly AppSceneGroup[] = [
-  "App: Home",
-  "App: Settings",
-  "App: Conversation",
-  "App: Account",
-  "App: Skins",
-];
-
-type FailProblemOf = Extract<Answer, { mode: "fail" }>["problem"];
-
-/** One step of an app run. `at` is in seconds since the scene start. */
-export type AppRunStep =
-  | { at: number; click: string }
-  | { at: number; type: string; into: string }
-  | { at: number; answer: string; with: Answer }
-  | { at: number; settle: string; value: unknown }
-  | { at: number; fail: string; problem: FailProblemOf }
-  /** `null` removes the answer for the route. */
-  | { at: number; api: ApiRoute; with: ApiAnswer | null }
-  | { at: number; stream: string; events: readonly AgUiEventLike[] }
-  | { at: number; streamEnd: string }
-  | { at: number; socket: string; send: unknown }
-  | { at: number; navigate: string };
+export type AppSceneGroup = "App";
+export const APP_SCENE_GROUPS: readonly AppSceneGroup[] = ["App"];
 
 export type AppSceneStart = {
   route: string;
@@ -195,7 +164,6 @@ export type AppScene = {
   title: string;
   group: AppSceneGroup;
   start: AppSceneStart;
-  run?: readonly AppRunStep[];
 };
 
 /** What one app frame starts with. The frame reads it from `window.parent.__workbenchAppFrame`. */
@@ -204,7 +172,6 @@ export type AppFrameConfig = {
   host: AppHost;
   os: Os;
   theme: "light" | "dark";
-  motion: Motion;
   role: Role | null;
   /** The skin the frame shows: the link's, else the scene's, else null (the default skin). */
   skin: AppSkin | null;
@@ -292,12 +259,7 @@ export function isAppScene(value: unknown): value is AppScene {
     return false;
   }
   if (!isRecord(start.session)) return false;
-  if (value.run === undefined) return true;
-  if (!Array.isArray(value.run)) return false;
-  return value.run.every(
-    (step) =>
-      isRecord(step) && typeof step.at === "number" && Number.isFinite(step.at),
-  );
+  return true;
 }
 
 declare global {

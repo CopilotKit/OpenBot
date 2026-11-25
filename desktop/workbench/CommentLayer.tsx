@@ -34,8 +34,6 @@ import { readPref, writePref } from "./viewerPrefs";
 export type CommentLayerProps = {
   frame: HTMLIFrameElement | null;
   scene: { id: string; title: string };
-  /** Seconds from the scene start, on the window's clock. */
-  atSeconds: number;
   window: WindowSettings;
   /** Set for an app scene: the live route of the app frame and where the app runs. */
   app?: CommentContext["app"];
@@ -116,7 +114,6 @@ function describeTarget(target: CommentTarget): string {
 export function CommentLayer({
   frame,
   scene,
-  atSeconds,
   window: settings,
   app,
   gridStep = 4,
@@ -285,7 +282,6 @@ export function CommentLayer({
       {
         comment,
         scene,
-        atSeconds,
         window: settings,
         link: window.location.href,
         app,

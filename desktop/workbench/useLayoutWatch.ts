@@ -1,28 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Change } from "../src/fakeNative/control";
 import type { Box } from "./geometry";
 import {
   clippedAndOutside,
   compare,
-  focusOf,
-  type ScreenMark,
-  type Snapshot,
-  screenOf,
   snapshot,
   spacingWarnings,
   spinnerWarnings,
+  type Snapshot,
   type Warning,
 } from "./layoutWatch";
 
-/**
- * The window's size, and where the OS draws its buttons over the page (titleBar.ts), or null where
- * none sit over it: the Spacing check measures the page against them.
- */
 type Viewport = { width: number; height: number; buttons?: Box | null };
-
-/** How many changes name the cause of a check. */
-const MAX_CAUSES = 3;
-
 function causeOf(change: Change): string {
   switch (change.kind) {
     case "call":
@@ -35,119 +24,76 @@ function causeOf(change: Change): string {
       return `settled ${change.call.command}`;
   }
 }
-
-/** The key that says a clipped, outside, spacing or spinners warning is the same one as before. */
-function stillKey(warning: Warning): string {
-  return warning.kind === "spacing"
-    ? `${warning.kind}|${warning.rule}|${warning.label}`
-    : `${warning.kind}|${warning.label}`;
+function key(warning: Warning): string {
+  return `${warning.kind}|${warning.label}|${warning.kind === "spacing" ? warning.rule : ""}`;
 }
 
-/**
- * Watches the layout of a loaded window. After each change of the fake native side or of the
- * clock, one frame later, it compares the window with how it was before, and finds text that is
- * cut off, elements outside the window, what comes too near the window's buttons (Spacing), and
- * more than one spinner at once (`spinnerWarnings`). While `hold(true)` is in force (a seek walks the
- * clock), it checks only when `flush` is called: at each stop of the walk, where a frame may not
- * come between two moves of the clock, and where the window is the same each time.
- */
+/** Current layout problems, checked after page, size, native and API changes on browser time. */
 export function useLayoutWatch(
   frame: HTMLIFrameElement | null,
   viewport: Viewport,
-): {
-  warnings: Warning[];
-  /**
-   * The clock time of this window's last check, in ms: 0 for a new window. `warnings` holds what
-   * this window's checks found up to this time, so a warning from an earlier window that is not in
-   * `warnings` and is earlier than this time is gone from the run. It is the time of the window the
-   * warnings come from: the page's own clock state lags a new window (a seek back) by a render.
-   */
-  checkedAt: number;
-  flush(): void;
-  hold(on: boolean): void;
-  /** The screens and the focus this window's checks saw, oldest first (see ScreenMark). */
-  screens(): ScreenMark[];
-} {
+): { warnings: Warning[] } {
   const [warnings, setWarnings] = useState<Warning[]>([]);
-  const [checkedAt, setCheckedAt] = useState(0);
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
-  const flushRef = useRef<() => void>(() => {});
-  const heldRef = useRef(false);
-  const screensRef = useRef<ScreenMark[]>([]);
-
   useEffect(() => {
-    /** Watches the window the iframe holds now, from no warnings and time 0. Gives the stop. */
-    const watch = (frame: HTMLIFrameElement): (() => void) => {
+    if (!frame) {
       setWarnings([]);
-      setCheckedAt(0);
-      screensRef.current = [];
+      return;
+    }
+    const watch = () => {
+      setWarnings([]);
       const win = frame.contentWindow as (Window & typeof globalThis) | null;
       if (!win) return () => {};
-      let stopped = false;
-      let off: (() => void) | null = null;
       let last: Snapshot | null = null;
-      let active = new Set<string>();
-      let causes: string[] = [];
       let handle: number | null = null;
-      let dirty = false;
-
+      let stopped = false;
+      let off: (() => void) | undefined;
+      const causes = new Set<string>();
       const check = () => {
-        if (handle !== null) win.cancelAnimationFrame(handle);
         handle = null;
-        dirty = false;
-        const clock = win.__workbenchClock;
+        if (stopped || !frame.contentDocument) return;
         const doc = frame.contentDocument;
-        if (stopped || !clock || !doc) return;
-        const at = clock.now();
-        const cause = causes.join(", ");
-        causes = [];
+        const at = win.performance.now();
         const next = snapshot(doc);
-        const screen = screenOf(doc);
-        const focus = focusOf(doc);
-        const seen = screensRef.current[screensRef.current.length - 1];
-        if (!seen || seen.screen !== screen || seen.focus !== focus)
-          screensRef.current.push({ at, screen, focus });
-        const found: Warning[] = last ? compare(last, next, at, cause) : [];
+        const moved = last
+          ? compare(last, next, at, [...causes].slice(0, 3).join(", "))
+          : [];
         last = next;
-        const now = new Set<string>();
+        causes.clear();
         const { buttons = null, ...size } = viewportRef.current;
-        for (const warning of [
+        const found = [
+          ...moved,
           ...clippedAndOutside(doc, at, size),
           ...spacingWarnings(doc, at, size, buttons),
           ...spinnerWarnings(doc, at),
-        ]) {
-          const key = stillKey(warning);
-          if (now.has(key)) continue;
-          now.add(key);
-          if (!active.has(key)) found.push(warning);
-        }
-        active = now;
-        // In the same update as the warnings it found, so the two always belong together.
-        setCheckedAt(at);
-        if (found.length > 0) setWarnings((all) => [...all, ...found]);
+        ];
+        setWarnings([
+          ...new Map(found.map((warning) => [key(warning), warning])).values(),
+        ]);
       };
-
       const pend = (cause: string) => {
-        if (causes.length < MAX_CAUSES && !causes.includes(cause))
-          causes.push(cause);
-        dirty = true;
-        if (handle === null && !heldRef.current)
+        causes.add(cause);
+        if (!stopped && handle === null)
           handle = win.requestAnimationFrame(check);
       };
-
+      const resized = () => pend("resized");
       const start = () => {
-        const clock = win.__workbenchClock;
-        const control = win.__workbench;
-        if (!clock || !control) return;
-        const offTick = clock.onTick(() => pend("clock"));
-        const offChange = control.onChange((change) => pend(causeOf(change)));
-        // An app frame also has the fake `/api`, the streams and the sockets.
-        const offApi = win.__workbenchApi?.onChange((change) => {
-          if (change.kind === "settled") {
-            pend(`request ${change.record.method} ${change.record.path}`);
-          }
+        const mutations = new win.MutationObserver(() => pend("page changed"));
+        mutations.observe(win.document, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          characterData: true,
         });
+        const sizes = new win.ResizeObserver(resized);
+        sizes.observe(win.document.documentElement);
+        win.addEventListener("resize", resized);
+        win.document.addEventListener("scroll", resized, true);
+        const offNative = win.__workbench?.onChange((change) =>
+          pend(causeOf(change)),
+        );
+        const offApi = win.__workbenchApi?.onChange(() => pend("request"));
         const offStreams = win.__workbenchStreams?.onChange(() =>
           pend("stream"),
         );
@@ -155,60 +101,41 @@ export function useLayoutWatch(
           pend("socket"),
         );
         off = () => {
-          offTick();
-          offChange();
+          mutations.disconnect();
+          sizes.disconnect();
+          win.removeEventListener("resize", resized);
+          win.document.removeEventListener("scroll", resized, true);
+          offNative?.();
           offApi?.();
           offStreams?.();
           offSockets?.();
         };
         check();
       };
-
-      // The boot script sets up the clock before the window's own code; wait for it if needed.
-      let poll: ReturnType<typeof setTimeout> | null = null;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const wait = () => {
-        poll = null;
-        if (stopped || win.closed) return;
+        if (stopped) return;
         if (win.__workbenchBooted) start();
-        else poll = setTimeout(wait, 10);
+        else timer = setTimeout(wait, 10);
       };
       wait();
-      flushRef.current = () => {
-        if (dirty) check();
-      };
-
       return () => {
         stopped = true;
-        if (poll !== null) clearTimeout(poll);
+        clearTimeout(timer);
         if (handle !== null) win.cancelAnimationFrame(handle);
         off?.();
-        flushRef.current = () => {};
       };
     };
-
-    if (!frame) {
-      setWarnings([]);
-      setCheckedAt(0);
-      return;
-    }
-    let stopWatch = watch(frame);
-    // A load of the same iframe again (the app frame reloads after a source edit) is a new
-    // window: its own clock from 0, and none of the old window's listeners. Watch it from the start.
-    const onLoad = () => {
-      stopWatch();
-      stopWatch = watch(frame);
+    let stop = watch();
+    const loaded = () => {
+      stop();
+      stop = watch();
     };
-    frame.addEventListener("load", onLoad);
+    frame.addEventListener("load", loaded);
     return () => {
-      frame.removeEventListener("load", onLoad);
-      stopWatch();
+      frame.removeEventListener("load", loaded);
+      stop();
     };
   }, [frame]);
-
-  const flush = useCallback(() => flushRef.current(), []);
-  const hold = useCallback((on: boolean) => {
-    heldRef.current = on;
-  }, []);
-  const screens = useCallback(() => [...screensRef.current], []);
-  return { warnings, checkedAt, flush, hold, screens };
+  return { warnings };
 }

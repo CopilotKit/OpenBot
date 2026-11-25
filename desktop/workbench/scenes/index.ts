@@ -1,12 +1,21 @@
-import { IMPORTED_SCENES } from "./imported";
-import { INSTALL_SCENES } from "./install";
-import { STATE_SCENES } from "./states";
 import type { Scene } from "./types";
-import { WINDOW_SCENES } from "./windows";
-
 export const SCENES: readonly Scene[] = [
-  ...INSTALL_SCENES,
-  ...WINDOW_SCENES,
-  ...IMPORTED_SCENES,
-  ...STATE_SCENES,
+  {
+    id: "setup",
+    title: "Setup",
+    group: "Setup",
+    start: { hash: "", search: "" },
+  },
+  {
+    id: "setup-status",
+    title: "Local status",
+    group: "Setup",
+    start: { hash: "#status", search: "" },
+  },
+  {
+    id: "setup-update",
+    title: "Update",
+    group: "Setup",
+    start: { hash: "#update-short", search: "" },
+  },
 ];

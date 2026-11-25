@@ -1,10 +1,4 @@
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CommentLayer, type CommentLayerProps } from "./CommentLayer";
 import { GridOverlay } from "./GridOverlay";
 import { Inspector } from "./Inspector";
@@ -34,11 +28,6 @@ export type WindowFrameProps = {
   titled?: boolean;
   /** Comment mode: set, the comment layer replaces the inspector. */
   comment?: Omit<CommentLayerProps, "frame"> | null;
-  /**
-   * Drawn over the iframe and under the title bar, in the window's zoom and corners: the still of
-   * the window while a warning hover seeks back.
-   */
-  cover?: ReactNode;
   onFrame?(iframe: HTMLIFrameElement | null): void;
 };
 
@@ -137,7 +126,6 @@ export function WindowFrame({
   address,
   titled = true,
   comment,
-  cover,
   onFrame,
 }: WindowFrameProps) {
   const browser = host === "browser";
@@ -184,7 +172,6 @@ export function WindowFrame({
           onLoad={() => onFrameRef.current?.(ref.current)}
           style={{ width, height, border: 0, colorScheme: theme }}
         />
-        {cover}
         {!browser && os === "mac" && <MacBar active={active} />}
         {grid && (
           <GridOverlay

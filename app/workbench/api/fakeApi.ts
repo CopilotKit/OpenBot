@@ -28,9 +28,9 @@ export type FakeApiOptions = {
     source: "stream" | "extra" | "spec";
     handlers: readonly RequestHandler[];
   }[];
-  /** The page clock's setTimeout, read at call time by the caller. */
+  /** The frame's browser timer, read at call time by the caller. */
   setTimer(run: () => void, ms: number): void;
-  /** Page clock milliseconds. */
+  /** Browser performance milliseconds. */
   now(): number;
 };
 
@@ -170,7 +170,7 @@ export function installFakeApi(
           };
         case "delay":
           await waitOrAbort(request.signal, (done) => {
-            // The page clock's timer cannot be cleared: after an abort it only finds nothing to do.
+            // After an abort the pending timer only finds nothing to do.
             let live = true;
             options.setTimer(() => {
               if (live) done();

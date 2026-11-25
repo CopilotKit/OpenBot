@@ -33,7 +33,7 @@ export type SceneListHandle = {
   focusFilter(): void;
   /** ↑ and ↓: moves the keyboard cursor to the scene before or after it. */
   move(delta: 1 | -1): void;
-  /** Enter: opens the scene under the cursor. False when the cursor is on the current scene. */
+  /** Enter: opens the scene under the cursor. False when the cursor is on the current view. */
   pickCursor(): boolean;
 };
 
@@ -104,7 +104,7 @@ export function SceneList({
               group.toLowerCase().includes(filter.trim().toLowerCase()),
           )
         : items;
-      // A filter opens every group that has a match; the current scene's group is always open.
+      // A filter opens every group that has a match; the current view's group is always open.
       const open = filtering || group === currentGroup || !collapsed.has(group);
       return { group, items: matches, total: items.length, open };
     })
@@ -114,11 +114,11 @@ export function SceneList({
   );
   const visibleKey = visible.join("\n");
 
-  // The cursor follows the current scene, and stays on a row that shows.
+  // The cursor follows the current view, and stays on a row that shows.
   useEffect(() => {
     setCursor(current);
   }, [current]);
-  // With a filter, the cursor goes to the first match; without one, back to the current scene.
+  // With a filter, the cursor goes to the first match; without one, back to the current view.
   useEffect(() => {
     const ids = visibleKey === "" ? [] : visibleKey.split("\n");
     if (!filtering && ids.includes(currentRef.current)) {
@@ -128,7 +128,7 @@ export function SceneList({
     setCursor((c) => (ids.includes(c) ? c : (ids[0] ?? c)));
   }, [visibleKey, filtering]);
 
-  // The current scene is in view when the page opens and after each pick.
+  // The current view is in view when the page opens and after each pick.
   useEffect(() => {
     document
       .getElementById(sceneRowId(current))
@@ -196,9 +196,9 @@ export function SceneList({
   );
 
   return (
-    <nav aria-label="Scenes" className="flex flex-col gap-1">
+    <nav aria-label="Views" className="flex flex-col gap-1">
       <div className="flex items-center justify-between gap-2 px-1 pb-1">
-        <h2 className="text-sm font-medium">Scenes</h2>
+        <h2 className="text-sm font-medium">Views</h2>
         <Button
           variant="ghost"
           size="sm"
@@ -216,8 +216,8 @@ export function SceneList({
         <InputGroupInput
           ref={filterRef}
           type="search"
-          aria-label="Filter scenes"
-          placeholder="Filter scenes"
+          aria-label="Filter views"
+          placeholder="Filter views"
           aria-keyshortcuts="/"
           aria-controls="wb-scene-rows"
           aria-activedescendant={
@@ -255,7 +255,7 @@ export function SceneList({
       </InputGroup>
       <div id="wb-scene-rows" className="flex flex-col gap-2">
         {shown.length === 0 && (
-          <p className="px-1 py-2 text-sm text-muted-foreground">{`No scene matches “${filter.trim()}”.`}</p>
+          <p className="px-1 py-2 text-sm text-muted-foreground">{`No view matches “${filter.trim()}”.`}</p>
         )}
         {shown.map(({ group, items, total, open }) => {
           const pinned = !filtering && group === currentGroup;
@@ -275,7 +275,7 @@ export function SceneList({
                   data-count={filtering ? `${items.length}/${total}` : total}
                   title={
                     pinned
-                      ? "The group of the current scene stays open."
+                      ? "The group of the current view stays open."
                       : undefined
                   }
                 >

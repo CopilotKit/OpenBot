@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { HttpResponse, http } from "msw";
+import { getResponse, HttpResponse, http } from "msw";
 import type { ApiChange } from "../../../desktop/workbench/appContract";
+import { getListBotsResponseMock } from "../../src/lib/api/generated/bots/bots.msw";
+import { agentsForBots, BOTS_ROUTE, extraHandlers } from "./extraHandlers";
 import { installFakeApi, NO_ANSWER_DETAIL } from "./fakeApi";
 
 const ORIGIN = "http://localhost:3021";
@@ -44,6 +46,32 @@ function setup() {
 const flush = () => new Promise((done) => setTimeout(done, 0));
 
 describe("installFakeApi", () => {
+  test("the generated Bots seed and runtime agents agree, and explicit answers win", async () => {
+    const { api, target } = setup();
+    const seed = getListBotsResponseMock();
+    api.setAnswer(BOTS_ROUTE, { mode: "value", body: seed });
+    const runtime = extraHandlers({ agents: () => agentsForBots(api, BOTS) });
+    const ids = async () => {
+      const bots = (await (await target.fetch(BOTS)).json()) as {
+        bots: { id: string }[];
+      };
+      const info = await getResponse(
+        runtime,
+        new Request(`${ORIGIN}/api/copilotkit/info`),
+      );
+      const body = (await info?.json()) as { agents: Record<string, unknown> };
+      expect(Object.keys(body.agents)).toEqual(bots.bots.map((bot) => bot.id));
+    };
+    await ids();
+    api.setAnswer(BOTS_ROUTE, {
+      mode: "value",
+      body: { bots: [{ id: "configured-bot" }] },
+    });
+    await ids();
+    api.setAnswer(BOTS_ROUTE, { mode: "value", body: { bots: [] } });
+    await ids();
+  });
+
   test("a value answer for a route pattern answers a matching path", async () => {
     const { api, target } = setup();
     api.setAnswer("GET /api/v2/organizations/:organizationId/bots", {

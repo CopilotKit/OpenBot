@@ -9,7 +9,7 @@ import {
 const context: CommentContext = {
   comment: "This should be centered",
   scene: { id: "setup-welcome", title: "Setup welcome" },
-  atSeconds: 75,
+
   window: {
     width: 1000,
     height: 800,
@@ -51,9 +51,9 @@ describe("buildPrompt, element", () => {
     expect(prompt).toContain("> This should be centered");
     expect(prompt).toContain("Row · desktop/src/Row.tsx:12");
     expect(prompt).toContain(
-      "cd desktop && bun run workbench:shot setup-welcome --at 75 --size 1000x800 --os mac --theme dark --grid",
+      "cd desktop && bun run workbench:shot --url 'http://localhost:5173/#abc'",
     );
-    expect(prompt).toContain("1:15");
+    expect(prompt).not.toContain("--at");
   });
 
   test("says none for missing gaps", () => {
@@ -207,12 +207,6 @@ describe("buildPrompt, app scenes", () => {
     text: "Save",
   });
 
-  test("without app, the prompt is the same as before", () => {
-    expect(buildPrompt({ kind: "element", element }, context)).toBe(
-      '# Change request from the OpenBot Desktop workbench\n\n> This should be centered\n\n## Where\n\n- Scene: Setup welcome (`setup-welcome`)\n- Time: 1:15\n- Window: 1000×800, OS mac, theme dark\n- Link: http://localhost:5173/#abc\n\nTo see it: `cd desktop && bun run workbench:shot setup-welcome --at 75 --size 1000x800 --os mac --theme dark --grid`\nOr open the link with `bun run workbench` running.\n\n## Element\n\n- Label: `button.save`\n- Component: Row · desktop/src/Row.tsx:12\n- Box: x 0, y 40, 100×20\n- Gaps to the nearest neighbour: top 8\n- Styles: font-size: 14px\n- Text: "Save"\n\n## What to do\n\n1. Find the component in the file named above. Search the repo if no file is named.\n2. Make the change the comment asks for.\n3. Keep the 4px grid.\n4. Follow the repo\'s `openbot-copy` and `openbot-screen-layout` rules where they apply.\n5. Shoot the same frame again with `cd desktop && bun run workbench:shot setup-welcome --at 75 --size 1000x800 --os mac --theme dark --grid`. Compare it with the first frame.\n',
-    );
-  });
-
   const appContext = (host: "desktop" | "browser"): CommentContext => ({
     ...context,
     scene: { id: "app-home-bots", title: "Home with Bots" },
@@ -234,17 +228,13 @@ describe("buildPrompt, app scenes", () => {
     expect(browser).toContain("- Route: /settings/computer\n- Host: Browser\n");
   });
 
-  test("the shot command names the browser host only for the browser", () => {
-    expect(
-      buildPrompt({ kind: "element", element }, appContext("browser")),
-    ).toContain(
-      "bun run workbench:shot app-home-bots --at 75 --size 1000x800 --os mac --theme dark --host browser --grid",
+  test("the shot command uses the complete configuration link", () => {
+    const prompt = buildPrompt(
+      { kind: "element", element },
+      appContext("browser"),
     );
-    expect(
-      buildPrompt({ kind: "element", element }, appContext("desktop")),
-    ).toContain(
-      "bun run workbench:shot app-home-bots --at 75 --size 1000x800 --os mac --theme dark --grid",
-    );
+    expect(prompt).toContain(`workbench:shot --url '${context.link}'`);
+    expect(prompt).not.toContain("--at");
   });
 
   test("the to-do list names app/src and the data access rules", () => {

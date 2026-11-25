@@ -110,7 +110,7 @@ export function installFakeSockets(win: SocketWindow): SocketControl {
       };
       all.push(this);
       notify();
-      // A microtask, not a timer: a paused page clock must not hold the open.
+      // Open on the next microtask, after the caller attaches its handlers.
       queueMicrotask(() => {
         if (this.readyState !== CONNECTING) return;
         this.readyState = OPEN;

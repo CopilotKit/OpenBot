@@ -1,17 +1,12 @@
-/*
- * The second module of the app frame, after clockBoot.ts and before the app's own entry. It sets
- * up the fakes of this frame: the user agent, still motion, the theme, the native side, the fake
- * `/api`, the AG-UI streams, the sockets, the Desktop page scripts and the scene's run.
- * It does not set `__workbenchBooted`: appBoot.ts does, after the app's entry drew its first element.
- * Pattern: desktop/workbench/frameBoot.ts. The page plays the clock; this frame never does.
- */
-
+// Installs the fake native/API boundaries before the real app entry. Browser timers stay intact.
 import { DESKTOP_PAGE_SCRIPTS } from "virtual:workbench-desktop-pages";
-import { MotionGlobalConfig, time as motionTime } from "motion/react";
 import { nativeControl } from "../../desktop/src/fakeNative/control";
 import { installPageShell } from "../../desktop/src/fakeNative/pageShell";
-import type { ApiRoute, AppScene } from "../../desktop/workbench/appContract";
-import type { RunAction } from "../../desktop/workbench/domSteps";
+import type {
+  ApiControl,
+  ApiRoute,
+  AppScene,
+} from "../../desktop/workbench/appContract";
 import {
   MAC_USER_AGENT,
   WINDOWS_USER_AGENT,
@@ -19,10 +14,9 @@ import {
 import { forceTheme, watchTheme } from "../../desktop/workbench/frameTheme";
 import { getListBotsResponseMock } from "../src/lib/api/generated/bots/bots.msw";
 import { createAgentStreams } from "./api/agentStream";
-import { extraHandlers } from "./api/extraHandlers";
+import { agentsForBots, BOTS_ROUTE, extraHandlers } from "./api/extraHandlers";
 import { installFakeApi } from "./api/fakeApi";
 import { generatedHandlers } from "./api/handlers";
-import { navigateIn, startAppRun } from "./appRunner";
 import { pageFallback } from "./pageDefaults";
 import { APP_SCENES } from "./scenes";
 import { sessionApi } from "./session";
@@ -30,14 +24,7 @@ import { skinApi } from "./skins";
 import { installFakeSockets } from "./socket";
 
 declare global {
-  var __workbenchRunInfo:
-    | { end: number; nextAt(ms: number): number | null }
-    | undefined;
   var __workbenchBooted: boolean | undefined;
-  /** The parent page listens here for each click and type step of the run. */
-  var __workbenchActions:
-    | { subscribe(listener: (action: RunAction) => void): () => void }
-    | undefined;
 }
 
 /** preboot.js sets this on the frame: it moves its matchMedia to the new theme. */
@@ -48,39 +35,6 @@ type PrebootWindow = Window & {
 // These two run on `load`, as Desktop runs them on PageLoadEvent::Finished. The others run once
 // the document is parsed.
 const ON_LOAD = new Set(["APP_THEME_PAGE", "OVERLAY_TITLE_BAR_PAGE"]);
-
-const STILL_CSS =
-  "*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; animation-duration: 0s !important; animation-delay: 0s !important; }";
-
-/** How far Motion's time moves in each new task while the page clock stands still, in ms. */
-const MOTION_TIME_STEP_MS = 1e-6;
-
-/**
- * Motion draws an element only when its time has moved since the last draw it asked for
- * (`VisualElement.scheduleRender` in motion-dom: `renderScheduledAt < time.now()`). Its time is
- * `performance.now()`, which is the page clock, and the page clock stands still until the page
- * plays it. So every value change after the first one at the same clock time was never drawn: an
- * element kept its first style, for example `initial` (opacity 0) after a skipped entrance.
- * Here Motion's time moves forward a tiny step in each new task while the clock stands still. In
- * one task it stays the same, as Motion expects. The frame time (`frameData.timestamp`), which
- * `useAnimationFrame` and the animations read, does not change.
- */
-function keepMotionTimeMoving(): void {
-  const now = motionTime.now;
-  let last = Number.NEGATIVE_INFINITY;
-  let held: number | undefined;
-  motionTime.now = () => {
-    if (held !== undefined) return held;
-    let at = now();
-    if (at <= last) at = last + MOTION_TIME_STEP_MS;
-    last = at;
-    held = at;
-    queueMicrotask(() => {
-      held = undefined;
-    });
-    return at;
-  };
-}
 
 function message(value: unknown): string {
   if (value instanceof Error) return value.message;
@@ -123,18 +77,10 @@ function boot(): void {
     console.error(
       "Workbench: this frame has no workbench page or no scene around it.",
     );
-    globalThis.__workbenchRunInfo = { end: 0, nextAt: () => null };
     globalThis.__workbenchBooted = true;
     return;
   }
 
-  // 2. The page clock (clockBoot.ts) and the error list.
-  const clock = globalThis.__workbenchClock;
-  if (clock === undefined) {
-    throw new Error(
-      "Workbench: the page clock is missing. clockBoot.ts must run first.",
-    );
-  }
   const errors: string[] = [];
   window.__workbenchErrors = errors;
   window.addEventListener("error", (event) => {
@@ -150,17 +96,6 @@ function boot(): void {
     configurable: true,
     get: () => (windows ? WINDOWS_USER_AGENT : MAC_USER_AGENT),
   });
-
-  // 4. Motion draws on the stopped page clock. Still motion: Motion skips its animations, and
-  // CSS has no transitions.
-  keepMotionTimeMoving();
-  if (config.motion === "still") {
-    MotionGlobalConfig.skipAnimations = true;
-    const style = document.createElement("style");
-    style.dataset.workbenchStill = "";
-    style.textContent = STILL_CSS;
-    document.head.append(style);
-  }
 
   // 5. The theme. A theme change from the page also moves preboot.js's matchMedia.
   forceTheme(document, config.theme);
@@ -187,22 +122,31 @@ function boot(): void {
   // 7. The sockets, the streams and the fake `/api`.
   const sockets = installFakeSockets(window);
   const streams = createAgentStreams();
-  const agents: readonly string[] =
-    scene.start.agents ?? getListBotsResponseMock().bots.map((bot) => bot.id);
-  const api = installFakeApi(window, {
+  const bots = getListBotsResponseMock();
+  const organization = scene.start.session.signedIn
+    ? scene.start.session.organization.id
+    : "default";
+  const botsPath = `/api/v2/organizations/${organization}/bots`;
+  const api: ApiControl = installFakeApi(window, {
     origin: location.origin,
     realFetch: window.fetch.bind(window),
     groups: [
       { source: "stream", handlers: streams.handlers },
-      { source: "extra", handlers: extraHandlers({ agents: () => agents }) },
+      {
+        source: "extra",
+        handlers: extraHandlers({
+          agents: () => scene.start.agents ?? agentsForBots(api, botsPath),
+        }),
+      },
       { source: "spec", handlers: generatedHandlers() },
     ],
     setTimer: (run, ms) => {
       window.setTimeout(run, ms);
     },
-    now: () => clock.now(),
+    now: () => performance.now(),
   });
   for (const answers of [
+    { [BOTS_ROUTE]: { mode: "value" as const, body: bots } },
     sessionApi(scene.start.session, config.role),
     scene.start.api ?? {},
     skinApi(config.skin),
@@ -232,40 +176,6 @@ function boot(): void {
       }
     });
   }
-
-  // 9. The run. The page plays the clock and listens for each click and type step.
-  const actionListeners = new Set<(action: RunAction) => void>();
-  globalThis.__workbenchActions = {
-    subscribe(listener) {
-      actionListeners.add(listener);
-      return () => {
-        actionListeners.delete(listener);
-      };
-    },
-  };
-  globalThis.__workbenchRunInfo = startAppRun(
-    scene.run ?? [],
-    clock,
-    {
-      control,
-      api,
-      streams,
-      sockets,
-      root: document,
-      navigate: (path) => navigateIn(window, path),
-    },
-    {
-      onAction(action) {
-        for (const listener of [...actionListeners]) {
-          try {
-            listener(action);
-          } catch (error) {
-            console.error(error);
-          }
-        }
-      },
-    },
-  );
 }
 
 boot();

@@ -32,7 +32,6 @@ export type WindowSettingsValue = {
 export type AppWindowSettings = {
   host: "desktop" | "browser";
   role: "member" | "admin" | "owner" | null;
-  motion: "still" | "real";
   /** null: as the scene says. */
   skin: AppSkin | null;
   /** null: as the scene says. */
@@ -64,7 +63,7 @@ export type WindowSettingsPanelProps = {
   onAppChange?(patch: Partial<AppWindowSettings>): void;
 };
 
-/** The select value for "As the scene says" (role null). */
+/** The select value for "Preset default" (role null). */
 const SCENE_ROLE = "scene";
 
 function toRole(value: string): AppWindowSettings["role"] {
@@ -118,24 +117,19 @@ const HOSTS: readonly Option[] = [
 ];
 
 const ROLES: readonly Option[] = [
-  { value: SCENE_ROLE, label: "As the scene says" },
+  { value: SCENE_ROLE, label: "Preset default" },
   { value: "member", label: "Member" },
   { value: "admin", label: "Admin" },
   { value: "owner", label: "Owner" },
 ];
 
-const MOTIONS: readonly Option[] = [
-  { value: "still", label: "Still" },
-  { value: "real", label: "Real" },
-];
-
 const SKINS: readonly Option[] = [
-  { value: SCENE_ROLE, label: "As the scene says" },
+  { value: SCENE_ROLE, label: "Preset default" },
   ...APP_SKINS.map((skin) => ({ value: skin, label: SKIN_LABELS[skin] })),
 ];
 
 const SIDEBARS: readonly Option[] = [
-  { value: SCENE_ROLE, label: "As the scene says" },
+  { value: SCENE_ROLE, label: "Preset default" },
   { value: "open", label: "Open" },
   { value: "closed", label: "Closed" },
 ];
@@ -173,14 +167,6 @@ function AppFields(props: {
         value={app.role ?? SCENE_ROLE}
         options={ROLES}
         onValue={(value) => props.onAppChange?.({ role: toRole(value) })}
-      />
-      <SelectRow
-        label="Motion"
-        value={app.motion}
-        options={MOTIONS}
-        onValue={(value) =>
-          props.onAppChange?.({ motion: value === "real" ? "real" : "still" })
-        }
       />
       <SelectRow
         label="Skin"

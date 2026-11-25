@@ -101,7 +101,6 @@ function show() {
     <CommentLayer
       frame={frame}
       scene={{ id: "install-mac", title: "Install on a Mac" }}
-      atSeconds={90}
       window={DEFAULT_WINDOW}
     />,
   );
@@ -136,7 +135,7 @@ test("a click picks the element, does not reach the window, and Copy puts the pr
   expect(prompt).toContain("> This needs to be centered");
   expect(prompt).toContain('Label: `span "Step 1 of 4"`');
   expect(prompt).toContain("Install on a Mac (`install-mac`)");
-  expect(prompt).toContain("Time: 1:30");
+  expect(prompt).not.toContain("Time:");
   expect(view.getByRole("status").textContent).toBe("Copied.");
 });
 
@@ -227,7 +226,7 @@ test("Ask for an impeccable command copies a scoped impeccable prompt, without w
   expect(prompt).toContain(
     'Review only this part of the frame: the element "span',
   );
-  expect(prompt).toContain("workbench:shot install-mac --at 90");
+  expect(prompt).toContain("workbench:shot --url");
   // The choice is kept for the next comment.
   expect(window.localStorage.getItem("workbench.commentAsk")).toBe('"typeset"');
 });

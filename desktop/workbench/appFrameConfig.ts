@@ -25,7 +25,6 @@ export function appFrameConfig(
     host: state.app?.host ?? scene.start.host,
     os: state.window.os,
     theme: state.window.theme,
-    motion: state.app?.motion ?? "still",
     role: state.app?.role ?? null,
     skin,
     sidebar,

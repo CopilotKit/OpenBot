@@ -8,7 +8,6 @@ import {
   type AppSidebar,
   type AppSkin,
   isApiRoute,
-  type Motion,
   parseApiAnswer,
   type Role,
 } from "./appContract";
@@ -26,8 +25,8 @@ export type WindowSettings = {
 
 export type WorkbenchState = {
   scene: string;
-  /** Seconds from the scene start. */
-  at: number;
+  /** The app router path captured by a shared link. */
+  route?: string;
   answers: Record<string, Answer>;
   env: EnvValues;
   window: WindowSettings;
@@ -40,7 +39,6 @@ export type WorkbenchState = {
 export type AppSettings = {
   host: AppHost | null;
   role: Role | null;
-  motion: Motion;
   /** The skin, or null for the scene's. */
   skin: AppSkin | null;
   /** The sidebar open or closed at the start, or null for the scene's. */
@@ -50,14 +48,12 @@ export type AppSettings = {
 export const DEFAULT_APP: AppSettings = {
   host: null,
   role: null,
-  motion: "still",
   skin: null,
   sidebar: null,
 };
 
 const HOSTS: readonly AppHost[] = ["desktop", "browser"];
 const ROLES: readonly Role[] = ["member", "admin", "owner"];
-const MOTIONS: readonly Motion[] = ["still", "real"];
 
 export const DEFAULT_WINDOW: WindowSettings = {
   width: 1000,
@@ -74,7 +70,7 @@ export const MIN_WINDOW = { width: 720, height: 560 };
 export function encodeState(state: WorkbenchState): string {
   const params = new URLSearchParams();
   params.set("scene", state.scene);
-  params.set("at", String(state.at));
+  if (state.route) params.set("route", state.route);
   params.set("w", String(state.window.width));
   params.set("h", String(state.window.height));
   params.set("os", state.window.os);
@@ -94,7 +90,6 @@ export function encodeState(state: WorkbenchState): string {
   const app = state.app ?? DEFAULT_APP;
   if (app.host !== null) params.set("host", app.host);
   if (app.role !== null) params.set("role", app.role);
-  if (app.motion === "real") params.set("motion", app.motion);
   if (app.skin !== null) params.set("skin", app.skin);
   if (app.sidebar !== null) params.set("sidebar", app.sidebar);
   return params.toString();
@@ -165,16 +160,11 @@ export function decodeState(
     }
   }
 
-  let at = 0;
-  const atParam = params.get("at");
-  if (atParam !== null) {
-    const n = parseNumber(atParam);
-    if (n !== null && n >= 0) at = n;
-    else
-      notices.push(
-        `The time "${atParam}" is not valid. The workbench starts at 0.`,
-      );
-  }
+  const rawRoute = params.get("route");
+  const route =
+    rawRoute?.startsWith("/") && !rawRoute.startsWith("//")
+      ? rawRoute
+      : undefined;
 
   const win: WindowSettings = { ...DEFAULT_WINDOW };
 
@@ -312,16 +302,6 @@ export function decodeState(
         `The role "${role}" is not valid. The workbench uses the scene's role.`,
       );
   }
-  const motion = params.get("motion");
-  if (motion !== null) {
-    const found = MOTIONS.find((m) => m === motion);
-    if (found) app.motion = found;
-    else
-      notices.push(
-        `The motion "${motion}" is not valid. The workbench uses "${DEFAULT_APP.motion}".`,
-      );
-  }
-
   const skin = params.get("skin");
   if (skin !== null) {
     const found = APP_SKINS.find((s) => s === skin);
@@ -342,7 +322,7 @@ export function decodeState(
   }
 
   return {
-    state: { scene, at, answers, env, window: win, api, app },
+    state: { scene, route, answers, env, window: win, api, app },
     notices,
   };
 }

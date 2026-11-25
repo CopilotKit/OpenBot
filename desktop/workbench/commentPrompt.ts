@@ -28,7 +28,6 @@ export type CommentTarget =
 export type CommentContext = {
   comment: string;
   scene: { id: string; title: string };
-  atSeconds: number;
   window: WindowSettings;
   link: string;
   /** Set for an app scene: the route of the app frame and where the app runs. */
@@ -40,11 +39,6 @@ const MAX_ROWS = 30;
 
 function round(value: number): string {
   return String(Math.round(value * 10) / 10);
-}
-
-function formatTime(seconds: number): string {
-  const whole = Math.max(0, Math.floor(seconds));
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
 function formatBox(box: Box): string {
@@ -68,9 +62,7 @@ function cell(text: string): string {
 }
 
 function shotCommand(context: CommentContext): string {
-  const w = context.window;
-  const host = context.app?.host === "browser" ? " --host browser" : "";
-  return `cd desktop && bun run workbench:shot ${context.scene.id} --at ${context.atSeconds} --size ${w.width}x${w.height} --os ${w.os} --theme ${w.theme}${host} --grid`;
+  return `cd desktop && bun run workbench:shot --url '${context.link.replaceAll("'", "'\\''")}'`;
 }
 
 function describeElement(el: PickedElement): string[] {
@@ -225,8 +217,7 @@ export function buildPrompt(
     "",
     "## Where",
     "",
-    `- Scene: ${context.scene.title} (\`${context.scene.id}\`)`,
-    `- Time: ${formatTime(context.atSeconds)}`,
+    `- View: ${context.scene.title} (\`${context.scene.id}\`)`,
     `- Window: ${w.width}×${w.height}, OS ${w.os}, theme ${w.theme}`,
     ...appLines(context),
     `- Link: ${context.link}`,

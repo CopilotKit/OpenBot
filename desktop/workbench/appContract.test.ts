@@ -107,7 +107,7 @@ describe("isAppScene", () => {
     kind: "app",
     id: "app-home-bots",
     title: "Home with bots",
-    group: "App: Home",
+    group: "App",
     start: {
       route: "/",
       host: "desktop",
@@ -120,7 +120,6 @@ describe("isAppScene", () => {
         onboarded: true,
       },
     },
-    run: [{ at: 1, click: "button" }],
   };
 
   function withField(path: string[], value: unknown): unknown {
@@ -135,10 +134,8 @@ describe("isAppScene", () => {
     return copy;
   }
 
-  test("takes a good scene, with and without a run", () => {
+  test("takes a view with initial configuration", () => {
     expect(isAppScene(good)).toBe(true);
-    expect(isAppScene(withField(["run"], undefined))).toBe(true);
-    expect(isAppScene(withField(["run"], []))).toBe(true);
   });
 
   test("refuses each bad field", () => {
@@ -156,11 +153,6 @@ describe("isAppScene", () => {
       [["start", "host"], undefined],
       [["start", "session"], undefined],
       [["start", "session"], true],
-      [["run"], {}],
-      [["run"], [1]],
-      [["run"], [{ click: "button" }]],
-      [["run"], [{ at: Number.NaN, click: "button" }]],
-      [["run"], [{ at: "1", click: "button" }]],
     ];
     for (const [path, value] of bad) {
       expect({ path, ok: isAppScene(withField(path, value)) }).toEqual({

@@ -4,7 +4,37 @@
  * `start.api`. Pattern: the `/info` answer in app/tests/connection-lost-conversation.test.tsx.
  */
 import { HttpResponse, http, type RequestHandler } from "msw";
+import type {
+  ApiControl,
+  ApiRoute,
+} from "../../../desktop/workbench/appContract";
 import { SAM } from "../session";
+
+export const BOTS_ROUTE =
+  "GET /api/v2/organizations/:organizationId/bots" satisfies ApiRoute;
+
+/** Runtime agents follow the same effective answer as the app's Bots request. */
+export function agentsForBots(api: ApiControl, path: string): string[] {
+  const answer = api.answerFor({ method: "GET", path })?.answer;
+  if (!answer || (answer.mode !== "value" && answer.mode !== "delay"))
+    return [];
+  const body = answer.body;
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !("bots" in body) ||
+    !Array.isArray(body.bots)
+  )
+    return [];
+  return body.bots.flatMap((bot: unknown) =>
+    typeof bot === "object" &&
+    bot !== null &&
+    "id" in bot &&
+    typeof bot.id === "string"
+      ? [bot.id]
+      : [],
+  );
+}
 
 /**
  * A made-up session for Sam, the person that people/me answers (../session.ts), with fixed times,

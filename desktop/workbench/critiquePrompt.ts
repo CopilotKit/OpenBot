@@ -1,4 +1,4 @@
-// Builds prompt.md for `bun run workbench:critique`: a self-contained prompt that tells an agent
+// Builds a self-contained review prompt that tells an agent
 // with the impeccable skill to review one workbench frame. Pure: no file system, no browser.
 
 import type { AppHost } from "./appContract";
@@ -8,7 +8,7 @@ import type { Warning } from "./layoutWatch";
 import type { WindowSettings } from "./urlState";
 import { warningText } from "./WarningsList";
 
-/** The impeccable commands that `workbench:critique` can ask for. */
+/** The impeccable commands available in the review controls. */
 export const CRITIQUE_COMMANDS = [
   "critique",
   "audit",
@@ -39,7 +39,6 @@ export type CritiqueContext = {
   command: CritiqueCommand;
   scene: { id: string; title: string };
   /** Seconds from the scene start. */
-  at: number;
   window: WindowSettings;
   /** Where the app runs in this frame. */
   host: AppHost;
@@ -50,7 +49,7 @@ export type CritiqueContext = {
   link: string;
   /**
    * False for a prompt that the workbench page copies: no frame.png or frame.json comes with it, so
-   * the agent renders the frame first. Default true (`workbench:critique` writes both files).
+   * the agent renders the frame first. Default true for a supplied screenshot/report pair.
    */
   files?: boolean;
   /** Set when the review is about one part of the frame (a picked element or area). */
@@ -63,11 +62,6 @@ export type CritiqueContext = {
 export const MAX_ELEMENTS = 60;
 
 const SOURCE_ROOTS = ["app/src/", "desktop/src/"];
-
-/** The folder name of one frame: `<scene>@<at>s`, as workbench:shot names its files. */
-export function folderName(sceneId: string, at: number): string {
-  return `${sceneId}@${at}s`;
-}
 
 /** Files that draw every screen, so they are never a screen's own file. */
 const SHARED_PARTS = ["/components/ui/", "/components/layout/"];
@@ -133,9 +127,7 @@ export function critiqueTarget(
 
 /** The workbench:shot command that renders the same frame. */
 export function shotCommand(context: CritiqueContext): string {
-  const w = context.window;
-  const host = context.hostFlag ? ` --host ${context.hostFlag}` : "";
-  return `cd desktop && bun run workbench:shot ${context.scene.id} --at ${context.at} --size ${w.width}x${w.height} --os ${w.os} --theme ${w.theme}${host}`;
+  return `cd desktop && bun run workbench:shot --url '${context.link.replaceAll("'", "'\\''")}'`;
 }
 
 function round(value: number): string {
@@ -144,11 +136,6 @@ function round(value: number): string {
 
 function formatBox(box: Box): string {
   return `x ${round(box.x)}, y ${round(box.y)}, ${round(box.width)}×${round(box.height)}`;
-}
-
-function formatTime(seconds: number): string {
-  const whole = Math.max(0, Math.floor(seconds));
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
 function cell(text: string): string {
@@ -268,8 +255,7 @@ export function buildCritiquePrompt(
     ...noteLines(context),
     "## Frame",
     "",
-    `- Scene: ${context.scene.title} (\`${context.scene.id}\`)`,
-    `- Time: ${formatTime(context.at)} (${context.at} s)`,
+    `- View: ${context.scene.title} (\`${context.scene.id}\`)`,
     `- Window: ${w.width}×${w.height}, OS ${w.os}, theme ${w.theme}`,
   ];
   if (app) {
@@ -299,35 +285,5 @@ export function buildCritiquePrompt(
     `4. After a change, run \`${command}\` again and compare the new frame with frame.png.`,
     "",
   );
-  return lines.join("\n");
-}
-
-export type IndexEntry = {
-  folder: string;
-  scene: { id: string; title: string };
-  at: number;
-  warnings: number;
-  target: string;
-};
-
-/** index.md for a `--all` run: every folder with its warning count. */
-export function buildIndex(
-  entries: readonly IndexEntry[],
-  command: CritiqueCommand,
-): string {
-  const total = entries.reduce((sum, e) => sum + e.warnings, 0);
-  const lines = [
-    "# Workbench design reviews",
-    "",
-    `${entries.length} frames for \`/impeccable ${command}\`, ${total} layout warnings in all. Each folder has frame.png, frame.json and prompt.md.`,
-    "",
-    "| Folder | Scene | Time | Warnings | Target |",
-    "| --- | --- | --- | --- | --- |",
-    ...entries.map(
-      (e) =>
-        `| [${e.folder}](${encodeURI(e.folder)}/prompt.md) | ${cell(e.scene.title)} | ${e.at} s | ${e.warnings} | \`${e.target}\` |`,
-    ),
-    "",
-  ];
   return lines.join("\n");
 }

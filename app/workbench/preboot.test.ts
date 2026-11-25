@@ -37,7 +37,6 @@ function config(overrides: Partial<AppFrameConfig> = {}): AppFrameConfig {
     host: "desktop",
     os: "mac",
     theme: "dark",
-    motion: "still",
     skin: null,
     sidebar: null,
     role: "owner",
@@ -153,19 +152,6 @@ describe("workbenchPreboot", () => {
     win.__workbenchPrebootTheme?.("dark");
     expect(dark.matches).toBe(true);
     expect(events).toHaveLength(1);
-  });
-
-  test("reduced motion matches when motion is still, and not when it is real", () => {
-    const still = fakeWindow(config({ motion: "still" }));
-    preboot(still);
-    expect(still.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(
-      true,
-    );
-    const real = fakeWindow(config({ motion: "real" }));
-    preboot(real);
-    expect(real.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(
-      false,
-    );
   });
 
   test("other queries go to the real matchMedia", () => {

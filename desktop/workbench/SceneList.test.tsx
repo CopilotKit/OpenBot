@@ -14,7 +14,7 @@ import {
   type SceneListHandle,
   sceneMatches,
 } from "./SceneList";
-import type { Scene } from "./scenes/types";
+import type { SceneListItem as Scene } from "./SceneList";
 
 beforeAll(() =>
   GlobalRegistrator.register({
@@ -32,25 +32,27 @@ const scenes: Scene[] = [
     id: "c1",
     title: "Cloud one",
     group: "Connected",
-    start: { hash: "", search: "" },
   },
   {
     id: "i1",
     title: "Install one",
     group: "Install",
-    start: { hash: "", search: "" },
   },
   {
     id: "i2",
     title: "Install two",
     group: "Install",
-    start: { hash: "", search: "" },
   },
 ];
 
 test("groups render in SCENE_GROUPS order and empty groups have no heading", () => {
   const { container } = render(
-    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={() => {}}
+    />,
   );
   const headings = Array.from(container.querySelectorAll("h3")).map(
     (h) => h.textContent,
@@ -60,7 +62,12 @@ test("groups render in SCENE_GROUPS order and empty groups have no heading", () 
 
 test("the current scene has aria-current", () => {
   const { getByText } = render(
-    <SceneList scenes={scenes} current="i2" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i2"
+      onPick={() => {}}
+    />,
   );
   expect(getByText("Install two").getAttribute("aria-current")).toBe("true");
   expect(getByText("Install two").hasAttribute("data-current")).toBe(true);
@@ -71,7 +78,12 @@ test("the current scene has aria-current", () => {
 test("a click calls onPick with the id", () => {
   const onPick = mock((_id: string) => {});
   const { getByText } = render(
-    <SceneList scenes={scenes} current="i1" onPick={onPick} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={onPick}
+    />,
   );
   fireEvent.click(getByText("Cloud one"));
   expect(onPick).toHaveBeenCalledWith("c1");
@@ -118,7 +130,12 @@ test("with a list of groups, an app scene shows under its app group", () => {
 test("a scene with an unknown group shows under Other, last", () => {
   const items = [...scenes, { id: "x1", title: "Lost one", group: "Nowhere" }];
   const { container } = render(
-    <SceneList scenes={items} current="i1" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={items}
+      current="i1"
+      onPick={() => {}}
+    />,
   );
   expect(headingsWith(container)).toEqual([
     { group: "Install", items: ["Install one", "Install two"] },
@@ -129,7 +146,12 @@ test("a scene with an unknown group shows under Other, last", () => {
 
 test("a scene row's tooltip has its full title and its id", () => {
   const { getByText } = render(
-    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={() => {}}
+    />,
   );
   expect(getByText("Install two").getAttribute("title")).toBe(
     "Install two (i2)",
@@ -157,23 +179,33 @@ test("the filter matches the title, the id and the group", () => {
 
 test("typing in the filter keeps the matching scenes, and says when none match", () => {
   const view = render(
-    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={() => {}}
+    />,
   );
-  const filter = view.getByLabelText("Filter scenes");
+  const filter = view.getByLabelText("Filter views");
   edit(filter, "two");
   expect(rowTitles(view.container)).toEqual(["Install two"]);
   edit(filter, "connected");
   expect(rowTitles(view.container)).toEqual(["Cloud one"]);
   edit(filter, "zzz");
-  expect(view.getByText("No scene matches “zzz”.")).not.toBeNull();
+  expect(view.getByText("No view matches “zzz”.")).not.toBeNull();
 });
 
 test("↓ and Enter in the filter open the next scene", () => {
   const onPick = mock((_id: string) => {});
   const view = render(
-    <SceneList scenes={scenes} current="i1" onPick={onPick} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={onPick}
+    />,
   );
-  const filter = view.getByLabelText("Filter scenes");
+  const filter = view.getByLabelText("Filter views");
   fireEvent.keyDown(filter, { key: "ArrowDown" });
   expect(filter.getAttribute("aria-activedescendant")).toBe("wb-scene-i2");
   fireEvent.keyDown(filter, { key: "Enter" });
@@ -184,7 +216,13 @@ test("the handle moves the cursor and picks; the current scene is not picked aga
   const onPick = mock((_id: string) => {});
   const handle = createRef<SceneListHandle>();
   const view = render(
-    <SceneList scenes={scenes} current="i1" onPick={onPick} handle={handle} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={onPick}
+      handle={handle}
+    />,
   );
   act(() => handle.current?.move(-1));
   expect(handle.current?.pickCursor()).toBe(false);
@@ -199,12 +237,17 @@ test("the handle moves the cursor and picks; the current scene is not picked aga
   expect(handle.current?.pickCursor()).toBe(true);
   expect(onPick).toHaveBeenCalledWith("c1");
   act(() => handle.current?.focusFilter());
-  expect(document.activeElement).toBe(view.getByLabelText("Filter scenes"));
+  expect(document.activeElement).toBe(view.getByLabelText("Filter views"));
 });
 
 test("a group folds, the fold is kept, and the current scene's group stays open", () => {
   const view = render(
-    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={() => {}}
+    />,
   );
   const connected = view.getByRole("button", { name: "Connected" });
   expect(connected.getAttribute("aria-expanded")).toBe("true");
@@ -222,14 +265,24 @@ test("a group folds, the fold is kept, and the current scene's group stays open"
   cleanup();
   // A new page keeps the fold.
   const again = render(
-    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={() => {}}
+    />,
   );
   expect(rowTitles(again.container)).toEqual(["Install one", "Install two"]);
 });
 
 test("Collapse all folds every group but the current one; Expand all opens them", () => {
   const view = render(
-    <SceneList scenes={scenes} current="c1" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="c1"
+      onPick={() => {}}
+    />,
   );
   fireEvent.click(view.getByText("Collapse all"));
   expect(rowTitles(view.container)).toEqual(["Cloud one"]);
@@ -247,10 +300,15 @@ test("a filter opens a folded group that has a match", () => {
     JSON.stringify(["Connected"]),
   );
   const view = render(
-    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={() => {}}
+    />,
   );
   expect(rowTitles(view.container)).toEqual(["Install one", "Install two"]);
-  edit(view.getByLabelText("Filter scenes"), "cloud");
+  edit(view.getByLabelText("Filter views"), "cloud");
   expect(rowTitles(view.container)).toEqual(["Cloud one"]);
 });
 
@@ -264,7 +322,7 @@ test("after the filter is cleared, the cursor is on the current scene again", ()
       handle={handle}
     />,
   );
-  const filter = view.getByLabelText("Filter scenes");
+  const filter = view.getByLabelText("Filter views");
   edit(filter, "cloud");
   expect(filter.getAttribute("aria-activedescendant")).toBe("wb-scene-c1");
   edit(filter, "");
@@ -274,11 +332,16 @@ test("after the filter is cleared, the cursor is on the current scene again", ()
 
 test("a group's heading shows its count, and its name stays the button's name", () => {
   const view = render(
-    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={() => {}}
+    />,
   );
   const install = view.getByRole("button", { name: "Install" });
   expect(install.getAttribute("data-count")).toBe("2");
-  edit(view.getByLabelText("Filter scenes"), "two");
+  edit(view.getByLabelText("Filter views"), "two");
   expect(
     view.getByRole("button", { name: "Install" }).getAttribute("data-count"),
   ).toBe("1/2");
@@ -286,10 +349,15 @@ test("a group's heading shows its count, and its name stays the button's name", 
 
 test("the clear button empties the filter and puts the focus back in it", () => {
   const view = render(
-    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+    <SceneList
+      groups={["Install", "Connected"]}
+      scenes={scenes}
+      current="i1"
+      onPick={() => {}}
+    />,
   );
   expect(view.queryByRole("button", { name: "Clear the filter" })).toBeNull();
-  const filter = view.getByLabelText("Filter scenes") as HTMLInputElement;
+  const filter = view.getByLabelText("Filter views") as HTMLInputElement;
   edit(filter, "cloud");
   fireEvent.click(view.getByRole("button", { name: "Clear the filter" }));
   expect(filter.value).toBe("");

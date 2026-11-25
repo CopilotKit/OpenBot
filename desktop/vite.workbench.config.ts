@@ -15,7 +15,6 @@ import {
   type ViteDevServer,
 } from "vite";
 import { APP_PREFIX } from "./workbench/appContract";
-import { findingsApi } from "./workbench/findingsServer";
 import { noConfigRestart } from "./workbench/noConfigRestart";
 import {
   APP_PID_FILE,
@@ -343,10 +342,6 @@ export default defineConfig(({ mode }) => ({
     workbenchHome(),
     appFrames(),
     appServer(),
-    findingsApi({
-      desktopDir,
-      ports: () => ({ workbench: PORT, app: APP_PORT }),
-    }),
   ],
   root: desktopDir,
   // A dependency cache for each port: a second workbench (another port, the same checkout) never

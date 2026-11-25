@@ -16,23 +16,12 @@ export const APP_SERVER_HINT =
   "The app server did not start or does not answer. Look in the workbench server's log (the terminal of bun run workbench, or <tmpdir>/openbot-workbench-<port>/server.log when the CLI or a test started it), then stop and start the workbench.";
 
 export const ALL_SCENE_GROUPS: readonly string[] = [
-  ...SCENE_GROUPS,
   ...APP_SCENE_GROUPS,
+  ...SCENE_GROUPS,
 ];
 
 export function isApp(scene: SceneEntry): scene is AppScene {
   return scene.kind === "app";
-}
-
-export function sceneSteps(scene: SceneEntry): readonly { at: number }[] {
-  return scene.run ?? [];
-}
-
-/** Seconds: the `at` of the last step, or 0 when the scene has no run. */
-export function sceneEnd(scene: SceneEntry): number {
-  let end = 0;
-  for (const step of sceneSteps(scene)) end = Math.max(end, step.at);
-  return end;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,7 +80,7 @@ export async function loadScenes(
     };
   }
   const picked = pickAppScenes(module, new Set(SCENES.map((s) => s.id)));
-  return { scenes: [...desktop, ...picked.scenes], notices: picked.notices };
+  return { scenes: [...picked.scenes, ...desktop], notices: picked.notices };
 }
 
 /** For the CLI: loads the app scenes from the file, not from the app server. */

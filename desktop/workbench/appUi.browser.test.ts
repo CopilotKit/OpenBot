@@ -13,7 +13,7 @@ import {
  */
 const asked = process.env.OPENBOT_APP_BROWSER === "1";
 
-// Playwright comes from the root install. See determinism.browser.test.ts.
+// Playwright comes from the root install. Installed for the manual Workbench checks.
 const PLAYWRIGHT: string = "playwright-core";
 type Page = {
   goto(url: string): Promise<unknown>;
@@ -124,6 +124,7 @@ describe.skipIf(!asked)("the workbench page", () => {
       expect(seen.columns).toEqual([seen.sidebar, seen.sidebar]);
       expect(seen.center).toBe(seen.ground);
 
+      await page.getByRole("button", { name: "Advanced", exact: true }).click();
       const calls = page.getByRole("button", { name: "Calls", exact: true });
       expect(await calls.getAttribute("data-slot")).toBe("collapsible-trigger");
       expect(await calls.getAttribute("aria-expanded")).toBe("false");

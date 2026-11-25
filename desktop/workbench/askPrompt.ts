@@ -73,7 +73,6 @@ function critiqueContext(
   return {
     command,
     scene: context.scene,
-    at: context.atSeconds,
     window: context.window,
     host: context.app?.host ?? "desktop",
     // The host the frame shows now: a shot with it renders the same frame.

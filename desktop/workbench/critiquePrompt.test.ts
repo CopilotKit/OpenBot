@@ -1,12 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildCritiquePrompt,
-  buildIndex,
   type CritiqueContext,
   critiqueTarget,
   type FrameElement,
   type FrameReport,
-  folderName,
   MAX_ELEMENTS,
   mainSourceFile,
   shotCommand,
@@ -28,18 +26,16 @@ function el(label: string, files: string[]): FrameElement {
 const desktopContext: CritiqueContext = {
   command: "critique",
   scene: { id: "install-mac", title: "Install on a Mac" },
-  at: 90,
   window: { ...DEFAULT_WINDOW, width: 1000, height: 800, os: "mac" },
   host: "desktop",
   hostFlag: null,
-  link: "http://localhost:3021/workbench/?scene=install-mac&at=90",
+  link: "http://localhost:3021/workbench/?scene=install-mac",
 };
 
 const appContext: CritiqueContext = {
   ...desktopContext,
   command: "audit",
   scene: { id: "app-settings", title: "Settings" },
-  at: 2,
   host: "browser",
   hostFlag: "browser",
   route: "/settings",
@@ -119,13 +115,11 @@ describe("critiqueTarget", () => {
 });
 
 describe("shotCommand", () => {
-  test("uses the same flags as the frame", () => {
-    expect(shotCommand(desktopContext)).toBe(
-      "cd desktop && bun run workbench:shot install-mac --at 90 --size 1000x800 --os mac --theme dark",
+  test("captures the shared configuration link", () => {
+    expect(shotCommand(desktopContext)).toContain(
+      `--url '${desktopContext.link}'`,
     );
-    expect(shotCommand(appContext)).toContain(
-      "workbench:shot app-settings --at 2 --size 1000x800 --os mac --theme dark --host browser",
-    );
+    expect(shotCommand(appContext)).not.toContain("--at");
   });
 });
 
@@ -149,19 +143,16 @@ describe("buildCritiquePrompt", () => {
 
   test("names the mode, the visual truth and the frame", () => {
     expect(prompt).toContain("Operate.");
-    expect(prompt).toContain(
-      "Use frame.png in this folder and `cd desktop && bun run workbench:shot install-mac --at 90 --size 1000x800 --os mac --theme dark` to re-render after changes.",
-    );
+    expect(prompt).toContain(shotCommand(desktopContext));
     expect(prompt).toContain("Do NOT use impeccable's own `shot`");
-    expect(prompt).toContain("- Scene: Install on a Mac (`install-mac`)");
-    expect(prompt).toContain("- Time: 1:30 (90 s)");
+    expect(prompt).toContain("- View: Install on a Mac (`install-mac`)");
     expect(prompt).toContain("- Window: 1000×800, OS mac, theme dark");
     expect(prompt).toContain(desktopContext.link);
   });
 
   test("lists the warnings as findings to check", () => {
     expect(prompt).toContain(
-      '1. span "Installing" is cut off at 0:37 · box x 290, y 347, 448×22',
+      '1. span "Installing" is cut off · box x 290, y 347, 448×22',
     );
   });
 
@@ -211,34 +202,5 @@ describe("buildCritiquePrompt", () => {
     expect(long).toContain(
       `Showing the first ${MAX_ELEMENTS} of ${MAX_ELEMENTS + 5} elements.`,
     );
-  });
-});
-
-describe("buildIndex", () => {
-  test("lists every folder with its warning count", () => {
-    const index = buildIndex(
-      [
-        {
-          folder: folderName("install-mac", 90),
-          scene: { id: "install-mac", title: "Install on a Mac" },
-          at: 90,
-          warnings: 6,
-          target: "desktop/src/App.tsx",
-        },
-        {
-          folder: folderName("app-home", 0),
-          scene: { id: "app-home", title: "Home" },
-          at: 0,
-          warnings: 0,
-          target: "/",
-        },
-      ],
-      "critique",
-    );
-    expect(index).toContain("2 frames for `/impeccable critique`, 6 layout");
-    expect(index).toContain(
-      "| [install-mac@90s](install-mac@90s/prompt.md) | Install on a Mac | 90 s | 6 | `desktop/src/App.tsx` |",
-    );
-    expect(index).toContain("| [app-home@0s](app-home@0s/prompt.md) | Home");
   });
 });

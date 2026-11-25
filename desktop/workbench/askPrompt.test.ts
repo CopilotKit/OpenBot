@@ -16,7 +16,7 @@ import type { Warning } from "./layoutWatch";
 const context: CommentContext = {
   comment: "The title feels cramped",
   scene: { id: "install-mac", title: "Install on a Mac" },
-  atSeconds: 90,
+
   window: {
     width: 1000,
     height: 800,
@@ -96,9 +96,7 @@ describe("the Ask for choice", () => {
     expect(prompt).toContain("## Surface mode");
     expect(prompt).toContain("Operate.");
     expect(prompt).toContain("Do NOT use impeccable's own `shot`");
-    expect(prompt).toContain(
-      "cd desktop && bun run workbench:shot install-mac --at 90 --size 1000x800 --os mac --theme light",
-    );
+    expect(prompt).toContain("cd desktop && bun run workbench:shot --url");
     // No image comes with a copied prompt: the agent renders the frame first.
     expect(prompt).toContain("No image comes with this prompt.");
     expect(prompt).not.toContain("frame.png in this folder");
@@ -107,7 +105,7 @@ describe("the Ask for choice", () => {
     );
     expect(prompt).toContain("> The title feels cramped");
     // Only the warnings in the picked part.
-    expect(prompt).toContain("h1 Install is cut off at 1:30");
+    expect(prompt).toContain("h1 Install is cut off");
     expect(prompt).not.toContain("footer is cut off");
   });
 
@@ -141,7 +139,7 @@ describe("the Ask for choice", () => {
       { kind: "app", warnings: [] },
     );
     expect(prompt).toContain("- Route: /settings/ai");
-    expect(prompt).toContain("--host browser");
+    expect(prompt).toContain("- Host: Browser");
     expect(prompt).toContain("The workbench found no layout warnings");
   });
 });

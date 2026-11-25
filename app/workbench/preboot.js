@@ -4,7 +4,7 @@
  * module. The shipped build never contains it.
  *
  * It is a classic script (no import, no export). It gives the frame a memory storage seeded from
- * the scene, and a matchMedia whose color scheme and reduced motion follow the workbench, not the
+ * the scene, and a matchMedia whose color scheme follows the workbench, not the
  * computer. Outside a workbench frame (no `__workbenchAppFrame` on the parent) it does nothing.
  */
 // biome-ignore lint/suspicious/noRedundantUseStrict: a classic script, not a module.
@@ -59,7 +59,6 @@ function workbenchPreboot(win) {
   });
 
   let theme = config.theme === "dark" ? "dark" : "light";
-  const still = config.motion === "still";
   const realMatchMedia =
     typeof win.matchMedia === "function" ? win.matchMedia.bind(win) : null;
   const schemeLists = [];
@@ -110,9 +109,6 @@ function workbenchPreboot(win) {
       const list = makeList(text, () => theme === "light");
       schemeLists.push(list);
       return list;
-    }
-    if (compact.includes("(prefers-reduced-motion:reduce)")) {
-      return makeList(text, () => still);
     }
     return realMatchMedia ? realMatchMedia(text) : makeList(text, () => false);
   };

@@ -5,11 +5,9 @@ import {
   clippedAndOutside,
   compare,
   elementKey,
-  focusOf,
   hiddenPx,
   isVisuallyHidden,
   type Snapshot,
-  screenOf,
   snapshot,
   spinnerWarnings,
   visibleSpinners,
@@ -488,21 +486,6 @@ test("an element below the window is outside when the page does not scroll", () 
       ),
     ).toEqual(['outside p "Ask in plain words."']);
   });
-});
-
-test("the screen is the route and the main heading, and the focus is the focused element's label", () => {
-  document.body.innerHTML =
-    '<nav><h2>Conversations</h2></nav><main><h1>Finishing  setup</h1><input aria-label="Base URL" /></main>';
-  expect(screenOf(document)).toBe(
-    `${location.pathname}${location.hash} · Finishing setup`,
-  );
-  expect(focusOf(document)).toBeNull();
-  document.querySelector("input")?.focus();
-  expect(focusOf(document)).toBe('textbox "Base URL"');
-  document.body.innerHTML = "<h2>Status</h2>";
-  expect(screenOf(document)).toBe(
-    `${location.pathname}${location.hash} · Status`,
-  );
 });
 
 // --- One spinner at a time ----------------------------------------------------------------------

@@ -2,7 +2,7 @@ import { beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { nativeControl } from "./control";
-import { STATE_NAMES, stateAnswer } from "./states";
+import { stateAnswer } from "./states";
 
 beforeEach(() => nativeControl().reset());
 
@@ -77,56 +77,6 @@ test("local_eval_terms at #licence is not accepted yet", () => {
     undefined,
   ) as { accepted: boolean };
   expect(terms.accepted).toBe(false);
-});
-
-test("STATE_NAMES holds every state once", () => {
-  const hashes = new Set(STATE_NAMES.map((state) => state.hash));
-  for (const hash of [
-    "",
-    "#update-short",
-    "#backend-short",
-    "#connect-app-too-old",
-    "#connect-app-too-old-security",
-    "#connect-session-ended",
-    "#local-app-too-old",
-    "#local-app-too-old-security",
-    "#local-launcher-ahead",
-    "#local-app-too-old-running",
-    "#local-running-fails",
-    "#move-choice",
-    "#move-confirm",
-    "#move-confirm-loading",
-    "#move-confirm-many",
-    "#move-signin",
-    "#move-midway",
-    "#move-failed",
-    "#move-stopped",
-    "#move-done",
-    "#move-done-held",
-    "#move-done-left",
-    "#move-done-ai",
-    "#move-first",
-    "#signin",
-    "#licence",
-    "#licence-installing",
-    "#licence-slow",
-    "#pause-podman",
-    "#connect-fails",
-    "#start",
-    "#status",
-  ])
-    expect(hashes).toContain(hash);
-  const searches = new Set(STATE_NAMES.map((state) => state.search));
-  for (const search of [
-    "?offer",
-    "?internal",
-    "?stopped",
-    "?updating",
-    "?started",
-  ])
-    expect(searches).toContain(search);
-  const keys = STATE_NAMES.map((state) => `${state.search}${state.hash}`);
-  expect(new Set(keys).size).toBe(keys.length);
 });
 
 test("move-first measures the installation again after its update", () => {

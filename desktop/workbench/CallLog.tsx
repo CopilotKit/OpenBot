@@ -9,7 +9,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { NativeControl } from "../src/fakeNative/control";
-import { formatTime } from "./RunControls";
+import { formatTime } from "./formatTime";
 
 export type CallLogProps = { control: NativeControl | null };
 
