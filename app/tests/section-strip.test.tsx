@@ -170,13 +170,11 @@ test("on a page whose section has no panel, that section is current and the pane
 
 test("Conversations brings its panel back without leaving the page", async () => {
   const { view, router, user } = renderApp("/routines");
-  await user.click(await view.findByRole("button", { name: "Conversations" }));
+  await user.click(await view.findByRole("button", { name: "Chats" }));
   expect(sidebarState(view)).toBe("expanded");
   expect(router.state.location.pathname).toBe("/routines");
   expect(
-    view
-      .getByRole("button", { name: "Conversations" })
-      .getAttribute("aria-pressed"),
+    view.getByRole("button", { name: "Chats" }).getAttribute("aria-pressed"),
   ).toBe("true");
 });
 
@@ -186,9 +184,7 @@ test("⌘B on a page with no panel opens Conversations' panel", async () => {
   await user.keyboard("{Meta>}b{/Meta}");
   expect(sidebarState(view)).toBe("expanded");
   expect(
-    view
-      .getByRole("button", { name: "Conversations" })
-      .getAttribute("aria-pressed"),
+    view.getByRole("button", { name: "Chats" }).getAttribute("aria-pressed"),
   ).toBe("true");
 });
 
@@ -214,13 +210,11 @@ test("a page no section owns keeps the section that was open", async () => {
 test("a page no section owns keeps a panel opened from the strip", async () => {
   const { view, router, user } = renderApp("/bots");
   await view.findByRole("heading", { level: 2, name: "Bots" });
-  await user.click(view.getByRole("button", { name: "Conversations" }));
+  await user.click(view.getByRole("button", { name: "Chats" }));
   await view.findByRole("heading", { level: 2, name: "Conversations" });
   await act(() => router.navigate({ to: "/teams" }));
   expect(
-    view
-      .getByRole("button", { name: "Conversations" })
-      .getAttribute("aria-pressed"),
+    view.getByRole("button", { name: "Chats" }).getAttribute("aria-pressed"),
   ).toBe("true");
   expect(
     view.getByRole("heading", { level: 2, name: "Conversations" }),
@@ -242,7 +236,7 @@ test("going to the Bots panel and back finds the Conversations panel as it was l
   expect(
     view.queryByRole("heading", { level: 2, name: "Conversations" }),
   ).toBeNull();
-  await user.click(view.getByRole("button", { name: "Conversations" }));
+  await user.click(view.getByRole("button", { name: "Chats" }));
   await view.findByRole("heading", { level: 2, name: "Conversations" });
   expect(view.queryByRole("heading", { level: 2, name: "Bots" })).toBeNull();
   expect(
@@ -257,7 +251,7 @@ test("going to the Bots panel and back finds the Conversations panel as it was l
 test("a panel the person closed stays closed, in storage too, after a page with no panel", async () => {
   window.localStorage.setItem(SIDEBAR_STORAGE_KEY, "collapsed");
   const { view, router } = renderApp("/");
-  await view.findByRole("button", { name: "Conversations" });
+  await view.findByRole("button", { name: "Chats" });
   expect(sidebarState(view)).toBe("collapsed");
   await act(() => router.navigate({ to: "/bots" }));
   await act(() => router.navigate({ to: "/" }));
@@ -267,9 +261,7 @@ test("a panel the person closed stays closed, in storage too, after a page with 
 
 test("clicking the open Conversations icon hides its panel, and clicking it again shows it", async () => {
   const { view, user } = renderApp("/");
-  const conversations = await view.findByRole("button", {
-    name: "Conversations",
-  });
+  const conversations = await view.findByRole("button", { name: "Chats" });
   expect(sidebarState(view)).toBe("expanded");
   await user.click(conversations);
   expect(sidebarState(view)).toBe("collapsed");
@@ -310,7 +302,7 @@ test("on Routines, Bots and then Routines lights Routines and folds the panel aw
 
 test("on Routines, with Bots opened by way of Conversations, Routines lights Routines again", async () => {
   const { view, user } = renderApp("/routines");
-  await user.click(await view.findByRole("button", { name: "Conversations" }));
+  await user.click(await view.findByRole("button", { name: "Chats" }));
   await user.click(view.getByRole("button", { name: "Bots" }));
   await view.findByRole("heading", { level: 2, name: "Bots" });
   await user.click(view.getByRole("link", { name: "Routines" }));

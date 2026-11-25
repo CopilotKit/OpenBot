@@ -227,6 +227,8 @@ async function neverSaysTheOldWords(drawn: Locator) {
   expect(said).not.toContain("Only an admin");
   expect(said).not.toContain("tools to give");
   expect(said).not.toContain("Open its page under Apps");
+  // Connect, never Turn on: turning an app on is not a step a person thinks of.
+  expect(said).not.toMatch(/\bturn(ing|ed)? on\b/i);
 }
 
 /** The two apps, both from the directory: Notion and Gmail. */
@@ -252,20 +254,20 @@ describe.skipIf(!asked)("an app's card for an admin", () => {
         const name = `${engine}-${theme}`;
         const step = (what: string) => `${app.title.toLowerCase()}-${what}`;
 
-        test(`${app.title}: one press turns it on, signs the admin in, and gives it to the Bot, in ${engine}, ${theme}`, async () => {
+        test(`${app.title}: one press connects it, signs the admin in, and gives it to the Bot, in ${engine}, ${theme}`, async () => {
           const page = await open(engine, theme, app.query);
           try {
             const drawn = await card(page);
             await shoot(page, step("card"), name);
             expect(await drawn.innerText()).toContain(
-              `${app.title} isn't turned on yet.`,
+              `${app.title} isn't connected yet.`,
             );
             await neverSaysTheOldWords(drawn);
             expect(await fits(page)).toEqual({ inside: true, sideways: false });
 
             await drawn
               .getByRole("button", {
-                name: `Turn on ${app.title} and give it to General Assistant`,
+                name: `Connect ${app.title} and give it to General Assistant`,
               })
               .click();
             await page

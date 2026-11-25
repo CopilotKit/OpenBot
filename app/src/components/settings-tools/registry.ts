@@ -1,3 +1,4 @@
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import type { ReactNode } from "react";
 import {
   asText,
@@ -99,8 +100,13 @@ export function settingsResult(result: string | undefined): {
   if (result === undefined) return { state: "running", output: null };
   const answer = asText(result);
   const refused = refusalOf(answer);
+  // In the person's words: the sentence a Bot is told when they said no is written for the model.
   if (refused !== undefined)
-    return { state: "refused", output: null, reason: refused };
+    return {
+      state: "refused",
+      output: null,
+      reason: outcomeForPerson(refused),
+    };
   if (toolResultFailed(result))
     return {
       state: "failed",

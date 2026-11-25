@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { proposalReason, skillTitle } from "@/lib/learning/display";
+import { failureSaid } from "@/lib/load-failure";
 
 /** What one Insight was learned from: the messages a conversation was cited for, or a recording. */
 function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
@@ -143,7 +144,7 @@ export function ProposalDialog<TKey extends QueryKey>({
         <DialogBody className="mt-4 gap-5 overflow-y-auto">
           {detail.isPending ? null : detail.error ? (
             <p role="alert" className="text-destructive text-sm">
-              {detail.error.message}
+              {failureSaid(detail.error)}
             </p>
           ) : (
             <>
@@ -176,7 +177,7 @@ export function ProposalDialog<TKey extends QueryKey>({
           )}
           {error && (
             <p role="alert" className="text-destructive text-sm">
-              {error.message}
+              {failureSaid(error)}
             </p>
           )}
         </DialogBody>

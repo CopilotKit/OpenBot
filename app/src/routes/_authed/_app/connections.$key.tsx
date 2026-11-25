@@ -24,6 +24,7 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import { GrantList } from "@/components/plugins/grant-list";
+import { KeyVersionOffer } from "@/components/plugins/key-version";
 import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,12 +49,18 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useDropBrokerReturn } from "@/lib/connections/broker-return";
+import { useConnectApp } from "@/lib/connections/connect-app";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
+import { withAdmins, yourAdmins } from "@/lib/organizations/admin-names";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { useBackAfterConnect } from "@/lib/plugins/connect-return";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
+import { signsInForDirectory } from "@/lib/plugins/directory-state";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   directoryProvider,
@@ -158,7 +165,15 @@ function RouteComponent() {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   // Held for this visit, keyed on the app, and dropped from the address below.
-  const [arrival] = useState(() => ({ key, connect: connect === true }));
+  const [arrival, setArrival] = useState(() => ({
+    key,
+    connect: connect === true,
+  }));
+  /*
+   * Arriving at another app's page from this one (an app's page offering its key version opens that
+   * app's key form) keeps this component, so the arrival is read again for the new app.
+   */
+  if (arrival.key !== key) setArrival({ key, connect: connect === true });
   const startConnect = arrival.key === key && arrival.connect;
   const navigate = Route.useNavigate();
   useEffect(() => {
@@ -246,11 +261,12 @@ function AppConnectionPage({
   const catalogue = useQuery(catalogueQueryOptions());
   const setup = useQuery(appSetupQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
-  const [notice, setNotice] = useState<string | null>(null);
+  // A refusal is kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const [notice, setNotice] = useState<Failure | null>(null);
 
   const connect = useMutation({
     ...connectAccountMutationOptions(),
-    onError: (thrown: Error) => setNotice(thrown.message),
+    onError: (thrown: Error) => setNotice(thrown),
     /*
      * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be shown
      * to you in your own browser; there is deliberately nothing here that could complete it for you.
@@ -271,9 +287,10 @@ function AppConnectionPage({
           ? start.authorizationUrl
           : null;
       if (authorizationUrl === null) {
-        setNotice(
-          "Couldn't start connecting, so nothing was connected. Try again, or ask an admin if it keeps happening.",
-        );
+        setNotice({
+          message:
+            "Couldn't start connecting, so nothing was connected. Try again, or ask an admin if it keeps happening.",
+        });
         return;
       }
       window.location.href = authorizationUrl;
@@ -341,11 +358,59 @@ function AppConnectionPage({
    * Admin draws for the app, so somebody who runs their own organization (OpenBot Cloud's usual case)
    * removes an app where they added it, without opening Admin. A member is never shown it.
    */
-  const role = useQuery(currentUserQueryOptions()).data?.role;
+  const signedIn = useQuery(currentUserQueryOptions());
+  const role = signedIn.data?.role;
+  /*
+   * WHO A MEMBER GOES TO, where this page tells them only an admin can take the step: the app isn't
+   * turned on or set up yet, connecting apps isn't set up, or the server refused a Connect in words
+   * that name an admin. Read only then, and never for an admin, who is never told to ask one.
+   */
+  const member =
+    paths.edition === "team" &&
+    signedIn.isSuccess &&
+    !isOrganizationAdmin(role);
+  /*
+   * APPS OPEN (the organization's switch): a member adds an app nobody has added, as an admin does,
+   * and is never told an admin has to turn it on. Locked down, they are.
+   */
+  const open = useAppsOpen() === true;
+  const openToMember = member && open;
+  const noticeNamesAdmin = notice !== null && /\badmin\b/i.test(notice.message);
+  const notSetUp =
+    setup.data !== undefined &&
+    !setup.data.directoryAvailable &&
+    server !== undefined &&
+    fromDirectory(server);
+  const notOn =
+    plugins.data !== undefined &&
+    server === undefined &&
+    entry?.auth === "user-oauth";
+  const admins = useOrganizationAdmins(
+    member && (noticeNamesAdmin || notSetUp || (notOn && !open)),
+  );
+  /* The server's refusal as it said it, and beside it who the admins are where it names one. */
+  const shownNotice: Failure | null =
+    notice !== null && noticeNamesAdmin && yourAdmins(admins)
+      ? { message: `${notice.message} ${yourAdmins(admins)}` }
+      : notice;
   const removable =
     paths.edition === "team" &&
     isOrganizationAdmin(role) &&
     server !== undefined;
+  /*
+   * AN ADMIN'S CONNECT ON AN APP NOBODY HAS ADDED adds it for everyone and goes straight on to their
+   * own sign-in, the press Connections' tiles make (`useConnectApp`). So does a member's, with apps
+   * open; locked down, a member is told an admin has to make it available. An app with no client to
+   * sign in against yet goes to Admin's page for it, which is where the client is typed in; a member
+   * stays here, where the server's refusal says it has to be set up first.
+   */
+  const mayAdd =
+    paths.edition === "team" && (isOrganizationAdmin(role) || openToMember);
+  const connectApp = useConnectApp((app) =>
+    openToMember
+      ? { to: "/connections/$key", params: { key: app } }
+      : paths.plugin(app),
+  );
   /* In the card under the row above it, where the page has one. */
   const switchRow =
     removable && server ? (
@@ -478,8 +543,10 @@ function AppConnectionPage({
     return (
       <PageShell backButton={back} title={server?.title ?? key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this connection. Try again in a moment, or ask an admin
-          if it keeps happening.
+          {loadFailure(
+            connections.error,
+            "Couldn't load this connection. Try again in a moment, or ask an admin if it keeps happening.",
+          )}
         </p>
       </PageShell>
     );
@@ -494,8 +561,10 @@ function AppConnectionPage({
     return (
       <PageShell backButton={back} title={key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this app. Try again in a moment, or ask an admin if it
-          keeps happening.
+          {loadFailure(
+            [plugins.error, catalogue.error, setup.error],
+            "Couldn't load this app. Try again in a moment, or ask an admin if it keeps happening.",
+          )}
         </p>
       </PageShell>
     );
@@ -518,7 +587,10 @@ function AppConnectionPage({
     return (
       <PageShell backButton={back} title={server.title}>
         <PageEmpty icon={IconPlugOff} title="Not set up yet">
-          An admin has to turn on {server.title} before anyone can connect it.
+          {withAdmins(
+            `An admin has to turn on ${server.title} before anyone can connect it.`,
+            admins,
+          )}
         </PageEmpty>
       </PageShell>
     );
@@ -630,9 +702,9 @@ function AppConnectionPage({
         description="Bots use this as you, and see only what you can see."
         title={server.title}
       >
-        {notice ? (
+        {shownNotice ? (
           <p className="break-words text-destructive text-sm" role="alert">
-            {notice}
+            {failureSaid(shownNotice)}
           </p>
         ) : null}
 
@@ -651,6 +723,7 @@ function AppConnectionPage({
           <PageRows className="mt-0">
             <BrokeredAccountRow
               account={brokeredAccount}
+              admins={admins}
               edition={paths.edition}
               reader="person"
               startConnect={startConnect}
@@ -669,6 +742,17 @@ function AppConnectionPage({
             />
             {switchRow}
           </PageRows>
+          {/*
+           * The same app with its key, for an app the directory lists as a sign-in in place of its
+           * key, offered to somebody who may add apps: adding it here connects it, as Browse apps
+           * does from Connections.
+           */}
+          {signsInForDirectory(server) &&
+          (paths.edition === "personal" ||
+            isOrganizationAdmin(role) ||
+            openToMember) ? (
+            <KeyVersionOffer appId={key} title={server.title} />
+          ) : null}
         </PageSection>
 
         {perActionGrants ? (
@@ -741,9 +825,14 @@ function AppConnectionPage({
       description={app.summary || undefined}
       title={app.title}
     >
-      {notice ? (
+      {shownNotice ? (
         <p className="break-words text-destructive text-sm" role="alert">
-          {notice}
+          {failureSaid(shownNotice)}
+        </p>
+      ) : null}
+      {connectApp.error ? (
+        <p className="break-words text-destructive text-sm" role="alert">
+          {failureSaid(connectApp.error)}
         </p>
       ) : null}
 
@@ -756,11 +845,16 @@ function AppConnectionPage({
                   read for both. */}
               <ItemTitle>Your account</ItemTitle>
               <ItemDescription>
-                {!enabled
-                  ? "Not available yet. An admin has to turn this on first."
-                  : connection
-                    ? "Bots you allow use this as you, and see only what you can see."
-                    : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}
+                {!enabled && mayAdd
+                  ? `No Bot can use this yet. Connecting makes it available to everyone in the organization and takes you to ${app.vendor} to approve access.`
+                  : !enabled
+                    ? withAdmins(
+                        "Not available yet. An admin has to turn this on first.",
+                        admins,
+                      )
+                    : connection
+                      ? "Bots you allow use this as you, and see only what you can see."
+                      : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -801,9 +895,9 @@ function AppConnectionPage({
                          * and changed nothing would report that access had been withdrawn when it
                          * had not, which is the one outcome worse than not offering it.
                          */
-                        setNotice(
-                          `You can't disconnect here yet. To stop access now, remove OpenBot in your ${app.vendor} account's third-party access settings.`,
-                        )
+                        setNotice({
+                          message: `You can't disconnect here yet. To stop access now, remove OpenBot in your ${app.vendor} account's third-party access settings.`,
+                        })
                       }
                       className="whitespace-nowrap"
                       variant="destructive"
@@ -820,10 +914,15 @@ function AppConnectionPage({
                    * vendor's own consent page, and a control that navigates away should look like one.
                    */}
                   <Button
-                    disabled={!enabled || connect.isPending}
+                    disabled={
+                      (!enabled && !mayAdd) ||
+                      connect.isPending ||
+                      connectApp.pending === key
+                    }
                     onClick={() => {
                       setNotice(null);
-                      connect.mutate(key);
+                      if (enabled) connect.mutate(key);
+                      else void connectApp.run(key, "connect");
                     }}
                     size="sm"
                     type="button"

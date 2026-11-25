@@ -49,6 +49,8 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { deleteQuestion } from "@/lib/delete-question";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { routineDoes } from "@/lib/routines/merged";
 import {
@@ -176,7 +178,7 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
       ) : runs.error ? (
         <div className="mt-4 flex flex-wrap items-center gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load its runs. Try again.
+            {loadFailure(runs.error, "Couldn't load its runs. Try again.")}
           </p>
           <Button
             disabled={runs.isFetching}
@@ -388,7 +390,11 @@ export function RoutinePage({
               <button
                 aria-label={`Run the routine scheduled ${routine.schedule} now`}
                 disabled={!routine.enabled || runNow.isPending}
-                onClick={() => runNow.mutate(routine.id)}
+                onClick={() => {
+                  // Bots can't run until a card is added: the dialog says why, in place of a run.
+                  if (stopIfNeedsCard()) return;
+                  runNow.mutate(routine.id);
+                }}
                 type="button"
               />
             }
@@ -504,7 +510,7 @@ export function RoutinePage({
         </PageRows>
         {setEnabled.error || runNow.error ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
-            {setEnabled.error?.message ?? runNow.error?.message}
+            {failureSaid(setEnabled.error ?? runNow.error)}
           </p>
         ) : null}
       </PageSection>
@@ -566,7 +572,7 @@ export function RoutinePage({
           {remove.error ? (
             <DialogBody className="mt-4">
               <p className="text-destructive text-sm" role="alert">
-                {remove.error.message}
+                {failureSaid(remove.error)}
               </p>
             </DialogBody>
           ) : null}

@@ -1,5 +1,5 @@
 /**
- * Settings → General → AI model inside OpenBot Desktop: a plan or a sign-in changes the connection
+ * Settings → Providers inside OpenBot Desktop: a plan or a sign-in changes the connection
  * with OpenBot running.
  *
  * Before, Change there only asked Desktop to stop OpenBot and reopen its setup window
@@ -35,7 +35,7 @@ import {
 } from "@/lib/api/generated/models/models.zod";
 import { modelKeys } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
-import { Route as GeneralRoute } from "@/routes/_authed/settings/index";
+import { Route as ProvidersRoute } from "@/routes/_authed/settings/providers";
 import { settleReactWork } from "./settle-react-work";
 
 const AI_CONNECTION = "/api/v2/organizations/default/ai-connection";
@@ -178,8 +178,8 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-function renderGeneral() {
-  const Page = GeneralRoute.options.component as ComponentType;
+function renderProviders() {
+  const Page = ProvidersRoute.options.component as ComponentType;
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
@@ -190,7 +190,7 @@ function renderGeneral() {
 }
 
 /** Open the AI model row, choose Change, then Anthropic, and start the Claude plan's sign-in. */
-async function startClaude(view: ReturnType<typeof renderGeneral>) {
+async function startClaude(view: ReturnType<typeof renderProviders>) {
   await userEvent.click(
     await view.findByRole("button", { name: /Uses your OpenAI API key/ }),
   );
@@ -209,14 +209,14 @@ async function startClaude(view: ReturnType<typeof renderGeneral>) {
 }
 
 /** Sign in with the Claude plan: approved in the browser, which comes back to Desktop. */
-async function signInWithClaude(view: ReturnType<typeof renderGeneral>) {
+async function signInWithClaude(view: ReturnType<typeof renderProviders>) {
   const dialog = await startClaude(view);
   await within(dialog).findByText("Signed in to Anthropic.");
   return dialog;
 }
 
 test("a Claude plan: signed in, its engine started alone, the server switched, Desktop settled, and OpenBot never stopped", async () => {
-  const view = renderGeneral();
+  const view = renderProviders();
   const dialog = await signInWithClaude(view);
   // Nothing to paste: the sign-in finished on its own.
   expect(within(dialog).queryByLabelText("Code from your browser")).toBeNull();
@@ -248,7 +248,7 @@ test("a Claude plan: signed in, its engine started alone, the server switched, D
  */
 test("a Claude plan in an older Desktop: the code Claude's page shows is pasted, as before", async () => {
   claudeUrl = MANUAL;
-  const view = renderGeneral();
+  const view = renderProviders();
   const dialog = await startClaude(view);
   await userEvent.type(
     await within(dialog).findByLabelText("Code from your browser"),
@@ -284,7 +284,7 @@ test("a Claude sign-in finishes in Desktop only when its redirect comes back to 
 
 test("a refused switch says why in one sentence, and Desktop settles back to the connection still in use", async () => {
   refuse = true;
-  const view = renderGeneral();
+  const view = renderProviders();
   const dialog = await signInWithClaude(view);
   await userEvent.click(
     within(dialog).getByRole("button", { name: "Connect" }),
@@ -308,7 +308,7 @@ test("after a switch, the models a person may pick and each conversation's pick 
     model: "gpt-6.1-pro",
     effort: null,
   });
-  const view = renderGeneral();
+  const view = renderProviders();
   const dialog = await signInWithClaude(view);
   await userEvent.click(
     within(dialog).getByRole("button", { name: "Connect" }),

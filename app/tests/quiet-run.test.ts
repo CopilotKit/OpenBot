@@ -117,6 +117,39 @@ test("a quiet run is asked about, kept while the server says it is going, and en
   expect(asked).toBe(3);
 });
 
+/*
+ * FOUND ON OPENBOT CLOUD. A long answer went quiet on a slow app, the one ask about it never reached
+ * a server, and the turn ended "lost touch" with the run still going.
+ */
+test("an ask the server could not answer is asked again, and the run that is still going is kept", async () => {
+  const answers: RunLiveness[] = ["unreachable", "unreachable", "live", "over"];
+  let asked = 0;
+  const watch = watchQuietRun({
+    quietMs: 20,
+    retryMs: 5,
+    ask: async () => {
+      asked += 1;
+      return answers.shift() ?? "over";
+    },
+  });
+  expect(await watch.over).toBe("over");
+  expect(asked).toBe(4);
+});
+
+test("a server that answers none of the asks in a row ends the turn as unreachable", async () => {
+  let asked = 0;
+  const watch = watchQuietRun({
+    quietMs: 20,
+    retryMs: 5,
+    ask: async () => {
+      asked += 1;
+      return "unreachable";
+    },
+  });
+  expect(await watch.over).toBe("unreachable");
+  expect(asked).toBe(3);
+});
+
 test("a run that keeps speaking is never asked about, and nothing is asked once it stops being watched", async () => {
   let asked = 0;
   const watch = watchQuietRun({
@@ -169,6 +202,7 @@ test("a server that stops answering while the browser takes a step ends the turn
   const answers: RunLiveness[] = ["over", "unreachable"];
   const watch = watchQuietRun({
     quietMs: 20,
+    retryMs: 5,
     ask: async () => answers.shift() ?? "unreachable",
   });
   watch.rest();

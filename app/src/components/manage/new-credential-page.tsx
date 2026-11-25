@@ -31,6 +31,7 @@ import {
   type ModelProvider,
   modelKeyQueryOptions,
 } from "@/lib/credentials/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 
 /** Without `items` the trigger draws the raw value, so the type read "model" in lower case. */
@@ -356,7 +357,10 @@ function CredentialForm({ modelKey }: { modelKey: ModelKeyName | null }) {
         </form.Subscribe>
         {createCredential.error ? (
           <p className="mt-5 text-destructive text-sm" role="alert">
-            Couldn't save the credential. Try again.
+            {loadFailure(
+              createCredential.error,
+              "Couldn't save the credential. Try again.",
+            )}
           </p>
         ) : null}
       </PageCard>

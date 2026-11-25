@@ -7,6 +7,7 @@ import {
   type PolicyTranslation,
   translatePolicyRule,
 } from "@/lib/computers/policy-translate";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 
 /** What came back for one description, kept beside the words it came from. */
 export type WrittenRule = PolicyTranslation & { text: string };
@@ -37,7 +38,7 @@ export function DescribeField({
 }) {
   const [text, setText] = useState("");
   const [writing, setWriting] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Failure | null>(null);
   const described = text.trim();
 
   const ask = async () => {
@@ -45,9 +46,10 @@ export function DescribeField({
     setProblem(null);
     setWriting(true);
     try {
-      setProblem(await write(described));
+      const unusable = await write(described);
+      setProblem(unusable === null ? null : { message: unusable });
     } catch (thrown) {
-      setProblem((thrown as Error).message);
+      setProblem(failureOf(thrown, String(thrown)));
     } finally {
       setWriting(false);
     }
@@ -87,7 +89,7 @@ export function DescribeField({
       </div>
       {problem ? (
         <p className="text-destructive text-sm" role="alert">
-          {problem}
+          {failureSaid(problem)}
         </p>
       ) : null}
     </Field>

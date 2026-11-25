@@ -3,15 +3,18 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { screenLinkLooks } from "./screen-link-style";
 
 /**
- * The cards a Bot's personal settings changes are drawn as, in a real browser: `update_my_settings`
- * and `update_my_bot`, saved, refused and still running, drawn by the call's name and result as the
+ * The cards a Bot's personal settings changes are drawn as, in a real browser: `update_my_settings`,
+ * `update_my_bot` and `update_bot_apps`, saved, refused and still running, drawn by the call's name and result as the
  * transcript draws them, from the result as the server writes it.
  *
  * Each saved card is titled with what changed (your settings, your approvals, the Bot by its name),
  * names every setting in the words of the screen it lives on with what it was and what it is now,
- * and opens that screen. A refusal says why in the server's words and draws nothing as changed. In
+ * and opens that screen with the link every settings card uses. A call still waiting on the person
+ * is its approval card, titled in plain words ("Change your settings", "Change Scout's settings").
+ * A refusal says why in the server's words and draws nothing as changed. In
  * the app's stylesheet, light and dark, at a laptop's width and a phone's: nothing scrolls sideways
  * and every card is whole inside the window.
  *
@@ -183,6 +186,11 @@ async function open(
     )
     .first()
     .waitFor({ timeout: 15_000 });
+  // The calls still waiting on the person, as their approval cards.
+  if (which === "cards")
+    await page
+      .locator('[data-part="approval-bot"] [data-slot="decision-card"]')
+      .waitFor({ timeout: 15_000 });
   // The screens' reads answer, and their rows draw what they answered.
   if (which === "screens")
     await page
@@ -198,6 +206,8 @@ async function open(
     content: await stylesheet([...new Set(classes)]),
   });
   await page.evaluate(() => document.fonts.ready);
+  // An approval card unfolds its answers as it opens; it is looked at once it has.
+  await page.waitForTimeout(400);
   return page;
 }
 
@@ -252,6 +262,27 @@ function read(page: Page): Promise<Record<string, Drawn>> {
   }) as Promise<Record<string, Drawn>>;
 }
 
+/** Each waiting call's approval card title, by its part of the page. */
+function approvalTitles(page: Page): Promise<Record<string, string>> {
+  return page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll("[data-part]")].flatMap((part) => {
+        const title = part.querySelector(
+          "[data-slot=decision-card] figcaption p",
+        );
+        return title
+          ? [
+              [
+                part.getAttribute("data-part") ?? "",
+                (title.textContent ?? "").trim(),
+              ],
+            ]
+          : [];
+      }),
+    ),
+  );
+}
+
 describe.skipIf(!asked)("the personal settings cards", () => {
   for (const engine of engines)
     for (const theme of ["light", "dark"] as const)
@@ -277,7 +308,7 @@ describe.skipIf(!asked)("the personal settings cards", () => {
             );
             expect(sideways).toBe(false);
             const cards = await read(page);
-            expect(Object.keys(cards)).toHaveLength(7);
+            expect(Object.keys(cards)).toHaveLength(12);
             for (const card of Object.values(cards)) {
               expect(card.inside).toBe(true);
               expect(card.valuesInside).toBe(true);
@@ -355,6 +386,115 @@ describe.skipIf(!asked)("the personal settings cards", () => {
               },
               { label: "Visibility", was: "Private", now: "Public" },
             ]);
+
+            // Every card opens its screen with the same link as the admin cards: primary, a chevron.
+            const links = await screenLinkLooks(page);
+            expect(links.map((link) => link.text)).toEqual([
+              "Open Settings",
+              "Open Approvals",
+              "Open Setup",
+              "Open Apps",
+              "Open Apps",
+            ]);
+            for (const link of links)
+              expect(link).toMatchObject({
+                underlined: false,
+                chevron: true,
+                primary: true,
+                weight: "500",
+              });
+            expect(new Set(links.map((link) => link.size)).size).toBe(1);
+
+            // A call waiting on the person asks in words a person would use, never the tool's name.
+            expect(await approvalTitles(page)).toEqual({
+              "approval-settings": "Change your settings",
+              "approval-bot": "Change Scout's settings",
+              "approval-apps": "Change what Scout can use in Gmail",
+            });
+            // While it waits, what Scout would be able to do in Gmail, row by row.
+            expect(
+              await page.evaluate(() =>
+                [
+                  ...document.querySelectorAll(
+                    '[data-part="approval-apps"] [data-setting]',
+                  ),
+                ].map((row) => (row.textContent ?? "").replace(/\s+/g, " ")),
+              ),
+            ).toEqual(["Send emailOffOn"]);
+
+            // What a Bot can use in an app: titled with the Bot, the app by its logo and name,
+            // each action as the app's page names it, and the Bot's Apps page to open.
+            const apps = cards["apps-done"];
+            expect(apps).toMatchObject({
+              state: "done",
+              title: "Scout",
+              badge: "Changed",
+              link: { text: "Open Apps", href: "/bots/bot-scout/apps" },
+            });
+            expect(apps?.rows).toEqual([
+              { label: "Send email", was: "Off", now: "On" },
+              { label: "Create email draft", was: "Off", now: "On" },
+              { label: "Delete message", was: "On", now: "Off" },
+            ]);
+            const appLines = await page.evaluate(() =>
+              Object.fromEntries(
+                [...document.querySelectorAll("[data-part^='apps-']")].map(
+                  (part) => {
+                    const app = part.querySelector("[data-app]");
+                    const logo = app?.querySelector("img");
+                    return [
+                      part.getAttribute("data-part"),
+                      app
+                        ? {
+                            name: app.getAttribute("data-app"),
+                            logo: Boolean(
+                              logo?.getAttribute("src")?.startsWith("data:"),
+                            ),
+                          }
+                        : null,
+                    ];
+                  },
+                ),
+              ),
+            );
+            expect(appLines).toEqual({
+              "apps-done": { name: "Gmail", logo: true },
+              // No logo: the app's initial, as the Apps page draws it.
+              "apps-app-done": { name: "Notion", logo: false },
+              "apps-running": { name: "Gmail", logo: false },
+              "apps-refused": { name: "Gmail", logo: false },
+              "apps-failed": { name: "Gmail", logo: false },
+            });
+            expect(cards["apps-app-done"]).toMatchObject({
+              state: "done",
+              title: "Ledger",
+              rows: [{ label: "Notion", was: "Can use", now: "Can't use" }],
+              link: { text: "Open Apps", href: "/bots/bot-ledger/apps" },
+            });
+            // Still running: the Bot the call names, and what it asks for, in the rows' words.
+            expect(cards["apps-running"]).toMatchObject({
+              state: "running",
+              title: "Ledger",
+              badge: "Changing",
+              link: null,
+              rows: [],
+              asked: ["Send email: On", "Delete message: Off"],
+            });
+            expect(cards["apps-refused"]).toMatchObject({
+              state: "refused",
+              title: "Ledger",
+              badge: "Not changed",
+              link: null,
+              rows: [],
+            });
+            expect(cards["apps-refused"]?.text).toContain(
+              "You can't manage this Bot.",
+            );
+            expect(cards["apps-failed"]).toMatchObject({
+              state: "failed",
+              badge: "Didn't work",
+              link: null,
+            });
 
             expect(cards["bot-refused"]).toMatchObject({
               state: "refused",

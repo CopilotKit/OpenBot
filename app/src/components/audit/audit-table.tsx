@@ -4,6 +4,7 @@ import {
   IconCirclePlus,
   IconSearch,
 } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import {
   type ColumnDef,
   type ColumnFiltersState,
@@ -16,7 +17,6 @@ import {
   tableFeatures,
   useTable,
 } from "@tanstack/react-table";
-import { useQuery } from "@tanstack/react-query";
 import type * as React from "react";
 import { useMemo, useState } from "react";
 import { PageEmpty } from "@/components/layout/page-shell";
@@ -37,15 +37,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { cn } from "@/lib/utils";
 import {
   type AuditEvent,
+  BotCell,
+  botIdOf,
   botText,
   DecisionCell,
   OUTCOME_MARK,
   OUTCOME_ROW,
+  StartedByCell,
   searchTextOf,
   startedByText,
   WhatCell,
@@ -77,6 +81,14 @@ const SEARCHABLE = new Set(["search"]);
  * started a row is drawn under its Bot (`WhoCell`), and still has a column for the Started by filter.
  */
 const UNDRAWN = new Set(["search", "startedBy"]);
+
+/**
+ * Columns a phone draws under What instead of beside it. At 390px the table was When, What and part
+ * of Bot, and Decision (the outcome and its reasons) sat off the edge where nobody scrolled to it.
+ * The People rows do the same on a phone: what sits beside a name takes a line of its own under it.
+ * "A phone" is the app's own (`useIsMobile`): the width the sidebar becomes a sheet at.
+ */
+const STACKED_ON_A_PHONE = new Set(["bot", "decision"]);
 
 const INITIAL_SORT: SortingState = [{ id: "when", desc: true }];
 
@@ -134,10 +146,22 @@ export function AuditTable({
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   // The person reading the page: a row they started says "you", not their email.
   const viewer = useQuery(currentUserQueryOptions()).data?.email ?? null;
+  // On a phone, Bot and Decision are drawn under What (STACKED_ON_A_PHONE).
+  const phone = useIsMobile();
   const columns = useMemo(
-    () => auditColumns(nameFor, storedNames, deploymentName, viewer, rowAction),
-    [nameFor, storedNames, deploymentName, viewer, rowAction],
+    () =>
+      auditColumns(
+        nameFor,
+        storedNames,
+        deploymentName,
+        viewer,
+        rowAction,
+        phone,
+      ),
+    [nameFor, storedNames, deploymentName, viewer, rowAction, phone],
   );
+  const drawn = (id: string) =>
+    !UNDRAWN.has(id) && !(phone && STACKED_ON_A_PHONE.has(id));
   const table = useTable({
     features,
     columns,
@@ -184,7 +208,7 @@ export function AuditTable({
           {table.getHeaderGroups().map((group) => (
             <TableRow className="hover:bg-transparent" key={group.id}>
               {group.headers
-                .filter((header) => !UNDRAWN.has(header.column.id))
+                .filter((header) => drawn(header.column.id))
                 .map((header) => (
                   <TableHead
                     className={cn(
@@ -211,7 +235,7 @@ export function AuditTable({
               >
                 {row
                   .getAllCells()
-                  .filter((cell) => !UNDRAWN.has(cell.column.id))
+                  .filter((cell) => drawn(cell.column.id))
                   .map((cell) => (
                     <TableCell
                       className={cn(
@@ -240,7 +264,9 @@ export function AuditTable({
             <TableRow className="hover:bg-transparent">
               <TableCell
                 className="p-0"
-                colSpan={columns.length - UNDRAWN.size}
+                colSpan={
+                  columns.filter((column) => drawn(column.id ?? "")).length
+                }
               >
                 {footer}
               </TableCell>
@@ -371,6 +397,8 @@ function auditColumns(
   deployment: string,
   viewer: string | null,
   rowAction?: (event: AuditEvent) => React.ReactNode,
+  /** A phone's window: Bot and Decision are drawn under What (STACKED_ON_A_PHONE). */
+  phone = false,
 ): ColumnDef<typeof features, AuditEvent>[] {
   return [
     {
@@ -420,7 +448,39 @@ function auditColumns(
       accessorFn: (event) => whatText(event),
       header: "What",
       cell: ({ row }) => (
-        <WhatCell event={row.original} storedName={storedNames} />
+        <>
+          <WhatCell event={row.original} storedName={storedNames} />
+          {phone ? (
+            // The Bot and the decision under what was done (STACKED_ON_A_PHONE).
+            <div className="mt-2 flex flex-col gap-2">
+              {/*
+               * Marked with the column each part stands in for, as the cells are. The Bot's name only
+               * when there is one: the "-" a column needs says nothing here.
+               */}
+              <div>
+                <div data-column="bot">
+                  {botIdOf(row.original) ? (
+                    <div>
+                      <BotCell event={row.original} nameFor={nameFor} />
+                    </div>
+                  ) : null}
+                </div>
+                <div className="text-xs">
+                  <StartedByCell
+                    deployment={deployment}
+                    event={row.original}
+                    nameFor={nameFor}
+                    viewer={viewer}
+                  />
+                </div>
+              </div>
+              <div data-column="decision">
+                <DecisionCell event={row.original} storedNames={storedNames} />
+                {rowAction?.(row.original)}
+              </div>
+            </div>
+          ) : null}
+        </>
       ),
       enableSorting: false,
     },

@@ -16,6 +16,8 @@ import {
 import {
   AppAccessAction,
   appAccessSentence,
+  namesAnAdmin,
+  useOpenApps,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
@@ -43,7 +45,9 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
   agentPluginsQueryOptions,
@@ -147,9 +151,17 @@ function YourApps({ agent }: { agent: AgentProfile }) {
   const held = useQuery(botAppsQueryOptions(agent.id));
   const give = useMutation(giveBotAppMutationOptions(queryClient));
   const takeBack = useMutation(takeBackBotAppMutationOptions(queryClient));
+  // What it holds, read by the section below too: while OpenBot holds off, that section says so once.
+  const whole = useQuery(agentPluginsQueryOptions(agent.id));
   const error = give.error ?? takeBack.error;
   const busy = give.isPending || takeBack.isPending;
   if (giveable.isPending || held.isPending) return null;
+  if (
+    isHeld([giveable.error, held.error]) &&
+    whole.data === undefined &&
+    isHeld(whole.error)
+  )
+    return null;
   const states = new Map((held.data ?? []).map((app) => [app.key, app]));
   /*
    * What you could give, and then anything you already gave that no longer is — an account you
@@ -170,17 +182,21 @@ function YourApps({ agent }: { agent: AgentProfile }) {
   ];
   return (
     <PageSection
-      description={`Turn on an app to let ${agent.name} use it. It always uses the account of whoever is asking.`}
+      description={`Choose which of your apps ${agent.name} can use. It always uses the account of whoever is asking.`}
       title="Your apps"
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
-      {giveable.error ? (
+      {/* Without what it holds, every switch would be drawn off: said as a failure instead. */}
+      {giveable.error || held.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your apps. Try again in a moment.
+          {loadFailure(
+            [giveable.error, held.error],
+            "Couldn't load your apps. Try again in a moment.",
+          )}
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty
@@ -266,6 +282,8 @@ function YourSkills({ agentId }: { agentId: string }) {
   const grant = useMutation(setPluginGrantMutationOptions(queryClient));
   const skills = (page.data ?? []).filter((skill) => skill.usableOnYourBots);
   const carried = new Set((held.data?.skills ?? []).map((skill) => skill.slug));
+  // The section below reads what it holds too, and says once that OpenBot is holding off.
+  if (held.data === undefined && isHeld(held.error)) return null;
   return (
     <PageSection
       description="Turn on a skill to use it with this Bot. Type / in a conversation to run it."
@@ -273,12 +291,15 @@ function YourSkills({ agentId }: { agentId: string }) {
     >
       {grant.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {grant.error.message}
+          {failureSaid(grant.error)}
         </p>
       ) : null}
       {page.isPending || held.isPending ? null : page.error || held.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your skills. Try again in a moment.
+          {loadFailure(
+            [page.error, held.error],
+            "Couldn't load your skills. Try again in a moment.",
+          )}
         </p>
       ) : skills.length === 0 ? (
         <PageEmpty
@@ -370,6 +391,21 @@ function Granted({
     ...botAppsQueryOptions(agentId),
     enabled: kind === "apps",
   });
+  // Apps open: the Bot's owner gives it apps, and nobody is told to ask an admin for that.
+  const knownOpen = useOpenApps(agentId);
+  const open = knownOpen ?? null;
+  /*
+   * Who a member is told to go to, read only once one of the rows says only an admin can take the
+   * step, and only once it is known the person is not an admin themselves, and whether apps are open.
+   */
+  const admins = useOrganizationAdmins(
+    me !== undefined &&
+      knownOpen !== undefined &&
+      kind === "apps" &&
+      (apps.data ?? []).some((app) =>
+        namesAnAdmin(app, edition, isOrganizationAdmin(me?.role), open),
+      ),
+  );
   /*
    * Both on the Apps page, so no row is drawn without its state and then redrawn with one a moment
    * later; and the edition, so the personal edition never shows the team edition's empty state first.
@@ -383,7 +419,10 @@ function Granted({
   if (!plugins.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Couldn't load what this Bot can use. Try again in a moment.
+        {loadFailure(
+          plugins.error,
+          "Couldn't load what this Bot can use. Try again in a moment.",
+        )}
       </p>
     );
   }
@@ -414,8 +453,10 @@ function Granted({
     >
       {kind === "apps" && apps.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't check whether each app is ready for you. Try again in a
-          moment.
+          {loadFailure(
+            apps.error,
+            "Couldn't check whether each app is ready for you. Try again in a moment.",
+          )}
         </p>
       ) : null}
       {count === 0 && kind === "skills" ? (
@@ -434,10 +475,14 @@ function Granted({
             <>
               Connect one on <Link to="/connections">Connections</Link>.
             </>
+          ) : open && mine ? (
+            "Give it one under Your apps. Until then this Bot can only talk with you."
+          ) : open ? (
+            "Its owner can give it some. Until then this Bot can only talk with you."
           ) : mine ? (
-            "Turn one on under Your apps, or ask an admin. Until then this Bot can only talk with you."
+            "Give it one under Your apps, or ask an admin. Until then this Bot can only talk with you."
           ) : (
-            "An admin has to add them. Until then this Bot can only talk with you."
+            "An admin has to give it some. Until then this Bot can only talk with you."
           )}
         </PageEmpty>
       ) : (
@@ -462,7 +507,14 @@ function Granted({
                         ? [appAccessSentence(app, undefined, edition, admin)]
                             .concat(labels.length > 0 ? [toolList(labels)] : [])
                             .join(" ")
-                        : appAccessSentence(app, undefined, edition, admin)}
+                        : appAccessSentence(
+                            app,
+                            undefined,
+                            edition,
+                            admin,
+                            admins,
+                            open,
+                          )}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>

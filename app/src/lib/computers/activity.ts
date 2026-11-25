@@ -605,6 +605,19 @@ export function readOutcome(content: unknown): ToolOutcome | null {
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     const outcome = parsed as Record<string, unknown>;
     if (outcome.waiting === true) return null;
+    /*
+     * A STEP THE RUN ENDED UNDER. When a run ends with a step still open (the person's Stop, a
+     * server that restarted, a stream cut short), the runtime closes the step with an answer of its
+     * own, `{ status: "stopped" | "error", reason, message }`, which has no `ok`. Found in an
+     * end-to-end run with the server restarted part way through a save: read as a computer's answer,
+     * it drew "Saved a file" for a file that was never written.
+     */
+    if (
+      outcome.ok === undefined &&
+      (outcome.status === "stopped" || outcome.status === "error") &&
+      typeof outcome.message === "string"
+    )
+      return { ...outcome, ok: false, reason: outcome.message };
     return { ...outcome, ok: outcome.ok !== false };
   }
   if (doneByPerson(text)) return { ok: true, doneByPerson: true, reason: text };

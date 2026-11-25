@@ -203,6 +203,11 @@ const COPILOTKIT_ALLOWED: { file: string; text: string; why: string }[] = [
     why: "managed updates: the account's own name, the glossary's named exception like GitHub's and Slack's own words",
   },
   {
+    file: "app/src/lib/plan/words.ts",
+    text: "Free because you're a CopilotKit employee",
+    why: "OpenBot Cloud's thank-you to the company's own staff, whose runs are free: the employer is named, in the words it was asked for",
+  },
+  {
     file: "desktop/src/Sections.tsx",
     text: "by CopilotKit",
     why: "the Account step's header, beside OpenBot's name: it reads OpenBot by CopilotKit",

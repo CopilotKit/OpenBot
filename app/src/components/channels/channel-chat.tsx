@@ -33,6 +33,10 @@ import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { ProgressRow } from "@/components/channels/progress-row";
 import {
+  openComposerModelPicker,
+  StoppedConnectionNotice,
+} from "@/components/channels/stopped-connection-notice";
+import {
   seedMessage,
   takeFirstMessage,
   transcriptMessages,
@@ -57,7 +61,9 @@ import {
   type AgentChannel,
   type ChannelSummary,
   channelKeys,
+  refusedTurnsQueryOptions,
 } from "@/lib/channels/queries";
+import { withRefusedTurns } from "@/lib/channels/refused-turns";
 import { runReply } from "@/lib/channels/run-reply";
 import { onBotSaidOffTheList } from "@/lib/channels/said-off-the-list";
 import { turnDidWork } from "@/lib/channels/turn-did-work";
@@ -100,6 +106,8 @@ import {
   failedRunReason,
   followLastRun,
   laterRunFailure,
+  laterRunReason,
+  refusedForPerson,
   requestNotMade,
   stoppedReason,
   TURN_CUT_OFF,
@@ -113,8 +121,11 @@ import {
   useConnectionLost,
   useReconnected,
 } from "@/lib/desktop/connection-lost";
+import { useClearWhenHoldEnds } from "@/lib/held-ends";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
 import {
   askChannelAgent,
@@ -735,7 +746,23 @@ export function ChannelChat({
    * ends in a failed run (`followLastRun`), so the failure is still there after a reload. Cleared by
    * the next turn.
    */
-  const [runError, setRunError] = useState<string | null>(null);
+  // Its sentence, or the server's refusal kept whole when it is OpenBot holding off (drawn calmly).
+  const [runError, setRunError] = useState<Failure | null>(null);
+  // A hold is about now: said until the organization answers again, then gone (lib/held-ends.ts).
+  useClearWhenHoldEnds(runError, () =>
+    setRunError((shown) => (shown === runError ? null : shown)),
+  );
+  /**
+   * The turns of this mount the server refused for the person, by the id of the person's message:
+   * the sentence it said (`refusedForPerson`). Unlike `runError`, the next turn doesn't clear one:
+   * each stays under its own message. Two refused in a row drew one notice, the second's, and the
+   * first message was left looking as if it had never been answered.
+   */
+  const [refusals, setRefusals] = useState<ReadonlyMap<string, string>>(
+    () => new Map(),
+  );
+  /** The person's message the turn going here sent: where a refusal of it is drawn. */
+  const turnMessageId = useRef<string | null>(null);
   // Mount reads and Bot refreshes share one ordering: only the newest read owns the notice.
   const historyReadVersion = useRef(0);
   useEffect(() => {
@@ -857,7 +884,9 @@ export function ChannelChat({
       // The turn the join was kept for had ended without a word reaching here: say so.
       if (keptEnded !== null && current && turnsRef.current === 0) {
         setRestoring(false);
-        setRunError(keptEnded === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE);
+        setRunError({
+          message: keptEnded === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,
+        });
       }
       /*
        * The last run failed, so say so again, as the turn did when it failed. Only from a replay
@@ -866,7 +895,7 @@ export function ChannelChat({
        */
       const failed = joined === "connected" ? lastRun.failure() : null;
       if (failed !== null && current && turnsRef.current === 0) {
-        setRunError((shown) => shown ?? failed);
+        setRunError((shown) => shown ?? { message: failed });
       }
 
       /*
@@ -1220,6 +1249,13 @@ export function ChannelChat({
    * handle that `copilotkit.runAgent` does not hand back.
    */
   const turnFailure = useRef<string | null>(null);
+  /**
+   * The turn going here failed because OpenBot's server refused it for the person, on a rule sending
+   * again won't change (`refusedForPerson`): a model their teams don't allow, a switch an admin
+   * turned off. Its message stays sent, as a conversation's first message refused the same way
+   * does, and the box is left empty: handed back with Send ready, it only asked to be refused again.
+   */
+  const turnRefused = useRef(false);
   /** A run of the turn going here failed because its stream reached this browser out of shape. */
   const streamBroke = useRef(false);
   /** The person stopped the turn going here (Stop, or Send now): a run it aborted is not a failure. */
@@ -1446,6 +1482,7 @@ export function ChannelChat({
 
     setRunError(null);
     turnFailure.current = null;
+    turnRefused.current = false;
     stoppedHere.current = false;
     reportedReply.current = null;
     assistantMessagesBeforeRun.current = new Set(
@@ -1475,13 +1512,13 @@ export function ChannelChat({
         ),
       );
 
-    target.addMessage(
-      sent ?? {
-        content: toMessageContent(trimmed, attachments),
-        id: newId(),
-        role: "user",
-      },
-    );
+    const turnMessage = sent ?? {
+      content: toMessageContent(trimmed, attachments),
+      id: newId(),
+      role: "user" as const,
+    };
+    turnMessageId.current = turnMessage.id;
+    target.addMessage(turnMessage);
     report(trimmed || describeAttachments(attachments), null);
 
     // Providers reject later turns if prior tool calls have no result; repair before sending.
@@ -1591,7 +1628,9 @@ export function ChannelChat({
             const whole = await readBackFromThread(target, existingMessageIds);
             if (whole) reportReadBack(target);
           }
-          setRunError(ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE);
+          setRunError({
+            message: ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,
+          });
           break;
         }
         if (!streamBroke.current || turnFailure.current !== null) break;
@@ -1607,7 +1646,7 @@ export function ChannelChat({
             target.setMessages(answered as typeof target.messages);
           continue;
         }
-        setRunError(STREAM_BROKE);
+        setRunError({ message: STREAM_BROKE });
         break;
       }
     } finally {
@@ -1621,7 +1660,7 @@ export function ChannelChat({
         target.messages.filter((message) => existingMessageIds.has(message.id)),
       );
       turnFailure.current = NOT_SENT;
-      setRunError(NOT_SENT);
+      setRunError({ message: NOT_SENT });
     }
 
     /*
@@ -1656,8 +1695,13 @@ export function ChannelChat({
      * dogfood: a turn cut before it did anything put the words back in the box as if nothing had
      * been sent, under a notice that said nothing of it.
      */
+    /*
+     * NOR A TURN THE SERVER REFUSED FOR THE PERSON. See `turnRefused`: the notice under it says
+     * why and who can change it, and the same words sent again are refused again.
+     */
     if (
       turnFailure.current !== null &&
+      !turnRefused.current &&
       !carriesOn(turnFailure.current) &&
       !turnDidWork(target.messages, existingMessageIds)
     ) {
@@ -1760,26 +1804,53 @@ export function ChannelChat({
     const fail = (
       message: string,
       laterRun = false,
-      /** A truer sentence that is still being asked for; nothing is drawn until it answers. */
-      truer?: Promise<string>,
+      /**
+       * A truer sentence that is still being asked for; nothing is drawn until it answers. It may be
+       * the server's refusal kept whole, when it is OpenBot holding off, to be drawn calmly.
+       */
+      truer?: Promise<Failure>,
+      /** The server refused the run for the person; see `turnRefused`. */
+      refused = false,
     ) => {
       if (!awaitingReply.current && !(laterRun && turnsRef.current > 0)) return;
       awaitingReply.current = false;
       // Both halves of one fact: the sentence the transcript shows, and the reason `deliver` throws
       // so the draft behind the turn is restored rather than counted as sent. See `turnFailure`.
       turnFailure.current = message;
-      if (!truer) return setRunError(message);
+      turnRefused.current = refused;
+      /*
+       * A refusal is said under the message it refused, and stays there (`refusals`); every other
+       * failure is the last turn's state (`runError`), cleared by the next turn.
+       */
+      const refusedMessage = refused ? turnMessageId.current : null;
+      const say = (sentence: Failure) => {
+        if (refusedMessage === null) return setRunError(sentence);
+        setRefusals((now) =>
+          new Map(now).set(refusedMessage, sentence.message),
+        );
+        // The server kept it: read its record again, so a reload draws what this view does.
+        void queryClient.invalidateQueries({
+          queryKey: channelKeys.refusedTurns(channel.id),
+        });
+      };
+      if (!truer) return say({ message });
       void truer.then((sentence) => {
         // The next turn clears the failure; a sentence about the one before it is dropped.
         if (turnFailure.current !== message) return;
-        turnFailure.current = sentence;
-        setRunError(sentence);
+        turnFailure.current = sentence.message;
+        say(sentence);
       });
     };
     const subscription = agent.subscribe?.({
       // Both surfaces fall back to the same sentence, from the same place, so a person who uses
       // both is not told two different things about the same silence.
-      onRunErrorEvent: ({ event }) => fail(stoppedReason(event?.message), true),
+      onRunErrorEvent: ({ event }) =>
+        fail(
+          stoppedReason(event?.message),
+          true,
+          undefined,
+          refusedForPerson(event?.message),
+        ),
       onRunFailed: ({ error }) => {
         /*
          * Not the Bot failing: the run's stream reached this browser out of shape, in any run of a
@@ -1803,7 +1874,16 @@ export function ChannelChat({
         if (!awaitingReply.current && turnsRef.current > 0) {
           if (stoppedHere.current) return;
           const said = laterRunFailure(error);
-          if (said) fail(said, true);
+          // A request refused may be OpenBot holding off, which the server is asked about first.
+          if (said)
+            fail(
+              said,
+              true,
+              requestNotMade(error)
+                ? laterRunReason(error, said, runtimeAgentId)
+                : undefined,
+              refusedForPerson(error),
+            );
           return;
         }
         /*
@@ -1817,6 +1897,7 @@ export function ChannelChat({
           requestNotMade(error)
             ? failedRunReason(error, runtimeAgentId)
             : undefined,
+          refusedForPerson(error),
         );
       },
       onRunFinishedEvent: ({ event }) => {
@@ -1854,7 +1935,8 @@ export function ChannelChat({
       },
     });
     return () => subscription?.unsubscribe();
-  }, [agent, runtimeAgentId]);
+    // A channel is one mount (keyed by its id), so its id never changes under this subscription.
+  }, [agent, runtimeAgentId, channel.id]);
 
   /** Stable reference for effects and component callbacks. */
   /*
@@ -1962,6 +2044,8 @@ export function ChannelChat({
    * is still holding, and the failed turn is already reported by `runError` under the transcript.
    */
   const askFromComponent = useCallback((text: string) => {
+    // Carry on, or a button a Bot drew: Bots can't run until a card is added, and the dialog says why.
+    if (stopIfNeedsCard()) return;
     void sayRef.current(text).catch(() => undefined);
   }, []);
 
@@ -1984,6 +2068,21 @@ export function ChannelChat({
 
     // Keep `seed` in state; transcriptMessages gives it up once the agent holds a user turn.
   }, []);
+
+  /*
+   * The turns the server refused, put back where they were sent (`withRefusedTurns`): the server's
+   * record of them, read with the conversation, and this mount's own (`refusals`) over it, so a
+   * refusal seen live and its record are one message and one notice. Nothing of a refused turn is
+   * in the thread, so without the record a reload lost the message and the notice both.
+   */
+  const storedRefusals = useQuery(refusedTurnsQueryOptions(channel.id)).data;
+  // Every render, as the transcript's messages always were: the agent's list changes in place.
+  const refused = withRefusedTurns(
+    transcriptMessages(agent.messages, seed),
+    storedRefusals ?? [],
+  );
+  for (const [messageId, sentence] of refusals)
+    refused.refusals.set(messageId, sentence);
 
   return (
     // Activity renderers resolve their agent through this SDK context. It must match useAgent's
@@ -2027,6 +2126,8 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            // An unsent reply stays with this conversation when somebody looks at another one.
+            draftKey={`conversation:${channel.id}`}
             attachmentLimits={attachmentLimits}
             starterSuggestions={
               channel.agentIds.length === 1 ? (
@@ -2075,13 +2176,14 @@ export function ChannelChat({
                 disabled={!channel.active}
                 onChange={runModel.choose}
                 saving={runModel.saving}
+                stopped={runModel.stopped !== null}
                 value={runModel.value}
               />
             }
             // Readiness is handled by `say`; deletion is the only disabled-chat state.
             disabled={!channel.active}
             messages={withVoiceChats(
-              transcriptMessages(agent.messages, seed).map(shownAnswer),
+              refused.messages.map(shownAnswer),
               voiceArchive.entries,
             )}
             attached={
@@ -2121,7 +2223,10 @@ export function ChannelChat({
                 />
                 {voiceArchive.error && (
                   <p className="pb-2 text-sm text-destructive" role="alert">
-                    Couldn’t load voice chats. Try again in a moment.
+                    {loadFailure(
+                      voiceArchive.error,
+                      "Couldn’t load voice chats. Try again in a moment.",
+                    )}
                   </p>
                 )}
                 {/* The picked model stopped being offered: what this conversation uses now. */}
@@ -2151,7 +2256,7 @@ export function ChannelChat({
                 ) : null}
                 {answer.error ? (
                   <p className="pb-2 text-sm text-destructive" role="alert">
-                    {answer.error.message}
+                    {failureSaid(answer.error)}
                   </p>
                 ) : null}
                 {channel.active ? null : (
@@ -2232,6 +2337,25 @@ export function ChannelChat({
              * run before closing it; see server/src/channels/stall-guard.ts.
              */
             stopped={runError ?? undefined}
+            // Each turn the server refused, under its own message, kept as later turns are sent.
+            refusals={refused.refusals}
+            /*
+             * A run on a connection that stopped working is refused, so this is drawn under the
+             * latest refusal as well as under `stopped`; it draws nothing unless the server says
+             * the conversation's connection stopped.
+             */
+            stoppedNotice={
+              (runError !== null || refused.refusals.size > 0) && picksModel ? (
+                <StoppedConnectionNotice
+                  channelId={channel.id}
+                  onChooseModel={() => openComposerModelPicker()}
+                  said={[
+                    ...(runError !== null ? [runError.message] : []),
+                    ...refused.refusals.values(),
+                  ]}
+                />
+              ) : undefined
+            }
             /*
              * A turn cut off part way (its backend stopped answering, its run ended unheard, its
              * stream broke, or the server says its reply came back incomplete or its model's
@@ -2240,7 +2364,7 @@ export function ChannelChat({
              * front of it.
              */
             onCarryOn={
-              runError !== null && carriesOn(runError)
+              runError !== null && carriesOn(runError.message)
                 ? () => askFromComponent(CARRY_ON)
                 : undefined
             }

@@ -4,11 +4,14 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
+import { everyPage } from "@/lib/api/every-page";
 import {
   getConversation,
   listConversations,
+  listRefusedTurns,
 } from "@/lib/api/generated/conversations/conversations";
 import type {
+  RefusedTurn as ApiRefusedTurn,
   Conversation,
   ConversationSummary,
 } from "@/lib/api/generated/model";
@@ -136,7 +139,37 @@ export const channelKeys = {
   byBots: () => ["channels", "bot"] as const,
   /** One Bot's conversations, as the Bots panel lists them under it. */
   byBot: (botId: string) => ["channels", "bot", botId] as const,
+  /** The caller's turns in one conversation that were refused before they ran. */
+  refusedTurns: (channelId: string) =>
+    ["channels", "refused-turns", channelId] as const,
 };
+
+/**
+ * One of the caller's turns in a conversation that was refused before it ran: the API's
+ * `RefusedTurn`. Nothing of it reaches the conversation's thread, so the transcript draws it from
+ * here: the message it was for, after `afterMessageId`, and the refusal under it.
+ */
+export type RefusedTurn = ApiRefusedTurn;
+
+/** Every refused turn of the caller's in a conversation, newest first, page by page to the end. */
+export function refusedTurnsQueryOptions(channelId: string) {
+  return queryOptions({
+    queryKey: channelKeys.refusedTurns(channelId),
+    queryFn: ({ signal }): Promise<RefusedTurn[]> =>
+      everyPage(async (cursor) => {
+        const page = await listRefusedTurns(
+          organizationId(),
+          channelId,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          {
+            signal,
+            fallback: "Couldn't load this conversation's refused turns.",
+          },
+        );
+        return { items: page.refusedTurns, nextCursor: page.nextCursor };
+      }),
+  });
+}
 
 /** One page of channels, and where the next one starts. */
 export type ChannelPage = {

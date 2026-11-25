@@ -12,6 +12,7 @@ import {
 } from "@openbot/shared/connect-prompt";
 import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import { connectorName, humanise, inFolder } from "@openbot/shared/tool-name";
+import { useQuery } from "@tanstack/react-query";
 import {
   Fragment,
   type ReactNode,
@@ -24,6 +25,8 @@ import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
 import { atStart } from "@/lib/manage-paths";
+import { modelNamer } from "@/lib/models/names";
+import { availableModelsQueryOptions } from "@/lib/models/queries";
 import { cn } from "@/lib/utils";
 
 /** One row as the API returns it. */
@@ -350,6 +353,9 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
   // Which permission, for whom: one sentence can save several switches, each a row of its own.
   if (event.eventType === "capability.changed")
     return permissionSubject(payload);
+  // Which team, by the name it had then: every team event keeps it, so a deleted team is still named.
+  if (event.eventType.startsWith("team.") && typeof payload.team === "string")
+    return payload.team;
   if (!storedNames) {
     const words = subjectWords(event);
     if (words !== undefined) return words;
@@ -614,6 +620,8 @@ function connectPromptOf(event: AuditEvent): ConnectPrompt | null {
 function notConnectedText(event: AuditEvent): string | undefined {
   const prompt = connectPromptOf(event);
   if (!prompt) return undefined;
+  // Connected and held: what was missing was actions of it the Bot wasn't given.
+  if (prompt.reason === "tools") return "Not given";
   return prompt.reason === "reconnect"
     ? "No longer connected"
     : "Not connected";
@@ -626,6 +634,10 @@ function notConnectedText(event: AuditEvent): string | undefined {
  */
 function notConnectedLine(prompt: ConnectPrompt, storedNames: boolean): string {
   if (storedNames && prompt.message) return prompt.message;
+  if (prompt.reason === "tools")
+    return prompt.need
+      ? `The Bot needed more of ${prompt.title} to ${prompt.need.replace(/^to\s+/i, "").replace(/[\s.]+$/, "")}.`
+      : `The Bot needed more of ${prompt.title} than it was given.`;
   if (prompt.reason === "reconnect")
     return `${prompt.title} is no longer connected. Reconnect it in Connections.`;
   if (prompt.reason === "shared")
@@ -1119,8 +1131,103 @@ export function DecisionCell({
         </div>
       ))}
       {expression ? <RuleExpression expression={expression} /> : null}
+      {event.eventType === "team.models_changed" ? (
+        <TeamModelsChange payload={event.payload ?? {}} />
+      ) : null}
+      {event.eventType === "model.refused" ? (
+        <ModelRefusal payload={event.payload ?? {}} />
+      ) : null}
     </>
   );
+}
+
+/** A team's list as the trail keeps it (`provider/model` each), or null while it set none. */
+function teamModelsOf(value: unknown): string[] | null {
+  return Array.isArray(value) &&
+    value.every((model): model is string => typeof model === "string")
+    ? value
+    : null;
+}
+
+/**
+ * The words for a team's models before or after a change: the models by their names, or everything
+ * the organization allows while the team set none. `nameOf` names a model as the provider lists it;
+ * one it doesn't list keeps its id.
+ */
+export function teamModelsWords(
+  models: readonly string[] | null,
+  nameOf: (name: string) => string,
+): string {
+  return models === null || models.length === 0
+    ? "Everything the organization allows"
+    : models.map(nameOf).join(", ");
+}
+
+/**
+ * What a change to a team's models changed, under its decision as a guidance save's words are: the
+ * models before and after, by their names from the listing the team's page chooses them from.
+ */
+function TeamModelsChange({ payload }: { payload: Record<string, unknown> }) {
+  const listing = useQuery(availableModelsQueryOptions());
+  const nameOf = modelNamer(listing.data);
+  return (
+    <>
+      <div className={DETAIL_LINE}>
+        Before: {teamModelsWords(teamModelsOf(payload.before), nameOf)}
+      </div>
+      <div className={DETAIL_LINE}>
+        Now: {teamModelsWords(teamModelsOf(payload.after), nameOf)}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Why a run was refused for its model, under Blocked: the model by its name, and whose list left it
+ * out, as the server records it (`rule`: the organization's allowed models, or the person's teams').
+ */
+export function modelRefusalWords(
+  payload: Record<string, unknown>,
+  nameOf: (name: string) => string,
+): string | null {
+  if (typeof payload.model !== "string") return null;
+  const name = nameOf(payload.model);
+  if (payload.rule === "team") {
+    // The teams whose lists applied then, by their names then; a row written before has none.
+    const teams = teamNamesOf(payload.teams);
+    return teams.length > 0
+      ? `${name} isn't on ${orList(teams.map(possessive))} list.`
+      : `${name} isn't one their teams allow.`;
+  }
+  if (payload.rule === "organization")
+    return `${name} isn't one the organization allows.`;
+  return `${name} isn't allowed.`;
+}
+
+/** The names of a refusal's teams (`[{ id, name }]`), skipping any entry without a name. */
+function teamNamesOf(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.flatMap((team: { name?: unknown }) =>
+        typeof team?.name === "string" && team.name ? [team.name] : [],
+      )
+    : [];
+}
+
+/** "Sales'", "Engineering's": the owner's form of a team's name. */
+function possessive(name: string): string {
+  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+}
+
+/** "A", "A or B", "A, B or C". */
+function orList(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
+}
+
+function ModelRefusal({ payload }: { payload: Record<string, unknown> }) {
+  const listing = useQuery(availableModelsQueryOptions());
+  const words = modelRefusalWords(payload, modelNamer(listing.data));
+  return words ? <div className={DETAIL_LINE}>{words}</div> : null;
 }
 
 const DETAIL_LINE =

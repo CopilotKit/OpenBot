@@ -17,7 +17,6 @@ import {
   waitFor,
 } from "@testing-library/react";
 import {
-  DEPLOY_LINE,
   openTeamFeatures,
   TEAM_FEATURE_GROUPS,
   TEAM_FEATURES,
@@ -50,25 +49,26 @@ function calendarFrame(dialog: HTMLElement) {
 
 describe("the team features dialog", () => {
   /*
-   * The OpenBot for Business page in the app: where it runs first and big, what it adds, and the
-   * calendar to book a demo right there. It never sends anybody to the website while the calendar
-   * is there to book in.
+   * The OpenBot for Business page in the app: its name, then the list, where it runs first, and
+   * the calendar to book a demo right there. Where it runs was a big line under the name, which
+   * somebody looking down the list for their own VPC skipped. It never sends anybody to the
+   * website while the calendar is there to book in.
    */
-  test("says where it runs first, lists every feature, and embeds the booking calendar", async () => {
+  test("says where it runs first in its list, lists every feature, and embeds the booking calendar", async () => {
     const view = render(<TeamFeaturesDialog />);
     expect(view.queryByRole("dialog")).toBeNull();
     act(() => openTeamFeatures());
     const dialog = await view.findByRole("dialog", {
       name: "OpenBot for Business",
     });
-    expect(DEPLOY_LINE).toBe(
-      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
+    const items = [...dialog.querySelectorAll("li")].map(
+      (item) => item.textContent,
     );
-    // The dialog's description, so it is the first thing read after its name.
-    expect(
-      document.getElementById(dialog.getAttribute("aria-describedby") ?? "")
-        ?.textContent,
-    ).toBe(DEPLOY_LINE);
+    expect(items[0]).toBe(
+      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
+    );
+    // Nothing between the name and the list: no big line it could hide behind.
+    expect(dialog.getAttribute("aria-describedby")).toBeNull();
     for (const feature of TEAM_FEATURES) {
       expect(dialog.textContent).toContain(feature.title);
     }
@@ -124,10 +124,12 @@ describe("the team features dialog", () => {
       [
         "For your whole organization",
         [
+          "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
           "Sign-in with Google, Microsoft or custom SSO",
           "People, roles and admins",
           "Bots shared with your whole organization",
           "Learning shared across your organization",
+          "Deploy custom agents built with any agent stack, or bring your own custom harness, with a great user experience and governance",
         ],
       ],
       [
@@ -137,11 +139,11 @@ describe("the team features dialog", () => {
       [
         "In control",
         [
+          "Top-to-bottom enterprise governance",
+          "A full audit trail, with export",
           "Controls over models, apps and networks",
           "Rules every Bot follows",
           "Policies in plain English, tested on past activity",
-          "Governance for everyone",
-          "A full audit trail, with export",
         ],
       ],
     ]);

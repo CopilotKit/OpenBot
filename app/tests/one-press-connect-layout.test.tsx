@@ -343,16 +343,16 @@ describe.skipIf(!asked)("one Connect on the chat card", () => {
         }
       }, 90_000);
 
-      test(`team admin: Turn on and give it goes on to the key form, in ${engine}, ${theme}`, async () => {
+      test(`team admin: Connect and give it goes on to the key form, in ${engine}, ${theme}`, async () => {
         const page = await open(engine, theme, "/?edition=team");
         try {
           const drawn = await card(page);
           await shoot(page, "admin-card", name);
           const button = drawn.getByRole("button", {
-            name: "Turn on Fireflies and give it to Personal Assistant",
+            name: "Connect Fireflies and give it to Personal Assistant",
           });
           expect(await button.textContent()).toBe(
-            "Turn on and give it to Personal Assistant",
+            "Connect and give it to Personal Assistant",
           );
           await button.click();
           await pressed(page);

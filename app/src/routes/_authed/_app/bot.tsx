@@ -27,6 +27,7 @@ import { useBotThread } from "@/lib/copilot/bot-thread";
 import { LiveThreadUpdates } from "@/lib/copilot/live-thread-updates";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
 import { useNoBotComputers } from "@/lib/deployment/queries";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { searchTextEntry } from "@/lib/search-text";
 
 export const Route = createFileRoute("/_authed/_app/bot")({
@@ -80,6 +81,7 @@ function RouteComponent() {
   const agent = search.agent === "" ? undefined : search.agent;
   const {
     data: agents,
+    error,
     isError,
     isPending,
   } = useQuery(agentListQueryOptions());
@@ -90,6 +92,7 @@ function RouteComponent() {
     Boolean(agent) && agents !== undefined && listedBot === undefined;
   const {
     data: detail,
+    error: detailError,
     isError: isDetailError,
     isPending: isDetailPending,
   } = useQuery({
@@ -107,7 +110,10 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your Bots. Try again in a moment.
+          {loadFailure(
+            error,
+            "Couldn't load your Bots. Try again in a moment.",
+          )}
         </p>
       </div>
     );
@@ -116,7 +122,10 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot. Try again in a moment.
+          {loadFailure(
+            detailError,
+            "Couldn't load this Bot. Try again in a moment.",
+          )}
         </p>
       </div>
     );
@@ -150,7 +159,9 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
    * page can say so instead of letting the Bot answer as if nothing were missing. `startNew`
    * mints another fresh thread on demand for the New chat control below.
    */
-  const { threadId, liveThreadId, history, startNew } = useBotThread(agentId);
+  const { threadId, liveThreadId, history, historyError, startNew } =
+    useBotThread(agentId);
+  const historyHeld = isHeld(historyError);
   /*
    * A turn that ends without an answer has to be said out loud here, because the packaged chat says
    * nothing. It reports a failed run to an `onError` prop and otherwise carries on as though the
@@ -220,11 +231,18 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
          */}
         {history === "unavailable" ? (
           <p
-            className="border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
+            className={
+              historyHeld
+                ? "border-b bg-muted/40 px-6 py-2 text-muted-foreground text-sm"
+                : "border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
+            }
             data-testid="bot-chat-history-unavailable"
             role="alert"
           >
-            Couldn't load earlier messages. The Bot is answering without them.
+            {loadFailure(
+              historyError,
+              "Couldn't load earlier messages. The Bot is answering without them.",
+            )}
           </p>
         ) : null}
         {/*
@@ -235,14 +253,21 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
          * beside the gap it explains; what it buys is that it is always on screen, whatever the
          * transcript has been scrolled to, and that it survives the next release of the chat.
          */}
+        {/* OpenBot holding off (a move, a brief outage) is said calmly: nothing failed. */}
         {stopped ? (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-destructive/10 px-6 py-2">
+          <div
+            className={
+              isHeld(stopped)
+                ? "flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-muted/40 px-6 py-2"
+                : "flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-destructive/10 px-6 py-2"
+            }
+          >
             <p
               className="text-destructive text-sm"
               data-testid="bot-chat-stopped"
               role="alert"
             >
-              {stopped}
+              {failureSaid(stopped)}
             </p>
             {/* A run refused because the organization needs a card is answered here. */}
             <AddCardButton />

@@ -406,6 +406,9 @@ function answer(method: string, url: URL): Response | undefined {
     return undefined;
   }
   if (method !== "GET") return undefined;
+  // The organization's apps switch, which a skill's tool list reads: open, the default.
+  if (path === "/api/v2/organizations/default/settings/apps")
+    return json({ lockedDown: false });
   // Managed updates don't apply to this OpenBot, so Admin doesn't list them.
   if (path === "/api/v2/organizations/default/management")
     return Response.json(

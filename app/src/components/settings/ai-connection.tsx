@@ -20,11 +20,15 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { describeConnection } from "@/lib/ai-connection/describe";
+import {
+  type DescribedConnection,
+  describeConnection,
+} from "@/lib/ai-connection/describe";
 import { disconnectAiMutationOptions } from "@/lib/ai-connection/mutations";
 import { isSignIn, providerById } from "@/lib/ai-connection/providers";
 import {
   aiConnectionQueryOptions,
+  aiConnectionsQueryOptions,
   desktopAiSupportQueryOptions,
   personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
@@ -44,60 +48,86 @@ import {
   Details,
   ProviderTile,
 } from "./ai-connection-chooser";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
+import {
+  AiConnectionRows,
+  SEVERAL,
+  SEVERAL_FOR_THE_ORGANIZATION,
+} from "./ai-connection-list";
 
 /**
- * Settings → General's AI model: the AI provider OpenBot's Bots run on and how OpenBot signs in to
- * it, with a dialog that changes it while OpenBot keeps running. Never the key itself.
+ * Settings → Providers: the AI providers OpenBot's Bots run on and how OpenBot signs in to each, one
+ * row each, every row leading to the provider's own page. Never the key itself.
  *
  * Drawn where the server says an admin can change it here (getAiConnection's `editable`). Keys and
  * addresses work in any browser; a plan or a provider sign-in only inside OpenBot Desktop, which
  * holds and renews what they sign in with. An OpenBot older than this operation, or a Desktop older
  * than changing it in place, keeps the row from before: Change there stops OpenBot and opens the
- * setup window.
+ * setup window. So does a server older than the list, or one with no AI connected yet.
  *
  * On OpenBot Cloud (a person can set their own AI there, `available`) it is the organization's AI,
  * for everyone in it, beside each person's own in "Your AI" (your-ai.tsx).
  */
 export function AiModelSection({
   organizationWide = false,
+  alone = false,
 }: {
   /** Beside "Your AI": this one is the organization's, for everyone in it. */
   organizationWide?: boolean;
+  /** The page's one section: the page's own title and description say what it is. */
+  alone?: boolean;
 }) {
   const connection = useQuery(aiConnectionQueryOptions());
   const support = useQuery(desktopAiSupportQueryOptions());
-  if (connection.isPending || support.isPending) return null;
+  const list = useQuery(aiConnectionsQueryOptions("organization"));
+  if (connection.isPending || support.isPending || list.isPending) return null;
   if (
     connection.error ||
     support.error ||
     connection.data === null ||
     support.data === "older"
   )
-    return <DesktopAiModelSection />;
+    return <DesktopAiModelSection alone={alone} />;
   if (!connection.data.editable) return null;
+  const inDesktop = support.data === "in-place";
+  // Several connections, where the server lists them; the one connection it had before otherwise.
+  const several = list.data ? list.data.connections.length > 1 : false;
   return (
     <PageSection
-      description={
-        organizationWide
-          ? "Choose an AI for everyone in your organization. Bots use it for anyone who hasn't connected their own."
-          : "Choose the AI provider your Bots use and how OpenBot signs in to it."
-      }
-      title={organizationWide ? "Organization's AI" : "AI model"}
+      {...(alone
+        ? {}
+        : {
+            description: `${
+              organizationWide
+                ? "Choose an AI for everyone in your organization. Bots use it for anyone who hasn't connected their own."
+                : "Choose the AI provider your Bots use and how OpenBot signs in to it."
+            }${several ? ` ${organizationWide ? SEVERAL_FOR_THE_ORGANIZATION : SEVERAL}` : ""}`,
+            title: organizationWide ? "Organization's AI" : "AI providers",
+          })}
     >
-      <PageRows>
-        <AiConnectionRow
-          connection={connection.data}
-          inDesktop={support.data === "in-place"}
+      {list.data && list.data.connections.length > 0 ? (
+        <AiConnectionRows
+          list={list.data}
           organizationWide={organizationWide}
+          scope="organization"
         />
-      </PageRows>
+      ) : (
+        <PageRows>
+          <AiConnectionRow
+            connection={connection.data}
+            inDesktop={inDesktop}
+            organizationWide={organizationWide}
+          />
+        </PageRows>
+      )}
     </PageSection>
   );
 }
 
 /**
  * The organization's AI connection as one row that opens its dialog: what it is, Change, and
- * Disconnect. Settings → General draws it, and so does Admin → Providers.
+ * Disconnect. Settings → Providers draws it against a server older than the list, and so does Admin
+ * → Providers.
  */
 export function AiConnectionRow({
   connection,
@@ -190,7 +220,11 @@ function useViewerId(connection: AiConnection): string | undefined {
 type Step =
   | { at: "current" }
   | { at: "choose" }
-  | { at: "done"; connection: AiConnection; desktopProblem: string | null };
+  | {
+      at: "done";
+      connection: DescribedConnection;
+      desktopProblem: string | null;
+    };
 
 function AiConnectionDialog({
   connection,
@@ -296,7 +330,7 @@ function AiConnectionDialog({
         ) : null}
         {disconnect.error ? (
           <p className="text-destructive" role="alert">
-            {disconnect.error.message}
+            {failureSaid(disconnect.error)}
           </p>
         ) : null}
       </DialogBody>
@@ -334,13 +368,18 @@ function AiConnectionDialog({
  * against an OpenBot server that doesn't offer it. Change there stops OpenBot and opens Desktop's
  * own setup window. Only inside Desktop; a plain browser draws nothing here.
  */
-function DesktopAiModelSection() {
+function DesktopAiModelSection({ alone }: { alone: boolean }) {
   const connection = useQuery(desktopAiConnectionQueryOptions());
   if (desktopShell() === null || !connection.data) return null;
   return (
     <PageSection
-      description="Choose the AI provider your Bots use and how OpenBot signs in to it."
-      title="AI model"
+      {...(alone
+        ? {}
+        : {
+            description:
+              "Choose the AI provider your Bots use and how OpenBot signs in to it.",
+            title: "AI providers",
+          })}
     >
       <PageRows>
         <DesktopAiConnectionRow connection={connection.data} />
@@ -396,7 +435,10 @@ function DesktopAiConnectionRow({
             </p>
             {change.error ? (
               <p className="text-destructive" role="alert">
-                Couldn't open the setup window. Try again.
+                {loadFailure(
+                  change.error,
+                  "Couldn't open the setup window. Try again.",
+                )}
               </p>
             ) : null}
           </DialogBody>

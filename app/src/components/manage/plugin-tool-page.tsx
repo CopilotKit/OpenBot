@@ -19,10 +19,11 @@ import { Switch } from "@/components/ui/switch";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { appSetupQueryOptions, appsQueryOptions } from "@/lib/apps/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
-import { appSetupQueryOptions, appsQueryOptions } from "@/lib/apps/queries";
 
 /**
  * One tool, and which Bots hold it.
@@ -51,7 +52,8 @@ export function PluginToolPage({
   const setup = useQuery(appSetupQueryOptions());
   // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
   const scope = useBotListScope();
-  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
+  const roster = useQuery(agentListQueryOptions(false, scope));
+  const agents = roster.data;
   /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
   const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
   /*
@@ -68,11 +70,12 @@ export function PluginToolPage({
     [...(agents ?? []), ...(hiddenAgents ?? [])].find(
       (one) => one.id === bot.id,
     )?.hasCallbackToken === true;
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
 
   const setGrant = useMutation({
     ...setPluginGrantMutationOptions(queryClient),
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
   });
 
   const server = plugins.data?.find((row) => row.id === key);
@@ -98,7 +101,10 @@ export function PluginToolPage({
     return (
       <PageShell backButton={back} title={toolName}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load plugins. Try again in a moment.
+          {loadFailure(
+            plugins.error,
+            "Couldn't load plugins. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );
@@ -150,7 +156,7 @@ export function PluginToolPage({
     >
       {error ? (
         <p className="text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
 
@@ -195,10 +201,21 @@ export function PluginToolPage({
         description="A Bot can call this tool only while its switch is on. Turning it off applies from the next call."
         title="Bots"
       >
+        {/* A roster that couldn't be read is not a roster of none. */}
+        {agents === undefined && roster.error ? (
+          <p className="mt-4 text-destructive text-sm" role="alert">
+            {loadFailure(
+              roster.error,
+              "Couldn't load your Bots. Try again in a moment.",
+            )}
+          </p>
+        ) : null}
         {bots.length === 0 ? (
-          <PageEmpty icon={IconBolt} title="No Bots yet">
-            Create one to give it this tool.
-          </PageEmpty>
+          agents === undefined ? null : (
+            <PageEmpty icon={IconBolt} title="No Bots yet">
+              Create one to give it this tool.
+            </PageEmpty>
+          )
         ) : (
           <PageRows>
             {bots.map((bot, index) => {

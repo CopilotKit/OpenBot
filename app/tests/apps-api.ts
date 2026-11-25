@@ -3,6 +3,8 @@ import type {
   App,
   AppDirectoryEntry,
   AppSetup,
+  DirectoryKeyVersion,
+  UpdateAppRequest,
 } from "@/lib/api/generated/model";
 import { appKeys, type CatalogueItem } from "@/lib/apps/queries";
 
@@ -61,6 +63,7 @@ export type TodayServer = {
   sharedOnly?: boolean;
   ownerGrants?: "any" | "admin";
   ownerGrantsChosen?: "any" | "admin" | null;
+  everyBot?: boolean;
   tools?: {
     name: string;
     ref?: string;
@@ -101,6 +104,8 @@ export type TodayDirectoryApp = {
     kind: "consent" | "self-registering" | "fields" | "no-auth" | "unsupported";
   };
   enabled?: boolean;
+  /** The same app connected with a key, for one listed as a sign-in in place of its key. */
+  keyVersion?: DirectoryKeyVersion;
 };
 
 /** A deployment, described as today's routes answered it. */
@@ -202,6 +207,7 @@ export function appBody(server: TodayServer): App {
     sharedOnly: server.sharedOnly ?? false,
     ownerGrants: server.ownerGrants ?? "admin",
     ownerGrantsChosen: server.ownerGrantsChosen ?? null,
+    everyBot: server.everyBot ?? false,
     addedBy: server.addedBy ?? null,
     toolsRefreshedAt: server.toolsRefreshedAt ?? null,
     lastError: server.lastError ?? null,
@@ -216,6 +222,23 @@ export function appBody(server: TodayServer): App {
     })),
     withdrawn: server.withdrawn ?? [],
   };
+}
+
+/**
+ * What the server does with an updateApp (`PATCH apps/{appId}`): it keeps each field the request
+ * names on the app, and answers the changed app. `ownerGrants: null` goes back to the default for
+ * the app's account, which is `admin` here.
+ */
+export function updateAppBody(
+  server: TodayServer,
+  patch: UpdateAppRequest,
+): App {
+  if (patch.ownerGrants !== undefined) {
+    server.ownerGrants = patch.ownerGrants ?? "admin";
+    server.ownerGrantsChosen = patch.ownerGrants;
+  }
+  if (patch.everyBot !== undefined) server.everyBot = patch.everyBot;
+  return appBody(server);
 }
 
 /** How apps are set up here, in the API's shape, from the flags `GET /api/plugins` carried. */
@@ -288,6 +311,7 @@ export function appDirectoryEntries(
                   : app.connection.kind === "no-auth"
                     ? "nothing"
                     : "sign-in",
+              ...(app.keyVersion ? { keyVersion: app.keyVersion } : {}),
             };
           });
   return [...catalogue, ...directory];

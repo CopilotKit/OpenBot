@@ -60,19 +60,22 @@ import {
   directoryAppsQueryOptions,
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { mayAddApps } from "@/lib/auth/roles";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
+  catalogueToAddRows,
   connectionRows,
   directoryRows,
   personalConnectionRows,
 } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { keyedLookup } from "@/lib/lookup";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
@@ -397,12 +400,15 @@ function RouteComponent() {
    */
   const role = useQuery(currentUserQueryOptions()).data?.role;
   /*
-   * WHO ADDS AN APP, decided by the one rule the app has for it (`isOrganizationAdmin`: an owner or
+   * WHO ADDS AN APP, decided by the one rule the app has for it (`mayAddApps`: an owner or
    * an admin of the organization being worked in), which is the server's `admin` too. On OpenBot
    * Cloud that is usually the one person who made their own organization, and they add and connect
-   * an app here in one press, never by way of Admin. A member asks an admin for it.
+   * an app here in one press, never by way of Admin. With apps open (the organization's switch) a
+   * member adds and connects in the same press; locked down, a member asks an admin for it.
    */
-  const mayAdd = personal || isOrganizationAdmin(role);
+  const open = useAppsOpen();
+  const openTeam = edition === "team" && open === true;
+  const mayAdd = mayAddApps(personal, role) || openTeam;
   const mayAddServer = mayAdd;
   const connectApp = useConnectApp();
   const paths = useManagePaths();
@@ -421,7 +427,7 @@ function RouteComponent() {
           title: moreApps.title,
           description: mayAdd
             ? moreApps.description
-            : "Find more apps and ask an admin to add them.",
+            : "Find more apps and ask an admin for them.",
         }
       : null;
   const browseLink =
@@ -453,6 +459,7 @@ function RouteComponent() {
     edition: edition ?? "team",
     place: "connections",
     role,
+    open,
   });
   const press = useDirectoryPress(pressMode);
   const mine = useQuery(myAppRequestsQueryOptions(pressMode === "request"));
@@ -485,9 +492,20 @@ function RouteComponent() {
    * broker's directory is its last tile.
    */
   const yourApps = matching.filter((row) => row.state !== "available");
-  const toAdd = matching.filter((row) => row.state === "available");
   /*
-   * The directory's apps for this search that aren't on the page already, as tiles under Add an app.
+   * And with apps open in the team edition, the catalogue's apps nobody has added yet, which anybody
+   * adds and connects in one press, as the personal edition's one person does.
+   */
+  const teamToAdd = openTeam
+    ? catalogueToAddRows({ catalogue: catalogue.data ?? [], added, connected })
+    : [];
+  const toAdd = personal
+    ? matching.filter((row) => row.state === "available")
+    : teamToAdd.filter((row) =>
+        `${row.title} ${row.summary}`.toLocaleLowerCase().includes(query),
+      );
+  /*
+   * The directory's apps for this search that aren't on the page already, as tiles under Connect an app.
    * Read only while the answer is for what is typed now, so a tile never stands for an older term.
    */
   const directoryCurrent =
@@ -501,7 +519,9 @@ function RouteComponent() {
   const found = directoryRows({
     entries: directoryEntries,
     mayAdd,
-    listed: new Set(rows.map((row) => row.title.toLocaleLowerCase())),
+    listed: new Set(
+      [...rows, ...teamToAdd].map((row) => row.title.toLocaleLowerCase()),
+    ),
     requested,
   });
   // Waiting on the directory for what is typed now: nothing claims "No matches" until it answers.
@@ -538,7 +558,7 @@ function RouteComponent() {
     !loading &&
     !appsError &&
     !connections.error &&
-    (rows.length > 0 || browse !== null);
+    (rows.length > 0 || teamToAdd.length > 0 || browse !== null);
   /*
    * A search that matches nothing, here or in the directory, says so once, with no section or
    * directory tile under it.
@@ -546,6 +566,7 @@ function RouteComponent() {
   const nothingMatches =
     query !== "" &&
     matching.length === 0 &&
+    toAdd.length === 0 &&
     found.length === 0 &&
     !directoryWaiting &&
     // A directory that couldn't be searched says so below; it isn't "No matches".
@@ -566,14 +587,14 @@ function RouteComponent() {
             variant="outline"
           >
             <IconPlus />
-            Add server
+            Add custom MCP
           </Button>
         ) : undefined
       }
       className="@container"
       description={
         personal
-          ? "Add apps and connect your accounts so your Bots can use them."
+          ? "Connect your accounts so your Bots can use apps on your behalf."
           : "Connect your accounts so Bots can use apps on your behalf."
       }
       title="Connections"
@@ -611,12 +632,12 @@ function RouteComponent() {
       ) : null}
       {connectApp.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {connectApp.error}
+          {failureSaid(connectApp.error)}
         </p>
       ) : null}
       {press.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {press.error}
+          {failureSaid(press.error)}
         </p>
       ) : null}
       <SignInNote
@@ -633,7 +654,7 @@ function RouteComponent() {
       {/*
        * The first section has no heading of its own: in the team edition it is the page's one list,
        * and "Your connections" under "Connections" said the same thing twice. It holds the search,
-       * which filters every section under it. In the personal edition Your apps and Add an app
+       * which filters every section under it. In the personal edition Your apps and Connect an app
        * follow as sections of their own.
        */}
       <PageSection>
@@ -652,11 +673,14 @@ function RouteComponent() {
            */
           <div className="mt-4 flex flex-col items-start gap-3" role="alert">
             <p className="text-destructive text-sm">
-              {edition === "team"
-                ? "Couldn't load your connections. Try again, or ask an admin if it keeps happening."
-                : edition === "personal"
-                  ? "Couldn't load your connections. Try again, or check Setup if it keeps happening."
-                  : "Couldn't load your connections. Try again."}
+              {loadFailure(
+                [...appReads.map((read) => read.error), connections.error],
+                edition === "team"
+                  ? "Couldn't load your connections. Try again, or ask an admin if it keeps happening."
+                  : edition === "personal"
+                    ? "Couldn't load your connections. Try again, or check Setup if it keeps happening."
+                    : "Couldn't load your connections. Try again.",
+              )}
             </p>
             <div className="flex gap-2">
               <Button
@@ -698,11 +722,13 @@ function RouteComponent() {
             icon={IconPlug}
             title="No apps yet"
           >
-            {edition === "team"
-              ? "Apps show up here once an admin turns them on."
-              : edition === "personal"
-                ? "Apps show up here once OpenBot is set up to reach them."
-                : "Apps show up here once they're turned on."}
+            {openTeam
+              ? "Apps show up here once they're added. Add one with Add custom MCP."
+              : edition === "team"
+                ? "Apps show up here once an admin turns them on."
+                : edition === "personal"
+                  ? "Apps show up here once OpenBot is set up to reach them."
+                  : "Apps show up here once they're turned on."}
           </PageEmpty>
         ) : (
           <>
@@ -730,15 +756,27 @@ function RouteComponent() {
             )}
             {searchesDirectory && directory.error ? (
               <p className="mt-4 text-destructive text-sm" role="alert">
-                {directoryReadFailure(provider)}
+                {loadFailure(directory.error, directoryReadFailure(provider))}
               </p>
             ) : null}
           </>
         )}
-        {links.error || providers.error ? (
+        {/*
+         * OpenBot holding off (a move, a brief outage) is said once: when the list above already
+         * says it, the same sentence is not said again for GitHub and Slack.
+         */}
+        {(links.error || providers.error) &&
+        !(
+          !loading &&
+          (appsError || connections.error) &&
+          isHeld([...appReads.map((read) => read.error), connections.error]) &&
+          isHeld([links.error, providers.error])
+        ) ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load GitHub and Slack, so they aren't listed. Try again in
-            a moment.
+            {loadFailure(
+              [links.error, providers.error],
+              "Couldn't load GitHub and Slack, so they aren't listed. Try again in a moment.",
+            )}
           </p>
         ) : null}
       </PageSection>
@@ -752,17 +790,17 @@ function RouteComponent() {
         </PageSection>
       ) : null}
       {/*
-       * Add an app, in both editions: the apps you could add (the personal edition's catalogue), the
+       * Connect an app, in both editions: the apps you could add (the personal edition's catalogue), the
        * directory's matches for a search, and Browse apps last. In the team edition an admin's press
-       * adds and connects, and a member's asks an admin.
+       * adds and connects, and so does everybody's with apps open; locked down, a member's asks an
+       * admin.
        */}
-      {showingApps &&
-      ((personal ? toAdd.length : 0) + found.length > 0 || browse) ? (
-        <PageSection title="Add an app">
+      {showingApps && (toAdd.length + found.length > 0 || browse) ? (
+        <PageSection title="Connect an app">
           <ConnectionGrid
             connectApp={connectApp}
             press={press}
-            rows={[...(personal ? toAdd : []), ...found]}
+            rows={[...toAdd, ...found]}
             directory={directoryEntries}
           >
             {browse ? <BrowseTile browse={browse} link={browseLink} /> : null}
@@ -927,7 +965,7 @@ function ConnectionsLoading() {
   );
 }
 
-/** The broker's directory of more apps, as the last tile of Add an app. */
+/** The broker's directory of more apps, as the last tile of Connect an app. */
 function BrowseTile({
   browse,
   link,
@@ -1024,16 +1062,19 @@ function ConnectionMark({
   return <Mark className="size-4" />;
 }
 
-/** Where a tile stands, or the word for what pressing it does. */
+/**
+ * Where a tile stands, or the word for what pressing it does. An app that needs no account says
+ * Connect too: the press is for using the app, and adding it is never a step of its own.
+ */
 const ACTION_LABEL = {
   connect: "Connect",
-  add: "Add",
+  add: "Connect",
   setup: "Set up",
   request: "Request",
 };
 const PENDING_LABEL = {
   connect: "Connecting…",
-  add: "Adding…",
+  add: "Connecting…",
   setup: "Connecting…",
   request: "Requesting…",
 };

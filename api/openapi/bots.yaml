@@ -51,6 +51,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -125,6 +127,8 @@ paths:
               schema:
                 type: string
               example: /api/v2/organizations/default/bots/agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -167,6 +171,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -223,6 +229,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -264,6 +272,9 @@ paths:
       responses:
         '204':
           description: The Bot was deleted.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -317,6 +328,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -369,6 +382,8 @@ paths:
               schema:
                 type: string
               example: /api/v2/organizations/default/bots/agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -414,6 +429,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -458,6 +475,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -502,6 +521,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -546,6 +567,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -593,6 +616,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -639,6 +664,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -695,6 +722,9 @@ paths:
       responses:
         '204':
           description: Recorded.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -733,6 +763,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -775,6 +807,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -819,6 +853,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -863,6 +899,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -926,6 +964,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -972,6 +1012,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1023,6 +1065,9 @@ paths:
       responses:
         '204':
           description: Stopped.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -1067,6 +1112,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1115,6 +1162,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1155,6 +1204,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1217,6 +1268,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1256,6 +1309,9 @@ paths:
       responses:
         '204':
           description: Unpublished.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -1297,6 +1353,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1334,6 +1392,9 @@ paths:
       responses:
         '204':
           description: The group no longer has it assigned.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -1384,6 +1445,9 @@ paths:
       responses:
         '204':
           description: Recorded.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -1419,6 +1483,9 @@ paths:
       responses:
         '204':
           description: Forgotten.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -1663,7 +1730,9 @@ components:
       description: >-
         What making a Bot public means for the shared app accounts it uses. An
         administrator's change approves them; anybody else's lists the ones an
-        administrator still has to approve.
+        administrator still has to approve. While the organization's apps are
+        open (getAppsSetting), nothing needs approving and needsApproval is
+        empty.
       required: [approved, needsApproval]
       properties:
         approved:
@@ -1780,6 +1849,16 @@ components:
               minLength: 1
               maxLength: 40
               pattern: \S
+            source:
+              type: string
+              minLength: 1
+              maxLength: 40
+              pattern: ^[a-z][a-z0-9-]*$
+              description: >-
+                Who serves the model, as the catalogue's connections name it
+                (ModelCatalogueConnection source). The default applies for a
+                person with a connection of that kind that can run. Omit for
+                the default connection's.
     CreateBotRequest:
       description: >-
         A new Bot: a Bot's fields, and the framework it is built on. One closed
@@ -2354,6 +2433,9 @@ components:
         A field is missing or out of bounds, the address is one this deployment
         may not reach, or the deployment cannot give a Bot a computer of its
         own.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2385,6 +2467,9 @@ components:
       description: >-
         The caller may not manage this Bot, the Bot comes with OpenBot, or the
         caller may not give it a computer of its own.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2417,6 +2502,9 @@ components:
       description: >-
         The Bot does not exist, was deleted, or is not visible to the caller,
         or the organization is not.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2437,6 +2525,9 @@ components:
       description: >-
         The handoff is not running or queued for the caller, the Bot is not
         one the caller can see, or the organization is not found.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2457,6 +2548,9 @@ components:
       description: >-
         The Bot is not published, not published to the caller, not theirs to
         publish, or the organization is not found.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2475,6 +2569,9 @@ components:
                 traceId: trace_example
     TeamBotForbidden:
       description: An administrator hasn't turned on Team Bots for the caller.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2497,6 +2594,9 @@ components:
         A field is out of bounds, the Bot has no real name or description, a
         person named has never signed in here, nobody is named for people, or
         the Bot is not published yet.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2517,6 +2617,9 @@ components:
       description: >-
         An admin assigned this Team Bot to the caller, so it stays in their
         list, or the Idempotency-Key was already used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:

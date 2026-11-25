@@ -41,6 +41,7 @@ import {
   signOutOfConnectedOpenBotMutationOptions,
 } from "@/lib/desktop/mutations";
 import { desktopStatusQueryOptions } from "@/lib/desktop/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useCurrentOrganizationName } from "@/lib/organizations/queries";
 import { COMPUTER_SECTION } from "@/lib/settings/computer-sections";
 
@@ -160,7 +161,7 @@ function SignOutRow({ host }: { host: string }) {
           {signOut.error ? (
             <DialogBody className="mt-4 text-sm">
               <p className="text-destructive" role="alert">
-                Couldn't sign out. Try again.
+                {loadFailure(signOut.error, "Couldn't sign out. Try again.")}
               </p>
             </DialogBody>
           ) : null}
@@ -238,7 +239,7 @@ export function ConnectInsteadSection({
           {change.error ? (
             <DialogBody className="mt-4 text-sm">
               <p className="text-destructive" role="alert">
-                Couldn't open setup. Try again.
+                {loadFailure(change.error, "Couldn't open setup. Try again.")}
               </p>
             </DialogBody>
           ) : null}
@@ -309,7 +310,7 @@ function MoveToCloudRow() {
                 },
                 {
                   icon: IconPlug,
-                  said: "Your app connections are private, so they can't move. You'll reconnect them in OpenBot Cloud.",
+                  said: "Apps connected with a key come across connected. You'll sign in to the rest again in OpenBot Cloud.",
                 },
                 {
                   icon: IconShieldCheck,
@@ -324,7 +325,7 @@ function MoveToCloudRow() {
             </ul>
             {move.error ? (
               <p className="text-destructive" role="alert">
-                Couldn't open setup. Try again.
+                {loadFailure(move.error, "Couldn't open setup. Try again.")}
               </p>
             ) : null}
           </DialogBody>
@@ -378,7 +379,7 @@ function UseThisComputerRow({ host }: { host: string }) {
           {change.error ? (
             <DialogBody className="mt-4 text-sm">
               <p className="text-destructive" role="alert">
-                Couldn't open setup. Try again.
+                {loadFailure(change.error, "Couldn't open setup. Try again.")}
               </p>
             </DialogBody>
           ) : null}

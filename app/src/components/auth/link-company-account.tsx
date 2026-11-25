@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { CompanySignInProvidersItem } from "@/lib/api/generated/model";
 import { linkCompanyAccount } from "@/lib/auth/client";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { cn } from "@/lib/utils";
 
 export const LINK_COMPANY_ACCOUNT = "Link your company account";
@@ -23,7 +24,7 @@ export function LinkCompanyAccount({
   className?: string;
 }) {
   const [linking, setLinking] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Failure | null>(null);
   if (providers.length === 0) return null;
 
   const link = async (providerId: string) => {
@@ -34,9 +35,7 @@ export function LinkCompanyAccount({
       await linkCompanyAccount(providerId);
     } catch (error) {
       setProblem(
-        error instanceof Error
-          ? error.message
-          : "Couldn't start signing in with your company.",
+        failureOf(error, "Couldn't start signing in with your company."),
       );
       setLinking(null);
     }
@@ -61,7 +60,7 @@ export function LinkCompanyAccount({
       ))}
       {problem ? (
         <p className="text-destructive text-sm" role="alert">
-          {problem}
+          {failureSaid(problem)}
         </p>
       ) : null}
     </div>

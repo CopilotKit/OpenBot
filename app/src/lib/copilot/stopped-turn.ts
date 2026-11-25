@@ -1,6 +1,10 @@
 import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
 import { botNoLongerUsable } from "@/lib/agents/queries";
+import { problemRequestId, recordProblem } from "@/lib/desktop/problems";
+import { useClearWhenHoldEnds } from "@/lib/held-ends";
+import { type Failure, isHeld } from "@/lib/load-failure";
+import { isPlanRequired, showCardNeeded } from "@/lib/plan/card-needed";
 
 /**
  * Why the last turn ended without an answer, for a surface that has to say so itself.
@@ -30,6 +34,7 @@ export function stoppedReason(reported: unknown): string {
       : typeof reported === "string"
         ? reported
         : "";
+  notePlanRefusal(reported, said);
   const refused = refusalForPerson(said);
   if (refused) return refused;
   const unreachable = backEndUnreachable(said);
@@ -130,8 +135,50 @@ export function laterRunFailure(reported: unknown): string | null {
  */
 const REST_REQUEST_FAILED = /^REST (\w+) request failed\b:?\s*/;
 
+/** The body of a REST failure the runtime's client reported, parsed, or null when there is none. */
+function refusedBody(said: string): unknown {
+  const match = REST_REQUEST_FAILED.exec(said.trim());
+  if (!match) return null;
+  try {
+    return JSON.parse(said.trim().slice(match[0].length));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A run refused for want of a plan opens the dialog that says why (`lib/plan/card-needed.ts`), on
+ * top of the sentence said under the turn, so a run no screen checked first still tells the person.
+ * Through Intelligence the refusal is the problem in the client's words; over the plain event stream
+ * the error keeps the response's status, 402.
+ */
+function notePlanRefusal(reported: unknown, said: string): void {
+  const status =
+    reported instanceof Error
+      ? (reported as Error & { status?: unknown }).status
+      : undefined;
+  const body = refusedBody(said);
+  if (isPlanRequired(body)) showCardNeeded(body);
+  else if (status === 402) showCardNeeded({});
+}
+
 /** Where OpenBot's own problems (RFC 9457) say what kind they are: `https://open.bot/errors/<code>`. */
 const OPENBOT_PROBLEM = "https://open.bot/errors/";
+
+/**
+ * Whether a run failed because OpenBot's server refused it for the person, on a rule they can't
+ * change by sending again (a model their teams don't allow, a switch an admin turned off, a card
+ * the organization needs): its own problem, with a sentence for them. See `refusalForPerson`.
+ */
+export function refusedForPerson(reported: unknown): boolean {
+  const said =
+    reported instanceof Error
+      ? reported.message
+      : typeof reported === "string"
+        ? reported
+        : "";
+  return refusalForPerson(said) !== null;
+}
 
 /**
  * The sentence OpenBot's server wrote for the person, when a REST failure is its refusal.
@@ -143,14 +190,7 @@ const OPENBOT_PROBLEM = "https://open.bot/errors/";
  * included, is not, and is still the backend failing.
  */
 function refusalForPerson(said: string): string | null {
-  const match = REST_REQUEST_FAILED.exec(said.trim());
-  if (!match) return null;
-  let body: unknown;
-  try {
-    body = JSON.parse(said.trim().slice(match[0].length));
-  } catch {
-    return null;
-  }
+  const body = refusedBody(said);
   if (!body || typeof body !== "object") return null;
   const { type, status, detail } = body as Record<string, unknown>;
   return typeof type === "string" &&
@@ -198,7 +238,8 @@ function refusedRequest(reported: unknown): "run" | "connect" | null {
     reported instanceof Error
       ? (reported as Error & { status?: unknown }).status
       : undefined;
-  return status === 404 ? "run" : null;
+  // 503: OpenBot may be holding off, which only the server can say (see `askAboutBot`).
+  return status === 404 || status === 503 ? "run" : null;
 }
 
 /** What a person reads when the Bot they were talking to is not one they can use any more. */
@@ -227,13 +268,55 @@ export async function failedRunReason(
   reported: unknown,
   botId: string,
   noLongerUsable: (botId: string) => Promise<boolean> = botNoLongerUsable,
-): Promise<string> {
-  const said = stoppedReason(reported);
+): Promise<Failure> {
+  const said = { message: stoppedReason(reported) };
   const request = refusedRequest(reported);
   if (!request) return said;
-  const gone = await noLongerUsable(botId).catch(() => false);
-  if (!gone) return said;
-  return request === "run" ? BOT_NOT_SHARED_MESSAGE_NOT_SENT : BOT_NOT_SHARED;
+  const asked = await askAboutBot(botId, noLongerUsable);
+  if (asked.held) return asked.held;
+  if (!asked.gone) return said;
+  return {
+    message:
+      request === "run" ? BOT_NOT_SHARED_MESSAGE_NOT_SENT : BOT_NOT_SHARED,
+  };
+}
+
+/**
+ * Why a later run of a turn failed (`laterRunFailure`), once the server has been asked whether it is
+ * holding off. Its sentence otherwise: the Bot being taken away is not asked about part way through a
+ * turn, as it never was.
+ */
+export async function laterRunReason(
+  reported: unknown,
+  said: string,
+  botId: string,
+  noLongerUsable: (botId: string) => Promise<boolean> = botNoLongerUsable,
+): Promise<Failure> {
+  if (!requestNotMade(reported)) return { message: said };
+  const asked = await askAboutBot(botId, noLongerUsable);
+  return asked.held ?? { message: said };
+}
+
+/**
+ * The server asked about the Bot whose run was refused: whether it is gone, or whether OpenBot is
+ * holding off for now.
+ *
+ * THE RUNTIME'S CLIENT LOSES A HOLD. While OpenBot moves an organization, or its database is briefly
+ * out of reach, the runtime refuses a run 503 with the server's sentence and `Retry-After`, as every
+ * address does. CopilotKit's client (`@copilotkit/core` 1.88.0, and still in 1.90.2) throws that as `REST run request failed: <the body>`, the status and the headers gone, and AG-UI's
+ * HTTP agent keeps the status but not the headers. So the person was told OpenBot couldn't reach its
+ * backend, in red. The app's own client keeps both, so the Bot is read through it: a read refused
+ * with a hold is the same hold, and its sentence is said calmly (lib/load-failure.tsx).
+ */
+async function askAboutBot(
+  botId: string,
+  noLongerUsable: (botId: string) => Promise<boolean>,
+): Promise<{ gone: boolean; held?: undefined } | { held: Failure }> {
+  try {
+    return { gone: await noLongerUsable(botId) };
+  } catch (error) {
+    return isHeld(error) ? { held: error as Failure } : { gone: false };
+  }
 }
 
 /** Whether a failure is one `failedRunReason` may have a truer sentence for. */
@@ -314,34 +397,94 @@ export function followLastRun(agent: Pick<AbstractAgent, "subscribe">): {
  * should stay until there is something newer to look at, and the person deciding when that is is the
  * one who sends the next message.
  */
-export function useStoppedTurn(agentId: string): string | null {
+export function useStoppedTurn(agentId: string): Failure | null {
   const { agent } = useAgent({ agentId });
-  const [stopped, setStopped] = useState<string | null>(null);
+  const [stopped, setStopped] = useState<Failure | null>(null);
 
-  useEffect(() => {
-    // Which run a sentence is about, so one that arrives after the next run began is dropped.
-    let run = 0;
-    const subscription = agent.subscribe?.({
-      onRunInitialized: () => {
-        run += 1;
-        setStopped(null);
-      },
-      onRunErrorEvent: ({ event }) => setStopped(stoppedReason(event?.message)),
-      onRunFailed: ({ error }) => {
-        if (!requestNotMade(error)) return setStopped(stoppedReason(error));
-        // Said once the server has answered whether the Bot is still theirs, so the wrong sentence
-        // is never drawn first.
-        const failed = run;
-        void failedRunReason(error, agentId).then((reason) => {
-          if (failed === run) setStopped(reason);
-        });
-      },
-    });
-    return () => {
-      run += 1;
-      subscription?.unsubscribe();
-    };
-  }, [agent, agentId]);
+  useEffect(
+    () => watchStoppedTurn(agent, agentId, setStopped),
+    [agent, agentId],
+  );
+  // A hold is about now: said until the organization answers again, then gone (lib/held-ends.ts).
+  useClearWhenHoldEnds(stopped, () =>
+    setStopped((shown) => (shown === stopped ? null : shown)),
+  );
 
   return stopped;
+}
+
+/** The request id the problem body of a failed run carries (`REST run request failed: {…}`), if any. */
+export function failureRequestId(reported: unknown): string | undefined {
+  const said =
+    reported instanceof Error
+      ? reported.message
+      : typeof reported === "string"
+        ? reported
+        : "";
+  return problemRequestId(refusedBody(said));
+}
+
+/**
+ * A run that failed is kept for the troubleshooting logs, and inside OpenBot Desktop handed to its
+ * log, as the sentence the person was shown, with the server's request id when the failure carried
+ * one. The runtime's own requests do not go through `lib/client.ts`, so this is how a broken reply
+ * reaches the logs.
+ *
+ * Recorded whenever the sentence is shown. Opening a conversation replays how its last run ended,
+ * with nothing that tells the replay from a run failing now, so a failure shown again is recorded
+ * again, at the time it was shown.
+ */
+function recordFailedRun(sentence: string, reported: unknown): void {
+  const requestId = failureRequestId(reported);
+  recordProblem({
+    kind: "run",
+    message: sentence,
+    ...(requestId ? { requestId } : {}),
+  });
+}
+
+/**
+ * What `useStoppedTurn` does with one agent: tells `setStopped` why each run that ends badly ended,
+ * and null as the next one starts. That is its sentence, or the server's refusal kept whole when it
+ * is OpenBot holding off, for `failureSaid` to draw calmly. Returns the function that stops watching.
+ */
+export function watchStoppedTurn(
+  agent: Pick<AbstractAgent, "subscribe">,
+  agentId: string,
+  setStopped: (stopped: Failure | null) => void,
+  noLongerUsable?: (botId: string) => Promise<boolean>,
+): () => void {
+  // Which run a sentence is about, so one that arrives after the next run began is dropped.
+  let run = 0;
+  const subscription = agent.subscribe?.({
+    onRunInitialized: () => {
+      run += 1;
+      setStopped(null);
+    },
+    onRunErrorEvent: ({ event }) => {
+      const sentence = stoppedReason(event?.message);
+      setStopped({ message: sentence });
+      recordFailedRun(sentence, event?.message);
+    },
+    onRunFailed: ({ error }) => {
+      if (!requestNotMade(error)) {
+        const sentence = stoppedReason(error);
+        setStopped({ message: sentence });
+        recordFailedRun(sentence, error);
+        return;
+      }
+      // Said once the server has answered whether the Bot is still theirs, or OpenBot is holding
+      // off, so the wrong sentence is never drawn first.
+      const failed = run;
+      void failedRunReason(error, agentId, noLongerUsable).then((reason) => {
+        // A hold is not a failure, and is not kept as one.
+        if (!isHeld(reason)) recordFailedRun(reason.message, error);
+        if (failed === run) setStopped(reason);
+      });
+    },
+  });
+  return () => {
+    run += 1;
+    subscription?.unsubscribe();
+  };
 }

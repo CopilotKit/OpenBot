@@ -3,6 +3,8 @@ import {
   IconAdjustments,
   IconArrowUpRight,
   IconChecks,
+  IconCloudComputing,
+  IconCode,
   IconDeviceDesktop,
   IconHistory,
   IconListCheck,
@@ -30,7 +32,6 @@ import { buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -42,14 +43,12 @@ import {
   BUSINESS_FEATURE_GROUPS,
   BUSINESS_FEATURES_MORE,
   type BusinessFeatureIcon,
-  DEPLOY_LINE,
 } from "@openbot/shared/openbot-for-business";
-
-/** The dialog's first line, in big letters: where OpenBot for Business runs. */
-export { DEPLOY_LINE };
 
 /** Each feature's icon. Desktop's first screen draws the same features with the same icons. */
 const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
+  deploy: IconCloudComputing,
+  agents: IconCode,
   "sign-in": IconLogin2,
   people: IconUsers,
   "shared-bots": IconUsersGroup,
@@ -140,9 +139,6 @@ export function TeamFeaturesDialog() {
                 <OpenBotLogo className="size-6" />
                 <BrandName>OpenBot for Business</BrandName>
               </DialogTitle>
-              <DialogDescription className="font-semibold text-2xl text-balance text-foreground tracking-tight">
-                {DEPLOY_LINE}
-              </DialogDescription>
             </DialogHeader>
             {TEAM_FEATURE_GROUPS.map((group) => (
               <section className="flex flex-col gap-3" key={group.title}>
@@ -289,13 +285,17 @@ export function NavigationTarget({
 }
 
 /**
- * The personal edition's way to learn about a computer for each Bot. It opens the OpenBot for
- * Business dialog, over whatever it sits in.
+ * The way to learn about a computer for each Bot, in the personal edition and on OpenBot Cloud. It
+ * opens the OpenBot for Business dialog, over whatever it sits in. Under a row's description it
+ * takes that description's size (`className="text-xs"`).
  */
-export function BusinessComputerLink() {
+export function BusinessComputerLink({ className }: { className?: string }) {
   return (
     <button
-      className="w-fit text-left text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+      className={cn(
+        "w-fit text-left text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground",
+        className,
+      )}
       onClick={openTeamFeatures}
       type="button"
     >

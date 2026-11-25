@@ -255,3 +255,48 @@ describe.skipIf(!asked)("the microphone's notice", () => {
     }
   }, 60_000);
 });
+
+describe.skipIf(!asked)("composer text at zoom", () => {
+  for (const layout of ["thread", "home"] as const) {
+    test(`${layout}: drafts wrap and scroll vertically`, async () => {
+      const page = await open(layout, "light");
+      try {
+        await page.evaluate(() => {
+          document.documentElement.style.zoom = "1.25";
+        });
+        const editor = page.getByRole("textbox", { name: "Message" });
+        await editor.fill(
+          `https://example.com/${"long-reference-".repeat(40)}`,
+        );
+        const wrapped = await editor.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            font: style.fontSize,
+            line: style.lineHeight,
+            overflowX: style.overflowX,
+            overflowWidth: element.scrollWidth - element.clientWidth,
+            height: element.scrollHeight,
+          };
+        });
+        expect(wrapped.overflowX).toBe("hidden");
+        expect(wrapped.font).toBe("16px");
+        expect(wrapped.line).toBe("24px");
+        expect(wrapped.overflowWidth).toBeLessThanOrEqual(1);
+        expect(wrapped.height).toBeGreaterThan(48);
+
+        await editor.fill("A line in a long draft.\n".repeat(40));
+        expect(
+          await editor.evaluate((element) => {
+            element.scrollTop = element.scrollHeight;
+            return {
+              overflowY: getComputedStyle(element).overflowY,
+              canScroll: element.scrollTop > 0,
+            };
+          }),
+        ).toEqual({ overflowY: "auto", canScroll: true });
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+  }
+});

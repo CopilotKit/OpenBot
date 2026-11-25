@@ -729,12 +729,12 @@ fetches none.
 const END_PAGE_STYLE: &str = r#"
 :root {
   /* tokens/src/scheme.ts, light: background foreground card muted-foreground border sidebar (bun run tokens:generate) */
-  --background: oklch(0.983 0.003 286.4);
-  --foreground: oklch(0.108 0.015 220.9);
+  --background: oklch(0.983 0.003 247.9);
+  --foreground: oklch(0.108 0.042 264.7);
   --card: oklch(1 0 0);
-  --muted-foreground: oklch(0.506 0.013 285.9);
-  --border: oklch(0.894 0.014 286.1);
-  --sidebar: oklch(0.948 0.011 286.2);
+  --muted-foreground: oklch(0.506 0.045 257.4);
+  --border: oklch(0.108 0.042 264.7 / 20%);
+  --sidebar: oklch(0.948 0.01 251.8);
   /* end of tokens/src/scheme.ts */
   --radius: 0.625rem;
   --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
@@ -743,12 +743,12 @@ const END_PAGE_STYLE: &str = r#"
 @media (prefers-color-scheme: dark) {
   :root {
     /* tokens/src/scheme.ts, dark: background foreground card muted-foreground border sidebar (bun run tokens:generate) */
-    --background: oklch(0.182 0.023 296.6);
-    --foreground: oklch(0.956 0.005 286.3);
-    --card: oklch(0.212 0.028 297.1);
-    --muted-foreground: oklch(0.69 0.017 285.9);
-    --border: oklch(0.28 0.035 298.6);
-    --sidebar: oklch(0.156 0.017 295.8);
+    --background: oklch(0.182 0.017 252);
+    --foreground: oklch(0.956 0.004 252);
+    --card: oklch(0.212 0.017 252);
+    --muted-foreground: oklch(0.69 0.016 252);
+    --border: oklch(0.956 0.004 252 / 16%);
+    --sidebar: oklch(0.156 0.017 252);
     /* end of tokens/src/scheme.ts */
     --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
     color-scheme: dark;

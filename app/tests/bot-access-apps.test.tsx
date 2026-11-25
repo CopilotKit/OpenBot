@@ -14,6 +14,7 @@ import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { meResponse } from "./accounts-api";
+import { APPS_SETTING_PATH, appsSettingResponse } from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
 import {
   botAppsPath,
@@ -21,7 +22,7 @@ import {
   botGrantsPath,
   botGrantsResponse,
 } from "./bot-grants-api";
-import { answerBotsList } from "./bots-api";
+import { answerBotsList, botPath, botResponse } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -76,14 +77,25 @@ const tool = (ref: string, toolName: string) => ({
   inputSchema: {},
 });
 
+/**
+ * The server for this Bot's page. Apps are locked down unless `open` says they are open: every test
+ * here that pins Request access or an admin's sentence pins it locked down. `mine` is whether the
+ * Bot is the person's own, as getBot says.
+ */
 function serving(options: {
   role?: "admin" | "user";
   apps?: AppAccess[] | "fail";
   tools?: ReturnType<typeof tool>[];
+  open?: boolean;
+  mine?: boolean;
 }) {
   const { role = "user", apps = [], tools = [] } = options;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url === APPS_SETTING_PATH)
+      return appsSettingResponse(options.open !== true);
+    if (url === botPath("expenses"))
+      return botResponse({ ...BOT, mine: options.mine ?? false });
     if (url.startsWith(botAppsPath("expenses")))
       return apps === "fail"
         ? Response.json({ error: "nope" }, { status: 500 })
@@ -107,7 +119,7 @@ function serving(options: {
   }) as unknown as typeof fetch;
 }
 
-function draw() {
+function draw(bot: AgentProfile = BOT) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -117,8 +129,8 @@ function draw() {
     path: "/",
     component: () => (
       <>
-        <AppsSections agent={BOT} />
-        <SkillsSections agent={BOT} />
+        <AppsSections agent={bot} />
+        <SkillsSections agent={bot} />
       </>
     ),
   });
@@ -183,7 +195,7 @@ test("an app this person has not connected says so and offers Connect", async ()
   expect(gmail.getByRole("button", { name: "Connect Gmail" })).toBeTruthy();
 });
 
-test("an app only an admin can fix offers Request access, and a pending one reads Requested", async () => {
+test("apps locked down: an app only an admin can fix offers Request access, and a pending one reads Requested", async () => {
   serving({
     apps: [
       appAccess({
@@ -226,6 +238,83 @@ test("an app only an admin can fix offers Request access, and a pending one read
   expect(notion.getByText("Requested")).toBeTruthy();
   expect(
     notion.getByRole("button", { name: "Withdraw request for Notion" }),
+  ).toBeTruthy();
+});
+
+test("apps open: on the owner's own Bot, an app nobody has added offers Connect and give it, never Request access", async () => {
+  const notAdded = appAccess({
+    key: "notion",
+    displayName: "Notion",
+    source: "catalogue",
+    state: "disabled",
+    unavailable: "absent",
+    requestKind: "enable",
+  });
+  serving({ apps: [notAdded], open: true, mine: true });
+  const view = draw({ ...BOT, mine: true, canManage: true });
+  const notion = await row(view, "notion");
+  expect(
+    await notion.findByRole("button", {
+      name: "Connect Notion and give it to Expenses",
+    }),
+  ).toBeTruthy();
+  expect(notion.getByText("Notion isn't connected yet.")).toBeTruthy();
+  expect(notion.queryByRole("button", { name: /Request access/ })).toBeNull();
+});
+
+test("apps open: on somebody else's Bot, the person connects it and is told its owner gives it", async () => {
+  serving({
+    apps: [
+      appAccess({
+        key: "notion",
+        displayName: "Notion",
+        source: "catalogue",
+        state: "disabled",
+        unavailable: "absent",
+        requestKind: "enable",
+      }),
+    ],
+    open: true,
+  });
+  const view = draw();
+  const notion = await row(view, "notion");
+  expect(
+    await notion.findByRole("button", { name: "Connect Notion" }),
+  ).toBeTruthy();
+  expect(
+    notion.getByText(
+      "Notion isn't connected yet. Connect it, and this Bot's owner can give it to the Bot.",
+    ),
+  ).toBeTruthy();
+  expect(notion.queryByRole("button", { name: /Request access/ })).toBeNull();
+  expect(notion.queryByText(/\badmin\b/i)).toBeNull();
+});
+
+test("a Bot with no apps: open, nobody is told to ask an admin; locked down, they are", async () => {
+  serving({ apps: [], open: true, mine: true });
+  const mineOpen = draw({ ...BOT, mine: true });
+  expect(
+    await mineOpen.findByText(
+      "Give it one under Your apps. Until then this Bot can only talk with you.",
+    ),
+  ).toBeTruthy();
+  cleanup();
+
+  serving({ apps: [], open: true });
+  const theirsOpen = draw();
+  expect(
+    await theirsOpen.findByText(
+      "Its owner can give it some. Until then this Bot can only talk with you.",
+    ),
+  ).toBeTruthy();
+  cleanup();
+
+  serving({ apps: [] });
+  const theirsLocked = draw();
+  expect(
+    await theirsLocked.findByText(
+      "An admin has to give it some. Until then this Bot can only talk with you.",
+    ),
   ).toBeTruthy();
 });
 

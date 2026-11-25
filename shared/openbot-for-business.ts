@@ -40,6 +40,9 @@ export type BookingCalendarColors = {
  * length, which the step's own words already say, so the narrow column shows the calendar first.
  * `hide_gdpr_banner` drops Calendly's cookie banner, which otherwise sits over the calendar inside
  * the step.
+ * `utm_source=openbot_app` and `utm_medium=in_app` say the call was booked from inside OpenBot,
+ * the web app or Desktop. Calendly keeps an embed address's UTM tags on the booking, so without them
+ * a booking made here counts as a direct one.
  * Colours are the app's own, where they could be read.
  */
 export function bookingCalendarSrc(
@@ -51,6 +54,8 @@ export function bookingCalendarSrc(
   url.searchParams.set("embed_type", "Inline");
   url.searchParams.set("hide_event_type_details", "1");
   url.searchParams.set("hide_gdpr_banner", "1");
+  url.searchParams.set("utm_source", "openbot_app");
+  url.searchParams.set("utm_medium", "in_app");
   if (colors) {
     url.searchParams.set("background_color", colors.background);
     url.searchParams.set("text_color", colors.text);
@@ -59,16 +64,14 @@ export function bookingCalendarSrc(
   return url.href;
 }
 
-/** The first line, in big letters: where OpenBot for Business runs. */
-export const DEPLOY_LINE =
-  "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.";
-
 /** Over the calendar: what booking a call is for. */
 export const BOOK_A_DEMO_LINE =
   "Pick a time to see a demo or scope a proof of concept with us.";
 
 /** Which icon a feature is drawn with. Each app maps these to its own Tabler icon. */
 export type BusinessFeatureIcon =
+  | "deploy"
+  | "agents"
   | "sign-in"
   | "people"
   | "shared-bots"
@@ -84,6 +87,9 @@ export type BusinessFeatureIcon =
 /**
  * What the team edition has and the personal edition does not, one short line each, in the three
  * things a team gets: its people, where its Bots work, and control over both.
+ *
+ * Where it runs is the list's first line. It was once a big line over the list, and somebody
+ * looking down the list for running it in their own VPC didn't find it there.
  */
 export const BUSINESS_FEATURE_GROUPS: readonly {
   title: string;
@@ -92,6 +98,11 @@ export const BUSINESS_FEATURE_GROUPS: readonly {
   {
     title: "For your whole organization",
     features: [
+      {
+        title:
+          "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
+        icon: "deploy",
+      },
       {
         title: "Sign-in with Google, Microsoft or custom SSO",
         icon: "sign-in",
@@ -102,6 +113,11 @@ export const BUSINESS_FEATURE_GROUPS: readonly {
         icon: "shared-bots",
       },
       { title: "Learning shared across your organization", icon: "learning" },
+      {
+        title:
+          "Deploy custom agents built with any agent stack, or bring your own custom harness, with a great user experience and governance",
+        icon: "agents",
+      },
     ],
   },
   {
@@ -114,6 +130,8 @@ export const BUSINESS_FEATURE_GROUPS: readonly {
   {
     title: "In control",
     features: [
+      { title: "Top-to-bottom enterprise governance", icon: "governance" },
+      { title: "A full audit trail, with export", icon: "audit" },
       { title: "Controls over models, apps and networks", icon: "controls" },
       { title: "Rules every Bot follows", icon: "rules" },
       /*
@@ -125,8 +143,6 @@ export const BUSINESS_FEATURE_GROUPS: readonly {
         title: "Policies in plain English, tested on past activity",
         icon: "policies",
       },
-      { title: "Governance for everyone", icon: "governance" },
-      { title: "A full audit trail, with export", icon: "audit" },
     ],
   },
 ];

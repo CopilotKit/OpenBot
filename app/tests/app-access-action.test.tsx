@@ -26,8 +26,13 @@ import { AppSource } from "@/lib/api/generated/model/appSource";
 import { BotAppConnect } from "@/lib/api/generated/model/botAppConnect";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { ME_PATH, meResponse } from "./accounts-api";
-import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  APPS_SETTING_PATH,
+  appsSettingResponse,
+  DEPLOYMENT_PATH,
+} from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
+import { APPS_PATH } from "./apps-api";
 import {
   APP_ACCESS_REQUESTS_PATH,
   APP_SETUP_PATH,
@@ -87,6 +92,11 @@ function mounted(
     directory?: "composio" | "arcade";
     /** What the server says the app is now, when the press reads it again after turning it on. */
     readAgain?: () => AppAccess;
+    /**
+     * Apps open, and whether the Bot is the person's own. Locked down unless given: every test here
+     * that pins Request access pins it locked down.
+     */
+    open?: { owner: boolean };
   } = {},
 ) {
   const sent: Sent[] = [];
@@ -111,6 +121,11 @@ function mounted(
       url,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
+    if (url === APPS_SETTING_PATH) return appsSettingResponse(!options.open);
+    if (options.open && url === botPath("expenses"))
+      return Response.json({
+        bot: { id: "expenses", name: "Expenses", mine: options.open.owner },
+      });
     if (options.admin && url === ME_PATH)
       return meResponse({ user: { id: "usr_admin", role: "admin" } });
     if (options.personal && url === DEPLOYMENT_PATH)
@@ -257,15 +272,136 @@ const COPY: [string, Partial<AppAccess>, RegExp][] = [
     { state: "disabled", unavailable },
     /^Gmail isn't fully set up yet\. Only an admin can finish setting it up\.$/,
   ]),
+  // Open to Bot owners by default: its owner can give it, not only an admin.
   [
-    "not_granted",
-    { state: "not_granted" },
-    /This Bot hasn't been given Gmail\. Only an admin can give it\./,
+    "not_granted, open to owners",
+    { state: "not_granted", ownerGrants: "any" },
+    /^This Bot hasn't been given Gmail\. Its owner can give it, or an admin\.$/,
+  ],
+  [
+    "not_granted, kept to admins",
+    { state: "not_granted", ownerGrants: "admin" },
+    /^This Bot hasn't been given Gmail\. Only an admin can give it\.$/,
   ],
 ];
 
 test.each(COPY)("says whose move it is: %s", (_, overrides, sentence) => {
   expect(appAccessSentence(appAccess(overrides))).toMatch(sentence);
+});
+
+/*
+ * APPS OPEN: what a member is told, as the Bot's owner and as anybody else. The steps open apps hand
+ * to a member name nobody; what an admin keeps either way (a set-up left unfinished, the shared
+ * account, an app kept to admins) reads as it does locked down.
+ */
+const OPEN_COPY: [string, Partial<AppAccess>, boolean, RegExp][] = [
+  [
+    "not added, the owner",
+    { state: "disabled", unavailable: "absent" },
+    true,
+    /^Gmail isn't connected yet\.$/,
+  ],
+  [
+    "not added, anybody else",
+    { state: "disabled", unavailable: "absent" },
+    false,
+    /^Gmail isn't connected yet\. Connect it, and this Bot's owner can give it to the Bot\.$/,
+  ],
+  [
+    "not given, the owner",
+    { state: "not_granted", ownerGrants: "any" },
+    true,
+    /^This Bot hasn't been given Gmail yet\.$/,
+  ],
+  [
+    "not given, anybody else",
+    { state: "not_granted", ownerGrants: "any" },
+    false,
+    /^This Bot hasn't been given Gmail\. Its owner can give it\.$/,
+  ],
+  [
+    "kept to admins",
+    { state: "not_granted", ownerGrants: "admin" },
+    true,
+    /^This Bot hasn't been given Gmail\. Only an admin can give it\.$/,
+  ],
+  [
+    "set-up unfinished",
+    { state: "disabled", unavailable: "oauth_client_missing" },
+    true,
+    /^Gmail isn't fully set up yet\. Only an admin can finish setting it up\.$/,
+  ],
+  [
+    "shared account not connected",
+    { state: "shared_not_connected", account: "shared" },
+    false,
+    /Only an admin can connect it\.$/,
+  ],
+];
+
+test.each(OPEN_COPY)(
+  "apps open, says whose move it is: %s",
+  (_, overrides, owner, sentence) => {
+    expect(
+      appAccessSentence(appAccess(overrides), undefined, "team", false, [], {
+        owner,
+      }),
+    ).toMatch(sentence);
+  },
+);
+
+test("apps open: the Bot's owner is offered Connect and give it, which turns it on and gives it in one press", async () => {
+  const { view, sent } = mounted(
+    appAccess({ state: "disabled", unavailable: "absent", connect: "key" }),
+    undefined,
+    { open: { owner: true } },
+  );
+  fireEvent.click(
+    await view.findByRole("button", {
+      name: "Connect Gmail and give it to Expenses",
+    }),
+  );
+  await waitFor(() =>
+    expect(sent.find((call) => call.method === "POST")?.url).toBe(
+      `${botAppPath("expenses", "composio-gmail")}/approve`,
+    ),
+  );
+  expect(view.queryByRole("button", { name: /Request access/ })).toBeNull();
+});
+
+test("apps open: on somebody else's Bot, Connect adds a catalogue app and goes on to the person's own key", async () => {
+  const fireflies = appAccess({
+    key: "fireflies",
+    displayName: "Fireflies",
+    source: "catalogue",
+    connect: "key",
+    state: "disabled",
+    unavailable: "absent",
+    requestKind: "enable",
+  });
+  const { view, sent } = mounted(fireflies, undefined, {
+    open: { owner: false },
+    // Added, not given to this Bot, and the person hasn't typed their key yet.
+    readAgain: () =>
+      appAccess({
+        ...fireflies,
+        state: "not_granted",
+        unavailable: null,
+        granted: false,
+      }),
+  });
+  fireEvent.click(
+    await view.findByRole("button", { name: "Connect Fireflies" }),
+  );
+  await waitFor(() =>
+    expect(view.getByTestId("app-page").textContent).toBe(
+      "/connections/fireflies?connect=true",
+    ),
+  );
+  const posts = sent.filter((call) => call.method === "POST");
+  expect(posts.map((call) => [call.url, call.body])).toEqual([
+    [APPS_PATH, { from: "directory", directoryEntryId: "catalogue:fireflies" }],
+  ]);
 });
 
 test("no sentence about a switched-off app says an admin turned it off", () => {
@@ -528,8 +664,8 @@ test("the focus follows the press: Request access hands it to Withdraw, and With
 test.each([
   [
     "disabled",
-    "Turn on and give it to Expenses",
-    "Turn on Gmail and give it to Expenses",
+    "Connect and give it to Expenses",
+    "Connect Gmail and give it to Expenses",
   ],
   ["not_granted", "Give it to Expenses", "Give Gmail to Expenses"],
 ] as const)(
@@ -698,7 +834,7 @@ test.each([
   [
     "disabled, never switched on",
     { state: "disabled", unavailable: "absent" },
-    "Gmail isn't turned on yet.",
+    "Gmail isn't connected yet.",
   ],
   [
     "disabled, with no directory set up",
@@ -1034,7 +1170,7 @@ test.each(
 
   fireEvent.click(
     await view.findByRole("button", {
-      name: "Turn on The app and give it to Expenses",
+      name: "Connect The app and give it to Expenses",
     }),
   );
 

@@ -1,12 +1,19 @@
 import { NOTICE_ID_PATTERN } from "@openbot/shared/notices";
-import type { Import, ReconnectApp } from "@/lib/api/generated/model";
+import type {
+  App,
+  CatalogueAppEntryAuth,
+  Import,
+  ReconnectApp,
+} from "@/lib/api/generated/model";
 
 /**
  * THE APPS A MOVE TO OPENBOT CLOUD LEFT FOR THE PERSON TO CONNECT AGAIN, AND THE RULES FOR WHEN ONE
  * STOPS ASKING.
  *
- * A move carries every connection as its app and account name only: the sign-in stays private on the
- * person's computer, so each app is listed in the import's `reconnect` and connected again here. An
+ * A move carries a connection the person signed in to as its app and account name only: the sign-in
+ * stays with the service it was made through, so the app is listed in the import's `reconnect` and
+ * connected again here. An app connected with a key comes across connected (the import's `carried`)
+ * and is never listed; one of those OpenBot Cloud couldn't connect is listed, with its `reason`. An
  * app stops asking once the person's own connections have it, or once they dismiss it. Both are read
  * from the server (their connections, and `dismissedNotices` in their preferences), so the list is
  * the same after a reload and on every device.
@@ -94,6 +101,39 @@ export function cloudAppFor<
 }
 
 /**
+ * Whether an app here needs no account of the person's, as listApps says of it, so it is done for
+ * them once the organization has it: a server added by its address that doesn't sign each person in
+ * (it is reached with the organization's key, or needs none), a directory app on the organization's
+ * one shared account once that account is connected, a directory app that connects with nothing,
+ * and an entry of OpenBot's own catalogue that its listing (`catalogueAuth`, listAppDirectory's
+ * `auth`) says needs nothing, is reached with a key an admin gives for everybody, or runs inside
+ * OpenBot. Every other app waits for the person's own connection.
+ */
+export function needsNoAccountOfYours(
+  app: Pick<
+    App,
+    | "source"
+    | "signIn"
+    | "accountMode"
+    | "sharedAccountConnected"
+    | "connectsWith"
+    | "entraScope"
+  >,
+  catalogueAuth?: CatalogueAppEntryAuth,
+): boolean {
+  if (app.source === "address") return !app.signIn && !app.entraScope;
+  if (app.source === "directory")
+    return app.accountMode === "shared"
+      ? app.sharedAccountConnected
+      : app.connectsWith === "nothing";
+  return (
+    catalogueAuth !== undefined &&
+    catalogueAuth !== "user-oauth" &&
+    !app.entraScope
+  );
+}
+
+/**
  * One moved app as the screens draw it: its notice id, the id of the app it is here (null where the
  * organization hasn't added it), and whether the person has connected it again.
  */
@@ -105,14 +145,16 @@ export type MovedApp = ReconnectApp & {
 
 /**
  * The moved apps still in view: every one the person has not dismissed, each marked reconnected
- * when their own connections have the app it is here. `cloudIdOf` names that app (`cloudAppFor`),
- * and `connected` is the app ids of the person's own live connections.
+ * when their own connections have the app it is here, or when that app needs no account of theirs
+ * (`doneHere`, read as `needsNoAccountOfYours`). `cloudIdOf` names that app (`cloudAppFor`), and
+ * `connected` is the app ids of the person's own live connections.
  */
 export function movedAppsInView(
   apps: readonly ReconnectApp[],
   cloudIdOf: (appId: string) => string | undefined,
   connected: ReadonlySet<string>,
   dismissed: readonly string[],
+  doneHere: (cloudId: string) => boolean = () => false,
 ): MovedApp[] {
   const answered = new Set(dismissed);
   return apps
@@ -122,7 +164,8 @@ export function movedAppsInView(
         ...app,
         noticeId: movedAppNoticeId(app.appId),
         cloudId,
-        reconnected: cloudId !== null && connected.has(cloudId),
+        reconnected:
+          cloudId !== null && (connected.has(cloudId) || doneHere(cloudId)),
       };
     })
     .filter((app) => !answered.has(app.noticeId));

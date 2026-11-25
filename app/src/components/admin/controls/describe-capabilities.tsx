@@ -43,6 +43,7 @@ import type {
   CapabilityChange,
   CapabilityChangeProblem,
 } from "@/lib/capability-changes/translate";
+import { failureSaid } from "@/lib/load-failure";
 import { MISSING_TEAM, teamName } from "@/lib/teams/names";
 import type { TeamSummary } from "@/lib/teams/queries";
 import { cn } from "@/lib/utils";
@@ -132,7 +133,7 @@ export function ChangeRows({
                   <ItemDescription>{scopeWords(change, teams)}</ItemDescription>
                   {wrong.map((problem) => (
                     <p className="text-destructive text-sm" key={problem.field}>
-                      {problem.message}
+                      {failureSaid(problem)}
                     </p>
                   ))}
                 </ItemContent>
@@ -274,7 +275,7 @@ export function PermissionsPreview({
       <Field>
         <FieldLabel>Who it changes</FieldLabel>
         <p className="text-destructive text-sm" role="alert">
-          {preview.error.message}
+          {failureSaid(preview.error)}
         </p>
       </Field>
     );

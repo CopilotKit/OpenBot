@@ -360,9 +360,9 @@ export const ALLOWED: Allowed[] = [
   },
   {
     file: "desktop/src-tauri/src/move_to_cloud/tests.rs",
-    what: /^\/api\/v2\/(people\/me\/organizations|organizations\/(default|org_mine)\/((exports|imports)(\/[a-z0-9_]+)*\/?|people\/me(\/ai-connection)?))$/,
+    what: /^\/api\/v2\/(people\/me\/organizations|organizations\/(default|org_mine|org_acme|\{\})\/((exports|imports)(\/[a-z0-9_]+)*\/?|export-estimate|people\/me(\/ai-connection)?))$/,
     rule: "hand-built-v2",
-    why: "the move's tests, against an OpenBot here and an OpenBot Cloud that answer as the API describes",
+    why: "the move's tests, against an OpenBot here and an OpenBot Cloud that answer as the API describes, in each organization a person may choose",
   },
   {
     file: "desktop/src-tauri/src/install_token.rs",
@@ -388,6 +388,18 @@ export const ALLOWED: Allowed[] = [
     what: "/.well-known/oauth-authorization-server/api/auth",
     rule: "before-sign-in",
     why: "OAuth's discovery document, which names the sign-in's addresses",
+  },
+  {
+    file: "desktop/src-tauri/src/connected/about.rs",
+    what: "/health",
+    rule: "before-sign-in",
+    why: "whether the OpenBot the app is connected to answers, for Get Troubleshooting Logs…, asked with no credential",
+  },
+  {
+    file: "desktop/src-tauri/src/connected/about.rs",
+    what: /^\/api\/v2\/(people\/me\/organizations|organizations\/\{organization\}\/(people\/me|deployment))$/,
+    rule: "hand-built-v2",
+    why: "what the OpenBot the app is connected to says about itself for Get Troubleshooting Logs… (getPerson, getDeployment), from Rust, which has no generated client",
   },
   {
     file: "desktop/src-tauri/src/connected/sign_in.rs",

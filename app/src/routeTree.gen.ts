@@ -61,6 +61,7 @@ import { Route as AuthedSettingsMemoryRouteImport } from './routes/_authed/setti
 import { Route as AuthedSettingsNotificationsRouteImport } from './routes/_authed/settings/notifications'
 import { Route as AuthedSettingsOrganizationRouteImport } from './routes/_authed/settings/organization'
 import { Route as AuthedSettingsPasswordsRouteImport } from './routes/_authed/settings/passwords'
+import { Route as AuthedSettingsProvidersRouteImport } from './routes/_authed/settings/providers'
 import { Route as AuthedSettingsSetupRouteImport } from './routes/_authed/settings/setup'
 import { Route as AuthedSettingsSkillsRouteImport } from './routes/_authed/settings/skills'
 import { Route as AuthedSettingsThisComputerRouteImport } from './routes/_authed/settings/this-computer'
@@ -100,6 +101,9 @@ import { Route as AuthedAdminPluginsIndexRouteImport } from './routes/_authed/ad
 import { Route as AuthedAdminPluginsKeyRouteImport } from './routes/_authed/admin/plugins/$key'
 import { Route as AuthedAdminPluginsArcadeRouteImport } from './routes/_authed/admin/plugins/arcade'
 import { Route as AuthedAdminPluginsComposioRouteImport } from './routes/_authed/admin/plugins/composio'
+import { Route as AuthedAdminPluginsNewRouteImport } from './routes/_authed/admin/plugins/new'
+import { Route as AuthedAdminProvidersProviderRouteImport } from './routes/_authed/admin/providers_.$provider'
+import { Route as AuthedAdminProvidersNewRouteImport } from './routes/_authed/admin/providers_.new'
 import { Route as AuthedAdminSkillsSlugRouteImport } from './routes/_authed/admin/skills_.$slug'
 import { Route as AuthedAdminSkillsNewRouteImport } from './routes/_authed/admin/skills_.new'
 import { Route as AuthedAdminTeamsTeamIdRouteImport } from './routes/_authed/admin/teams_.$teamId'
@@ -110,6 +114,8 @@ import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './route
 import { Route as AuthedSettingsConnectedAccountsIndexRouteImport } from './routes/_authed/settings/connected-accounts/index'
 import { Route as AuthedSettingsConnectedAccountsKeyRouteImport } from './routes/_authed/settings/connected-accounts/$key'
 import { Route as AuthedSettingsCredentialsNewRouteImport } from './routes/_authed/settings/credentials_.new'
+import { Route as AuthedSettingsProvidersProviderRouteImport } from './routes/_authed/settings/providers_.$provider'
+import { Route as AuthedSettingsProvidersNewRouteImport } from './routes/_authed/settings/providers_.new'
 import { Route as AuthedAppBotsAgentIdIndexRouteImport } from './routes/_authed/_app/bots.$agentId.index'
 import { Route as AuthedAppBotsAgentIdAccessRouteImport } from './routes/_authed/_app/bots.$agentId.access'
 import { Route as AuthedAppBotsAgentIdActivityRouteImport } from './routes/_authed/_app/bots.$agentId.activity'
@@ -129,10 +135,12 @@ import { Route as AuthedAppConnectionsBrowseComposioRouteImport } from './routes
 import { Route as AuthedAppRoutinesCheckInsCheckInIdRouteImport } from './routes/_authed/_app/routines_.check-ins.$checkInId'
 import { Route as AuthedAppRoutinesGoalsGoalIdRouteImport } from './routes/_authed/_app/routines_.goals.$goalId'
 import { Route as AuthedAppRoutinesSchedulesRoutineIdRouteImport } from './routes/_authed/_app/routines_.schedules.$routineId'
+import { Route as AuthedAdminProvidersProviderChangeRouteImport } from './routes/_authed/admin/providers_.$provider_.change'
 import { Route as AuthedSettingsPersonalPluginsSplatRouteImport } from './routes/_authed/settings/_personal/plugins.$'
 import { Route as AuthedSettingsPersonalSkillsSlugRouteImport } from './routes/_authed/settings/_personal/skills_.$slug'
 import { Route as AuthedSettingsPersonalSkillsNewRouteImport } from './routes/_authed/settings/_personal/skills_.new'
 import { Route as AuthedSettingsPersonalVaultNewRouteImport } from './routes/_authed/settings/_personal/vault_.new'
+import { Route as AuthedSettingsProvidersProviderChangeRouteImport } from './routes/_authed/settings/providers_.$provider_.change'
 import { Route as AuthedAppConnectionsKeyBotsAgentIdRouteImport } from './routes/_authed/_app/connections.$key_.bots.$agentId'
 import { Route as AuthedAppConnectionsKeyToolsToolRouteImport } from './routes/_authed/_app/connections.$key_.tools.$tool'
 import { Route as AuthedAdminPluginsKeyBotsAgentIdRouteImport } from './routes/_authed/admin/plugins/$key_.bots.$agentId'
@@ -400,6 +408,11 @@ const AuthedSettingsPasswordsRoute = AuthedSettingsPasswordsRouteImport.update({
   path: '/passwords',
   getParentRoute: () => AuthedSettingsRouteRoute,
 } as any)
+const AuthedSettingsProvidersRoute = AuthedSettingsProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => AuthedSettingsRouteRoute,
+} as any)
 const AuthedSettingsSetupRoute = AuthedSettingsSetupRouteImport.update({
   id: '/setup',
   path: '/setup',
@@ -613,6 +626,22 @@ const AuthedAdminPluginsComposioRoute =
     path: '/plugins/composio',
     getParentRoute: () => AuthedAdminRouteRoute,
   } as any)
+const AuthedAdminPluginsNewRoute = AuthedAdminPluginsNewRouteImport.update({
+  id: '/plugins/new',
+  path: '/plugins/new',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminProvidersProviderRoute =
+  AuthedAdminProvidersProviderRouteImport.update({
+    id: '/providers_/$provider',
+    path: '/providers/$provider',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
+const AuthedAdminProvidersNewRoute = AuthedAdminProvidersNewRouteImport.update({
+  id: '/providers_/new',
+  path: '/providers/new',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
 const AuthedAdminSkillsSlugRoute = AuthedAdminSkillsSlugRouteImport.update({
   id: '/skills_/$slug',
   path: '/skills/$slug',
@@ -667,6 +696,18 @@ const AuthedSettingsCredentialsNewRoute =
   AuthedSettingsCredentialsNewRouteImport.update({
     id: '/credentials_/new',
     path: '/credentials/new',
+    getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
+const AuthedSettingsProvidersProviderRoute =
+  AuthedSettingsProvidersProviderRouteImport.update({
+    id: '/providers_/$provider',
+    path: '/providers/$provider',
+    getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
+const AuthedSettingsProvidersNewRoute =
+  AuthedSettingsProvidersNewRouteImport.update({
+    id: '/providers_/new',
+    path: '/providers/new',
     getParentRoute: () => AuthedSettingsRouteRoute,
   } as any)
 const AuthedAppBotsAgentIdIndexRoute =
@@ -783,6 +824,12 @@ const AuthedAppRoutinesSchedulesRoutineIdRoute =
     path: '/routines/schedules/$routineId',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedAdminProvidersProviderChangeRoute =
+  AuthedAdminProvidersProviderChangeRouteImport.update({
+    id: '/providers_/$provider_/change',
+    path: '/providers/$provider/change',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
 const AuthedSettingsPersonalPluginsSplatRoute =
   AuthedSettingsPersonalPluginsSplatRouteImport.update({
     id: '/plugins/$',
@@ -806,6 +853,12 @@ const AuthedSettingsPersonalVaultNewRoute =
     id: '/vault_/new',
     path: '/vault/new',
     getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
+const AuthedSettingsProvidersProviderChangeRoute =
+  AuthedSettingsProvidersProviderChangeRouteImport.update({
+    id: '/providers_/$provider_/change',
+    path: '/providers/$provider/change',
+    getParentRoute: () => AuthedSettingsRouteRoute,
   } as any)
 const AuthedAppConnectionsKeyBotsAgentIdRoute =
   AuthedAppConnectionsKeyBotsAgentIdRouteImport.update({
@@ -880,6 +933,7 @@ export interface FileRoutesByFullPath {
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/settings/organization': typeof AuthedSettingsOrganizationRoute
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
+  '/settings/providers': typeof AuthedSettingsProvidersRoute
   '/settings/setup': typeof AuthedSettingsSetupRoute
   '/settings/skills': typeof AuthedSettingsSkillsRoute
   '/settings/this-computer': typeof AuthedSettingsThisComputerRoute
@@ -914,6 +968,9 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/admin/plugins/new': typeof AuthedAdminPluginsNewRoute
+  '/admin/providers/$provider': typeof AuthedAdminProvidersProviderRoute
+  '/admin/providers/new': typeof AuthedAdminProvidersNewRoute
   '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/admin/teams/$teamId': typeof AuthedAdminTeamsTeamIdRoute
@@ -922,6 +979,8 @@ export interface FileRoutesByFullPath {
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/settings/credentials/new': typeof AuthedSettingsCredentialsNewRoute
+  '/settings/providers/$provider': typeof AuthedSettingsProvidersProviderRoute
+  '/settings/providers/new': typeof AuthedSettingsProvidersNewRoute
   '/agents/': typeof AuthedAppAgentsIndexRoute
   '/bots/': typeof AuthedAppBotsIndexRoute
   '/capabilities/': typeof AuthedAppCapabilitiesIndexRoute
@@ -949,10 +1008,12 @@ export interface FileRoutesByFullPath {
   '/routines/check-ins/$checkInId': typeof AuthedAppRoutinesCheckInsCheckInIdRoute
   '/routines/goals/$goalId': typeof AuthedAppRoutinesGoalsGoalIdRoute
   '/routines/schedules/$routineId': typeof AuthedAppRoutinesSchedulesRoutineIdRoute
+  '/admin/providers/$provider/change': typeof AuthedAdminProvidersProviderChangeRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/settings/skills/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
   '/settings/skills/new': typeof AuthedSettingsPersonalSkillsNewRoute
   '/settings/vault/new': typeof AuthedSettingsPersonalVaultNewRoute
+  '/settings/providers/$provider/change': typeof AuthedSettingsProvidersProviderChangeRoute
   '/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
   '/connections/$key/bots/$agentId': typeof AuthedAppConnectionsKeyBotsAgentIdRoute
   '/connections/$key/tools/$tool': typeof AuthedAppConnectionsKeyToolsToolRoute
@@ -1006,6 +1067,7 @@ export interface FileRoutesByTo {
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/settings/organization': typeof AuthedSettingsOrganizationRoute
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
+  '/settings/providers': typeof AuthedSettingsProvidersRoute
   '/settings/setup': typeof AuthedSettingsSetupRoute
   '/settings/skills': typeof AuthedSettingsSkillsRoute
   '/settings/this-computer': typeof AuthedSettingsThisComputerRoute
@@ -1039,6 +1101,9 @@ export interface FileRoutesByTo {
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/admin/plugins/new': typeof AuthedAdminPluginsNewRoute
+  '/admin/providers/$provider': typeof AuthedAdminProvidersProviderRoute
+  '/admin/providers/new': typeof AuthedAdminProvidersNewRoute
   '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/admin/teams/$teamId': typeof AuthedAdminTeamsTeamIdRoute
@@ -1047,6 +1112,8 @@ export interface FileRoutesByTo {
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/settings/credentials/new': typeof AuthedSettingsCredentialsNewRoute
+  '/settings/providers/$provider': typeof AuthedSettingsProvidersProviderRoute
+  '/settings/providers/new': typeof AuthedSettingsProvidersNewRoute
   '/agents': typeof AuthedAppAgentsIndexRoute
   '/bots': typeof AuthedAppBotsIndexRoute
   '/capabilities': typeof AuthedAppCapabilitiesIndexRoute
@@ -1074,10 +1141,12 @@ export interface FileRoutesByTo {
   '/routines/check-ins/$checkInId': typeof AuthedAppRoutinesCheckInsCheckInIdRoute
   '/routines/goals/$goalId': typeof AuthedAppRoutinesGoalsGoalIdRoute
   '/routines/schedules/$routineId': typeof AuthedAppRoutinesSchedulesRoutineIdRoute
+  '/admin/providers/$provider/change': typeof AuthedAdminProvidersProviderChangeRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/settings/skills/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
   '/settings/skills/new': typeof AuthedSettingsPersonalSkillsNewRoute
   '/settings/vault/new': typeof AuthedSettingsPersonalVaultNewRoute
+  '/settings/providers/$provider/change': typeof AuthedSettingsProvidersProviderChangeRoute
   '/bots/$agentId': typeof AuthedAppBotsAgentIdIndexRoute
   '/connections/$key/bots/$agentId': typeof AuthedAppConnectionsKeyBotsAgentIdRoute
   '/connections/$key/tools/$tool': typeof AuthedAppConnectionsKeyToolsToolRoute
@@ -1135,6 +1204,7 @@ export interface FileRoutesById {
   '/_authed/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/_authed/settings/organization': typeof AuthedSettingsOrganizationRoute
   '/_authed/settings/passwords': typeof AuthedSettingsPasswordsRoute
+  '/_authed/settings/providers': typeof AuthedSettingsProvidersRoute
   '/_authed/settings/setup': typeof AuthedSettingsSetupRoute
   '/_authed/settings/skills': typeof AuthedSettingsSkillsRoute
   '/_authed/settings/this-computer': typeof AuthedSettingsThisComputerRoute
@@ -1170,6 +1240,9 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/_authed/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/_authed/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/_authed/admin/plugins/new': typeof AuthedAdminPluginsNewRoute
+  '/_authed/admin/providers_/$provider': typeof AuthedAdminProvidersProviderRoute
+  '/_authed/admin/providers_/new': typeof AuthedAdminProvidersNewRoute
   '/_authed/admin/skills_/$slug': typeof AuthedAdminSkillsSlugRoute
   '/_authed/admin/skills_/new': typeof AuthedAdminSkillsNewRoute
   '/_authed/admin/teams_/$teamId': typeof AuthedAdminTeamsTeamIdRoute
@@ -1178,6 +1251,8 @@ export interface FileRoutesById {
   '/_authed/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/_authed/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/_authed/settings/credentials_/new': typeof AuthedSettingsCredentialsNewRoute
+  '/_authed/settings/providers_/$provider': typeof AuthedSettingsProvidersProviderRoute
+  '/_authed/settings/providers_/new': typeof AuthedSettingsProvidersNewRoute
   '/_authed/_app/agents/': typeof AuthedAppAgentsIndexRoute
   '/_authed/_app/bots/': typeof AuthedAppBotsIndexRoute
   '/_authed/_app/capabilities/': typeof AuthedAppCapabilitiesIndexRoute
@@ -1205,10 +1280,12 @@ export interface FileRoutesById {
   '/_authed/_app/routines_/check-ins/$checkInId': typeof AuthedAppRoutinesCheckInsCheckInIdRoute
   '/_authed/_app/routines_/goals/$goalId': typeof AuthedAppRoutinesGoalsGoalIdRoute
   '/_authed/_app/routines_/schedules/$routineId': typeof AuthedAppRoutinesSchedulesRoutineIdRoute
+  '/_authed/admin/providers_/$provider_/change': typeof AuthedAdminProvidersProviderChangeRoute
   '/_authed/settings/_personal/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/_authed/settings/_personal/skills_/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
   '/_authed/settings/_personal/skills_/new': typeof AuthedSettingsPersonalSkillsNewRoute
   '/_authed/settings/_personal/vault_/new': typeof AuthedSettingsPersonalVaultNewRoute
+  '/_authed/settings/providers_/$provider_/change': typeof AuthedSettingsProvidersProviderChangeRoute
   '/_authed/_app/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
   '/_authed/_app/connections/$key_/bots/$agentId': typeof AuthedAppConnectionsKeyBotsAgentIdRoute
   '/_authed/_app/connections/$key_/tools/$tool': typeof AuthedAppConnectionsKeyToolsToolRoute
@@ -1265,6 +1342,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/organization'
     | '/settings/passwords'
+    | '/settings/providers'
     | '/settings/setup'
     | '/settings/skills'
     | '/settings/this-computer'
@@ -1299,6 +1377,9 @@ export interface FileRouteTypes {
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
+    | '/admin/plugins/new'
+    | '/admin/providers/$provider'
+    | '/admin/providers/new'
     | '/admin/skills/$slug'
     | '/admin/skills/new'
     | '/admin/teams/$teamId'
@@ -1307,6 +1388,8 @@ export interface FileRouteTypes {
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
     | '/settings/credentials/new'
+    | '/settings/providers/$provider'
+    | '/settings/providers/new'
     | '/agents/'
     | '/bots/'
     | '/capabilities/'
@@ -1334,10 +1417,12 @@ export interface FileRouteTypes {
     | '/routines/check-ins/$checkInId'
     | '/routines/goals/$goalId'
     | '/routines/schedules/$routineId'
+    | '/admin/providers/$provider/change'
     | '/settings/plugins/$'
     | '/settings/skills/$slug'
     | '/settings/skills/new'
     | '/settings/vault/new'
+    | '/settings/providers/$provider/change'
     | '/bots/$agentId/'
     | '/connections/$key/bots/$agentId'
     | '/connections/$key/tools/$tool'
@@ -1391,6 +1476,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/organization'
     | '/settings/passwords'
+    | '/settings/providers'
     | '/settings/setup'
     | '/settings/skills'
     | '/settings/this-computer'
@@ -1424,6 +1510,9 @@ export interface FileRouteTypes {
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
+    | '/admin/plugins/new'
+    | '/admin/providers/$provider'
+    | '/admin/providers/new'
     | '/admin/skills/$slug'
     | '/admin/skills/new'
     | '/admin/teams/$teamId'
@@ -1432,6 +1521,8 @@ export interface FileRouteTypes {
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
     | '/settings/credentials/new'
+    | '/settings/providers/$provider'
+    | '/settings/providers/new'
     | '/agents'
     | '/bots'
     | '/capabilities'
@@ -1459,10 +1550,12 @@ export interface FileRouteTypes {
     | '/routines/check-ins/$checkInId'
     | '/routines/goals/$goalId'
     | '/routines/schedules/$routineId'
+    | '/admin/providers/$provider/change'
     | '/settings/plugins/$'
     | '/settings/skills/$slug'
     | '/settings/skills/new'
     | '/settings/vault/new'
+    | '/settings/providers/$provider/change'
     | '/bots/$agentId'
     | '/connections/$key/bots/$agentId'
     | '/connections/$key/tools/$tool'
@@ -1519,6 +1612,7 @@ export interface FileRouteTypes {
     | '/_authed/settings/notifications'
     | '/_authed/settings/organization'
     | '/_authed/settings/passwords'
+    | '/_authed/settings/providers'
     | '/_authed/settings/setup'
     | '/_authed/settings/skills'
     | '/_authed/settings/this-computer'
@@ -1554,6 +1648,9 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/$key'
     | '/_authed/admin/plugins/arcade'
     | '/_authed/admin/plugins/composio'
+    | '/_authed/admin/plugins/new'
+    | '/_authed/admin/providers_/$provider'
+    | '/_authed/admin/providers_/new'
     | '/_authed/admin/skills_/$slug'
     | '/_authed/admin/skills_/new'
     | '/_authed/admin/teams_/$teamId'
@@ -1562,6 +1659,8 @@ export interface FileRouteTypes {
     | '/_authed/settings/components-gallery/$name'
     | '/_authed/settings/connected-accounts/$key'
     | '/_authed/settings/credentials_/new'
+    | '/_authed/settings/providers_/$provider'
+    | '/_authed/settings/providers_/new'
     | '/_authed/_app/agents/'
     | '/_authed/_app/bots/'
     | '/_authed/_app/capabilities/'
@@ -1589,10 +1688,12 @@ export interface FileRouteTypes {
     | '/_authed/_app/routines_/check-ins/$checkInId'
     | '/_authed/_app/routines_/goals/$goalId'
     | '/_authed/_app/routines_/schedules/$routineId'
+    | '/_authed/admin/providers_/$provider_/change'
     | '/_authed/settings/_personal/plugins/$'
     | '/_authed/settings/_personal/skills_/$slug'
     | '/_authed/settings/_personal/skills_/new'
     | '/_authed/settings/_personal/vault_/new'
+    | '/_authed/settings/providers_/$provider_/change'
     | '/_authed/_app/bots/$agentId/'
     | '/_authed/_app/connections/$key_/bots/$agentId'
     | '/_authed/_app/connections/$key_/tools/$tool'
@@ -1974,6 +2075,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsPasswordsRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
+    '/_authed/settings/providers': {
+      id: '/_authed/settings/providers'
+      path: '/providers'
+      fullPath: '/settings/providers'
+      preLoaderRoute: typeof AuthedSettingsProvidersRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
     '/_authed/settings/setup': {
       id: '/_authed/settings/setup'
       path: '/setup'
@@ -2247,6 +2355,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminPluginsComposioRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/plugins/new': {
+      id: '/_authed/admin/plugins/new'
+      path: '/plugins/new'
+      fullPath: '/admin/plugins/new'
+      preLoaderRoute: typeof AuthedAdminPluginsNewRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/providers_/$provider': {
+      id: '/_authed/admin/providers_/$provider'
+      path: '/providers/$provider'
+      fullPath: '/admin/providers/$provider'
+      preLoaderRoute: typeof AuthedAdminProvidersProviderRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/providers_/new': {
+      id: '/_authed/admin/providers_/new'
+      path: '/providers/new'
+      fullPath: '/admin/providers/new'
+      preLoaderRoute: typeof AuthedAdminProvidersNewRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/skills_/$slug': {
       id: '/_authed/admin/skills_/$slug'
       path: '/skills/$slug'
@@ -2315,6 +2444,20 @@ declare module '@tanstack/react-router' {
       path: '/credentials/new'
       fullPath: '/settings/credentials/new'
       preLoaderRoute: typeof AuthedSettingsCredentialsNewRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
+    '/_authed/settings/providers_/$provider': {
+      id: '/_authed/settings/providers_/$provider'
+      path: '/providers/$provider'
+      fullPath: '/settings/providers/$provider'
+      preLoaderRoute: typeof AuthedSettingsProvidersProviderRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
+    '/_authed/settings/providers_/new': {
+      id: '/_authed/settings/providers_/new'
+      path: '/providers/new'
+      fullPath: '/settings/providers/new'
+      preLoaderRoute: typeof AuthedSettingsProvidersNewRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
     '/_authed/_app/bots/$agentId/': {
@@ -2450,6 +2593,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppRoutinesSchedulesRoutineIdRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/admin/providers_/$provider_/change': {
+      id: '/_authed/admin/providers_/$provider_/change'
+      path: '/providers/$provider/change'
+      fullPath: '/admin/providers/$provider/change'
+      preLoaderRoute: typeof AuthedAdminProvidersProviderChangeRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/settings/_personal/plugins/$': {
       id: '/_authed/settings/_personal/plugins/$'
       path: '/plugins/$'
@@ -2477,6 +2627,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/vault/new'
       preLoaderRoute: typeof AuthedSettingsPersonalVaultNewRouteImport
       parentRoute: typeof AuthedSettingsPersonalRoute
+    }
+    '/_authed/settings/providers_/$provider_/change': {
+      id: '/_authed/settings/providers_/$provider_/change'
+      path: '/providers/$provider/change'
+      fullPath: '/settings/providers/$provider/change'
+      preLoaderRoute: typeof AuthedSettingsProvidersProviderChangeRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
     }
     '/_authed/_app/connections/$key_/bots/$agentId': {
       id: '/_authed/_app/connections/$key_/bots/$agentId'
@@ -2538,12 +2695,16 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
   AuthedAdminPluginsArcadeRoute: typeof AuthedAdminPluginsArcadeRoute
   AuthedAdminPluginsComposioRoute: typeof AuthedAdminPluginsComposioRoute
+  AuthedAdminPluginsNewRoute: typeof AuthedAdminPluginsNewRoute
+  AuthedAdminProvidersProviderRoute: typeof AuthedAdminProvidersProviderRoute
+  AuthedAdminProvidersNewRoute: typeof AuthedAdminProvidersNewRoute
   AuthedAdminSkillsSlugRoute: typeof AuthedAdminSkillsSlugRoute
   AuthedAdminSkillsNewRoute: typeof AuthedAdminSkillsNewRoute
   AuthedAdminTeamsTeamIdRoute: typeof AuthedAdminTeamsTeamIdRoute
   AuthedAdminTeamsNewRoute: typeof AuthedAdminTeamsNewRoute
   AuthedAdminComponentsIndexRoute: typeof AuthedAdminComponentsIndexRoute
   AuthedAdminPluginsIndexRoute: typeof AuthedAdminPluginsIndexRoute
+  AuthedAdminProvidersProviderChangeRoute: typeof AuthedAdminProvidersProviderChangeRoute
   AuthedAdminPluginsKeyBotsAgentIdRoute: typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   AuthedAdminPluginsKeyToolsToolRoute: typeof AuthedAdminPluginsKeyToolsToolRoute
 }
@@ -2577,12 +2738,17 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,
   AuthedAdminPluginsArcadeRoute: AuthedAdminPluginsArcadeRoute,
   AuthedAdminPluginsComposioRoute: AuthedAdminPluginsComposioRoute,
+  AuthedAdminPluginsNewRoute: AuthedAdminPluginsNewRoute,
+  AuthedAdminProvidersProviderRoute: AuthedAdminProvidersProviderRoute,
+  AuthedAdminProvidersNewRoute: AuthedAdminProvidersNewRoute,
   AuthedAdminSkillsSlugRoute: AuthedAdminSkillsSlugRoute,
   AuthedAdminSkillsNewRoute: AuthedAdminSkillsNewRoute,
   AuthedAdminTeamsTeamIdRoute: AuthedAdminTeamsTeamIdRoute,
   AuthedAdminTeamsNewRoute: AuthedAdminTeamsNewRoute,
   AuthedAdminComponentsIndexRoute: AuthedAdminComponentsIndexRoute,
   AuthedAdminPluginsIndexRoute: AuthedAdminPluginsIndexRoute,
+  AuthedAdminProvidersProviderChangeRoute:
+    AuthedAdminProvidersProviderChangeRoute,
   AuthedAdminPluginsKeyBotsAgentIdRoute: AuthedAdminPluginsKeyBotsAgentIdRoute,
   AuthedAdminPluginsKeyToolsToolRoute: AuthedAdminPluginsKeyToolsToolRoute,
 }
@@ -2626,6 +2792,7 @@ interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsNotificationsRoute: typeof AuthedSettingsNotificationsRoute
   AuthedSettingsOrganizationRoute: typeof AuthedSettingsOrganizationRoute
   AuthedSettingsPasswordsRoute: typeof AuthedSettingsPasswordsRoute
+  AuthedSettingsProvidersRoute: typeof AuthedSettingsProvidersRoute
   AuthedSettingsSetupRoute: typeof AuthedSettingsSetupRoute
   AuthedSettingsSkillsRoute: typeof AuthedSettingsSkillsRoute
   AuthedSettingsThisComputerRoute: typeof AuthedSettingsThisComputerRoute
@@ -2634,8 +2801,11 @@ interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsComponentsGalleryNameRoute: typeof AuthedSettingsComponentsGalleryNameRoute
   AuthedSettingsConnectedAccountsKeyRoute: typeof AuthedSettingsConnectedAccountsKeyRoute
   AuthedSettingsCredentialsNewRoute: typeof AuthedSettingsCredentialsNewRoute
+  AuthedSettingsProvidersProviderRoute: typeof AuthedSettingsProvidersProviderRoute
+  AuthedSettingsProvidersNewRoute: typeof AuthedSettingsProvidersNewRoute
   AuthedSettingsComponentsGalleryIndexRoute: typeof AuthedSettingsComponentsGalleryIndexRoute
   AuthedSettingsConnectedAccountsIndexRoute: typeof AuthedSettingsConnectedAccountsIndexRoute
+  AuthedSettingsProvidersProviderChangeRoute: typeof AuthedSettingsProvidersProviderChangeRoute
 }
 
 const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
@@ -2650,6 +2820,7 @@ const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsNotificationsRoute: AuthedSettingsNotificationsRoute,
   AuthedSettingsOrganizationRoute: AuthedSettingsOrganizationRoute,
   AuthedSettingsPasswordsRoute: AuthedSettingsPasswordsRoute,
+  AuthedSettingsProvidersRoute: AuthedSettingsProvidersRoute,
   AuthedSettingsSetupRoute: AuthedSettingsSetupRoute,
   AuthedSettingsSkillsRoute: AuthedSettingsSkillsRoute,
   AuthedSettingsThisComputerRoute: AuthedSettingsThisComputerRoute,
@@ -2660,10 +2831,14 @@ const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsConnectedAccountsKeyRoute:
     AuthedSettingsConnectedAccountsKeyRoute,
   AuthedSettingsCredentialsNewRoute: AuthedSettingsCredentialsNewRoute,
+  AuthedSettingsProvidersProviderRoute: AuthedSettingsProvidersProviderRoute,
+  AuthedSettingsProvidersNewRoute: AuthedSettingsProvidersNewRoute,
   AuthedSettingsComponentsGalleryIndexRoute:
     AuthedSettingsComponentsGalleryIndexRoute,
   AuthedSettingsConnectedAccountsIndexRoute:
     AuthedSettingsConnectedAccountsIndexRoute,
+  AuthedSettingsProvidersProviderChangeRoute:
+    AuthedSettingsProvidersProviderChangeRoute,
 }
 
 const AuthedSettingsRouteRouteWithChildren =

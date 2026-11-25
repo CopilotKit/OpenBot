@@ -25,6 +25,7 @@ import {
   groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import {
   BotMarkdown,
   markdownComponents,
@@ -34,8 +35,8 @@ import {
 import { newId } from "@/lib/new-id";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
-import { SentFileCard } from "./sent-file-card";
 import { Composer, toAgentOptions } from "./composer";
+import { SentFileCard } from "./sent-file-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
 
 /**
@@ -145,7 +146,10 @@ export function GroupChat({ channelId }: { channelId: string }) {
         role="alert"
       >
         <p className="text-sm text-destructive">
-          Couldn't load this conversation. Try again.
+          {loadFailure(
+            group.error,
+            "Couldn't load this conversation. Try again.",
+          )}
         </p>
         <Button
           disabled={group.isFetching}
@@ -203,12 +207,12 @@ export function GroupChat({ channelId }: { channelId: string }) {
       <div className="mx-auto w-full max-w-2xl shrink-0 pb-4">
         {send.error ? (
           <p className="pb-2 text-sm text-destructive" role="alert">
-            {send.error.message}
+            {failureSaid(send.error)}
           </p>
         ) : null}
         {answer.error ? (
           <p className="pb-2 text-sm text-destructive" role="alert">
-            {answer.error.message}
+            {failureSaid(answer.error)}
           </p>
         ) : null}
         {/* The same drawer a conversation with one Bot draws its question in. */}
@@ -235,6 +239,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
           disabled={bots.length === 0}
           pending={send.isPending || answer.isPending || working}
           autoFocus
+          draftKey={`conversation:${channelId}`}
           onSubmit={async (draft) => {
             if (!draft.text) return;
             if (question && (!draft.agentId || draft.agentId === askerId)) {

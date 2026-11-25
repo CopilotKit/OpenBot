@@ -15,8 +15,15 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { appsQueryOptions } from "@/lib/apps/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { botList, type MovedApp } from "@/lib/moves/moved-apps";
 import { clearReconnectReturn, useMovedApps } from "@/lib/moves/use-moved-apps";
+import {
+  type AdminName,
+  withAdmins,
+  yourAdmins,
+} from "@/lib/organizations/admin-names";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { searchTextEntry } from "@/lib/search-text";
 
 /**
@@ -42,8 +49,13 @@ export const Route = createFileRoute("/_authed/_app/reconnect")({
 });
 
 const TITLE = "Reconnect your apps";
+/*
+ * True of every app listed: one the person signed in to, whose sign-in stayed with the service it
+ * was made through, and one meant to come across connected that wasn't, whose row says why. The
+ * apps that came across connected are never listed.
+ */
 const DESCRIPTION =
-  "These apps were connected in OpenBot on your computer. Their sign-ins stay private, so connect each one again here.";
+  "These apps were connected in OpenBot on your computer. Connect each one again here.";
 
 function ReconnectPage() {
   const moved = useMovedApps();
@@ -63,13 +75,22 @@ function ReconnectPage() {
   const logos = new Map(
     (apps.data ?? []).map((app) => [app.id, app.logo] as const),
   );
+  // Who a member goes to for an app only an admin can turn on, read only when one is listed.
+  const admins = useOrganizationAdmins(
+    moved.ready &&
+      !moved.mayAdd &&
+      moved.apps.some((app) => app.cloudId === null && !app.reconnected),
+  );
 
   if (moved.error) {
     return (
       <PageShell description={DESCRIPTION} title={TITLE}>
         <div className="flex flex-col items-start gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load the apps from your move. Try again in a moment.
+            {loadFailure(
+              moved.error,
+              "Couldn't load the apps from your move. Try again in a moment.",
+            )}
           </p>
           <Button
             disabled={moved.retrying}
@@ -113,6 +134,7 @@ function ReconnectPage() {
         {moved.apps.map((app, index) => (
           <React.Fragment key={app.appId}>
             <MovedAppRow
+              admins={admins}
               app={app}
               dismissing={moved.dismissing === app.noticeId}
               logo={
@@ -130,7 +152,10 @@ function ReconnectPage() {
       </PageRows>
       {moved.dismissError ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't dismiss that app. Try again in a moment.
+          {loadFailure(
+            moved.dismissError,
+            "Couldn't dismiss that app. Try again in a moment.",
+          )}
         </p>
       ) : null}
     </PageShell>
@@ -150,22 +175,51 @@ export function movedAppSummary(app: MovedApp): string {
 
 /**
  * Why a moved app can't be connected from here yet, or null when it can: the organization hasn't
- * added it, and either only an admin may (the person isn't one), or adding it was just refused.
+ * added it, and either only an admin may (the person isn't one, and is told who they are), or adding
+ * it was just refused.
  */
 function blockedBecause(
   app: MovedApp,
   mayAdd: boolean,
   notAdded: boolean,
+  admins: readonly AdminName[],
 ): string | null {
   if (app.cloudId !== null) return null;
   if (!mayAdd)
-    return `An admin has to turn ${app.appName} on before you can connect it.`;
+    return withAdmins(
+      `An admin has to turn ${app.appName} on before you can connect it.`,
+      admins,
+    );
   if (notAdded)
     return `Couldn't turn ${app.appName} on here. Try again in a moment.`;
   return null;
 }
 
+/**
+ * The line under a moved app's summary, or null: why it isn't connected yet. An add refused just
+ * now says so first. Otherwise OpenBot Cloud's own reason for an app meant to come across connected
+ * (the organization doesn't allow it, say), which already says what to do, with who the admins are
+ * beside it when only an admin can act on it; else why it waits for an admin. Nothing once it is
+ * connected again.
+ */
+export function movedAppNote(
+  app: MovedApp,
+  mayAdd: boolean,
+  notAdded: boolean,
+  admins: readonly AdminName[],
+): { said: string; reason: boolean } | null {
+  if (app.reconnected) return null;
+  const blocked = blockedBecause(app, mayAdd, notAdded, admins);
+  if (blocked && notAdded) return { said: blocked, reason: false };
+  if (app.reason) {
+    const who = blocked ? yourAdmins(admins) : "";
+    return { said: who ? `${app.reason} ${who}` : app.reason, reason: true };
+  }
+  return blocked ? { said: blocked, reason: false } : null;
+}
+
 function MovedAppRow({
+  admins,
   app,
   logo,
   mayAdd,
@@ -173,6 +227,7 @@ function MovedAppRow({
   dismissing,
   onDismiss,
 }: {
+  admins: readonly AdminName[];
   app: MovedApp;
   logo: string | null;
   mayAdd: boolean;
@@ -181,7 +236,7 @@ function MovedAppRow({
   onDismiss: () => void;
 }) {
   const summary = movedAppSummary(app);
-  const blocked = blockedBecause(app, mayAdd, notAdded);
+  const note = movedAppNote(app, mayAdd, notAdded, admins);
   return (
     <Item data-moved-app={app.appId} size="sm">
       <RowMark>
@@ -195,12 +250,14 @@ function MovedAppRow({
             {summary}
           </ItemDescription>
         ) : null}
-        {blocked ? (
+        {note ? (
           <ItemDescription
             className="line-clamp-none text-foreground"
-            data-moved-app-blocked=""
+            {...(note.reason
+              ? { "data-moved-app-reason": "" }
+              : { "data-moved-app-blocked": "" })}
           >
-            {blocked}
+            {note.said}
           </ItemDescription>
         ) : null}
       </ItemContent>

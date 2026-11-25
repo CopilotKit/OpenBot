@@ -25,4 +25,9 @@ export interface ReconnectApp {
   iconUrl?: string;
   /** The Bots that used it, so the person knows which to check. */
   botNames?: string[];
+  /**
+   * Why an app that was meant to come across connected (carried) still needs connecting here, in a sentence a person reads: for example, the organization doesn't allow it. Absent for an app the person signs in to again.
+   * @minLength 1
+   */
+  reason?: string;
 }

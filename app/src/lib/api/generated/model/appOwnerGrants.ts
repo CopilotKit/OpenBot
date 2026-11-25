@@ -3,7 +3,7 @@
  */
 
 /**
- * Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.
+ * Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.
  */
 export type AppOwnerGrants =
   (typeof AppOwnerGrants)[keyof typeof AppOwnerGrants];

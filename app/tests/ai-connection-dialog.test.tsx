@@ -401,7 +401,13 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
       test(`a refused key says why and changes nothing; a good one connects, in ${engine}, ${theme}`, async () => {
         const server = new FakeServer();
         const window = WIDE;
-        const page = await open("/settings", server, engine, theme, window);
+        const page = await open(
+          "/settings/providers",
+          server,
+          engine,
+          theme,
+          window,
+        );
         try {
           const row = page.getByRole("button", {
             name: /OpenAI.*Uses your OpenAI API key\./,
@@ -505,7 +511,13 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
           { provider: "anthropic", login: "api-key", endpointHost: null },
         ],
       };
-      const page = await open("/settings", server, engine, "light", WIDE);
+      const page = await open(
+        "/settings/providers",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
       try {
         await page.getByRole("button", { name: /^Anthropic/ }).click();
         const dialog = page.getByRole("dialog");
@@ -535,7 +547,13 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
     for (const theme of THEMES)
       test(`at a phone's width the dialog fits, in ${engine}, ${theme}`, async () => {
         const server = new FakeServer();
-        const page = await open("/settings", server, engine, theme, PHONE);
+        const page = await open(
+          "/settings/providers",
+          server,
+          engine,
+          theme,
+          PHONE,
+        );
         try {
           await page.getByRole("button", { name: /^OpenAI/ }).click();
           const dialog = page.getByRole("dialog");

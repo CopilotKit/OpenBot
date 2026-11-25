@@ -1,3 +1,4 @@
+import { answeredBy } from "@openbot/shared/handoff-markers";
 import { readFiring } from "@/lib/channels/routine-firing";
 import type { TranscriptItem } from "./tool-activity";
 
@@ -104,6 +105,49 @@ export function turnsOf(items: readonly TranscriptItem[]): Turn[] {
   });
 
   return turns;
+}
+
+/**
+ * The Bot's replies, each as the row its toolbar goes under and the words its Copy copies.
+ *
+ * A reply is everything one Bot said between two things that arrived from the other side (the
+ * person's message, their files, a routine firing): every line of it, joined as paragraphs, and
+ * none of the tool cards drawn between them. Its toolbar goes under its last line. Another Bot
+ * answering in the same turn is its own reply, under its own name. `skip` names rows that are not
+ * part of what the reply says: a task's folded working, a steer note.
+ */
+export function replyCopies(
+  items: readonly TranscriptItem[],
+  skip: (id: string) => boolean,
+): Map<string, string> {
+  const replies = new Map<string, string>();
+  let speaker: string | null = null;
+  let last: string | null = null;
+  let words: string[] = [];
+  const close = () => {
+    if (last !== null && words.length > 0)
+      replies.set(last, words.join("\n\n"));
+    speaker = null;
+    last = null;
+    words = [];
+  };
+  for (const item of items) {
+    if (
+      item.kind === "attachments" ||
+      (item.kind === "text" && item.role === "user")
+    ) {
+      close();
+      continue;
+    }
+    if (item.kind !== "text" || skip(item.id)) continue;
+    const said = answeredBy(item.id) ?? "";
+    if (last !== null && said !== speaker) close();
+    speaker = said;
+    last = item.id;
+    if (item.text.trim() !== "") words.push(item.text);
+  }
+  close();
+  return replies;
 }
 
 /** How close to the end, in pixels, counts as being at the end of the conversation. */

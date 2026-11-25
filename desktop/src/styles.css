@@ -22,20 +22,20 @@
    * (and here the whole ground) shares.
    */
   /* tokens/src/scheme.ts, light: background foreground card primary primary-foreground secondary muted muted-foreground destructive success border input ring sidebar sidebar-accent (bun run tokens:generate) */
-  --background: oklch(0.983 0.003 286.4);
-  --foreground: oklch(0.108 0.015 220.9);
+  --background: oklch(0.983 0.003 247.9);
+  --foreground: oklch(0.108 0.042 264.7);
   --card: oklch(1 0 0);
-  --primary: oklch(0.108 0.015 220.9);
+  --primary: oklch(0.108 0.042 264.7);
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.956 0.005 286.3);
-  --muted: oklch(0.956 0.005 286.3);
-  --muted-foreground: oklch(0.506 0.013 285.9);
+  --secondary: oklch(0.956 0.009 250.2);
+  --muted: oklch(0.956 0.009 250.2);
+  --muted-foreground: oklch(0.506 0.045 257.4);
   --destructive: oklch(0.504 0.178 22.9);
   --success: oklch(0.514 0.1 167.2);
-  --border: oklch(0.894 0.014 286.1);
-  --input: oklch(0.894 0.014 286.1);
+  --border: oklch(0.108 0.042 264.7 / 20%);
+  --input: oklch(0.108 0.042 264.7 / 20%);
   --ring: oklch(0.644 0.167 276.1);
-  --sidebar: oklch(0.948 0.011 286.2);
+  --sidebar: oklch(0.948 0.01 251.8);
   --sidebar-accent: oklch(0.832 0.085 281.4 / 30%);
   /* end of tokens/src/scheme.ts */
   --radius: 0.625rem;
@@ -968,8 +968,9 @@ button.text-link.inline-link {
 
 /*
  * OpenBot for Business, under the rows: the app's OpenBot for Business view stacked for the card.
- * Where it runs in big letters, what it adds in three short lists, then the calendar to book a
- * call on a card of its own. Sizes are the app dialog's: 28px icon tiles, 10px between rows.
+ * Its name in big letters, where it runs and what it adds in three short lists, then the calendar
+ * to book a call on a card of its own. Sizes are the app dialog's: 28px icon tiles, 10px between
+ * rows.
  */
 .business-booker {
   display: flex;
@@ -1057,7 +1058,7 @@ button.text-link.inline-link {
   outline: none;
 }
 
-/* Book a demo, under where it runs: one button that takes the card down to the calendar. */
+/* Book a demo, under its name: one button that takes the card down to the calendar. */
 .business-book {
   display: flex;
   margin-top: -4px;
@@ -2369,20 +2370,20 @@ main > .sheet:has(.journey.handing-off) .self-contained-why {
 @media (prefers-color-scheme: dark) {
   :root {
     /* tokens/src/scheme.ts, dark: background foreground card primary primary-foreground secondary muted muted-foreground destructive success border input ring sidebar sidebar-accent (bun run tokens:generate) */
-    --background: oklch(0.182 0.023 296.6);
-    --foreground: oklch(0.956 0.005 286.3);
-    --card: oklch(0.212 0.028 297.1);
-    --primary: oklch(0.956 0.005 286.3);
-    --primary-foreground: oklch(0.108 0.015 220.9);
-    --secondary: oklch(0.253 0.032 297.6);
-    --muted: oklch(0.253 0.032 297.6);
-    --muted-foreground: oklch(0.69 0.017 285.9);
+    --background: oklch(0.182 0.017 252);
+    --foreground: oklch(0.956 0.004 252);
+    --card: oklch(0.212 0.017 252);
+    --primary: oklch(0.956 0.004 252);
+    --primary-foreground: oklch(0.108 0.017 252);
+    --secondary: oklch(0.253 0.017 252);
+    --muted: oklch(0.253 0.017 252);
+    --muted-foreground: oklch(0.69 0.016 252);
     --destructive: oklch(0.792 0.121 16.4);
     --success: oklch(0.832 0.13 170.1);
-    --border: oklch(0.28 0.035 298.6);
-    --input: oklch(0.28 0.035 298.6);
+    --border: oklch(0.956 0.004 252 / 16%);
+    --input: oklch(0.956 0.004 252 / 16%);
     --ring: oklch(0.713 0.151 277.7);
-    --sidebar: oklch(0.156 0.017 295.8);
+    --sidebar: oklch(0.156 0.017 252);
     --sidebar-accent: oklch(0.832 0.085 281.4 / 12%);
     /* end of tokens/src/scheme.ts */
 

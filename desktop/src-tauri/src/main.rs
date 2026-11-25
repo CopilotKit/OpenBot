@@ -134,6 +134,9 @@ struct Shell {
     /// The app connected to an OpenBot that runs somewhere else: its relay and sign-in while the
     /// window shows it. See `desktop_connected`.
     connected: desktop_connected::State,
+    /// The app's own recent problems, as OpenBot's page records them (`record_problem`), for Get
+    /// Troubleshooting Logs…. See `page_problems`.
+    page_problems: openbot_desktop_lib::page_problems::Recorder,
     /// The move from OpenBot (Self-Contained) to OpenBot Cloud. See `desktop_move`.
     moving: desktop_move::State,
     /// The last security floor this app verified (`security_floor`).
@@ -7982,9 +7985,9 @@ fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String>
 /// The setup screens' background in light and in dark, which the macOS title bar takes while they
 /// show. The same values as `--surface-main` in styles.css (OpenBot's `--sidebar`, in sRGB).
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-const SETUP_BACKGROUND: tauri::window::Color = tauri::window::Color(0xed, 0xed, 0xf5, 0xff);
+const SETUP_BACKGROUND: tauri::window::Color = tauri::window::Color(0xe9, 0xee, 0xf4, 0xff);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-const SETUP_BACKGROUND_DARK: tauri::window::Color = tauri::window::Color(0x0d, 0x0b, 0x13, 0xff);
+const SETUP_BACKGROUND_DARK: tauri::window::Color = tauri::window::Color(0x07, 0x0d, 0x14, 0xff);
 
 /// Whether `url` is the setup page rather than OpenBot.
 fn on_setup_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> bool {
@@ -8620,6 +8623,18 @@ header, which has no sidebar beside it, and every place the page marks `data-des
 app sidebar's strip and panel, a skin's top bar and rail). The
 sidebar renders after the page loads and again on navigation, so new headers are marked as they
 appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
+
+The top strip of the app's, Admin's and Settings' shells moves the window across its whole width,
+over the page as well as over the sidebar, as a Mac window's title bar does. MEASURED: only the top
+of the sidebar moved it; a press over the page beside it (the bars over the page, the page's own top
+bar, the window's tint above them) did nothing. Over the page the strip reaches as far down as the
+sidebar's top row, and past any bars over the page to the bottom of the page's first row
+(`TOP_ROW`, as tall as the bar `PageShell` draws); over the sidebar, to its top row. Every page
+draws a different top bar, so the strip is a height, not a mark on each page's bar: a press in it
+is lent the mark on what it landed on, for Tauri's own drag script to move the window from (and
+zoom it on a double-click), and the mark is given back on release. A control in the strip (a
+button, a link, a field, anything Tauri treats as one) is never lent it, and stays a control. Below
+the strip, nothing changes.
 */
 const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   document.documentElement.dataset.desktopTitlebar = "overlay";
@@ -8647,9 +8662,96 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     for (const main of document.querySelectorAll('[data-slot="sidebar-wrapper"] > main')) {
       const beside = main.parentElement.querySelector(':scope > [data-slot="sidebar"]');
       if (!beside || beside.dataset.state === "collapsed") main.setAttribute(DRAG, "");
-      else main.removeAttribute(DRAG);
+      else if (main !== lent) main.removeAttribute(DRAG);
     }
   };
+  // The page's first row under the bars over it: the height of the bar `PageShell` draws.
+  const TOP_ROW = 56;
+  // What Tauri's drag script (tauri 2.12, window/scripts/drag.js) treats as a control.
+  const CONTROL_TAGS = new Set(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "LABEL", "SUMMARY"]);
+  const CONTROL_ROLES = new Set(["button", "link", "menuitem", "tab", "checkbox", "radio", "switch", "option"]);
+  const control = (el) =>
+    CONTROL_TAGS.has(el.tagName) ||
+    (el.hasAttribute("contenteditable") && el.getAttribute("contenteditable") !== "false") ||
+    (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1") ||
+    CONTROL_ROLES.has(el.getAttribute("role"));
+  // Where the shell's top strip ends: over the sidebar, at its top row; over the page, at that or
+  // at the page's first row under the bars over it, whichever is lower.
+  const stripBottom = (wrapper, overSidebar) => {
+    let bottom = 0;
+    const rows = wrapper.querySelectorAll(
+      '[data-slot="sidebar-header"], [data-slot="section-panel"] > [data-desktop-drag]',
+    );
+    for (const row of rows) {
+      const box = row.getBoundingClientRect();
+      if (box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+    // The strip of sections, with no panel beside it: the room it leaves for the window's buttons.
+    for (const strip of wrapper.querySelectorAll('[data-slot="strip"]')) {
+      const box = strip.getBoundingClientRect();
+      if (box.height > 0)
+        bottom = Math.max(bottom, box.top + parseFloat(getComputedStyle(strip).paddingTop));
+    }
+    const main = overSidebar ? null : wrapper.querySelector(":scope > main");
+    if (main) {
+      const style = getComputedStyle(main);
+      let top =
+        main.getBoundingClientRect().top +
+        parseFloat(style.borderTopWidth) +
+        parseFloat(style.paddingTop);
+      for (const child of main.children) {
+        if (child.tagName !== "ASIDE") break;
+        top = Math.max(top, child.getBoundingClientRect().bottom);
+      }
+      bottom = Math.max(bottom, top + TOP_ROW);
+    }
+    return bottom;
+  };
+  // The element a press in the top strip was lent the mark on, and the mark it had before, until
+  // the press is released.
+  let lent = null;
+  let lentOver = null;
+  const giveBack = () => {
+    if (!lent) return;
+    if (lent.getAttribute(DRAG) === "deep") {
+      if (lentOver === null) lent.removeAttribute(DRAG);
+      else lent.setAttribute(DRAG, lentOver);
+    }
+    lent = null;
+    mark();
+  };
+  // Capturing on the window, so the mark is there before Tauri's script, on the document, looks.
+  window.addEventListener(
+    "mousedown",
+    (event) => {
+      giveBack();
+      if (event.button !== 0 || !(event.target instanceof Element)) return;
+      const wrapper = event.target.closest('[data-slot="sidebar-wrapper"]');
+      if (!wrapper) return;
+      const overSidebar = event.target.closest('[data-slot="sidebar-container"]') !== null;
+      if (event.clientY >= stripBottom(wrapper, overSidebar)) return;
+      // What Tauri walks from: the element pressed, or what holds a picture's lines (an icon).
+      let held = null;
+      for (const el of event.composedPath()) {
+        if (!(el instanceof HTMLElement)) continue;
+        held = held || el;
+        const attr = el.getAttribute(DRAG);
+        if (attr === "false") return;
+        // Tauri moves the window from here already.
+        if (attr === "deep" || ((attr === "" || attr === "true") && el === event.target)) return;
+        if (attr === null && control(el)) return;
+      }
+      if (!held) return;
+      // "deep" rather than bare, so a press on an icon's lines, which Tauri walks past, drags too.
+      lentOver = held.getAttribute(DRAG);
+      held.setAttribute(DRAG, "deep");
+      lent = held;
+    },
+    true,
+  );
+  // After Tauri's script has seen the release, which is when a double-click zooms on macOS. A press
+  // that moved the window may never see its release here: the next press takes the mark back.
+  window.addEventListener("mouseup", giveBack);
   let queued = false;
   new MutationObserver(() => {
     if (queued) return;
@@ -9864,6 +9966,16 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     failure: Option<String>,
 ) -> Result<(), String> {
+    let saved = write_troubleshooting_logs(app, failure)?;
+    reveal_saved_logs(app, saved);
+    Ok(())
+}
+
+/// The logs gathered and saved in the log folder, and where.
+fn write_troubleshooting_logs<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    failure: Option<String>,
+) -> Result<PathBuf, String> {
     use time::macros::format_description;
     let text = gather_troubleshooting_logs(app, failure);
     let folder = logging::folder(app)
@@ -9880,8 +9992,7 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
     // The stamp, not the file name: the log's own scrubbing takes a name that long and mixed for a
     // key.
     log::info!("[logs] saved troubleshooting logs in the log folder, stamped {stamp}");
-    reveal_saved_logs(app, saved);
-    Ok(())
+    Ok(saved)
 }
 
 /**
@@ -9937,6 +10048,10 @@ fn reveal_through<Reveal>(
 /// `tauri_plugin_opener::reveal_item_in_dir`. On macOS an Objective-C exception from AppKit is
 /// caught and returned as the error, so even on the main thread a reveal cannot take the app down.
 fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
+    // A test never opens the file manager on the computer it runs on.
+    if cfg!(test) {
+        return Ok(());
+    }
     #[cfg(target_os = "macos")]
     let revealed = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
         tauri_plugin_opener::reveal_item_in_dir(path)
@@ -9976,6 +10091,9 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     failure: Option<String>,
 ) -> String {
+    if desktop_connected::is_connected(app) {
+        return gather_connected_troubleshooting_logs(app, failure);
+    }
     let home = logging::home_folder();
     let folder = logging::folder(app).ok();
     // The engine the back end runs on; before setup has chosen one, whichever is answering.
@@ -10017,15 +10135,7 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
         })
     };
     let text = troubleshooting::gather(troubleshooting::Sources {
-        desktop: format!(
-            "OpenBot Desktop {} ({})",
-            desktop_version(app),
-            build_description(
-                env!("OPENBOT_BUILD_COMMIT"),
-                env!("OPENBOT_BUILD_BRANCH"),
-                env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
-            )
-        ),
+        desktop: desktop_description(app),
         failure,
         log_folder: folder.as_deref(),
         home: home.as_deref(),
@@ -10035,6 +10145,66 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
     });
     log::info!("[logs] gathered troubleshooting logs");
     text
+}
+
+/// `OpenBot Desktop 1.2.0 (Built … from …)`, as the launch line says it.
+fn desktop_description<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    format!(
+        "OpenBot Desktop {} ({})",
+        desktop_version(app),
+        build_description(
+            env!("OPENBOT_BUILD_COMMIT"),
+            env!("OPENBOT_BUILD_BRANCH"),
+            env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
+        )
+    )
+}
+
+/**
+Get Troubleshooting Logs while the app is connected to an OpenBot that runs elsewhere: what the app
+saw of it, within `troubleshooting::LIMIT` however slow it is (`troubleshooting::gather_connected`).
+Nothing of an installation on this computer is asked: none runs here.
+
+Before, a connected app's menus had no such item, and its log held only the relay's lines: a reply
+that broke on OpenBot Cloud left nothing a person could send. Now the file has the app's own recent
+problems as its page recorded them (`record_problem`), each failed request with the request id that
+finds it in that OpenBot's logs.
+*/
+fn gather_connected_troubleshooting_logs<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    failure: Option<String>,
+) -> String {
+    let home = logging::home_folder();
+    let folder = logging::folder(app).ok();
+    let shell = app.state::<Shell>();
+    let text = troubleshooting::gather_connected(troubleshooting::ConnectedSources {
+        desktop: desktop_description(app),
+        failure,
+        log_folder: folder.as_deref(),
+        home: home.as_deref(),
+        address: desktop_connected::address_now(app),
+        signed_in: desktop_connected::connected_address(app).is_some(),
+        front_end: shell.page_problems.front_end(),
+        about: desktop_connected::about(app),
+        problems: shell.page_problems.recent(),
+        limit: troubleshooting_limit(),
+    });
+    log::info!("[logs] gathered troubleshooting logs while connected");
+    text
+}
+
+/**
+A problem OpenBot's page recorded as it happened (`page_problems`): kept for Get Troubleshooting
+Logs… and written to the log. Only OpenBot's own page can ask (`desktop_page::record_problem`).
+*/
+pub(crate) fn record_page_problem<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    reported: &openbot_desktop_lib::page_problems::Reported,
+) -> Result<(), String> {
+    let home = logging::home_folder();
+    app.state::<Shell>()
+        .page_problems
+        .record(reported, home.as_deref())
 }
 
 /**
@@ -13406,18 +13576,20 @@ fn settle_menu_stop(shell: &Shell, fallback_root: &Path, stopped: Stopped) -> Op
 fn chose(app: &tauri::AppHandle, item: &str) {
     match item {
         "open" => show_whichever_applies(app),
-        // The two a connected app's menus carry in place of Status and the troubleshooting logs.
+        // The two a connected app's menus carry in place of Status.
         CONNECTED_SIGN_OUT_MENU_ID => desktop_connected::sign_out_from_menu(app.clone()),
         CONNECTED_LOG_FOLDER_MENU_ID => {
             let _ = open_log_folder_now(app);
         }
-        // Stop, Status and the engine's logs are about OpenBot on this computer. A connected app's
-        // menus do not carry them, and a shortcut or a stale menu does not reach them either.
-        "stop" | "status" | "logs" if desktop_connected::is_connected(app) => {}
+        // Stop and Status are about OpenBot on this computer. A connected app's menus do not carry
+        // them, and a shortcut or a stale menu does not reach them either.
+        "stop" | "status" if desktop_connected::is_connected(app) => {}
         // Stop without quitting: the stack is what costs something to leave running, and somebody
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone(), AskedFrom::Menu),
         "status" => show_status_window(app),
+        // Connected or not: connected, the file says what the app saw of the OpenBot it is
+        // connected to (`gather_connected_troubleshooting_logs`).
         "logs" => save_troubleshooting_logs_from_menu(app.clone()),
         app_update::MENU_ID => check_for_updates_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
@@ -13690,7 +13862,7 @@ const TROUBLESHOOTING_MENU_LABEL: &str = "Get Troubleshooting Logs…";
 const TROUBLESHOOTING_MENU_GATHERING: &str = "Gathering Logs…";
 
 /// The menus' Sign Out and Open Log Folder while the app is connected to an OpenBot that runs
-/// elsewhere. See `desktop_connected`.
+/// elsewhere, beside Get Troubleshooting Logs…. See `desktop_connected`.
 const CONNECTED_SIGN_OUT_MENU_ID: &str = "sign-out";
 const CONNECTED_SIGN_OUT_MENU_LABEL: &str = "Sign Out";
 const CONNECTED_LOG_FOLDER_MENU_ID: &str = "log-folder";
@@ -13717,8 +13889,9 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
     // The menu bar menu follows the system's appearance; its icons are drawn for each.
     let dark = system_is_dark(app);
     let running = app.state::<Shell>().root.lock().unwrap().is_some();
-    // Connected to an OpenBot that runs elsewhere: Show Window, the app's log folder, Sign Out and
-    // Quit. Nothing here starts, stops or reports on OpenBot, because none runs on this computer.
+    // Connected to an OpenBot that runs elsewhere: Show Window, the app's log folder, the
+    // troubleshooting logs, Sign Out and Quit. Nothing here starts, stops or reports on an OpenBot
+    // on this computer, because none runs here; the logs say what the app saw of the one it shows.
     let connected = desktop_connected::is_connected(app);
     // Check for Updates… only in a build offered updates: anywhere else it could only say no.
     let updates = app_update_feed(app).is_some();
@@ -13761,6 +13934,13 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
                     CONNECTED_LOG_FOLDER_MENU_ID,
                     CONNECTED_LOG_FOLDER_MENU_LABEL,
                     true,
+                    None::<&str>,
+                )?),
+                MenuEntry::Plain(MenuItem::with_id(
+                    app,
+                    "logs",
+                    logs_label,
+                    logs_enabled,
                     None::<&str>,
                 )?),
                 MenuEntry::Plain(MenuItem::with_id(
@@ -13877,6 +14057,13 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
                 CONNECTED_LOG_FOLDER_MENU_ID,
                 CONNECTED_LOG_FOLDER_MENU_LABEL,
                 true,
+                None::<&str>,
+            )?));
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
+                app,
+                "logs",
+                logs_label,
+                logs_enabled,
                 None::<&str>,
             )?));
             entries.push(MenuEntry::Plain(MenuItem::with_id(
@@ -14541,6 +14728,7 @@ fn main() {
             desktop_move::move_footprint,
             desktop_move::keep_self_contained,
             desktop_move::move_preview,
+            desktop_move::move_destinations,
             desktop_move::move_to_cloud,
             desktop_move::cancel_move,
             desktop_move::open_moved_cloud,
@@ -20695,10 +20883,10 @@ mod tests {
     fn the_windows_title_bar_is_dark_from_its_first_show_and_redrawn_on_every_change() {
         let dark = title_bar_attributes(Some(true));
         assert_eq!(dark[0], (IMMERSIVE_DARK_MODE, 1), "{dark:?}");
-        assert!(dark.contains(&(CAPTION_COLOR, 0x0013_0b0d)), "{dark:?}");
+        assert!(dark.contains(&(CAPTION_COLOR, 0x0014_0d07)), "{dark:?}");
         let light = title_bar_attributes(Some(false));
         assert_eq!(light[0], (IMMERSIVE_DARK_MODE, 0), "{light:?}");
-        assert!(light.contains(&(CAPTION_COLOR, 0x00f5_eded)), "{light:?}");
+        assert!(light.contains(&(CAPTION_COLOR, 0x00f4_eee9)), "{light:?}");
         // Windows's own colours, and the window's theme left to decide its dark or light.
         let own = title_bar_attributes(None);
         assert!(own
@@ -28202,6 +28390,7 @@ fn main() {
             app.handle().clone(),
             "https://cloud.openbot.example".into(),
             None,
+            None,
         ));
 
         assert!(ended.is_err(), "the move ends without moving: {ended:?}");
@@ -28216,6 +28405,7 @@ fn main() {
         let ended = tauri::async_runtime::block_on(desktop_move::move_to_cloud(
             app.handle().clone(),
             "https://cloud.openbot.example".into(),
+            None,
             None,
         ));
         assert!(ended.is_err());

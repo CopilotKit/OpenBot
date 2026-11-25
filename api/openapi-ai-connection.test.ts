@@ -345,3 +345,186 @@ test("no answer about a person's own AI has a place for a key, and every example
       ReplacePersonalAiConnectionBody.safeParse(exampleValue(example)).success,
     ).toBe(true);
 });
+
+/*
+ * Several AI connections at once (plans/multiple-ai-connections-spec.md). The single connection above
+ * keeps its meaning and is the default; these list, connect, remove and make default, once for the
+ * organization (admins) and once for a person (themselves). All of it only grows the API.
+ */
+const LIST = "/api/v2/organizations/{organizationId}/ai-connections";
+const PERSONAL_LIST =
+  "/api/v2/organizations/{organizationId}/people/{personId}/ai-connections";
+const ORG_SIGN_INS =
+  "/api/v2/organizations/{organizationId}/ai-connection-sign-ins";
+
+function operationsOf(base: string) {
+  const list = spec.paths[base] ?? {};
+  const one = spec.paths[`${base}/{connectionId}`] ?? {};
+  const makeDefault = spec.paths[`${base}/{connectionId}/make-default`] ?? {};
+  return {
+    list: list.get,
+    connect: list.post,
+    remove: one.delete,
+    makeDefault: makeDefault.post,
+  };
+}
+
+test("an administrator lists, connects, removes and makes default the organization's connections", () => {
+  const { list, connect, remove, makeDefault } = operationsOf(LIST);
+  expect(
+    [list, connect, remove, makeDefault].map((o) => o?.operationId),
+  ).toEqual([
+    "listAiConnections",
+    "connectAiConnection",
+    "removeAiConnection",
+    "makeAiConnectionDefault",
+  ]);
+  for (const operation of [list, connect, remove, makeDefault]) {
+    expect(operation?.tags).toEqual(["Models"]);
+    expect(operation?.responses["403"]?.$ref).toContain("AdminOnly");
+  }
+  expect(list?.security).toContainEqual({ appOAuth: ["ai-connection:read"] });
+  for (const write of [connect, remove, makeDefault]) {
+    expect(write?.security).toContainEqual({
+      appOAuth: ["ai-connection:write"],
+    });
+    expect(write?.parameters?.map((p) => p.$ref)).toContainEqual(
+      expect.stringContaining("IdempotencyKey"),
+    );
+  }
+  expect(list?.parameters?.map((p) => p.$ref)).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining("Limit"),
+      expect.stringContaining("Cursor"),
+    ]),
+  );
+  expect(remove?.responses["204"]).toBeDefined();
+  expect(remove?.responses["404"]?.$ref).toContain("AiConnectionNotFound");
+  expect(makeDefault?.responses["404"]?.$ref).toContain("AiConnectionNotFound");
+  expect(makeDefault?.responses["409"]?.$ref).toContain("AiConnectionNotReady");
+  expect(connect?.responses["422"]?.$ref).toContain("AiConnectionRefused");
+});
+
+test("a person lists, connects, removes and makes default their own connections, and only they may", () => {
+  const { list, connect, remove, makeDefault } = operationsOf(PERSONAL_LIST);
+  expect(
+    [list, connect, remove, makeDefault].map((o) => o?.operationId),
+  ).toEqual([
+    "listPersonalAiConnections",
+    "connectPersonalAiConnection",
+    "removePersonalAiConnection",
+    "makePersonalAiConnectionDefault",
+  ]);
+  for (const operation of [list, connect, remove, makeDefault]) {
+    expect(operation?.responses["403"]?.$ref).toContain("OwnOnly");
+    const scopes = operation?.security?.flatMap((s) => s.appOAuth ?? []);
+    expect(
+      scopes?.every((scope) => scope.startsWith("personal-ai-connection:")),
+    ).toBe(true);
+  }
+  for (const write of [connect, remove, makeDefault])
+    expect(write?.parameters?.map((p) => p.$ref)).toContainEqual(
+      expect.stringContaining("IdempotencyKey"),
+    );
+  expect(connect?.responses["409"]?.$ref).toContain(
+    "PersonalAiConnectionUnavailable",
+  );
+});
+
+test("the organization signs in to a provider the way a person does, with the same schemas", () => {
+  const start = spec.paths[ORG_SIGN_INS]?.post;
+  const read = spec.paths[`${ORG_SIGN_INS}/{signInId}`]?.get;
+  const finish = spec.paths[`${ORG_SIGN_INS}/{signInId}/code`]?.post;
+  expect([start, read, finish].map((o) => o?.operationId)).toEqual([
+    "startAiSignIn",
+    "getAiSignIn",
+    "finishAiSignIn",
+  ]);
+  const schemaOf = (operation: Operation | undefined, status: string) =>
+    operation?.responses[status]?.content?.["application/json"]?.schema?.$ref;
+  expect(schemaOf(start, "201")).toBe(schemaOf(signIns.post, "201"));
+  expect(schemaOf(read, "200")).toBe(schemaOf(signIn.get, "200"));
+  expect(schemaOf(finish, "200")).toBe(schemaOf(signInCode.post, "200"));
+  for (const operation of [start, read, finish])
+    expect(operation?.responses["403"]?.$ref).toContain("AdminOnly");
+});
+
+test("no connection in a list, and no catalogue connection, has a place for a key or an address", () => {
+  for (const name of ["AiConnectionEntry", "AiConnectionPage"]) {
+    const names = propertyNames({ $ref: `#/components/schemas/${name}` });
+    expect(names.length).toBeGreaterThan(0);
+    for (const secret of ["apiKey", "baseUrl", "key", "token", "secret"])
+      expect(names).not.toContain(secret);
+  }
+  const catalogue = propertyNames({
+    $ref: "#/components/schemas/ModelCatalogueConnection",
+  });
+  expect(catalogue).toContain("owner");
+  for (const hidden of ["apiKey", "baseUrl", "endpointHost", "key", "token"])
+    expect(catalogue).not.toContain(hidden);
+});
+
+test("what an older client reads and sends is unchanged: every new field is optional", () => {
+  const schemas = spec.components.schemas as Record<
+    string,
+    Schema & { required?: string[] }
+  >;
+  const required = (name: string) => schemas[name]?.required ?? [];
+  expect(required("ModelCatalogue")).not.toContain("connections");
+  expect(required("ModelChoice")).not.toContain("connection");
+  expect(required("ModelChoice")).not.toContain("stopped");
+  expect(required("ModelChoiceInput")).not.toContain("connection");
+  expect(Object.keys(schemas.ModelCatalogue?.properties ?? {})).toContain(
+    "connections",
+  );
+  expect(Object.keys(schemas.ModelChoice?.properties ?? {})).toEqual(
+    expect.arrayContaining(["connection", "stopped"]),
+  );
+  expect(Object.keys(schemas.ModelChoiceInput?.properties ?? {})).toContain(
+    "connection",
+  );
+});
+
+test("every example of the connection lists parses with the generated client", async () => {
+  const zod = (await import(
+    "../app/src/lib/api/generated/models/models.zod"
+  )) as unknown as Record<
+    string,
+    { safeParse: (value: unknown) => { success: boolean } }
+  >;
+  const parses = (
+    operation: Operation | undefined,
+    status: string,
+    name: string,
+  ) => {
+    const schema = zod[name];
+    expect(schema).toBeDefined();
+    const examples = Object.values(
+      operation?.responses[status]?.content?.["application/json"]?.examples ??
+        {},
+    );
+    expect(examples.length).toBeGreaterThan(0);
+    for (const example of examples)
+      expect(schema?.safeParse(exampleValue(example)).success).toBe(true);
+  };
+  const org = operationsOf(LIST);
+  const mine = operationsOf(PERSONAL_LIST);
+  parses(org.list, "200", "ListAiConnectionsResponse");
+  parses(org.connect, "201", "ConnectAiConnectionResponse");
+  parses(org.makeDefault, "200", "MakeAiConnectionDefaultResponse");
+  parses(mine.list, "200", "ListPersonalAiConnectionsResponse");
+  const catalogue =
+    spec.paths["/api/v2/organizations/{organizationId}/model-catalogue"]?.get;
+  parses(catalogue, "200", "GetModelCatalogueResponse");
+  const choice =
+    spec.paths[
+      "/api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}"
+    ];
+  parses(choice?.get, "200", "GetModelChoiceResponse");
+  const examples = Object.values(
+    catalogue?.responses["200"]?.content?.["application/json"]?.examples ?? {},
+  ).map(exampleValue) as { connections?: unknown[] }[];
+  expect(
+    examples.some((example) => (example.connections?.length ?? 0) > 1),
+  ).toBe(true);
+});

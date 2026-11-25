@@ -42,7 +42,7 @@ export function SectionPanel({
         className="flex h-12 shrink-0 items-center gap-0.5 pr-2 pl-4"
         data-desktop-drag="deep"
       >
-        <h2 className="min-w-0 flex-1 truncate font-semibold text-[15px] tracking-tight">
+        <h2 className="min-w-0 flex-1 truncate font-semibold text-base tracking-tight">
           {title}
         </h2>
         {actions}

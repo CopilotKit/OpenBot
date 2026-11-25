@@ -1,0 +1,382 @@
+[
+  {
+    "input": "OPENAI_API_KEY=sk-proj-a1B2c3D4a1B2c3D4a1B2c3D4a1B2c3D4a1B2c3D4a1B2c3D4",
+    "redacted": "OPENAI_API_KEY=[redacted]",
+    "keepingIds": "OPENAI_API_KEY=[redacted]"
+  },
+  {
+    "input": "model refused key sk-ant-oat01-Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_Xy7_",
+    "redacted": "model refused key [redacted]",
+    "keepingIds": "model refused key [redacted]"
+  },
+  {
+    "input": "{\"refresh_token\":\"Kd8fJ2Kd8fJ2Kd8fJ2Kd8fJ2Kd8fJ2\"}",
+    "redacted": "{\"refresh_token\":\"[redacted]\"}",
+    "keepingIds": "{\"refresh_token\":\"[redacted]\"}"
+  },
+  {
+    "input": "git clone https://x-access-token:ghp_q1W2q1W2q1W2q1W2q1W2q1W2q1W2q1W2q1W2@github.com/a/b",
+    "redacted": "git clone https://[redacted]@github.com/a/b",
+    "keepingIds": "git clone https://[redacted]@github.com/a/b"
+  },
+  {
+    "input": "slack said invalid_auth for xoxb-1234-1234-1234-1234-",
+    "redacted": "slack said invalid_auth for [redacted]",
+    "keepingIds": "slack said invalid_auth for [redacted]"
+  },
+  {
+    "input": "Authorization: Bearer eyJhbGciOiJIUzI1hbGciOiJIUzI1.eyJzdWIiOiIxMjM0zdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+    "redacted": "Authorization: Bearer [redacted]",
+    "keepingIds": "Authorization: Bearer [redacted]"
+  },
+  {
+    "input": "id_token eyJhbGciOiJIUzI1hbGciOiJIUzI1.eyJzdWIiOiIxMjM0zdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+    "redacted": "id_token [redacted]",
+    "keepingIds": "id_token [redacted]"
+  },
+  {
+    "input": "KEY_ENCRYPTION_KEY: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "redacted": "KEY_ENCRYPTION_KEY: [redacted]",
+    "keepingIds": "KEY_ENCRYPTION_KEY: [redacted]"
+  },
+  {
+    "input": "secret 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 rejected",
+    "redacted": "secret [redacted] rejected",
+    "keepingIds": "secret 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 rejected"
+  },
+  {
+    "input": "password=hunter2 for postgres",
+    "redacted": "password=[redacted] for postgres",
+    "keepingIds": "password=[redacted] for postgres"
+  },
+  {
+    "input": "http://127.0.0.1:1455/auth/callback?code=ac_Synthetic.Code&state=xyz123",
+    "redacted": "http://127.0.0.1:1455/auth/callback?code=[redacted]&state=[redacted]",
+    "keepingIds": "http://127.0.0.1:1455/auth/callback?code=[redacted]&state=[redacted]"
+  },
+  {
+    "input": "postgres://openbot:s3cret-Pass@postgres:5432/openbot",
+    "redacted": "postgres://[redacted]@postgres:5432/openbot",
+    "keepingIds": "postgres://[redacted]@postgres:5432/openbot"
+  },
+  {
+    "input": "Cookie: better-auth.session_token=abc; theme=dark",
+    "redacted": "Cookie: [redacted]",
+    "keepingIds": "Cookie: [redacted]"
+  },
+  {
+    "input": "unexpected answer from Kd8fJ2Kd8fJ2Kd8fJ2Kd8fJ2Kd8fJ2 upstream",
+    "redacted": "unexpected answer from [redacted] upstream",
+    "keepingIds": "unexpected answer from Kd8fJ2Kd8fJ2Kd8fJ2Kd8fJ2Kd8fJ2 upstream"
+  },
+  {
+    "input": "signed in as alice.smith@example.com",
+    "redacted": "signed in as [email]",
+    "keepingIds": "signed in as [email]"
+  },
+  {
+    "input": "[compose] up failed (exit status: 1) in 12.4s",
+    "redacted": "[compose] up failed (exit status: 1) in 12.4s",
+    "keepingIds": "[compose] up failed (exit status: 1) in 12.4s"
+  },
+  {
+    "input": "Error response from daemon: Bind for 0.0.0.0:3010 failed: port is already allocated",
+    "redacted": "Error response from daemon: Bind for 0.0.0.0:3010 failed: port is already allocated",
+    "keepingIds": "Error response from daemon: Bind for 0.0.0.0:3010 failed: port is already allocated"
+  },
+  {
+    "input": "[engine] docker 27.3.1 is answering at unix:///var/run/docker.sock",
+    "redacted": "[engine] docker 27.3.1 is answering at unix:///var/run/docker.sock",
+    "keepingIds": "[engine] docker 27.3.1 is answering at unix:///var/run/docker.sock"
+  },
+  {
+    "input": "pulled ghcr.io/copilotkit/openbot-server:0.3.2 for openbot-desktop-server-1",
+    "redacted": "pulled ghcr.io/copilotkit/openbot-server:0.3.2 for openbot-desktop-server-1",
+    "keepingIds": "pulled ghcr.io/copilotkit/openbot-server:0.3.2 for openbot-desktop-server-1"
+  },
+  {
+    "input": "[app update] could not read https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json: 404",
+    "redacted": "[app update] could not read https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json: 404",
+    "keepingIds": "[app update] could not read https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json: 404"
+  },
+  {
+    "input": "[start] installed in C:\\Users\\Administrator\\OpenBot, app on port 3010",
+    "redacted": "[start] installed in C:\\Users\\Administrator\\OpenBot, app on port 3010",
+    "keepingIds": "[start] installed in C:\\Users\\Administrator\\OpenBot, app on port 3010"
+  },
+  {
+    "input": "[start] using k3d-local-abc-server-0 and cpki-app-api-test",
+    "redacted": "[start] using k3d-local-abc-server-0 and cpki-app-api-test",
+    "keepingIds": "[start] using k3d-local-abc-server-0 and cpki-app-api-test"
+  },
+  {
+    "input": "[step engine] Docker Desktop 4.36.0 is running.",
+    "redacted": "[step engine] Docker Desktop 4.36.0 is running.",
+    "keepingIds": "[step engine] Docker Desktop 4.36.0 is running."
+  },
+  {
+    "input": "[exit] code 0, Os { code: 2, kind: NotFound, message: \"No such file or directory\" }",
+    "redacted": "[exit] code 0, Os { code: 2, kind: NotFound, message: \"No such file or directory\" }",
+    "keepingIds": "[exit] code 0, Os { code: 2, kind: NotFound, message: \"No such file or directory\" }"
+  },
+  {
+    "input": "[start] model anthropic, signed in with a subscription",
+    "redacted": "[start] model anthropic, signed in with a subscription",
+    "keepingIds": "[start] model anthropic, signed in with a subscription"
+  },
+  {
+    "input": "OpenBot Desktop 0.3.2 (v0.3.2 (b214c97e)) on macos aarch64",
+    "redacted": "OpenBot Desktop 0.3.2 (v0.3.2 (b214c97e)) on macos aarch64",
+    "keepingIds": "OpenBot Desktop 0.3.2 (v0.3.2 (b214c97e)) on macos aarch64"
+  },
+  {
+    "input": "/api/v2/organizations/Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ/conversations/5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
+    "redacted": "/api/v2/organizations/[redacted]/conversations/5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
+    "keepingIds": "/api/v2/organizations/Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ/conversations/5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10"
+  },
+  {
+    "input": "req_5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
+    "redacted": "req_5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
+    "keepingIds": "req_5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10"
+  },
+  {
+    "input": "/api/v2/people/oba_Zq3Kp8xZq3Kp8xZq3Kp8xZq3Kp8x",
+    "redacted": "/api/v2/people/[redacted]",
+    "keepingIds": "/api/v2/people/[redacted]"
+  },
+  {
+    "input": "/api/v2/sessions/eyJhbGciOihbGciOihbGciOi.eyJzdWIiOizdWIiOizdWIiOi.Sfl9xQ",
+    "redacted": "/api/v2/sessions/[redacted]",
+    "keepingIds": "/api/v2/sessions/[redacted]"
+  },
+  {
+    "input": "/api/v2/people/dana.rivera@example.com",
+    "redacted": "/api/v2/people/[email]",
+    "keepingIds": "/api/v2/people/[email]"
+  },
+  {
+    "input": "access_token=Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ",
+    "redacted": "access_token=[redacted]",
+    "keepingIds": "access_token=[redacted]"
+  },
+  {
+    "input": "{\"level\":30,\"time\":\"2026-11-08T10:12:01.004Z\",\"event\":\"auth.signed_in\",\"email\":\"dana.rivera@example.com\",\"organizationId\":\"org_2xK9pQ7vLm\",\"userId\":\"user_31aZ\",\"subjectId\":\"usr_01JD8ZK3Q4M7N2P5R8T0V\"}",
+    "redacted": "{\"level\":30,\"time\":\"2026-11-08T10:12:01.004Z\",\"event\":\"auth.signed_in\",\"email\":\"[email]\",\"organizationId\":\"org_2xK9pQ7vLm\",\"userId\":\"user_31aZ\",\"subjectId\":\"[redacted]\"}",
+    "keepingIds": "{\"level\":30,\"time\":\"2026-11-08T10:12:01.004Z\",\"event\":\"auth.signed_in\",\"email\":\"[email]\",\"organizationId\":\"org_2xK9pQ7vLm\",\"userId\":\"user_31aZ\",\"subjectId\":\"usr_01JD8ZK3Q4M7N2P5R8T0V\"}"
+  },
+  {
+    "input": "{\"level\":30,\"time\":\"2026-11-08T10:12:02.551Z\",\"msg\":\"license.verified\",\"licenseToken\":\"ck_lic_q7Rt2Xw9q7Rt2Xw9q7Rt2Xw9q7Rt2Xw9\",\"token\":\"eyJhbGciOihbGciOihbGciOi.eyJzdWIiOizdWIiOizdWIiOi.Sfl9xQ\"}",
+    "redacted": "{\"level\":30,\"time\":\"2026-11-08T10:12:02.551Z\",\"msg\":\"license.verified\",\"licenseToken\":\"[redacted]\",\"token\":\"[redacted]\"}",
+    "keepingIds": "{\"level\":30,\"time\":\"2026-11-08T10:12:02.551Z\",\"msg\":\"license.verified\",\"licenseToken\":\"[redacted]\",\"token\":\"[redacted]\"}"
+  },
+  {
+    "input": "{\"level\":30,\"time\":\"2026-11-08T10:12:03.000Z\",\"msg\":\"telemetry.sink.succeeded\",\"posthog_distinct_id\":\"8c0f4a52-7e0b-4d1e-9a5f-3b2c1d0e9f8a\"}",
+    "redacted": "{\"level\":30,\"time\":\"2026-11-08T10:12:03.000Z\",\"msg\":\"telemetry.sink.succeeded\",\"posthog_distinct_id\":\"8c0f4a52-7e0b-4d1e-9a5f-3b2c1d0e9f8a\"}",
+    "keepingIds": "{\"level\":30,\"time\":\"2026-11-08T10:12:03.000Z\",\"msg\":\"telemetry.sink.succeeded\",\"posthog_distinct_id\":\"8c0f4a52-7e0b-4d1e-9a5f-3b2c1d0e9f8a\"}"
+  },
+  {
+    "input": "2026-11-08T10:12:01.010Z INFO  [provider] GET https://api.anthropic.com/v1/models Authorization: Bearer sk-ant-oat01-Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_",
+    "redacted": "2026-11-08T10:12:01.010Z INFO  [provider] GET https://api.anthropic.com/v1/models Authorization: Bearer [redacted]",
+    "keepingIds": "2026-11-08T10:12:01.010Z INFO  [provider] GET https://api.anthropic.com/v1/models Authorization: Bearer [redacted]"
+  },
+  {
+    "input": "2026-11-08T10:12:01.011Z WARN  [provider] the key sk-ant-api03-Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_ was refused (401)",
+    "redacted": "2026-11-08T10:12:01.011Z WARN  [provider] the key [redacted] was refused (401)",
+    "keepingIds": "2026-11-08T10:12:01.011Z WARN  [provider] the key [redacted] was refused (401)"
+  },
+  {
+    "input": "2026-11-08T10:12:01.012Z INFO  [oauth] callback http://127.0.0.1:43117/callback?code=4/0AeanS9kLm2S9kLm2S9kLm2S9kLm2S9kLm2&state=Xy7kQ2mN9pL4",
+    "redacted": "2026-11-08T10:12:01.012Z INFO  [oauth] callback http://127.0.0.1:43117/callback?code=[redacted]&state=[redacted]",
+    "keepingIds": "2026-11-08T10:12:01.012Z INFO  [oauth] callback http://127.0.0.1:43117/callback?code=[redacted]&state=[redacted]"
+  },
+  {
+    "input": "2026-11-08T10:12:01.013Z INFO  [oauth] token answer {\"access_token\":\"eyJhbGciOihbGciOihbGciOi.eyJzdWIiOizdWIiOizdWIiOi.Sfl9xQ\",\"refresh_token\":\"1//0gLm7Np2QrLm7Np2QrLm7Np2QrLm7Np2QrLm7Np2Qr\",\"client_secret\":\"GOCSPX-aB3dE5aB3dE5aB3dE5aB3dE5\"}",
+    "redacted": "2026-11-08T10:12:01.013Z INFO  [oauth] token answer {\"access_token\":\"[redacted]\",\"refresh_token\":\"[redacted]\",\"client_secret\":\"[redacted]\"}",
+    "keepingIds": "2026-11-08T10:12:01.013Z INFO  [oauth] token answer {\"access_token\":\"[redacted]\",\"refresh_token\":\"[redacted]\",\"client_secret\":\"[redacted]\"}"
+  },
+  {
+    "input": "OPENAI_API_KEY=sk-proj-Ab9_x7QzAb9_x7QzAb9_x7QzAb9_x7QzAb9_x7QzAb9_x7Qz",
+    "redacted": "OPENAI_API_KEY=[redacted]",
+    "keepingIds": "OPENAI_API_KEY=[redacted]"
+  },
+  {
+    "input": "ANTHROPIC_API_KEY=\"sk-ant-api03-Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_\"",
+    "redacted": "ANTHROPIC_API_KEY=[redacted]",
+    "keepingIds": "ANTHROPIC_API_KEY=[redacted]"
+  },
+  {
+    "input": "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_Zq3-Kp8_",
+    "redacted": "CLAUDE_CODE_OAUTH_TOKEN=[redacted]",
+    "keepingIds": "CLAUDE_CODE_OAUTH_TOKEN=[redacted]"
+  },
+  {
+    "input": "COPILOTKIT_LICENSE_TOKEN=ck_lic_q7Rt2Xw9q7Rt2Xw9q7Rt2Xw9q7Rt2Xw9",
+    "redacted": "COPILOTKIT_LICENSE_TOKEN=[redacted]",
+    "keepingIds": "COPILOTKIT_LICENSE_TOKEN=[redacted]"
+  },
+  {
+    "input": "COMPOSIO_API_KEY=ak_x7k2m9p4x7k2m9p4x7k2m9p4",
+    "redacted": "COMPOSIO_API_KEY=[redacted]",
+    "keepingIds": "COMPOSIO_API_KEY=[redacted]"
+  },
+  {
+    "input": "KEY_ENCRYPTION_KEY=Qm9vYmFyQm9vYmFyQm9vYmFyQm9vYmFy==",
+    "redacted": "KEY_ENCRYPTION_KEY=[redacted]",
+    "keepingIds": "KEY_ENCRYPTION_KEY=[redacted]"
+  },
+  {
+    "input": "BETTER_AUTH_SECRET=\"correct horse battery staple\"",
+    "redacted": "BETTER_AUTH_SECRET=[redacted]",
+    "keepingIds": "BETTER_AUTH_SECRET=[redacted]"
+  },
+  {
+    "input": "export WORKER_SHARED_SECRET='two words'",
+    "redacted": "export WORKER_SHARED_SECRET=[redacted]",
+    "keepingIds": "export WORKER_SHARED_SECRET=[redacted]"
+  },
+  {
+    "input": "DATABASE_URL=postgres://openbot:hunter2pass@127.0.0.1:5432/openbot",
+    "redacted": "DATABASE_URL=postgres://[redacted]@127.0.0.1:5432/openbot",
+    "keepingIds": "DATABASE_URL=postgres://[redacted]@127.0.0.1:5432/openbot"
+  },
+  {
+    "input": "2026-11-08T10:14:22.120Z info step engine-storage-check succeeded",
+    "redacted": "2026-11-08T10:14:22.120Z info step engine-storage-check succeeded",
+    "keepingIds": "2026-11-08T10:14:22.120Z info step engine-storage-check succeeded"
+  },
+  {
+    "input": "2026-11-08T10:15:40.003Z ERROR [local setup] failed after 88.1s: exit 1; error.code=IMAGE_PULL_FAILED",
+    "redacted": "2026-11-08T10:15:40.003Z ERROR [local setup] failed after 88.1s: exit 1; error.code=IMAGE_PULL_FAILED",
+    "keepingIds": "2026-11-08T10:15:40.003Z ERROR [local setup] failed after 88.1s: exit 1; error.code=IMAGE_PULL_FAILED"
+  },
+  {
+    "input": "write /var/lib/docker/tmp/GetImageBlob123: no space left on device",
+    "redacted": "write /var/lib/docker/tmp/GetImageBlob123: no space left on device",
+    "keepingIds": "write /var/lib/docker/tmp/GetImageBlob123: no space left on device"
+  },
+  {
+    "input": "Images          14        3         18.2GB    12.1GB (66%)",
+    "redacted": "Images          14        3         18.2GB    12.1GB (66%)",
+    "keepingIds": "Images          14        3         18.2GB    12.1GB (66%)"
+  },
+  {
+    "input": "27.3.1",
+    "redacted": "27.3.1",
+    "keepingIds": "27.3.1"
+  },
+  {
+    "input": "[launch] OpenBot Desktop 1.0.0-rc.1 (Built 2026-11-08 06:40 UTC from 52ea4b5) on macos aarch64",
+    "redacted": "[launch] OpenBot Desktop 1.0.0-rc.1 (Built 2026-11-08 06:40 UTC from 52ea4b5) on macos aarch64",
+    "keepingIds": "[launch] OpenBot Desktop 1.0.0-rc.1 (Built 2026-11-08 06:40 UTC from 52ea4b5) on macos aarch64"
+  },
+  {
+    "input": "WARN [local check] before local start: 8 CPUs and 7.7 GiB of memory, 0.0 GiB free of 58.4 GiB in a container; short of disk (nearly full)",
+    "redacted": "WARN [local check] before local start: 8 CPUs and 7.7 GiB of memory, 0.0 GiB free of 58.4 GiB in a container; short of disk (nearly full)",
+    "keepingIds": "WARN [local check] before local start: 8 CPUs and 7.7 GiB of memory, 0.0 GiB free of 58.4 GiB in a container; short of disk (nearly full)"
+  },
+  {
+    "input": "{\"level\":30,\"time\":\"2026-11-08T10:12:03.000Z\",\"event\":\"consent.state.invalid\",\"flowId\":\"setup-abc\",\"runId\":\"run-7\"}",
+    "redacted": "{\"level\":30,\"time\":\"2026-11-08T10:12:03.000Z\",\"event\":\"consent.state.invalid\",\"flowId\":\"setup-abc\",\"runId\":\"run-7\"}",
+    "keepingIds": "{\"level\":30,\"time\":\"2026-11-08T10:12:03.000Z\",\"event\":\"consent.state.invalid\",\"flowId\":\"setup-abc\",\"runId\":\"run-7\"}"
+  },
+  {
+    "input": "stack local-7f3a2c is starting",
+    "redacted": "stack local-7f3a2c is starting",
+    "keepingIds": "stack local-7f3a2c is starting"
+  },
+  {
+    "input": "2026-11-09T22:27:16.960Z INFO  [logs] saved troubleshooting logs in the log folder, stamped 2026-11-09T22-27-16Z",
+    "redacted": "2026-11-09T22:27:16.960Z INFO  [logs] saved troubleshooting logs in the log folder, stamped 2026-11-09T22-27-16Z",
+    "keepingIds": "2026-11-09T22:27:16.960Z INFO  [logs] saved troubleshooting logs in the log folder, stamped 2026-11-09T22-27-16Z"
+  },
+  {
+    "input": "/api/v2/organizations/Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ/people/Wm4nR7tYWm4nR7tYWm4nR7tYWm4nR7tY",
+    "redacted": "/api/v2/organizations/[redacted]/people/[redacted]",
+    "keepingIds": "/api/v2/organizations/Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ/people/Wm4nR7tYWm4nR7tYWm4nR7tYWm4nR7tY"
+  },
+  {
+    "input": "/api/v2/organizations/Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ/bots/Wm4nR7tYWm4nR7tYWm4nR7tYWm4nR7tY/runs",
+    "redacted": "/api/v2/organizations/[redacted]/bots/[redacted]/runs",
+    "keepingIds": "/api/v2/organizations/Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ/bots/Wm4nR7tYWm4nR7tYWm4nR7tYWm4nR7tY/runs"
+  },
+  {
+    "input": "/api/v2/organizations/Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ/conversations",
+    "redacted": "/api/v2/organizations/[redacted]/conversations",
+    "keepingIds": "/api/v2/organizations/Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ/conversations"
+  },
+  {
+    "input": "Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ",
+    "redacted": "[redacted]",
+    "keepingIds": "Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ"
+  },
+  {
+    "input": "Wm4nR7tYWm4nR7tYWm4nR7tYWm4nR7tY",
+    "redacted": "[redacted]",
+    "keepingIds": "Wm4nR7tYWm4nR7tYWm4nR7tYWm4nR7tY"
+  },
+  {
+    "input": "req_01JD8ZK3Q4M7N2P5R8T0V",
+    "redacted": "[redacted]",
+    "keepingIds": "req_01JD8ZK3Q4M7N2P5R8T0V"
+  },
+  {
+    "input": "/api/v2/apps/obr_Zq3Kp8xZq3Kp8xZq3Kp8xZq3Kp8x/refresh",
+    "redacted": "/api/v2/apps/[redacted]/refresh",
+    "keepingIds": "/api/v2/apps/[redacted]/refresh"
+  },
+  {
+    "input": "/api/v2/keys/obk_Zq3Kp8xZq3Kp8xZq3Kp8xZq3Kp8x",
+    "redacted": "/api/v2/keys/[redacted]",
+    "keepingIds": "/api/v2/keys/[redacted]"
+  },
+  {
+    "input": "TypeError: can't read sk-ant-api03-Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_ for dana.rivera@example.com",
+    "redacted": "TypeError: can't read [redacted] for [email]",
+    "keepingIds": "TypeError: can't read [redacted] for [email]"
+  },
+  {
+    "input": "Error: request failed with Authorization: Bearer oba_Zq3Kp8xZq3Kp8xZq3Kp8xZq3Kp8x",
+    "redacted": "Error: request failed with Authorization: Bearer [redacted]",
+    "keepingIds": "Error: request failed with Authorization: Bearer [redacted]"
+  },
+  {
+    "input": "Error: token eyJhbGciOihbGciOihbGciOi.eyJzdWIiOizdWIiOizdWIiOi.Sfl9xQ expired",
+    "redacted": "Error: token [redacted] expired",
+    "keepingIds": "Error: token [redacted] expired"
+  },
+  {
+    "input": "Error: Couldn't start a conversation.",
+    "redacted": "Error: Couldn't start a conversation.",
+    "keepingIds": "Error: Couldn't start a conversation."
+  },
+  {
+    "input": "OpenBot couldn't reach its backend, so your message wasn't sent. Try again, or quit and reopen OpenBot.",
+    "redacted": "OpenBot couldn't reach its backend, so your message wasn't sent. Try again, or quit and reopen OpenBot.",
+    "keepingIds": "OpenBot couldn't reach its backend, so your message wasn't sent. Try again, or quit and reopen OpenBot."
+  },
+  {
+    "input": "Set-Cookie: better-auth.session_token=abc123.def456; Path=/; HttpOnly",
+    "redacted": "Set-Cookie: [redacted]",
+    "keepingIds": "Set-Cookie: [redacted]"
+  },
+  {
+    "input": "openbot-relay=Kd8fJ2Kd8fJ2Kd8fJ2Kd8fJ2Kd8fJ2; Path=/",
+    "redacted": "openbot-relay=[redacted]; Path=/",
+    "keepingIds": "openbot-relay=[redacted]; Path=/"
+  },
+  {
+    "input": "http://127.0.0.1:49200/assets/index-abc.js:12:345",
+    "redacted": "http://127.0.0.1:49200/assets/index-abc.js:12:345",
+    "keepingIds": "http://127.0.0.1:49200/assets/index-abc.js:12:345"
+  },
+  {
+    "input": "https://my.open.bot/api/v2/organizations/default/deployment",
+    "redacted": "https://my.open.bot/api/v2/organizations/default/deployment",
+    "keepingIds": "https://my.open.bot/api/v2/organizations/default/deployment"
+  },
+  {
+    "input": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+    "redacted": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+    "keepingIds": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15"
+  }
+]

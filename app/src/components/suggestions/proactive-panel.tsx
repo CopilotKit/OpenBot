@@ -57,6 +57,7 @@ import { CHECK_IN_INTERVALS, intervalLabel } from "@/lib/routines/merged";
 import { useUserPreferences } from "@/lib/settings/message-list";
 import { queryClient } from "@/query-client";
 import { SuggestionRow } from "./suggestion-row";
+import { failureSaid } from "@/lib/load-failure";
 
 export const intervals = CHECK_IN_INTERVALS;
 /** The label map, so a closed trigger says "Every 4 hours" rather than 240. */
@@ -98,7 +99,7 @@ export function SuggestionsInbox({
     <PageSection title="Suggested next steps">
       {suggestions.isPending ? null : suggestions.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {suggestions.error.message}
+          {failureSaid(suggestions.error)}
         </p>
       ) : shown.length ? (
         <PageRows>
@@ -210,7 +211,7 @@ export function ProactiveResearchSettings({
       ) : null}
       {settings.isPending ? null : settings.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {settings.error.message}
+          {failureSaid(settings.error)}
         </p>
       ) : shown.length === 0 ? (
         <PageEmpty
@@ -402,7 +403,7 @@ export function TurnOnResearchDialog({
           </form>
           {add.error && (
             <p role="alert" className="text-destructive text-sm">
-              {add.error.message}
+              {failureSaid(add.error)}
             </p>
           )}
         </DialogBody>

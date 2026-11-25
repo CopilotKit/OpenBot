@@ -5,6 +5,7 @@ import {
   issueCallbackTokenMutationOptions,
   revokeCallbackTokenMutationOptions,
 } from "@/lib/agents/mutations";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The credential this coworker presents when it calls a tool back.
@@ -116,7 +117,7 @@ export function CallbackTokenPanel({
 
       {error ? (
         <p className="text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
     </section>

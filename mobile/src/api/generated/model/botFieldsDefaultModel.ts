@@ -20,4 +20,11 @@ export type BotFieldsDefaultModel = {
    * @pattern \S
    */
   effort: string | null;
+  /**
+   * Who serves the model, as the catalogue's connections name it (ModelCatalogueConnection source). The default applies for a person with a connection of that kind that can run. Omit for the default connection's.
+   * @minLength 1
+   * @maxLength 40
+   * @pattern ^[a-z][a-z0-9-]*$
+   */
+  source?: string;
 } | null;

@@ -56,10 +56,11 @@ import {
 } from "@/lib/agents/form";
 import {
   ISOLATION_NOT_ALLOWED,
-  ISOLATION_UNAVAILABLE,
   isolatedExplained,
+  isolationUnavailable,
 } from "@/lib/agents/isolation";
 import { createAgentMutationOptions } from "@/lib/agents/mutations";
+import { publicVisibilityWords } from "@/lib/agents/public-words";
 import { testAgentConnection } from "@/lib/agents/queries";
 import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
@@ -72,6 +73,13 @@ import { isComposing } from "@/lib/composing";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
 import { type PluginServer, pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -231,8 +239,11 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const [tried, setTried] = useState(false);
   /** Continue on the address is dialling it, before anything is created. */
   const [checking, setChecking] = useState(false);
-  /** Why the server could not reach the address on the last Continue, in its own words. */
-  const [unreachable, setUnreachable] = useState<string>();
+  /**
+   * Why the server could not reach the address on the last Continue, in its own words. The refusal
+   * itself, not its words: a hold is drawn calmly (lib/load-failure.tsx).
+   */
+  const [unreachable, setUnreachable] = useState<Failure>();
   /** The Bot just made, held for the moment the sheet spends saying so before it hands over. */
   const [createdId, setCreatedId] = useState<string>();
   /**
@@ -388,11 +399,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         await create(runtime);
       } catch (error) {
         createAgent.reset();
-        setUnreachable(
-          error instanceof Error && error.message
-            ? error.message
-            : MASTRA_UNREACHABLE,
-        );
+        setUnreachable(failureOf(error, MASTRA_UNREACHABLE));
         focusAddress();
       }
       return;
@@ -495,6 +502,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                     checked: isolated,
                     available: isolationAvailable,
                     allowed: isolationAllowed,
+                    cloud: capabilities?.hostedSignIn === true,
                     onChange: setIsolated,
                   }}
                   onInstructions={setInstructions}
@@ -522,7 +530,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             ) : (
               <EndpointStep
                 endpoint={endpoint}
-                endpointError={tried ? endpointIssue : unreachable}
+                endpointError={
+                  tried
+                    ? endpointIssue === undefined
+                      ? undefined
+                      : { message: endpointIssue }
+                    : unreachable
+                }
                 harness={runtime?.kind === "managed" ? runtime.harness : null}
                 onEndpoint={(value) => {
                   setEndpoint(value);
@@ -547,7 +561,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
         {createAgent.error ? (
           <p className="mt-6 text-destructive text-sm" role="alert">
-            {createAgent.error.message}
+            {failureSaid(createAgent.error)}
           </p>
         ) : null}
       </div>
@@ -663,7 +677,7 @@ type Visibility = AgentFormValues["visibility"];
 const VISIBILITY_OPTIONS: Array<{
   value: Visibility;
   title: string;
-  description: string;
+  description?: string;
   icon: typeof IconLock;
 }> = [
   {
@@ -675,7 +689,7 @@ const VISIBILITY_OPTIONS: Array<{
   {
     value: "public",
     title: "Public",
-    description: "Everyone in your company can find and use it.",
+    // No sentence of its own: said for the organization the person is in (`publicVisibilityWords`).
     icon: IconUsers,
   },
 ];
@@ -716,6 +730,8 @@ function AboutStep({
   isolation: IsolationChoice;
   personal: boolean;
 }) {
+  // Public is everyone in this organization, by name where the app knows it.
+  const everyone = publicVisibilityWords(useOrganizationAudience());
   return (
     <FieldGroup>
       <Field>
@@ -779,7 +795,7 @@ function AboutStep({
                         {option.title}
                       </span>
                       <span className="block text-pretty text-muted-foreground text-xs">
-                        {option.description}
+                        {option.description ?? everyone}
                       </span>
                     </span>
                   </button>
@@ -852,11 +868,11 @@ function EveryAppList({
     <FieldSet>
       <FieldLegend variant="label">Apps it can use</FieldLegend>
       <FieldDescription>
-        Every Bot can use every app you turn on in Connections.
+        Every Bot can use every app you connect in Connections.
       </FieldDescription>
       {turnedOn.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your apps.
+          {loadFailure(turnedOn.error, "Couldn't load your apps.")}
         </p>
       ) : servers.length > 0 ? (
         <ul aria-label="Apps it can use" className="grid gap-2 sm:grid-cols-2">
@@ -888,6 +904,8 @@ type IsolationChoice = {
   available: boolean;
   /** Whether an administrator lets this person ask for one ("Isolated Bots"). */
   allowed: boolean;
+  /** Whether this is OpenBot Cloud (`hostedSignIn`), which gives each person one computer. */
+  cloud: boolean;
   onChange: (checked: boolean) => void;
 };
 
@@ -909,11 +927,12 @@ function IsolatedOption({
   checked,
   available,
   allowed,
+  cloud,
   isPublic,
   onChange,
 }: IsolationChoice & { isPublic: boolean }) {
   const reason = !available
-    ? ISOLATION_UNAVAILABLE
+    ? isolationUnavailable(cloud)
     : !allowed
       ? ISOLATION_NOT_ALLOWED
       : null;
@@ -965,6 +984,9 @@ function IsolatedOption({
           >
             {reason ?? "A computer of its own, instead of sharing yours."}
           </p>
+          {cloud && !available ? (
+            <BusinessComputerLink className="text-xs" />
+          ) : null}
         </div>
       </div>
     </FieldSet>
@@ -1048,7 +1070,7 @@ export function EndpointStep({
   harness: string | null;
   endpoint: string;
   secret: string;
-  endpointError?: string;
+  endpointError?: Failure;
   onEndpoint: (value: string) => void;
   onKey: (value: string) => void;
 }) {
@@ -1087,10 +1109,9 @@ export function EndpointStep({
             value={endpoint}
           />
           {endpointError ? (
-            <FieldError
-              className="text-pretty"
-              errors={[{ message: endpointError }]}
-            />
+            <FieldError className="text-pretty">
+              {failureSaid(endpointError)}
+            </FieldError>
           ) : mastra ? (
             <FieldDescription>
               Give the address of your Mastra server. It needs to run one agent,

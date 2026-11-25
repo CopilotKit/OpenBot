@@ -1,6 +1,6 @@
 import { IconArrowUpRight, IconUser } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ConnectionFields } from "@/components/plugins/connection-fields";
 import { ConsentHandoffDialog } from "@/components/plugins/consent-handoff";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,10 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
+import { type Failure, failureInstead, failureSaid } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
+import { type AdminName, withAdmins } from "@/lib/organizations/admin-names";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import {
   brokeredConsentFor,
@@ -252,7 +255,7 @@ export type BrokeredAccount = {
    * broker key at all, which is an administrator's to set. A dialog saying "that app could not be
    * asked what it needs" is true of all four and useful about none.
    */
-  fieldsError: string | null;
+  fieldsError: ReactNode;
   /**
    * Finish the connection with what the person typed.
    *
@@ -268,9 +271,9 @@ export type BrokeredAccount = {
    * Carried out of the hook as well as reported to the screen's banner, because the form is a
    * modal. The banner is behind its backdrop, so Composio's own sentence — the one this path spends
    * a dropped `cause` to preserve — arrived where the person could not read it, over a form still
-   * holding the key it was about.
+   * holding the key it was about. Drawn through the shared rule, so a hold reads calm (`failureSaid`).
    */
-  submissionError: string | null;
+  submissionError: ReactNode;
   /** Spend one read-only call at the vendor to find out whether the key still works. */
   recheck: () => void;
   rechecking: boolean;
@@ -347,9 +350,10 @@ export function useBrokeredAccount(input: {
    * Where this row's failures go: the screen's own banner.
    *
    * Called with null as an action starts, so the reason the last attempt failed is not left sitting
-   * over the one now in flight.
+   * over the one now in flight. A refusal is handed on whole, not as its words, so the banner can
+   * draw a hold calmly (`failureSaid`).
    */
-  report: (message: string | null) => void;
+  report: (failure: Failure | null) => void;
 }): BrokeredAccount {
   const queryClient = useQueryClient();
   const {
@@ -452,7 +456,9 @@ export function useBrokeredAccount(input: {
   const recheck = useMutation({
     ...recheckBrokeredConnectionMutationOptions(queryClient, shared),
     onError: (thrown: Error) =>
-      report(readableRefusal(thrown.message, RECHECK_FAILED)),
+      report(
+        failureInstead(thrown, readableRefusal(thrown.message, RECHECK_FAILED)),
+      ),
   });
   /*
    * The check's answer is thrown away whenever an action changes the account it was about.
@@ -477,7 +483,7 @@ export function useBrokeredAccount(input: {
 
   const connect = useMutation({
     ...connectAccountMutationOptions(returnTo, shared),
-    onError: (thrown: Error) => report(thrown.message),
+    onError: (thrown: Error) => report(thrown),
     /*
      * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be
      * shown to this person in their own browser; there is deliberately nothing here that could
@@ -521,9 +527,10 @@ export function useBrokeredAccount(input: {
           setKeyInstead(true);
           return;
         }
-        report(
-          "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
-        );
+        report({
+          message:
+            "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
+        });
         return;
       }
       return leaveFor(start.authorizationUrl);
@@ -568,7 +575,7 @@ export function useBrokeredAccount(input: {
   const disconnect = useMutation({
     ...disconnectBrokeredMutationOptions(queryClient, shared),
     onError: (thrown: Error) => {
-      report(thrown.message);
+      report(thrown);
       forgetAnswers();
     },
     onSuccess: forgetAnswers,
@@ -584,7 +591,7 @@ export function useBrokeredAccount(input: {
    */
   const fieldsRequest = useMutation({
     ...brokeredConnectionFieldsMutationOptions(returnTo, shared),
-    onError: (thrown: Error) => report(thrown.message),
+    onError: (thrown: Error) => report(thrown),
   });
 
   /*
@@ -633,7 +640,12 @@ export function useBrokeredAccount(input: {
   const submission = useMutation({
     ...connectBrokeredWithFieldsMutationOptions(queryClient, returnTo, shared),
     onError: (thrown: Error) => {
-      report(readableRefusal(thrown.message, KEY_CHECK_FAILED));
+      report(
+        failureInstead(
+          thrown,
+          readableRefusal(thrown.message, KEY_CHECK_FAILED),
+        ),
+      );
       forgetAnswers();
     },
     onSuccess: forgetAnswers,
@@ -677,7 +689,7 @@ export function useBrokeredAccount(input: {
    */
   const connectAnother = useMutation({
     ...connectAnotherAccountMutationOptions(returnTo),
-    onError: (thrown: Error) => report(thrown.message),
+    onError: (thrown: Error) => report(thrown),
     onSuccess: (start) => {
       forgetConfirmation();
       forgetRecheck();
@@ -686,9 +698,10 @@ export function useBrokeredAccount(input: {
         return;
       }
       if (start === null) {
-        report(
-          "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
-        );
+        report({
+          message:
+            "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
+        });
         return;
       }
       return leaveFor(start.authorizationUrl);
@@ -696,12 +709,12 @@ export function useBrokeredAccount(input: {
   });
   const makeDefault = useMutation({
     ...setDefaultBrokeredAccountMutationOptions(queryClient),
-    onError: (thrown: Error) => report(thrown.message),
+    onError: (thrown: Error) => report(thrown),
   });
   const disconnectAccount = useMutation({
     ...disconnectBrokeredAccountMutationOptions(queryClient),
     onError: (thrown: Error) => {
-      report(thrown.message);
+      report(thrown);
       forgetAnswers();
     },
     onSuccess: forgetAnswers,
@@ -817,13 +830,13 @@ export function useBrokeredAccount(input: {
       fieldsRequest.mutate(serverId);
     },
     requestingFields: fieldsRequest.isPending,
-    fieldsError: fieldsRequest.error?.message ?? null,
+    fieldsError: failureSaid(fieldsRequest.error),
     submitFields: (values: Record<string, string>) => {
       report(null);
       submission.mutate({ serverId, values });
     },
     submittingFields: submission.isPending,
-    submissionError: submission.error?.message ?? null,
+    submissionError: failureSaid(submission.error),
     serverId,
     shared,
     fieldsSubmitted: submission.isSuccess,
@@ -880,6 +893,8 @@ function formatDate(iso: string): string {
  */
 function accountSentence(input: {
   account: BrokeredAccount;
+  /** Who a member is told to ask where connecting apps isn't set up (`withAdmins`). */
+  admins: readonly AdminName[];
   /** The app's own name, as the screen drawing this row knows it. */
   title: string;
   connectedDescription: string;
@@ -897,6 +912,7 @@ function accountSentence(input: {
 }): string {
   const {
     account,
+    admins,
     connectedDescription,
     edition,
     disconnectedDescription,
@@ -909,7 +925,11 @@ function accountSentence(input: {
   } = input;
 
   if (!account.configured) {
-    return brokeredKeyMissing(provider, edition, reader, hosted);
+    const missing = brokeredKeyMissing(provider, edition, reader, hosted);
+    // Only a person's sentence asks an admin; the admin's names what to set.
+    return reader === "person" && edition === "team"
+      ? withAdmins(missing, admins)
+      : missing;
   }
 
   if (account.kind === "no-auth") {
@@ -949,7 +969,7 @@ function accountSentence(input: {
        * is worth a second press rather than a second connection.
        */
       if (account.probe && !account.verified) {
-        return `Your key didn't pass a check with ${title}. That may be the key, or ${title} itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
+        return `Your key didn't pass a check with ${vendorNameOf(title)}. That may be the key, or ${vendorNameOf(title)} itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
       }
       /*
        * NOTHING WAS SPENT ON IT, WHICH IS A FACT ABOUT THE CHECK AND ABOUT THE APP AT THE TIME. The
@@ -970,7 +990,7 @@ function accountSentence(input: {
        * today.
        */
       if (account.probe === null) {
-        return `Connected with your key. It hasn't been checked with ${title}. At the time, ${title} had no safe way to check a key. That's about the app, not your key.`;
+        return `Connected with your key. It hasn't been checked with ${vendorNameOf(title)}. At the time, ${vendorNameOf(title)} had no safe way to check a key. That's about the app, not your key.`;
       }
       /*
        * AND NOTHING HAS SAID WHICH, which is no longer the page load: the connections read carries
@@ -980,7 +1000,7 @@ function accountSentence(input: {
        * two things a record can say; this is what stands where there is no record, and it must not
        * borrow either.
        */
-      return `Connected with your key. It hasn't been checked with ${title}.`;
+      return `Connected with your key. It hasn't been checked with ${vendorNameOf(title)}.`;
     }
     /*
      * WHAT DISCONNECTING DID NOT DO. The account ends at Composio and the key does not end
@@ -989,7 +1009,7 @@ function accountSentence(input: {
      * have live, so the row names the step this deployment cannot take for them.
      */
     if (account.disconnected) {
-      return `Disconnected. Your key still works at ${title}. Change it there to stop all access.`;
+      return `Disconnected. Your key still works at ${vendorNameOf(title)}. Change it there to stop all access.`;
     }
     /*
      * NOT THE SCREEN'S OWN SENTENCE, which is written for the kind that leaves: one of the two says
@@ -1002,7 +1022,7 @@ function accountSentence(input: {
      * way this app is connected, and a row that replaced the whole line took it away with the trip
      * it was right to drop.
      */
-    const asked = `Needs a key from ${title}. Connect shows where to get one.`;
+    const asked = `Needs a key from ${vendorNameOf(title)}. Connect shows where to get one.`;
     return disconnectedReassurance
       ? `${asked} ${disconnectedReassurance}`
       : asked;
@@ -1038,11 +1058,12 @@ function KeyGuideNote({
   guide: KeyGuide | null;
   title: string;
 }) {
+  const vendor = vendorNameOf(title);
   return (
     <div className="mb-3 flex flex-col gap-1.5 text-sm" data-testid="key-guide">
       <p>
-        OpenBot connects to {title} with a key from your {title} account, not a
-        sign-in.
+        OpenBot connects to {vendor} with a key from your {vendor} account, not
+        a sign-in.
       </p>
       {guide ? <p className="text-muted-foreground">{guide.steps}</p> : null}
       {guide?.url ? (
@@ -1052,7 +1073,7 @@ function KeyGuideNote({
           rel="noopener noreferrer"
           target="_blank"
         >
-          Get a key from {title}
+          Get a key from {vendor}
           <IconArrowUpRight aria-hidden="true" className="size-3.5" />
         </a>
       ) : null}
@@ -1086,6 +1107,7 @@ export function NotConnected() {
  */
 export function BrokeredAccountRow({
   account,
+  admins = [],
   connectedDescription,
   edition = "team",
   disconnectedDescription,
@@ -1097,6 +1119,11 @@ export function BrokeredAccountRow({
   startConnect = false,
   title,
 }: {
+  /**
+   * The organization's admins, for a member told to ask one to set connecting apps up: the sentence
+   * names them (`withAdmins`). Empty for an admin, and wherever nobody is to be named.
+   */
+  admins?: readonly AdminName[];
   /**
    * Start connecting on arrival, once, for an app that isn't connected: the key form for an app that
    * takes a key (Browse apps sends somebody here straight after adding one), the sign-in for one
@@ -1282,9 +1309,10 @@ export function BrokeredAccountRow({
               ends, which was cut off mid-word beside the buttons. */}
           <ItemDescription className="line-clamp-none">
             {several
-              ? `You connected ${accounts.length} ${title} accounts. Bots use your default account unless you ask for another.`
+              ? `You connected ${accounts.length} ${vendorNameOf(title)} accounts. Bots use your default account unless you ask for another.`
               : accountSentence({
                   account,
+                  admins,
                   connectedDescription,
                   edition,
                   disconnectedDescription,

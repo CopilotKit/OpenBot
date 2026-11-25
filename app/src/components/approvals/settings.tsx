@@ -34,6 +34,7 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 import {
   ALWAYS_ASKS,
@@ -91,7 +92,7 @@ export function ApprovalSettings() {
     <>
       {error ? (
         <p className="mt-6 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {isOrganizationAdmin(me?.role) && !personal ? (
@@ -120,91 +121,95 @@ export function ApprovalSettings() {
         }
         title="Before a Bot acts"
       >
-        <PageRows>
-          <Item size="sm">
-            <ItemMedia variant="icon">
-              <IconHandStop />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>{ASK_FIRST_TITLE}</ItemTitle>
-              <ItemDescription className="line-clamp-none">
-                {ASK_FIRST_DESCRIPTION}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                aria-label={ASK_FIRST_TITLE}
-                checked={inbox.data?.enabled ?? false}
-                disabled={inbox.isLoading || preferences.isPending}
-                onCheckedChange={(enabled) => preferences.mutate({ enabled })}
-              />
-            </ItemActions>
-          </Item>
-          {inbox.data?.preferences ? (
-            <>
-              <Separator />
-              <Item size="sm">
-                <ItemMedia variant="icon">
-                  <IconEyeCheck />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle id="auto-review-title">Auto-review</ItemTitle>
-                  <ItemDescription
-                    className="line-clamp-none"
-                    id="auto-review-description"
-                  >
-                    {enforced ? "An admin requires this. " : ""}
-                    Before a Bot does something that could affect your accounts
-                    or share information, OpenBot checks it against your request
-                    and your rules. If it can't tell, it asks you.
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Switch
-                    // Named by its title alone and described by the sentence beside it, so the name
-                    // stays short however long the description grows.
-                    aria-describedby="auto-review-description"
-                    aria-labelledby="auto-review-title"
-                    checked={enforced || inbox.data.preferences.autoReview}
-                    disabled={enforced || preferences.isPending}
-                    onCheckedChange={(autoReview) =>
-                      preferences.mutate({ autoReview })
-                    }
-                  />
-                </ItemActions>
-              </Item>
-              <Separator />
-              <Item size="sm">
-                <ItemMedia variant="icon">
-                  <IconTerminal2 />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>Commands on your computer</ItemTitle>
-                  <ItemDescription className="line-clamp-none">
-                    {inbox.data.hostCommands &&
-                    inbox.data.hostCommands !==
-                      inbox.data.preferences.hostCommands
-                      ? `An admin limits this to "${HOST_LABELS[inbox.data.hostCommands]}". `
-                      : ""}
-                    The OpenBot desktop app still shows you each command before
-                    it runs.
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <LabelSelect
-                    disabled={preferences.isPending}
-                    label="Commands on your computer"
-                    labels={HOST_LABELS}
-                    onChange={(hostCommands) =>
-                      preferences.mutate({ hostCommands })
-                    }
-                    value={inbox.data.preferences.hostCommands}
-                  />
-                </ItemActions>
-              </Item>
-            </>
-          ) : null}
-        </PageRows>
+        {/* Unread, the switch would be drawn off whatever is saved: the line above says why. */}
+        {inbox.data === undefined ? null : (
+          <PageRows>
+            <Item size="sm">
+              <ItemMedia variant="icon">
+                <IconHandStop />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>{ASK_FIRST_TITLE}</ItemTitle>
+                <ItemDescription className="line-clamp-none">
+                  {ASK_FIRST_DESCRIPTION}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Switch
+                  aria-label={ASK_FIRST_TITLE}
+                  checked={inbox.data?.enabled ?? false}
+                  disabled={inbox.isLoading || preferences.isPending}
+                  onCheckedChange={(enabled) => preferences.mutate({ enabled })}
+                />
+              </ItemActions>
+            </Item>
+            {inbox.data?.preferences ? (
+              <>
+                <Separator />
+                <Item size="sm">
+                  <ItemMedia variant="icon">
+                    <IconEyeCheck />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle id="auto-review-title">Auto-review</ItemTitle>
+                    <ItemDescription
+                      className="line-clamp-none"
+                      id="auto-review-description"
+                    >
+                      {enforced ? "An admin requires this. " : ""}
+                      Before a Bot does something that could affect your
+                      accounts or share information, OpenBot checks it against
+                      your request and your rules. If it can't tell, it asks
+                      you.
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Switch
+                      // Named by its title alone and described by the sentence beside it, so the name
+                      // stays short however long the description grows.
+                      aria-describedby="auto-review-description"
+                      aria-labelledby="auto-review-title"
+                      checked={enforced || inbox.data.preferences.autoReview}
+                      disabled={enforced || preferences.isPending}
+                      onCheckedChange={(autoReview) =>
+                        preferences.mutate({ autoReview })
+                      }
+                    />
+                  </ItemActions>
+                </Item>
+                <Separator />
+                <Item size="sm">
+                  <ItemMedia variant="icon">
+                    <IconTerminal2 />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>Commands on your computer</ItemTitle>
+                    <ItemDescription className="line-clamp-none">
+                      {inbox.data.hostCommands &&
+                      inbox.data.hostCommands !==
+                        inbox.data.preferences.hostCommands
+                        ? `An admin limits this to "${HOST_LABELS[inbox.data.hostCommands]}". `
+                        : ""}
+                      The OpenBot desktop app still shows you each command
+                      before it runs.
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <LabelSelect
+                      disabled={preferences.isPending}
+                      label="Commands on your computer"
+                      labels={HOST_LABELS}
+                      onChange={(hostCommands) =>
+                        preferences.mutate({ hostCommands })
+                      }
+                      value={inbox.data.preferences.hostCommands}
+                    />
+                  </ItemActions>
+                </Item>
+              </>
+            ) : null}
+          </PageRows>
+        )}
       </PageSection>
       <PageSection
         description={
@@ -223,7 +228,7 @@ export function ApprovalSettings() {
         }
         title="Rules for every Bot"
       >
-        {saved === 0 ? (
+        {saved === 0 && inbox.data !== undefined ? (
           <PageEmpty icon={IconChecklist} title="No rules yet" />
         ) : null}
         {saved > 0 || canAdd ? (

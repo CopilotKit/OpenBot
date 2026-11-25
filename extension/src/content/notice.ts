@@ -32,7 +32,7 @@ const custom = (mode: Mode) =>
 
 export const NOTICE_TOKENS = { light: custom("light"), dark: custom("dark") };
 
-export const RADIUS = "0.625rem";
+export const RADIUS = "0.5rem";
 
 type Choice = "stop" | "restart" | "continue";
 

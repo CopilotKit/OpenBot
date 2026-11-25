@@ -59,30 +59,30 @@ export type Palette = Record<Token, string>;
 
 /*
  * Three surfaces, darkest to lightest, the way Linear draws them: the frame (the sidebar's tint,
- * which the window edge shares), the panel the page sits in, and the white cards on it. The frame
- * is CopilotKit's pale lavender, the grays lean towards its lilac, the ring is its periwinkle, and
- * the selected sidebar row is a lilac tint.
+ * which the window edge shares), the panel the page sits in, and the white cards on it. Every gray
+ * is Tailwind's slate at the gray's own lightness. CopilotKit's lavender is kept for what it marks:
+ * the ring is its periwinkle, and the selected sidebar row is a lilac tint.
  */
 const light: Palette = {
-  background: "oklch(0.983 0.003 286.4)",
-  foreground: "oklch(0.108 0.015 220.9)",
+  background: "oklch(0.983 0.003 247.9)",
+  foreground: "oklch(0.108 0.042 264.7)",
   card: "oklch(1 0 0)",
-  "card-foreground": "oklch(0.108 0.015 220.9)",
+  "card-foreground": "oklch(0.108 0.042 264.7)",
   popover: "oklch(1 0 0)",
-  "popover-foreground": "oklch(0.108 0.015 220.9)",
-  primary: "oklch(0.108 0.015 220.9)",
+  "popover-foreground": "oklch(0.108 0.042 264.7)",
+  primary: "oklch(0.108 0.042 264.7)",
   "primary-foreground": "oklch(1 0 0)",
-  secondary: "oklch(0.956 0.005 286.3)",
-  "secondary-foreground": "oklch(0.108 0.015 220.9)",
-  muted: "oklch(0.956 0.005 286.3)",
-  "muted-foreground": "oklch(0.506 0.013 285.9)",
-  accent: "oklch(0.956 0.005 286.3)",
-  "accent-foreground": "oklch(0.108 0.015 220.9)",
+  secondary: "oklch(0.956 0.009 250.2)",
+  "secondary-foreground": "oklch(0.108 0.042 264.7)",
+  muted: "oklch(0.956 0.009 250.2)",
+  "muted-foreground": "oklch(0.506 0.045 257.4)",
+  accent: "oklch(0.956 0.009 250.2)",
+  "accent-foreground": "oklch(0.108 0.042 264.7)",
   destructive: "oklch(0.504 0.178 22.9)",
   success: "oklch(0.514 0.1 167.2)",
   warning: "oklch(0.555 0.163 49)",
-  border: "oklch(0.894 0.014 286.1)",
-  input: "oklch(0.894 0.014 286.1)",
+  border: "oklch(0.108 0.042 264.7 / 20%)",
+  input: "oklch(0.108 0.042 264.7 / 20%)",
   ring: "oklch(0.644 0.167 276.1)",
   "chart-1": "oklch(0.869 0.022 252.894)",
   "chart-2": "oklch(0.554 0.046 257.417)",
@@ -90,41 +90,43 @@ const light: Palette = {
   "chart-4": "oklch(0.372 0.044 257.287)",
   "chart-5": "oklch(0.279 0.041 260.031)",
   "empty-pattern-color": "oklch(0.746 0.117 279.9)",
-  sidebar: "oklch(0.948 0.011 286.2)",
-  "sidebar-foreground": "oklch(0.108 0.015 220.9)",
-  "sidebar-primary": "oklch(0.108 0.015 220.9)",
+  sidebar: "oklch(0.948 0.01 251.8)",
+  "sidebar-foreground": "oklch(0.108 0.042 264.7)",
+  "sidebar-primary": "oklch(0.108 0.042 264.7)",
   "sidebar-primary-foreground": "oklch(1 0 0)",
   "sidebar-accent": "oklch(0.832 0.085 281.4 / 30%)",
-  "sidebar-accent-foreground": "oklch(0.108 0.015 220.9)",
-  "sidebar-border": "oklch(0.894 0.014 286.1)",
+  "sidebar-accent-foreground": "oklch(0.108 0.042 264.7)",
+  "sidebar-border": "oklch(0.108 0.042 264.7 / 20%)",
   "sidebar-ring": "oklch(0.644 0.167 276.1)",
 };
 
 /*
- * The same three surfaces on a near-black plum ground: the frame darkest, the cards lightest.
+ * The same three surfaces on a near-black blue-gray ground: the frame darkest, the cards lightest.
+ * The grays are slate with its hue moved from 265 to 252 and 40% of its tint: slate's own dark
+ * leans indigo, which reads as purple.
  * Secondary and muted fills are lighter than the cards, as shadcn's dark fills are, so a button or
  * badge never reads as a hole.
  */
 const dark: Palette = {
-  background: "oklch(0.182 0.023 296.6)",
-  foreground: "oklch(0.956 0.005 286.3)",
-  card: "oklch(0.212 0.028 297.1)",
-  "card-foreground": "oklch(0.956 0.005 286.3)",
-  popover: "oklch(0.212 0.028 297.1)",
-  "popover-foreground": "oklch(0.956 0.005 286.3)",
-  primary: "oklch(0.956 0.005 286.3)",
-  "primary-foreground": "oklch(0.108 0.015 220.9)",
-  secondary: "oklch(0.253 0.032 297.6)",
-  "secondary-foreground": "oklch(0.956 0.005 286.3)",
-  muted: "oklch(0.253 0.032 297.6)",
-  "muted-foreground": "oklch(0.69 0.017 285.9)",
-  accent: "oklch(0.28 0.037 297.7)",
-  "accent-foreground": "oklch(0.956 0.005 286.3)",
+  background: "oklch(0.182 0.017 252)",
+  foreground: "oklch(0.956 0.004 252)",
+  card: "oklch(0.212 0.017 252)",
+  "card-foreground": "oklch(0.956 0.004 252)",
+  popover: "oklch(0.212 0.017 252)",
+  "popover-foreground": "oklch(0.956 0.004 252)",
+  primary: "oklch(0.956 0.004 252)",
+  "primary-foreground": "oklch(0.108 0.017 252)",
+  secondary: "oklch(0.253 0.017 252)",
+  "secondary-foreground": "oklch(0.956 0.004 252)",
+  muted: "oklch(0.253 0.017 252)",
+  "muted-foreground": "oklch(0.69 0.016 252)",
+  accent: "oklch(0.28 0.016 252)",
+  "accent-foreground": "oklch(0.956 0.004 252)",
   destructive: "oklch(0.792 0.121 16.4)",
   success: "oklch(0.832 0.13 170.1)",
   warning: "oklch(0.828 0.189 84.4)",
-  border: "oklch(0.28 0.035 298.6)",
-  input: "oklch(0.28 0.035 298.6)",
+  border: "oklch(0.956 0.004 252 / 16%)",
+  input: "oklch(0.956 0.004 252 / 16%)",
   ring: "oklch(0.713 0.151 277.7)",
   "chart-1": "oklch(0.869 0.022 252.894)",
   "chart-2": "oklch(0.554 0.046 257.417)",
@@ -132,13 +134,13 @@ const dark: Palette = {
   "chart-4": "oklch(0.372 0.044 257.287)",
   "chart-5": "oklch(0.279 0.041 260.031)",
   "empty-pattern-color": "oklch(0.832 0.085 281.4)",
-  sidebar: "oklch(0.156 0.017 295.8)",
-  "sidebar-foreground": "oklch(0.956 0.005 286.3)",
-  "sidebar-primary": "oklch(0.956 0.005 286.3)",
-  "sidebar-primary-foreground": "oklch(0.108 0.015 220.9)",
+  sidebar: "oklch(0.156 0.017 252)",
+  "sidebar-foreground": "oklch(0.956 0.004 252)",
+  "sidebar-primary": "oklch(0.956 0.004 252)",
+  "sidebar-primary-foreground": "oklch(0.108 0.017 252)",
   "sidebar-accent": "oklch(0.832 0.085 281.4 / 12%)",
-  "sidebar-accent-foreground": "oklch(0.956 0.005 286.3)",
-  "sidebar-border": "oklch(0.28 0.035 298.6)",
+  "sidebar-accent-foreground": "oklch(0.956 0.004 252)",
+  "sidebar-border": "oklch(0.956 0.004 252 / 16%)",
   "sidebar-ring": "oklch(0.713 0.151 277.7)",
 };
 

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { StepIntro } from "./onboarding-frame";
 import type { OnboardingStep } from "./onboarding-wizard";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Onboarding's last step: the person's name, and Get started, which saves it and finishes.
@@ -69,7 +70,7 @@ export function useNameStep({
             />
             {save.error ? (
               <p className="text-left text-sm text-destructive" role="alert">
-                {save.error.message}
+                {failureSaid(save.error)}
               </p>
             ) : null}
           </form>

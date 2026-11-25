@@ -13,6 +13,7 @@ import type {
 } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { type Failure, failureOf, isHeld } from "@/lib/load-failure";
 
 export type AgentVisibility = BotVisibility;
 
@@ -126,12 +127,16 @@ export function agentQueryOptions(agentId: string) {
  * A verdict about this moment, asked when a message to the Bot was refused, so it is not cached and
  * it fails closed: only the API's own 404 says the Bot is gone. A read that could not be made, or a
  * server that broke, says nothing about the Bot, and answers false.
+ *
+ * Except OpenBot holding off (a move, or the organization's database briefly out of reach): that
+ * refusal is thrown as it came, so the caller can say the server's sentence calmly (`failedRunReason`).
  */
 export async function botNoLongerUsable(agentId: string): Promise<boolean> {
   try {
     await getBot(organizationId(), agentId);
     return false;
   } catch (error) {
+    if (isHeld(error)) throw error;
     return error instanceof ClientError && error.status === 404;
   }
 }
@@ -146,10 +151,13 @@ export function agentHandoffQueryOptions(agentId: string) {
   });
 }
 
-/** What the server said when it tried the endpoint. */
+/**
+ * What the server said when it tried the endpoint. A refusal is kept whole, so a hold (OpenBot
+ * moving the organization) is drawn calmly rather than as an unreachable address (lib/load-failure.tsx).
+ */
 export type ConnectionVerdict =
   | { ok: true; events: string[] }
-  | { ok: false; reason: string };
+  | { ok: false; reason: Failure };
 
 /** What a person reads when the test itself could not be run. */
 const UNTESTED = "The connection could not be tested.";
@@ -179,12 +187,12 @@ export async function testAgentConnection(
       { fallback: UNTESTED },
     );
     if (verdict.ok) return { ok: true, events: verdict.events };
-    return { ok: false, reason: verdict.reason ?? UNTESTED };
+    return { ok: false, reason: { message: verdict.reason ?? UNTESTED } };
   } catch (error) {
     // A refusal carries the server's sentence (or UNTESTED); a request that never arrived does not.
     return {
       ok: false,
-      reason: error instanceof ClientError ? error.message : UNTESTED,
+      reason: failureOf(error instanceof ClientError ? error : null, UNTESTED),
     };
   }
 }

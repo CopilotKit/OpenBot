@@ -1,5 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useSyncExternalStore } from "react";
+import {
+  CarryOnGroup,
+  hasCarriedOn,
+  noteBlocked,
+  wasSeenBlocked,
+} from "./carry-on-group";
 import { useConversation } from "./conversation";
+
+export { carryOnMessage } from "./carry-on-group";
 
 /**
  * Carrying on with the task an app card interrupted, once the app is ready, without the person
@@ -23,10 +31,15 @@ import { useConversation } from "./conversation";
  * once per card, across re-renders, remounts and other tabs on this browser, by a mark kept in
  * `localStorage` under the tool call the card was drawn for, set before the message is sent.
  *
- * SEEN, OR OFFERED. A card that watched the app go from blocked to ready carries on by itself: the
- * person was here, and the change is what they were waiting for. A card drawn already ready, in a
+ * TOGETHER, WHEN A BOT ASKED FOR SEVERAL. The cards that are the latest thing carry on as one set
+ * (`carry-on-group.ts`): one message naming every app, once the last of them is ready. Carried on
+ * one by one, the first card's message moved the conversation on and the rest were never heard.
+ *
+ * SEEN, OR OFFERED. Cards that watched an app go from blocked to ready carry on by themselves: the
+ * person was here, and the change is what they were waiting for. Cards drawn already ready, in a
  * conversation opened after the change (an admin approved overnight), cannot know the person still
- * wants the task done, so it offers Continue and leaves it to them.
+ * wants the task done, so they offer Continue and leave it to them. So do cards some of which are
+ * ready while others still wait, for a person who means to go on without the rest.
  */
 
 /** Where an app card sits in its conversation, as the transcript knows it. */
@@ -37,36 +50,8 @@ export type CardPlace = {
   latest: boolean;
 };
 
-const MARK = "openbot:carried-on:";
-
-/** Marks kept here as well, for a browser that refuses `localStorage` (a private window, a policy). */
-const carriedHere = new Set<string>();
-
-function hasCarriedOn(toolCallId: string): boolean {
-  if (carriedHere.has(toolCallId)) return true;
-  try {
-    return window.localStorage.getItem(MARK + toolCallId) !== null;
-  } catch {
-    return false;
-  }
-}
-
-/** Mark this card as carried on. False when something already had: this caller must not send. */
-function markCarriedOn(toolCallId: string): boolean {
-  if (hasCarriedOn(toolCallId)) return false;
-  carriedHere.add(toolCallId);
-  try {
-    window.localStorage.setItem(MARK + toolCallId, new Date().toISOString());
-  } catch {
-    // The in-memory mark still holds for this tab.
-  }
-  return true;
-}
-
-/** What is sent as the person when the task carries on. Short, and true whoever made it ready. */
-export function carryOnMessage(app: string): string {
-  return `${app} is ready now. Please carry on.`;
-}
+/** For a card outside a conversation: nobody joins it, so it never sends or offers anything. */
+const ALONE = new CarryOnGroup();
 
 /**
  * Carry on when this card's app becomes ready, or offer to.
@@ -74,7 +59,9 @@ export function carryOnMessage(app: string): string {
  * `ready` is null until the card knows; only a known `false` counts as having seen the app blocked.
  * `blockedWhenAsked` says whether the app was out of reach when the Bot asked — what lets a card
  * drawn already ready offer Continue only where something changed since. Returns `carried` once
- * this card has carried on (here or in another tab), and `offer` when a Continue is worth drawing.
+ * this card has carried on (here or in another tab), `inHand` while the conversation will carry on
+ * with it (by itself, or from the Continue under it or a sibling), so the card never tells the
+ * person to ask again, and `offer` when this card is the one to draw Continue.
  */
 export function useCarryOn({
   place,
@@ -86,34 +73,55 @@ export function useCarryOn({
   ready: boolean | null;
   blockedWhenAsked: boolean;
   app: string;
-}): { carried: boolean; offer: (() => void) | null } {
-  const ask = useConversation()?.ask;
-  const sawBlocked = useRef(false);
-  // Only re-renders this card once it has sent, so `carried` is read again.
-  const [, rerender] = useState(0);
-  useEffect(() => {
-    if (ready === false) sawBlocked.current = true;
-  }, [ready]);
+}): { carried: boolean; inHand: boolean; offer: (() => void) | null } {
+  const conversation = useConversation();
+  const ask = conversation?.ask ?? null;
+  const group = conversation?.carryOn ?? ALONE;
+  const key = useId();
+  // Re-read whenever any card of the conversation changes: whether this one offers depends on them.
+  useSyncExternalStore(group.subscribe, group.snapshot, group.snapshot);
 
   const toolCallId = place?.toolCallId;
-  const carried = toolCallId ? hasCarriedOn(toolCallId) : false;
-  const can = Boolean(ask && toolCallId && place?.latest && ready === true);
-
-  const send = () => {
-    if (!ask || !toolCallId || !markCarriedOn(toolCallId)) return;
-    ask(carryOnMessage(app));
-    rerender((count) => count + 1);
-  };
-  const sendRef = useRef(send);
-  sendRef.current = send;
+  /*
+   * Seen blocked: kept rather than read off `ready`, so a card that saw the change still counts it
+   * once ready, and kept per tool call for the tab (see `noteBlocked`), so it survives the trip to an
+   * app's own page to type its key.
+   */
+  if (ready === false && toolCallId) noteBlocked(toolCallId);
+  const sawBlocked = toolCallId ? wasSeenBlocked(toolCallId) : false;
+  const joins = Boolean(ask && toolCallId && place?.latest);
 
   useEffect(() => {
-    if (can && sawBlocked.current) sendRef.current();
-  }, [can]);
+    if (!joins || !toolCallId) {
+      group.set(key, null, ask);
+      return;
+    }
+    group.set(
+      key,
+      { toolCallId, app, ready, sawBlocked, blockedWhenAsked },
+      ask,
+    );
+  }, [
+    group,
+    key,
+    joins,
+    toolCallId,
+    app,
+    ready,
+    sawBlocked,
+    blockedWhenAsked,
+    ask,
+  ]);
+  // Leaves the set when it is drawn no more.
+  useEffect(() => () => group.set(key, null, null), [group, key]);
 
+  const carried = toolCallId ? hasCarriedOn(toolCallId) : false;
   return {
     carried,
+    inHand: joins,
     offer:
-      can && !carried && !sawBlocked.current && blockedWhenAsked ? send : null,
+      joins && ready === true && !carried && group.view(key).offer
+        ? () => group.carryOn()
+        : null,
   };
 }

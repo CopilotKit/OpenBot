@@ -14,6 +14,10 @@ import {
   ConnectAppResponse,
   ListConnectionsResponse,
 } from "@/lib/api/generated/connections/connections.zod";
+import {
+  CreateCredentialBody,
+  CreateCredentialResponse,
+} from "@/lib/api/generated/credentials/credentials.zod";
 import type {
   Import,
   PersonalAiConnection,
@@ -31,6 +35,11 @@ import {
 import { personBody } from "./accounts-api";
 import { type AppsFixture, answerAppsApi, appBody } from "./apps-api";
 import { connectionBody } from "./connections-api";
+import {
+  MEMBERS_PATH,
+  membersResponse,
+  organizationMember,
+} from "./organizations-api";
 
 /**
  * After a move to OpenBot Cloud, the apps the move listed to connect again (their sign-ins stay on
@@ -73,6 +82,15 @@ const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";
 const ORGANIZATION = "/api/v2/organizations/default";
 const ME = `${ORGANIZATION}/people/me`;
+/** The organization's people: a member says who its owner and admin are. */
+const ORGANIZATION_MEMBERS = [
+  organizationMember("Sam Rivera", "sam@example.com", "member"),
+  organizationMember("Ines Duarte", "ines@example.com", "admin"),
+  organizationMember("Priya Raman", "priya@example.com", "owner"),
+];
+/** What a member reads about an app only an admin can turn on, with who the admins are. */
+const SLACK_WAITS =
+  "An admin has to turn Slack on before you can connect it: Priya Raman (priya@example.com) or Ines Duarte (ines@example.com).";
 
 const WIDE = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
@@ -217,10 +235,66 @@ const APPS: AppsFixture = {
     },
     directoryApp("notion", "Notion", "Read and write pages."),
   ],
+  /*
+   * The directory's apps not added here yet, as listAppDirectory lists them: Slack, and Linear,
+   * which the directory lists and then refuses to add. An app added by its address is never in it.
+   */
+  directory: [
+    { slug: "slack", name: "Slack", connection: { kind: "consent" } },
+    { slug: "linear", name: "Linear", connection: { kind: "consent" } },
+  ],
 };
 
-/** A finished move, as listImports answers it, listing `reconnect`. */
-function finishedMove(reconnect: ReconnectApp[]): Import {
+/** OpenBot Cloud's sentence for a carried app its organization doesn't allow. */
+const NOT_ALLOWED =
+  "Your organization doesn't allow Team wiki yet. Ask an admin to approve it, then connect it here.";
+/** Meant to come across connected with its key; the organization here doesn't allow it. */
+const TEAM_WIKI: ReconnectApp = {
+  appId: "team-wiki",
+  appName: "Team wiki",
+  botNames: ["Research"],
+  reason: NOT_ALLOWED,
+};
+
+/** A server added by its address on the person's computer: not in the directory. */
+const S4_ORDERS: ReconnectApp = {
+  appId: "s4-orders",
+  appName: "S4 Orders",
+  botNames: ["Order Desk"],
+};
+/** That server once an admin has added it here, with the organization's key. */
+const S4_ORDERS_HERE = {
+  id: "s4-orders",
+  title: "S4 Orders",
+  provenance: "custom",
+  url: "https://orders.s4.test/mcp",
+  signIn: false,
+};
+/** An entry of OpenBot's own catalogue reached with a key an admin gives for everybody. */
+const EXA_ENTRY = {
+  key: "exa",
+  title: "Exa",
+  vendor: "Exa",
+  summary: "Search the web.",
+  auth: "deployment-bearer" as const,
+};
+const EXA: ReconnectApp = { appId: "exa", appName: "Exa" };
+/** The id the vault gives the nth credential saved in a test: a UUID, as the API's are. */
+const credentialId = (n: number) =>
+  `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+/** A directory app on the organization's one shared account, connected. */
+const NOTION_SHARED = {
+  ...directoryApp("notion", "Notion", "Read and write pages."),
+  accountMode: "shared" as const,
+  sharedVendorConnected: true,
+};
+const NOTION: ReconnectApp = { appId: "notion", appName: "Notion" };
+
+/** A finished move, as listImports answers it, listing `reconnect` and `carried`. */
+function finishedMove(
+  reconnect: ReconnectApp[],
+  carried: Import["carried"] = undefined,
+): Import {
   return {
     id: "imp_0e1f2a3b4c5d6f1d",
     status: "imported",
@@ -238,6 +312,7 @@ function finishedMove(reconnect: ReconnectApp[]): Import {
     maxPartBytes: 33554432,
     receivedParts: [1],
     reconnect,
+    ...(carried ? { carried } : {}),
   } as Import;
 }
 
@@ -282,10 +357,14 @@ class FakeServer {
   saves: unknown[] = [];
   /** Every request this server could not answer. */
   unanswered: string[] = [];
+  /** How many times the app read the organization's members. */
+  membersAsks = 0;
   /** The organization's apps, which an admin's add grows. */
   apps: AppsFixture = { ...APPS, servers: [...(APPS.servers ?? [])] };
   /** Every app added, by the entry it was asked for. */
   added: string[] = [];
+  /** The ids of every credential an admin saved. */
+  credentials: string[] = [];
   role: "member" | "admin";
   /**
    * The person's own AI on OpenBot Cloud, where one is required: null where the server answers
@@ -305,6 +384,11 @@ class FakeServer {
   connects: { appId: string; key: boolean }[] = [];
   /** The apps that take a key, whatever the app list says about how they connect. */
   keyApps = new Set<string>();
+  /**
+   * The organization's apps switch. Locked down unless a test opens it: the tests here that pin a
+   * member waiting for an admin pin it locked down. Open, a member adds an app as an admin does.
+   */
+  lockedDown = true;
 
   constructor(
     imports: Import[] | null,
@@ -428,6 +512,8 @@ class FakeServer {
           hostedSignIn: this.hosted,
         },
       };
+    if (path === `${ORGANIZATION}/settings/apps` && method === "GET")
+      return { status: 200, json: { lockedDown: this.lockedDown } };
     if (path === `${ORGANIZATION}/bots` && method === "GET")
       return { status: 200, json: { bots: [], nextCursor: null } };
     if (path === `${ORGANIZATION}/conversations` && method === "GET")
@@ -442,16 +528,66 @@ class FakeServer {
           code: "LINKED_ACCOUNTS_UNAVAILABLE",
         },
       };
+    // A key an admin types for an app reached with one: kept, and answered without its secret.
+    if (path === `${ORGANIZATION}/credentials` && method === "POST") {
+      expect(this.role).toBe("admin");
+      const sent = CreateCredentialBody.parse(request.postDataJSON());
+      const id = credentialId(this.credentials.length + 1);
+      this.credentials.push(id);
+      return {
+        status: 201,
+        json: CreateCredentialResponse.parse({
+          id,
+          kind: sent.kind,
+          provider: sent.provider,
+          keyId: sent.keyId,
+          metadata: sent.metadata ?? {},
+          createdAt: "2026-11-24T12:00:00.000Z",
+          revokedAt: null,
+        }),
+      };
+    }
     if (path === `${ORGANIZATION}/apps` && method === "POST") {
       expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
         0,
       );
-      expect(this.role).toBe("admin");
+      // An admin adds apps; so does anybody while apps are open.
+      if (this.lockedDown) expect(this.role).toBe("admin");
       const sent = request.postDataJSON() as Record<string, unknown>;
       CreateAppBody.parse(sent);
+      // A server added by its address: reached with the organization's key, nobody signs in.
+      if (sent.from === "address") {
+        const title = String(sent.title);
+        this.added.push(`address:${title}`);
+        const server = {
+          id: title.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+          title,
+          provenance: "custom",
+          url: String(sent.url),
+          signIn: false,
+        };
+        this.apps.servers = [...(this.apps.servers ?? []), server];
+        return { status: 201, json: CreateAppResponse.parse(appBody(server)) };
+      }
       expect(sent.from).toBe("directory");
       const entry = String(sent.directoryEntryId);
       this.added.push(entry);
+      // An entry of OpenBot's own catalogue: added as its key, with the key it was given, if any.
+      const listed = (this.apps.catalogue ?? []).find(
+        (item) => `catalogue:${item.key}` === entry,
+      );
+      if (listed) {
+        if (listed.auth === "deployment-bearer")
+          expect(this.credentials).toContain(String(sent.credentialId));
+        const server = {
+          id: listed.key,
+          title: listed.title,
+          provenance: "first-party",
+          url: `https://${listed.key}.vendor.test/mcp`,
+        };
+        this.apps.servers = [...(this.apps.servers ?? []), server];
+        return { status: 201, json: CreateAppResponse.parse(appBody(server)) };
+      }
       // Slack is in the directory; nothing else asked for here is.
       if (entry !== "directory:slack")
         return {
@@ -487,6 +623,12 @@ class FakeServer {
         status: 200,
         json: ConnectAppResponse.parse(this.start(appId, body.values)),
       };
+    }
+    // Who a member is told to go to for an app only an admin can turn on.
+    if (path === MEMBERS_PATH && method === "GET") {
+      this.membersAsks += 1;
+      const members = membersResponse(url.toString(), ORGANIZATION_MEMBERS);
+      return { status: members.status, json: await members.json() };
     }
     const apps = answerAppsApi(url.toString(), { method }, this.apps);
     if (apps) return { status: apps.status, json: await apps.json() };
@@ -966,10 +1108,14 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
       const page = await open("/reconnect", server, engine);
       try {
         await row(page, "googlecalendar").waitFor();
-        // Slack isn't added in this organization, and only an admin may add it.
-        await row(page, "slack")
-          .getByText("An admin has to turn Slack on before you can connect it.")
-          .waitFor();
+        // Slack isn't added in this organization, and only an admin may add it: named, owner first.
+        await row(page, "slack").getByText(SLACK_WAITS).waitFor();
+        await shoot(page, "member-waits", engine, "light", WIDE);
+        if (shots) {
+          await page.setViewportSize(PHONE);
+          await shoot(page, "member-waits", engine, "light", PHONE);
+          await page.setViewportSize(WIDE);
+        }
         expect(
           await row(page, "slack")
             .getByRole("button", { name: "Reconnect" })
@@ -978,9 +1124,7 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         // Opened straight from OpenBot Desktop: back to the list, never a page that isn't there.
         await page.goto(`${ORIGIN}/reconnect/slack`);
         await page.waitForURL((url) => url.pathname === "/reconnect");
-        await row(page, "slack")
-          .getByText("An admin has to turn Slack on before you can connect it.")
-          .waitFor();
+        await row(page, "slack").getByText(SLACK_WAITS).waitFor();
         expect(server.added).toEqual([]);
         await row(page, "googlecalendar")
           .getByRole("button", { name: "Dismiss Google Calendar" })
@@ -1014,6 +1158,216 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         await page.close();
       }
     }, 120_000);
+
+  /*
+   * Reported in dogfooding: a move left about 20 apps to reconnect. Apps connected with a key come
+   * across connected now and are never listed; one OpenBot Cloud couldn't connect is, with its
+   * reason on its row in place of the line it would otherwise have.
+   */
+  for (const engine of engines)
+    test(`an app that came across connected isn't listed, and one that couldn't says why on its row, in ${engine}`, async () => {
+      const server = new FakeServer([
+        finishedMove(
+          [GMAIL, TEAM_WIKI, SLACK],
+          [{ appId: "fireflies", appName: "Fireflies", botNames: ["Standup"] }],
+        ),
+      ]);
+      const page = await open("/reconnect", server, engine);
+      try {
+        // OpenBot Cloud's reason, and beside it who the admins are, owner first.
+        const withAdmins = `${NOT_ALLOWED} Your admins are Priya Raman (priya@example.com) and Ines Duarte (ines@example.com).`;
+        await row(page, "team-wiki").getByText(withAdmins).waitFor();
+        expect(
+          await row(page, "team-wiki")
+            .locator("[data-moved-app-reason]")
+            .textContent(),
+        ).toBe(withAdmins);
+        // The reason says what to do, so the admin line isn't said twice.
+        expect(
+          await row(page, "team-wiki")
+            .getByText(/An admin has to turn/)
+            .count(),
+        ).toBe(0);
+        // Its other line is still there.
+        expect(await row(page, "team-wiki").textContent()).toContain(
+          "Used by Research",
+        );
+        // The rest as before.
+        await row(page, "slack").getByText(SLACK_WAITS).waitFor();
+        expect(
+          await row(page, "gmail").locator("[data-moved-app-reason]").count(),
+        ).toBe(0);
+        // The app that came across connected is nowhere on the list.
+        expect(await row(page, "fireflies").count()).toBe(0);
+        expect(
+          await page
+            .getByText(
+              "These apps were connected in OpenBot on your computer. Connect each one again here.",
+            )
+            .count(),
+        ).toBe(1);
+        for (const theme of ["light", "dark"] as const)
+          for (const window of [WIDE, PHONE]) {
+            await page.emulateMedia({ colorScheme: theme });
+            await page.setViewportSize(window);
+            await page.waitForTimeout(200);
+            expect(await measured(page)).toEqual(FINE);
+            await shoot(page, "list-reason", engine, theme, window);
+          }
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  /*
+   * Found by the move's end-to-end run: Reconnect on a server added by its address asked the
+   * directory to add it, which it isn't in, and the row then said "Couldn't turn S4 Orders on here.
+   * Try again in a moment." Now an admin's one press opens Add custom MCP with its name filled in
+   * (the move doesn't bring the address or key), and adding it comes back to the list, done.
+   */
+  for (const engine of engines)
+    test(`an admin's Reconnect on a server added by its address opens Add custom MCP, and adding it comes back done, in ${engine}`, async () => {
+      const server = new FakeServer(
+        [finishedMove([S4_ORDERS, GMAIL])],
+        "admin",
+      );
+      const page = await open("/reconnect", server, engine);
+      try {
+        await row(page, "s4-orders")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL((url) => url.pathname === "/connections/new");
+        const name = page.getByLabel("Name");
+        await name.waitFor();
+        expect(await name.inputValue()).toBe("S4 Orders");
+        await page
+          .getByText(
+            "S4 Orders was added by its address in OpenBot on your computer. Add it here with the same address, and its key if it needs one.",
+          )
+          .waitFor();
+        // Never asked of the directory, which doesn't have it.
+        expect(server.added).toEqual([]);
+        await shoot(page, "add-by-address", engine, "light", WIDE);
+        await page.getByLabel("Server address").fill(S4_ORDERS_HERE.url);
+        await page.getByLabel(/^Key/).fill("s4-orders-key");
+        await page.getByLabel("Server address").press("Enter");
+        // Back on the list, and done: it needs no account of the person's.
+        await page.waitForURL(`${ORIGIN}/reconnect`);
+        await row(page, "s4-orders").getByText("Reconnected").waitFor();
+        expect(server.added).toEqual(["address:S4 Orders"]);
+        await row(page, "gmail")
+          .getByRole("button", { name: "Reconnect" })
+          .waitFor();
+      } finally {
+        await page.close();
+      }
+
+      // Anybody else: the row says only an admin can, and who they are, with nothing to press.
+      const member = new FakeServer([finishedMove([S4_ORDERS])]);
+      const asMember = await open("/reconnect", member, engine);
+      try {
+        await row(asMember, "s4-orders")
+          .getByText(
+            "An admin has to turn S4 Orders on before you can connect it: Priya Raman (priya@example.com) or Ines Duarte (ines@example.com).",
+          )
+          .waitFor();
+        expect(
+          await row(asMember, "s4-orders")
+            .getByRole("button", { name: "Reconnect" })
+            .count(),
+        ).toBe(0);
+      } finally {
+        await asMember.close();
+      }
+    }, 90_000);
+
+  /*
+   * Every kind of app is one press. Reconnect on an app of OpenBot's own catalogue that the
+   * organization hasn't added asked the directory for it, which refused, and the row said "Couldn't
+   * turn Google Drive on here." Now it is added from the catalogue, as the catalogue's own page adds
+   * it, and its sign-in starts; one reached with a key opens its own page with the key form open, and
+   * once saved comes back to the list, done.
+   */
+  for (const engine of engines)
+    test(`an admin's Reconnect on an app of OpenBot's catalogue adds it from there, or opens its key form, in ${engine}`, async () => {
+      const server = new FakeServer(
+        [finishedMove([DRIVE, EXA, GMAIL])],
+        "admin",
+      );
+      server.apps.catalogue = [DRIVE_ENTRY, EXA_ENTRY];
+      const page = await open("/reconnect", server, engine);
+      try {
+        // Signed in to as each person: added from the catalogue, then straight to its sign-in.
+        await row(page, "gdrive")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL(`${SIGN_IN}/gdrive`);
+        expect(server.added).toEqual(["catalogue:gdrive"]);
+        expect(server.connects).toEqual([{ appId: "gdrive", key: false }]);
+
+        // Reached with a key an admin gives: its own page, with that form open on arrival.
+        await page.goto(`${ORIGIN}/reconnect`);
+        await row(page, "exa")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL((url) => url.pathname === "/admin/plugins/exa");
+        const form = page.getByRole("dialog", { name: "Access token for Exa" });
+        await form.getByLabel("Access token").fill("exa-key");
+        // Styled, so the dialog's backdrop sits behind its buttons as in the app.
+        await style(page);
+        await shoot(page, "catalogue-key", engine, "light", WIDE);
+        await form.getByRole("button", { name: "Save" }).click();
+        // Back on the list, and done: reached with the organization's key, nobody connects it.
+        await page.waitForURL(`${ORIGIN}/reconnect`);
+        await row(page, "exa").getByText("Reconnected").waitFor();
+        expect(server.added).toEqual(["catalogue:gdrive", "catalogue:exa"]);
+        expect(server.credentials).toEqual([credentialId(1)]);
+        expect(await page.getByText(/Couldn't turn/).count()).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  /*
+   * Found by the same run: once an admin added that server with the organization's key, the list
+   * still offered Reconnect on it and home still counted it, because only the person's own
+   * connections marked an app done. An app that needs no account of the person's (a server reached
+   * with the organization's key, or a shared account that is connected) is done once it is here.
+   */
+  for (const engine of engines)
+    test(`an app here that needs no account of the person's is done, on the list and at home, in ${engine}`, async () => {
+      const server = new FakeServer([
+        finishedMove([S4_ORDERS, NOTION, DOCS, GMAIL]),
+      ]);
+      server.apps.servers = [
+        ...(server.apps.servers ?? []).filter(
+          (app) => app.id !== "composio-notion",
+        ),
+        S4_ORDERS_HERE,
+        NOTION_SHARED,
+        ...SIGN_IN_APPS,
+      ];
+      const page = await open("/reconnect", server, engine);
+      try {
+        await row(page, "s4-orders").getByText("Reconnected").waitFor();
+        await row(page, "notion").getByText("Reconnected").waitFor();
+        // A server that signs each person in, and a person's own sign-in, still wait for them.
+        for (const app of ["docs-search", "gmail"])
+          await row(page, app)
+            .getByRole("button", { name: "Reconnect" })
+            .waitFor();
+        await page.goto(`${ORIGIN}/`);
+        const bar = page.getByRole("complementary", {
+          name: "Apps to reconnect",
+        });
+        await bar.waitFor();
+        expect(await bar.textContent()).toContain(
+          "2 apps from your move still need reconnecting.",
+        );
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
 
   for (const engine of engines)
     test(`an admin's Reconnect adds an app the organization hasn't yet, and says so when it can't, in ${engine}`, async () => {
@@ -1061,7 +1415,34 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
           .getByRole("button", { name: "Try again" })
           .waitFor();
         expect(server.added).toEqual(["directory:slack", "directory:linear"]);
+        // An admin adds it themselves, so is never told who the admins are.
+        expect(await page.getByText(/northwind|example\.com\)/).count()).toBe(
+          0,
+        );
+        expect(server.membersAsks).toBe(0);
         await shoot(page, "admin-refused", engine, "light", WIDE);
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`apps open, a member's Reconnect adds an app the organization hasn't yet, as an admin's does, in ${engine}`, async () => {
+      const server = new FakeServer([finishedMove([SLACK])]);
+      server.lockedDown = false;
+      const page = await open("/reconnect", server, engine);
+      try {
+        // Nothing waits for an admin: the row offers Reconnect, and names nobody.
+        await row(page, "slack")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL(`${ORIGIN}/connections/composio-slack`);
+        await page.getByRole("dialog", { name: "Connecting Slack" }).waitFor();
+        expect(server.added).toEqual(["directory:slack"]);
+        expect(server.connects).toEqual([
+          { appId: "composio-slack", key: false },
+        ]);
+        expect(server.membersAsks).toBe(0);
       } finally {
         await page.close();
       }

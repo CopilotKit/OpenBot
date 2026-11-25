@@ -60,6 +60,7 @@ import type {
   OwnerStaysResponse,
   PersonNotFoundResponse,
   RemoveOrganizationMemberHeaders,
+  SeatRequiredResponse,
   ServerErrorResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
@@ -1369,7 +1370,7 @@ export const getListOrganizationInvitationsUrl = (
 };
 
 /**
- * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. search narrows the list to the invitations whose address holds it, ignoring case; it finds only this organization's invitations. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List the invitations an organization has sent
  */
 export const listOrganizationInvitations = async (
@@ -1599,7 +1600,7 @@ export const getCreateOrganizationInvitationUrl = (organizationId: string) => {
 };
 
 /**
- * Invite the person with this email address to join the organization with a role. They need no account yet: the invitation waits for whoever signs in with that address, and they see it in OpenBot then. Where OpenBot can send email, it also emails them; delivery says which happened, so the inviter knows whether to pass the link on themselves. The invitation lasts seven days. Inviting an address again after its invitation expired or was declined starts a new one. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Invite the person with this email address to join the organization with a role. They need no account yet: the invitation waits for whoever signs in with that address, and they see it in OpenBot then. Where OpenBot can send email, it also emails them; delivery says which happened, so the inviter knows whether to pass the link on themselves. The invitation lasts seven days. Inviting an address again after its invitation expired or was declined starts a new one. Only an owner or an admin of this organization can. An organization that pays for each member needs a free seat for the person: with none, the invitation is refused with SEAT_REQUIRED and addSeatUrl, and nothing is invited. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Invite somebody to an organization
  */
 export const createOrganizationInvitation = async (
@@ -1651,6 +1652,7 @@ export const getCreateOrganizationInvitationMutationOptions = <
   TError =
     | InvalidOrganizationInvitationResponse
     | UnauthenticatedResponse
+    | SeatRequiredResponse
     | AdminOnlyResponse
     | OrganizationNotFoundResponse
     | OrganizationInvitationConflictResponse
@@ -1705,6 +1707,7 @@ export type CreateOrganizationInvitationMutationBody =
 export type CreateOrganizationInvitationMutationError =
   | InvalidOrganizationInvitationResponse
   | UnauthenticatedResponse
+  | SeatRequiredResponse
   | AdminOnlyResponse
   | OrganizationNotFoundResponse
   | OrganizationInvitationConflictResponse
@@ -1723,6 +1726,7 @@ export const useCreateOrganizationInvitation = <
   TError =
     | InvalidOrganizationInvitationResponse
     | UnauthenticatedResponse
+    | SeatRequiredResponse
     | AdminOnlyResponse
     | OrganizationNotFoundResponse
     | OrganizationInvitationConflictResponse
@@ -1907,7 +1911,7 @@ export const getGetOrganizationPlanUrl = (organizationId: string) => {
 };
 
 /**
- * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
+ * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands for the caller: on the free allowance with runs left, on the plan, behind on a payment, or needing a card. The free allowance is a number of runs each person gets, across every organization they are in, so freeRunsUsedPercent is the caller's own. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
  * @summary Read an organization's plan
  */
 export const getOrganizationPlan = async (

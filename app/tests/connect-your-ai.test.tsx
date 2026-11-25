@@ -1027,7 +1027,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         );
 
         // Anywhere else in the app sends them back to it.
-        await page.goto(`${ORIGIN}/settings`);
+        await page.goto(`${ORIGIN}/settings/providers`);
         await heading(page, "Connect your AI");
         expect(new URL(page.url()).pathname).toBe("/onboarding");
 
@@ -1070,7 +1070,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         // they were headed when the gate sent them back: Settings.
         expect(await primary(page).textContent()).toContain("Get started");
         await primary(page).click();
-        await page.waitForURL((url) => url.pathname === "/settings");
+        await page.waitForURL((url) => url.pathname === "/settings/providers");
         await page.getByRole("heading", { name: "Your AI" }).waitFor();
         expect(server.completes).toBe(1);
       } finally {
@@ -1095,12 +1095,12 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await primary(page).click();
         await page.locator("[data-app-home]").waitFor();
         // And once in, nothing sends them back.
-        await page.goto(`${ORIGIN}/settings`);
+        await page.goto(`${ORIGIN}/settings/providers`);
         await page.getByRole("heading", { name: "Your AI" }).waitFor();
         await page
           .getByRole("button", { name: /Your organization's AI/ })
           .waitFor();
-        expect(new URL(page.url()).pathname).toBe("/settings");
+        expect(new URL(page.url()).pathname).toBe("/settings/providers");
       } finally {
         await page.close();
       }
@@ -1109,7 +1109,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
   for (const engine of engines)
     test(`somebody who finished onboarding before has the step alone, in ${engine}`, async () => {
       const server = new FakeServer("none", true);
-      const page = await open("/settings", server, engine, "light", WIDE);
+      const page = await open(
+        "/settings/providers",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
       try {
         await heading(page, "Connect your AI");
         expect(await page.locator("[data-onboarding-steps]").count()).toBe(0);
@@ -1121,7 +1127,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await chooser.getByRole("status").waitFor();
         await primary(page).click();
         // On to Settings, where they were going when the gate stopped them.
-        await page.waitForURL((url) => url.pathname === "/settings");
+        await page.waitForURL((url) => url.pathname === "/settings/providers");
         await page.getByRole("heading", { name: "Your AI" }).waitFor();
         // Already finished: not finished again, and no place in it saved.
         expect(server.completes).toBe(0);
@@ -1797,7 +1803,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
       server.personal = GetPersonalAiConnectionResponse.parse(
         example("PersonalAiConnectionExample"),
       ) as PersonalAiConnection;
-      const page = await open("/settings", server, engine, "light", WIDE);
+      const page = await open(
+        "/settings/providers",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
       try {
         await page.getByRole("heading", { name: "Your AI" }).waitFor();
         // The admin's section for the organization's AI says it is the organization's.
@@ -2043,7 +2055,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
       server.personal = GetPersonalAiConnectionResponse.parse(
         example("PersonalAiConnectionExample"),
       ) as PersonalAiConnection;
-      const page = await open("/settings", server, engine, "light", WIDE);
+      const page = await open(
+        "/settings/providers",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
       try {
         // Its key is the organization's, not the admin's own.
         await page
@@ -2061,7 +2079,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         ...example("PersonalAiConnectionExample"),
         organization: { ready: false, provider: null },
       }) as PersonalAiConnection;
-      const second = await open("/settings", unset, engine, "light", WIDE);
+      const second = await open(
+        "/settings/providers",
+        unset,
+        engine,
+        "light",
+        WIDE,
+      );
       try {
         await second
           .getByRole("button", {
@@ -2255,7 +2279,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
 
         await primary(page).click();
         await page.locator("[data-app-home]").waitFor();
-        await page.goto(`${ORIGIN}/settings`);
+        await page.goto(`${ORIGIN}/settings/providers`);
         await page
           .getByRole("button", {
             name: /OpenAI.*Signed in with your ChatGPT plan\./,
@@ -2542,7 +2566,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
   for (const engine of engines)
     test(`a Claude plan signs in with the code Claude's page shows, in Settings, in ${engine}`, async () => {
       const server = new FakeServer("organization", true);
-      const page = await open("/settings", server, engine, "light", WIDE);
+      const page = await open(
+        "/settings/providers",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
       try {
         await page
           .getByRole("button", { name: /Your organization's AI/ })
@@ -2873,7 +2903,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               example("PersonalAiConnectionExample"),
             ) as PersonalAiConnection;
             const settings = await open(
-              "/settings",
+              "/settings/providers",
               own,
               engine,
               theme,
@@ -2951,7 +2981,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               ...example("PersonalAiConnectionExample"),
               organization: { ready: false, provider: null },
             }) as PersonalAiConnection;
-            const setup = await open("/settings", unset, engine, theme, window);
+            const setup = await open(
+              "/settings/providers",
+              unset,
+              engine,
+              theme,
+              window,
+            );
             try {
               await setup
                 .getByRole("button", { name: /Not chosen yet/ })
@@ -3095,7 +3131,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
             // ChatGPT's code and its address both stay waiting, to be seen.
             own.outcomes = ["never", "never"];
             const settings = await open(
-              "/settings",
+              "/settings/providers",
               own,
               engine,
               theme,
