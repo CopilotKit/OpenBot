@@ -19875,6 +19875,91 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/saved-logins/purge:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Saved logins
+      operationId: purgeSavedLogins
+      summary: Delete the saved logins nobody may use
+      description: 'Delete, passwords included, the saved logins in the organization that nobody may use any more, in two groups. The first is every current member the Password manager switch is off for. The switch is read for each person as it applies to them, by their role, directory groups and teams, as getPersonCapabilities answers it: a group or team that turns it back on for its members keeps their logins. The second is every person removed from the organization: somebody who is no longer a member of it, or whose address can''t sign in to this OpenBot any more. Every other saved login stays. The answer counts what was deleted in each group, 0 where there was nothing to delete, and the purge is recorded on the audit trail. The second group is almost always 0: removing somebody already deletes their saved logins, and a daily sweep deletes any left behind. It is a safety net, so a 0 there is expected. getUnusableSavedLogins reads the same two counts without deleting anything. Only an administrator of the organization may do this. The personal edition has no switches to set and nobody to remove, so it doesn''t serve this and answers 404.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - saved-logins:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: How many saved logins were deleted in each group.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedLoginsPurged'
+              examples:
+                answer:
+                  $ref: '#/components/examples/SavedLoginsPurgedExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/saved-logins/unusable:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Saved logins
+      operationId: getUnusableSavedLogins
+      summary: Count the saved logins nobody may use
+      description: 'Count, without deleting anything, the saved logins in the organization that nobody may use any more: exactly what purgeSavedLogins would delete at this moment, in the same two groups. The first is every current member the Password manager switch is off for, read for each person by their role, directory groups and teams, as getPersonCapabilities answers it. The second is every person removed from the organization: somebody who is no longer a member of it, or whose address can''t sign in to this OpenBot any more. Each count is 0 where there is nothing to delete. The second group is almost always 0: removing somebody already deletes their saved logins, and a daily sweep deletes any left behind. It is a safety net, so a 0 there is expected. A client reads this to say how many a purge will delete before asking for one. Only an administrator of the organization may read it. The personal edition has no switches to set and nobody to remove, so it doesn''t serve this and answers 404.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - saved-logins:read
+        - apiKey: []
+      responses:
+        '200':
+          description: How many saved logins a purge would delete in each group.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedLoginCounts'
+              examples:
+                answer:
+                  $ref: '#/components/examples/UnusableSavedLoginsExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/recorder-connect-codes:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -23712,8 +23797,8 @@ components:
             host-access:write: Give a Bot a folder on the signed-in person's own computer, take one away, and stop folder access.
             sign-in-requests:read: Read the sign-in requests the signed-in person's Bots are waiting on, never a credential.
             sign-in-requests:write: Open, answer and decline sign-in requests for the signed-in person.
-            saved-logins:read: Read which logins the signed-in person saved, never a password.
-            saved-logins:write: Delete the signed-in person's saved logins.
+            saved-logins:read: Read which logins the signed-in person saved, never a password, and for an administrator how many saved logins nobody in the organization may use any more.
+            saved-logins:write: Delete the signed-in person's saved logins, and for an administrator the saved logins nobody in the organization may use any more.
             recorder:read: Read the signed-in person's connected browsers and their recordings.
             recorder:write: Connect and disconnect the signed-in person's browsers.
             learning:read: Read what Learning proposed in the signed-in person's own spaces, their Learning choices and skills, and for an administrator the organization's Learning settings, spaces, people's proposals and sharing requests.
@@ -39193,6 +39278,28 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    SavedLoginCounts:
+      type: object
+      description: 'How many saved logins nobody may use, for each reason: those a purge deleted, or those it would delete.'
+      required:
+        - switchedOff
+        - removed
+      properties:
+        switchedOff:
+          type: integer
+          minimum: 0
+          description: Those of current members the Password manager switch is off for.
+        removed:
+          type: integer
+          minimum: 0
+          description: 'Those of people removed from the organization, or whose address can''t sign in any more. Almost always 0: a safety net.'
+    SavedLoginsPurged:
+      type: object
+      required:
+        - deleted
+      properties:
+        deleted:
+          $ref: '#/components/schemas/SavedLoginCounts'
     CreateRecorderConnectCodeRequest:
       type: object
       additionalProperties: false
@@ -49182,7 +49289,7 @@ components:
         capabilities:
           - id: passwordManager
             title: Password manager
-            description: People may save logins and hand sign-ins to a Bot's browser.
+            description: People may save logins, and sign a Bot in with a login they saved.
             default: true
             organization: null
             roles:
@@ -49225,7 +49332,7 @@ components:
       value:
         id: passwordManager
         title: Password manager
-        description: People may save logins and hand sign-ins to a Bot's browser.
+        description: People may save logins, and sign a Bot in with a login they saved.
         default: true
         organization: null
         roles:
@@ -52869,6 +52976,17 @@ components:
             lastUsedAt: '2026-11-11T10:05:00.000Z'
         passwordManager: true
         nextCursor: null
+    SavedLoginsPurgedExample:
+      summary: Logins of members with the switch off, and of removed people.
+      value:
+        deleted:
+          switchedOff: 12
+          removed: 3
+    UnusableSavedLoginsExample:
+      summary: Logins of members with the switch off, and none of removed people.
+      value:
+        switchedOff: 12
+        removed: 0
     RecorderConnectCodeExample:
       summary: A code good for five minutes.
       value:
