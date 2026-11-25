@@ -1837,7 +1837,11 @@ components:
       properties:
         kind:
           type: string
-          enum: [cloudflare, visible-challenge]
+          x-extensible-enum: [cloudflare, visible-challenge, passkey]
+          description: >-
+            What the page raised: a Cloudflare check, a visible human check, or
+            a request for a passkey, which a passkey kept on the person's own
+            device can't answer in a Bot's computer.
         reason:
           type: string
         requestId:
@@ -2169,10 +2173,26 @@ components:
           type: string
         source:
           type: string
-          enum: [model, cloudflare, visible-challenge, manual]
+          x-extensible-enum: [model, cloudflare, visible-challenge, manual, passkey]
           description: >-
-            Who raised it: the Bot (model), a check the page raised, or the
-            person themselves (manual).
+            Who raised it: the Bot (model), a check the page raised (cloudflare,
+            visible-challenge, or passkey when the page asked for a passkey), or
+            the person themselves (manual).
+        passkey:
+          type: object
+          required: [host, askedAt]
+          description: >-
+            Set when the page asked for a passkey while this request was open. A
+            passkey kept on the person's own device can't be used in a Bot's
+            computer, so they sign in another way on the page, such as its "Try
+            another way".
+          properties:
+            host:
+              type: string
+              description: The site that asked, such as accounts.google.com.
+            askedAt:
+              type: string
+              description: When it asked.
         status:
           type: string
           x-extensible-enum: [waiting, taken, completed, cancelled, expired, interrupted]

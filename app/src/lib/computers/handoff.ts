@@ -285,7 +285,9 @@ function challengeFrom(result: ToolOutcome): BrowserChallenge | undefined {
     !("requestId" in value) ||
     typeof value.requestId !== "string" ||
     !("kind" in value) ||
-    (value.kind !== "cloudflare" && value.kind !== "visible-challenge") ||
+    (value.kind !== "cloudflare" &&
+      value.kind !== "visible-challenge" &&
+      value.kind !== "passkey") ||
     !("reason" in value) ||
     typeof value.reason !== "string"
   )

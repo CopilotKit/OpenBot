@@ -10,7 +10,12 @@ import {
   botBrowserStateQueryOptions,
 } from "@/lib/bot-browser/queries";
 import type { ClientError } from "@/lib/client";
-import { botsReason, supplySecret } from "@/lib/computers/control";
+import {
+  botsReason,
+  passkeyNotice,
+  supplySecret,
+  waitingReason,
+} from "@/lib/computers/control";
 import {
   type ComputerState,
   computerStatusQueryOptions,
@@ -793,8 +798,12 @@ export function ComputerView({
    * believed somebody was driving it.
    */
   const wheelHere = driving && !settled;
-  /** What the Bot asked for the wheel for, when it asked. Never the person's own take. */
-  const reason = botsReason(control);
+  /** What the Bot asked for the wheel for, when it asked, and that the page wants a passkey once it does. */
+  const reason = waitingReason(control);
+  /** The page in front of the person holding the wheel asked for a passkey: the way through, said where they are. */
+  const passkey = passkeyNotice(control);
+  /** Said to the person holding the wheel: the passkey's way through when there is one, else the Bot's reason. */
+  const drivingReason = passkey ?? botsReason(control);
 
   const polledScreen = showScreen ? (
     <img
@@ -1084,8 +1093,10 @@ export function ComputerView({
         {!settled && driving && !control?.transitioning ? (
           <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-warning/10 px-3 py-2">
             <span className="text-sm">
-              <strong className="font-medium">You have control.</strong> The Bot
-              waits until you hand it back. Open the screen to click and type.
+              <strong className="font-medium">You have control.</strong>{" "}
+              {passkey
+                ? `${passkey} Open the screen to click and type.`
+                : "The Bot waits until you hand it back. Open the screen to click and type."}
             </span>
             <ComputerControlButton
               computerId={computerId}
@@ -1295,7 +1306,7 @@ export function ComputerView({
                       {driving ? (
                         <span className="truncate text-muted-foreground lg:whitespace-normal">
                           You have control. Click and type on the page.
-                          {reason ? ` ${reason}` : null}
+                          {drivingReason ? ` ${drivingReason}` : null}
                         </span>
                       ) : someoneElse ? (
                         <span className="truncate text-muted-foreground lg:whitespace-normal">

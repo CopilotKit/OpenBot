@@ -2196,6 +2196,102 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/apps:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Organization settings
+      operationId: getAppsSetting
+      summary: Read whether the organization's apps are open
+      description: Return whether the organization's apps are open, the default, or locked down (AppsSetting). Every member may read it, so the app can say what giving an app to a Bot will do. In the personal edition apps are always open, and it can't be changed.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - settings:read
+        - apiKey: []
+      responses:
+        '200':
+          description: Whether the organization's apps are open.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppsSetting'
+              examples:
+                open:
+                  value:
+                    lockedDown: false
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    patch:
+      tags:
+        - Organization settings
+      operationId: updateAppsSetting
+      summary: Open the organization's apps, or lock them down
+      description: Open the organization's apps or lock them down (AppsSetting). Locking down takes nothing back unless takeBackWhatOpenGave is sent too. The change, and anything taken back, is recorded on the audit trail. Only an administrator of the organization may change it.
+      security:
+        - webSession: []
+        - appOAuth:
+            - settings:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAppsSettingRequest'
+            examples:
+              lockDown:
+                value:
+                  lockedDown: true
+                  takeBackWhatOpenGave: true
+              open:
+                value:
+                  lockedDown: false
+      responses:
+        '200':
+          description: The setting, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppsSetting'
+              examples:
+                lockedDown:
+                  value:
+                    lockedDown: true
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/capabilities:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -5655,8 +5751,8 @@ paths:
       tags:
         - Apps
       operationId: updateApp
-      summary: Change who may give an app to a Bot
-      description: 'Change who may give the app to a Bot: any Bot''s owner, for their own Bot (any), only an administrator (admin), or null for the default for the app''s account. Recorded on the audit trail. When owners stop deciding, the approvals to use the app''s shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. Only an administrator may.'
+      summary: Change who may give an app to a Bot, or give it to every Bot
+      description: 'Change who may give the app to a Bot: any Bot''s owner, for their own Bot (any), only an administrator (admin), or null for the default (AppOwnerGrants). Recorded on the audit trail. When owners stop deciding, the approvals to use the app''s shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.'
       security:
         - webSession: []
         - appOAuth:
@@ -5677,6 +5773,9 @@ paths:
               default:
                 value:
                   ownerGrants: null
+              everyBot:
+                value:
+                  everyBot: true
       responses:
         '200':
           description: The changed app.
@@ -7475,7 +7574,7 @@ paths:
         - Bot grants
       operationId: giveBotApp
       summary: Give your own app to a Bot you own
-      description: 'Give a Bot you own one of your apps: the actions that only read, or every action of Routines. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn''t have yet are listed in given. Recorded on the audit trail.'
+      description: 'Give a Bot you own one of your apps: every action it has, or where the organization''s apps are locked down (getAppsSetting), the actions that only read, or every action of Routines. Actions that change something still ask first wherever the approval rules say so. They run on the account of whoever asks the Bot. The app must be turned on and open to owners, which it is unless an administrator closed it, and an administrator must not have turned this off for you. A Bot that already has the app gets nothing more, and given is empty. With actions, the Bot is given those actions of the app instead, and only the ones it doesn''t have yet are listed in given. Recorded on the audit trail.'
       security:
         - webSession: []
         - appOAuth:
@@ -7582,7 +7681,7 @@ paths:
         - Bot grants
       operationId: approveBotApp
       summary: Turn an app on and give it to a Bot
-      description: 'Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot the actions that only read, or confirm the app''s shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can''t be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.'
+      description: 'Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot every action of it (the actions that only read where the organization''s apps are locked down), or confirm the app''s shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can''t be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.'
       security:
         - webSession: []
         - appOAuth:
@@ -7951,7 +8050,7 @@ paths:
         - App access requests
       operationId: approveAppAccessRequest
       summary: Approve a request for an app
-      description: 'Do what a request asks: turn the app on, give the Bot its actions, or confirm the app''s shared account is connected. actions names the actions to give. Without it the Bot gets the actions the request names, or, for a request that names none, only the actions that only read. The request is answered before anything changes, so a second answer loses. A change that can''t be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.'
+      description: 'Do what a request asks: turn the app on, give the Bot its actions, or confirm the app''s shared account is connected. actions names the actions to give. Without it the Bot gets the actions the request names, or, for a request that names none, every action of the app (only the actions that only read where the organization''s apps are locked down). The request is answered before anything changes, so a second answer loses. A change that can''t be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.'
       security:
         - webSession: []
         - appOAuth:
@@ -25578,6 +25677,27 @@ components:
         - $ref: '#/components/schemas/OrganizationSettingValues'
       description: The settings to change. At least one; the rest stay as they are.
       minProperties: 1
+    AppsSetting:
+      type: object
+      description: Whether the organization's apps are open or locked down. It is kept apart from the organization's other settings so every member can read it.
+      required:
+        - lockedDown
+      properties:
+        lockedDown:
+          type: boolean
+          description: 'Whether the organization''s apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, and the apps that need no sign-in are on for every Bot. True is locked down: an administrator approves access requests, one press gives an app''s read-only actions, and an app is open to Bot owners only once an administrator opens it. Switching changes what giving does from then on. It doesn''t take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.'
+    UpdateAppsSettingRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - lockedDown
+      properties:
+        lockedDown:
+          type: boolean
+          description: True locks the organization's apps down, false opens them (AppsSetting).
+        takeBackWhatOpenGave:
+          type: boolean
+          description: 'Sent with lockedDown true: also take back what OpenBot gave Bots by itself while the organization was open, which is a person''s connected apps on their own Bots and the apps that need no sign-in on every Bot. What an administrator or a Bot''s owner gave by hand stays. Recorded on the audit trail. Ignored with lockedDown false: open apps would give it all again.'
     InactiveComputersStopped:
       type: object
       required:
@@ -28628,7 +28748,7 @@ components:
       enum:
         - any
         - admin
-      description: 'Who may give the app to a Bot: any Bot''s owner, for their own Bot, or only an administrator.'
+      description: 'Who may give the app to a Bot: any Bot''s owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot''s owner; where the organization''s apps are locked down, an administrator for any app that doesn''t run on each person''s own account.'
     AppTool:
       type: object
       description: One action an app offers.
@@ -28705,6 +28825,7 @@ components:
         - sharedOnly
         - ownerGrants
         - ownerGrantsChosen
+        - everyBot
         - addedBy
         - toolsRefreshedAt
         - lastError
@@ -28782,7 +28903,10 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AppOwnerGrants'
             - type: 'null'
-          description: What an administrator chose for ownerGrants, or null where the default for the app's account applies.
+          description: What an administrator chose for ownerGrants, or null where the default applies.
+        everyBot:
+          type: boolean
+          description: Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.
         addedBy:
           type:
             - string
@@ -28959,7 +29083,10 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AppOwnerGrants'
             - type: 'null'
-          description: Who may give the app to a Bot, or null for the default for its account.
+          description: Who may give the app to a Bot, or null for the default (AppOwnerGrants).
+        everyBot:
+          type: boolean
+          description: 'True gives the app to every Bot in the organization, and to every Bot made later. False takes back what giving it to every Bot gave. What a Bot was given any other way stays. Routines and OpenBot settings are every Bot''s already: true changes nothing, and false is refused.'
     AppAccountModeRequest:
       type: object
       additionalProperties: false
@@ -30375,7 +30502,7 @@ components:
           type: array
           minItems: 1
           maxItems: 50
-          description: The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets the actions that only read.
+          description: The actions of the app to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app, or the actions that only read where the organization's apps are locked down.
           items:
             type: string
             minLength: 1
@@ -30615,7 +30742,7 @@ components:
         actions:
           type: array
           maxItems: 2000
-          description: The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets only the actions that only read.
+          description: The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets every action of the app, or the actions that only read where the organization's apps are locked down.
           items:
             type: string
             minLength: 1
@@ -36788,12 +36915,26 @@ components:
           type: string
         source:
           type: string
-          enum:
+          x-extensible-enum:
             - model
             - cloudflare
             - visible-challenge
             - manual
-          description: 'Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).'
+            - passkey
+          description: 'Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).'
+        passkey:
+          type: object
+          required:
+            - host
+            - askedAt
+          description: Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its "Try another way".
+          properties:
+            host:
+              type: string
+              description: The site that asked, such as accounts.google.com.
+            askedAt:
+              type: string
+              description: When it asked.
         status:
           type: string
           x-extensible-enum:
@@ -37107,9 +37248,11 @@ components:
       properties:
         kind:
           type: string
-          enum:
+          x-extensible-enum:
             - cloudflare
             - visible-challenge
+            - passkey
+          description: 'What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person''s own device can''t answer in a Bot''s computer.'
         reason:
           type: string
         requestId:
@@ -43668,12 +43811,12 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-            noReads:
+            noTools:
               value:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
-                detail: Notion has nothing a Bot can only read with. Ask an admin to choose what this Bot can do with it.
+                detail: Notion has nothing to give yet. Ask an admin to refresh it.
                 code: CONFLICT
                 category: conflict
                 retryable: false
@@ -49196,6 +49339,7 @@ components:
             sharedOnly: false
             ownerGrants: admin
             ownerGrantsChosen: null
+            everyBot: false
             addedBy: sam.okafor@acme.com
             toolsRefreshedAt: '2026-11-14T09:05:00.000Z'
             lastError: null
@@ -49221,6 +49365,7 @@ components:
             sharedOnly: false
             ownerGrants: admin
             ownerGrantsChosen: admin
+            everyBot: false
             addedBy: dana.whitfield@acme.com
             toolsRefreshedAt: '2026-11-14T09:00:00.000Z'
             lastError: null
@@ -49256,6 +49401,7 @@ components:
         sharedOnly: false
         ownerGrants: admin
         ownerGrantsChosen: null
+        everyBot: false
         addedBy: sam.okafor@acme.com
         toolsRefreshedAt: '2026-11-14T09:05:00.000Z'
         lastError: null
@@ -49314,6 +49460,7 @@ components:
         sharedOnly: false
         ownerGrants: admin
         ownerGrantsChosen: admin
+        everyBot: true
         addedBy: dana.whitfield@acme.com
         toolsRefreshedAt: '2026-11-14T09:00:00.000Z'
         lastError: null
