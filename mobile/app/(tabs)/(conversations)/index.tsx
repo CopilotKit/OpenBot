@@ -2,6 +2,7 @@ import { router, Stack } from "expo-router";
 import { Button } from "heroui-native/button";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, View } from "react-native";
+import { useCSSVariable } from "uniwind";
 import {
   type ConversationSummary,
   everyBot,
@@ -45,6 +46,10 @@ export default function Conversations() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
+  const [foreground, muted] = useCSSVariable([
+    "--color-foreground",
+    "--color-muted",
+  ]) as (string | undefined)[];
   const [older, setOlder] = useState<ConversationSummary[]>([]);
   const [olderCursor, setOlderCursor] = useState<string | null | undefined>();
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload for whoever is signed in now, not the previous person
@@ -217,6 +222,10 @@ export default function Conversations() {
             placeholder: "Search conversations",
             // Under the title: iOS 26 would otherwise float it at the bottom, over the dock.
             placement: "stacked",
+            // Android's search field takes no colors from the header's own light or dark.
+            textColor: foreground,
+            hintTextColor: muted,
+            headerIconColor: foreground,
             onChangeText: (event) => setQuery(event.nativeEvent.text),
             onCancelButtonPress: () => setQuery(""),
           },
