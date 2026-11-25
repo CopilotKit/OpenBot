@@ -119,11 +119,12 @@ export function ManagementPage() {
   // Disconnect, and Stop once the code is approved or while connecting by itself, all ask first.
   const [confirming, setConfirming] = useState<Confirming | null>(null);
 
-  // The personal edition has nothing to manage: said without asking the server.
-  const personal = !capabilities.isPending && !asks;
-  if (!personal && management.isPending)
+  // Where the server would answer 404 (the personal edition, OpenBot Cloud, another organization):
+  // said without asking it.
+  const notHere = !capabilities.isPending && !asks;
+  if (!notHere && management.isPending)
     return <PageShell title={TITLE}>{null}</PageShell>;
-  if (!personal && management.error)
+  if (!notHere && management.error)
     return (
       <PageShell description={DESCRIPTION} title={TITLE}>
         <Notice>
@@ -134,7 +135,7 @@ export function ManagementPage() {
         </Notice>
       </PageShell>
     );
-  if (personal || !management.data?.applies)
+  if (notHere || !management.data?.applies)
     return (
       <PageShell title={TITLE}>
         <PageEmpty icon={IconCloudCog} title="Not available here">

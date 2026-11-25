@@ -22,7 +22,10 @@ import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { channelKeys } from "@/lib/channels/queries";
-import { deploymentKeys } from "@/lib/deployment/queries";
+import {
+  type DeploymentCapabilities,
+  deploymentKeys,
+} from "@/lib/deployment/queries";
 import {
   CONVERSATIONS,
   SectionProvider,
@@ -96,7 +99,16 @@ function Frame() {
   );
 }
 
-function renderApp(path: string) {
+function renderApp(
+  path: string,
+  {
+    deployment = {},
+    openbotVersion,
+  }: {
+    deployment?: Partial<DeploymentCapabilities>;
+    openbotVersion?: string;
+  } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
@@ -106,6 +118,7 @@ function renderApp(path: string) {
     selfHostBanner: false,
     localEvaluation: false,
     edition: "team",
+    ...deployment,
   });
   queryClient.setQueryData(authKeys.currentUser(), {
     id: "maya",
@@ -113,6 +126,7 @@ function renderApp(path: string) {
     email: "maya@example.com",
     role: "user",
     onboarding: null,
+    openbotVersion,
   });
   queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
     messageListEmphasis: "thread",
@@ -326,4 +340,66 @@ test("Bots on the strip shows the Bots panel and stays on the page", async () =>
   // Pressed again with its panel showing, it folds the panel away, as Conversations does.
   await user.click(view.getByRole("button", { name: "Bots" }));
   expect(sidebarState(view)).toBe("collapsed");
+});
+
+/** The version as the strip draws it, outside any menu: what a screenshot of the page shows. */
+function stripVersion(view: ReturnType<typeof render>) {
+  return (
+    view.container.querySelector(
+      '[data-slot="strip"] [data-slot="openbot-version"]',
+    )?.textContent ?? null
+  );
+}
+
+/*
+ * Reported from OpenBot Cloud: screenshots sent with a bug report never said which release they were
+ * taken on. Since the strip, the version was only inside the account menu, and the strip's foot
+ * showed the person's initials and nothing else. On Cloud it now sits under them, on every page.
+ */
+test("on OpenBot Cloud the strip shows the release the server runs, with no menu open", async () => {
+  const { view, user } = renderApp("/", {
+    deployment: { hostedSignIn: true },
+    openbotVersion: "main-20261113-9",
+  });
+  await view.findByRole("button", { name: "Chats" });
+  await waitFor(() => expect(stripVersion(view)).toBe("main-20261113-9"));
+  expect(view.queryByRole("menu")).toBeNull();
+  // The account menu still says it too, at the top of its account row.
+  await user.click(view.getByRole("button", { name: "Maya Chen" }));
+  await view.findByRole("menu");
+  expect(
+    document.querySelector(
+      '[data-slot="account-row"] [data-slot="openbot-version"]',
+    )?.textContent,
+  ).toBe("main-20261113-9");
+});
+
+test("on OpenBot Cloud a release's number reads with its v, on a page with no panel too", async () => {
+  const { view } = renderApp("/routines", {
+    deployment: { hostedSignIn: true },
+    openbotVersion: "1.2.0",
+  });
+  await view.findByRole("link", { name: "Routines" });
+  await waitFor(() => expect(stripVersion(view)).toBe("v1.2.0"));
+});
+
+test("an OpenBot a company runs itself, and the personal edition, keep the version in the account menu only", async () => {
+  for (const deployment of [
+    { hostedSignIn: false },
+    { hostedSignIn: false, edition: "personal" as const },
+  ]) {
+    const { view } = renderApp("/", {
+      deployment,
+      openbotVersion: "1.2.0",
+    });
+    await view.findByRole("button", { name: "Chats" });
+    expect(stripVersion(view)).toBeNull();
+    cleanup();
+  }
+});
+
+test("on OpenBot Cloud, a server with no version to give shows none on the strip", async () => {
+  const { view } = renderApp("/", { deployment: { hostedSignIn: true } });
+  await view.findByRole("button", { name: "Chats" });
+  expect(stripVersion(view)).toBeNull();
 });

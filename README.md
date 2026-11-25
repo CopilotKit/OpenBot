@@ -88,7 +88,7 @@ OpenBot has three parts. On your laptop, setup runs the backend and Intelligence
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-overview-dark.svg">
-  <img src="docs/assets/architecture-overview-light.svg" alt="Mac, Windows, web, iOS, Android, Slack, and Teams connect to the OpenBot backend. Built-in Bots in the server and your agents on any execution platform share an AG-UI lane. Computer execution uses Kubernetes by default or a compatible sandbox provider; tools use MCP and adapters. CopilotKit Intelligence runs alongside OpenBot on your infrastructure." width="100%">
+  <img src="docs/assets/architecture-overview-light.svg" alt="Open-source frontends (web, Mac, Windows, iOS, Android, Slack, Teams, or your own) reach the OpenBot backend through the OpenBot API. Its core includes CopilotKit Intelligence for memory, learning, and governance. Lanes run from the core, each with a built-in option inside the backend and your own outside it: agents (Built-in Bots or your own custom agents, or any agent such as ADK, LangChain, or Claude Agent SDK, hosted on AgentCore, LangSmith, Gemini Agent Runtime, or elsewhere), computers (a virtual machine for every user and bot, or your own sandbox such as Daytona, E2B, or Modal), tools (thousands of built-in connectors, or any MCP server or hub), and vaults (the built-in vault, or 1Password, HashiCorp Vault, or AWS Secrets Manager). More lanes follow the same pattern." width="100%">
 </picture>
 
 | Part | What it does |

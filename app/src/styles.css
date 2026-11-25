@@ -74,28 +74,59 @@
 }
 
 /*
- * A tool line that is still running.
+ * A tool line that is still running: a soft band of light sweeps across its words, left to right,
+ * as an assistant's "Thinking…" does, and the line goes still once the step is over.
  *
- * The words breathe: they ease down to a little over half strength and back once every 2.4 seconds,
- * a pace that reads as calm progress. A light band used to sweep across them every 1.6 seconds,
- * crossing the words in under half a second and then holding still, so on screen the text seemed to
- * blink on and off. The words are drawn in the line's own colour throughout and never fade further
- * than 0.6, so a running step can be read at any moment of the cycle. Only `opacity` animates, which
- * the compositor handles without painting the text again on every frame.
+ * DRAWN WITH A MASK, NOT A GRADIENT FILL. The words keep their own colours (a label, its dimmer
+ * detail, an icon or a badge beside them, in either theme), and the mask holds them at a little over
+ * half strength except where the band passes, where they are drawn in full. An earlier sweep painted
+ * a gradient through the glyphs with a transparent fill, and with animation off that fill stayed
+ * transparent and the words vanished; a mask leaves the fill alone, so turning it off can only ever
+ * leave the words as they are.
+ *
+ * NOT A BLINK. An earlier band crossed the words in under half a second every 1.6 seconds and then
+ * held still, so the text seemed to flash. This one is wide and soft and travels at an even pace the
+ * whole cycle, 2.4 seconds end to end, and the words never drop below 0.55, so a running step can be
+ * read at any moment.
  */
 .tool-line-running {
-  animation: tool-line-pulse 2.4s ease-in-out infinite;
+  --tool-line-dim: rgb(0 0 0 / 0.55);
+  -webkit-mask-image: linear-gradient(
+    100deg,
+    var(--tool-line-dim) 30%,
+    #000 50%,
+    var(--tool-line-dim) 70%
+  );
+  mask-image: linear-gradient(
+    100deg,
+    var(--tool-line-dim) 30%,
+    #000 50%,
+    var(--tool-line-dim) 70%
+  );
+  -webkit-mask-size: 250% 100%;
+  mask-size: 250% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  animation: tool-line-shimmer 2.4s linear infinite;
 }
 
-@keyframes tool-line-pulse {
-  50% {
-    opacity: 0.6;
+/* The band starts beyond the left edge and leaves beyond the right. */
+@keyframes tool-line-shimmer {
+  from {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+  }
+  to {
+    -webkit-mask-position: 0% 0;
+    mask-position: 0% 0;
   }
 }
 
 /* Reduced motion keeps the words at full strength and still. */
 @media (prefers-reduced-motion: reduce) {
   .tool-line-running {
+    -webkit-mask-image: none;
+    mask-image: none;
     animation: none;
   }
 }

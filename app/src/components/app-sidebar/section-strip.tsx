@@ -38,6 +38,7 @@ import {
   AccountRow,
   accountMenuClassName,
   accountMenuItemClassName,
+  StripVersion,
 } from "./account-label";
 import { TroubleshootingLogsMenuItem } from "./troubleshooting-logs-item";
 import { useSignOut } from "./use-sign-out";
@@ -222,13 +223,22 @@ function StripAccount() {
 
 /**
  * The app's strip: the orb, Conversations, the main menu's destinations in the shared list's order
- * (`lib/navigation.ts`), and the account at the foot. A section with a panel switches the panel and
- * leaves the page alone; any other opens its page.
+ * (`lib/navigation.ts`), and the account at the foot, with the release the server runs under it on
+ * OpenBot Cloud. A section with a panel switches the panel and leaves the page alone; any other
+ * opens its page.
  */
 export function SectionStrip() {
   const navigation = useNavigationItems();
   return (
-    <Strip footer={<StripAccount />} header={<HomeOrb />}>
+    <Strip
+      footer={
+        <>
+          <StripAccount />
+          <StripVersion />
+        </>
+      }
+      header={<HomeOrb />}
+    >
       <PanelItem
         icon={IconMessages}
         id={CONVERSATIONS}
