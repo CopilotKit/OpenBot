@@ -53,6 +53,7 @@ import {
 } from "@/lib/approvals";
 import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import { attachmentUrl } from "@/lib/channels/attachments";
+import { runEndedIn } from "@/lib/channels/mark-read";
 import {
   recordChannelActivityMutationOptions,
   setChannelBusy,
@@ -1844,13 +1845,16 @@ export function ChannelChat({
     const subscription = agent.subscribe?.({
       // Both surfaces fall back to the same sentence, from the same place, so a person who uses
       // both is not told two different things about the same silence.
-      onRunErrorEvent: ({ event }) =>
+      onRunErrorEvent: ({ event }) => {
+        // Seen failing here is read, though the roster never hears of it (mark-read.ts).
+        runEndedIn(channel.id);
         fail(
           stoppedReason(event?.message),
           true,
           undefined,
           refusedForPerson(event?.message),
-        ),
+        );
+      },
       onRunFailed: ({ error }) => {
         /*
          * Not the Bot failing: the run's stream reached this browser out of shape, in any run of a
@@ -1901,6 +1905,8 @@ export function ChannelChat({
         );
       },
       onRunFinishedEvent: ({ event }) => {
+        // However it finished, seen finishing here is read (mark-read.ts).
+        runEndedIn(channel.id);
         /*
          * A run the server stopped to ask the person (an app's call OpenBot asks about) draws its
          * card now, not on the inbox's next poll, as a computer step's does.
