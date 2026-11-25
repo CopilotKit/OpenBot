@@ -88,6 +88,15 @@ describe.skipIf(!asked)("a hold longer than one Retry-After", () => {
             await page
               .getByText("Northwind check", { exact: true })
               .waitFor({ timeout: 10_000 });
+            // Every read on the page goes on by itself, each after its own Retry-After: the list can
+            // be back while another read is still waiting out its second. On a loaded machine that
+            // second ran past the list, and a one-shot look caught the sentence just before it went.
+            await page
+              .getByRole("alert")
+              .filter({ hasText: hold.said })
+              .first()
+              .waitFor({ state: "detached", timeout: 5_000 })
+              .catch(() => undefined);
             expect(await alerts(page)).toEqual([]);
             // Asked again once per Retry-After, one read at a time: never a storm.
             const refused = server.refusedForMove.get("/routines") ?? 0;
