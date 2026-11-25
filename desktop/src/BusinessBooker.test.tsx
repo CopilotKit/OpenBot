@@ -7,9 +7,13 @@ import {
   BUSINESS_URL,
 } from "../../shared/openbot-for-business";
 
-// Cloud marks are display-only here. Isolate them from other tests' shared Mark mocks.
-mock.module("./CloudMarks", () => ({
-  CloudMarks: () => null,
+// Keep the shared marks component real: replacing it would leak into later window tests.
+mock.module("./Mark", () => ({
+  Mark: ({ name }: { name: string }) => <span>{name}</span>,
+  ButtonMark: () => null,
+  MarkImage: ({ id, name }: { id: string; name: string }) => (
+    <img alt={name} data-mark={id} />
+  ),
 }));
 const { BusinessBooker } = await import("./BusinessBooker");
 

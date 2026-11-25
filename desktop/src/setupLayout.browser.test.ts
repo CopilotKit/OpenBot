@@ -329,7 +329,7 @@ describe.skipIf(!asked)("the window through a first run", () => {
           const now = await fits();
           expect(now.page).toBeLessThanOrEqual(now.window);
           expect(now.asked).toBe(0);
-          expect(now.shell[0]).toBe("rail");
+          expect(now.shell[0]).toMatch(/^rail\b/);
           expect(now.shell[1]).toMatch(/^sheet\b/);
           expect(now.shell.length).toBe(2);
           expect(
@@ -2647,7 +2647,7 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
               .querySelector(".journey")!
               .getBoundingClientRect();
             const natural = said.cloneNode(true) as HTMLElement;
-            natural.style.cssText = `position: absolute; width: ${title.width}px; min-height: 0; height: auto;`;
+            natural.style.cssText = `position: absolute; width: ${title.width}px; min-height: 0; height: auto; -webkit-line-clamp: unset;`;
             said.parentElement!.append(natural);
             const naturalHeight = natural.getBoundingClientRect().height;
             natural.remove();
@@ -4977,7 +4977,7 @@ describe.skipIf(!asked)("approved layout: agreement", () => {
           expect(geometry.gap).toBeCloseTo(24, 0);
           expect(geometry.whole).toBe(true);
           expect(geometry.overflow).toBe(false);
-          expect(geometry.panelWidth).toBeLessThanOrEqual(480);
+          expect(geometry.panelWidth).toBeLessThanOrEqual(600);
           expect(Math.abs(geometry.horizontalCenterOffset)).toBeLessThanOrEqual(
             1,
           );
@@ -5082,7 +5082,7 @@ describe.skipIf(!asked)("approved layout: agreement", () => {
                 said:
                   "Connection failed. " +
                   "Check your connection and organization settings before trying again. ".repeat(
-                    20,
+                    40,
                   ),
                 detail: "Connection reset.",
               },

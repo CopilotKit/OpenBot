@@ -258,6 +258,12 @@ main.with-progress-rail > .sheet.update-layout {
   line-height: 1.3;
 }
 
+/* Reserve the full native hand-off while its shorter waiting message replaces it. */
+.update-progress .journey.handing-off .journey-said {
+  min-height: 3lh;
+  -webkit-line-clamp: unset;
+}
+
 .update-progress .journey-description {
   margin: 0;
   color: var(--text-secondary);
@@ -468,6 +474,10 @@ main:has(> .sheet.welcome.page-first) .rail .tile.with-marks > .cloud-marks {
   .update-progress > .journey {
     margin-top: 24px;
     gap: 16px;
+  }
+
+  .update-progress .journey.handing-off .journey-said {
+    min-height: 5lh;
   }
 
   .update-progress > .update-data-reassurance {

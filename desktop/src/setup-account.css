@@ -66,9 +66,9 @@
   }
 }
 
-/* Add to the panel's 16px gap so accepting stays 24px below the agreement link. */
+/* Add to the page-first panel's 20px gap so accepting stays 24px below the link. */
 .account-layout .setup-panel.agreement-panel > .row {
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .account-layout .agreement-panel > .agreement-icon {
