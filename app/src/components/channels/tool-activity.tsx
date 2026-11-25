@@ -949,6 +949,7 @@ export function ToolActivity({
       <ToolLine
         bare
         icon={<IconStack kinds={kinds} />}
+        openKey={group.id}
         label={
           running && working
             ? working === 1

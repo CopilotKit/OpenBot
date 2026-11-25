@@ -2,14 +2,14 @@ import { useRenderTool } from "@copilotkit/react-core/v2";
 import { useContext } from "react";
 import { z } from "zod";
 import {
-  CommandCard,
+  CommandStep,
   codingOutcome,
-  DiffCard,
+  DiffStep,
   GlobLine,
   GrepLine,
+  PlanStep,
   ReadLine,
   TaskLine,
-  TodoCard,
 } from "@/components/channels/coding-tool-cards";
 import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
 
@@ -85,7 +85,7 @@ function useOutcome(result: string | undefined) {
 }
 
 function Command({ command, result }: { command?: string; result?: string }) {
-  return <CommandCard command={command} outcome={useOutcome(result)} />;
+  return <CommandStep command={command} outcome={useOutcome(result)} />;
 }
 
 function Diff({
@@ -102,7 +102,7 @@ function Diff({
   result?: string;
 }) {
   return (
-    <DiffCard
+    <DiffStep
       changes={changes}
       kind={kind}
       outcome={useOutcome(result)}
@@ -252,7 +252,7 @@ export function CodingTools() {
   useRenderTool({
     name: "TodoWrite",
     parameters: todoWrite,
-    render: ({ parameters: given }) => <TodoCard todos={given?.todos ?? []} />,
+    render: ({ parameters: given }) => <PlanStep todos={given?.todos ?? []} />,
   });
 
   useRenderTool({
