@@ -115,7 +115,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
           Add source
         </Button>
       }
-      description="Apps you connected that this Bot can read show up here, and you can add more. Sources refresh every 15 minutes. Only this Bot sees what they hold."
+      description="A source copies records from an app into this Bot's memory. Add one only for records you want this Bot to always have at hand. Sources refresh every 15 minutes, and only this Bot sees what they hold."
       title="App sources"
     >
       {sources.isPending ? null : sources.error ? (
@@ -142,7 +142,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
           icon={IconPlugConnected}
           title="No sources yet"
         >
-          Apps this Bot can read from show up here.
+          Add one with Add source.
         </PageEmpty>
       ) : (
         <PageRows>
