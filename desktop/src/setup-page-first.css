@@ -112,8 +112,8 @@ main > .rail + .sheet.welcome.page-first {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: safe center;
-  padding-block: 24px;
+  justify-content: flex-start;
+  padding-block: 64px 24px;
   overflow-y: auto;
 }
 
@@ -123,11 +123,29 @@ main > .rail + .sheet.welcome.page-first {
 }
 
 .welcome.page-first :is(.cloud-sign-in, .connect-to-openbot) > .row {
-  margin-top: 20px;
+  margin-top: 48px;
+}
+
+.welcome.page-first .cloud-sign-in > .row {
+  margin-top: 80px;
 }
 
 .welcome.page-first .connect-to-openbot > .text-link {
   margin-top: 20px;
+}
+
+/* Requirements and the install action use separate parts of the available page height. */
+.sheet.welcome:has(> .needs) > .needs {
+  margin: 64px 0;
+  padding: 0;
+}
+
+.sheet.welcome:has(> .needs) > .lede {
+  margin: 0;
+}
+
+.sheet.welcome:has(> .needs) > .row {
+  margin: 24px 0 0;
 }
 
 /* The selected update rail owns identity/history; the right pane holds the current operation. */
@@ -223,12 +241,21 @@ main.with-progress-rail > .sheet.update-layout {
 }
 
 .update-progress > .journey {
-  margin-block: auto;
-  padding-block: 28px;
+  flex: none;
+  margin: 160px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.update-progress > .journey > progress {
+  margin: 0;
 }
 
 .update-progress .journey-head {
   font-size: var(--text-2xl);
+  line-height: 1.3;
 }
 
 .update-progress .journey-description {
@@ -240,11 +267,11 @@ main.with-progress-rail > .sheet.update-layout {
 .update-progress > .update-data-reassurance {
   color: var(--text-secondary);
   font-size: var(--text-sm);
-  margin: 0 0 18px;
+  margin: 32px 0 0;
 }
 
 .update-layout .update-progress > .row {
-  margin: 0;
+  margin: 48px 0 0;
   padding-top: 18px;
   border-top: 1px solid var(--border);
   flex: none;
@@ -417,5 +444,37 @@ main:has(> .sheet.welcome.page-first) .rail .tile.with-marks > .cloud-marks {
   .quit-layout > .setup-body > .setup-content {
     grid-template-columns: 180px minmax(0, 1fr);
     gap: 28px;
+  }
+}
+
+/* Short windows keep the same groups, with only the generous intervals reduced. */
+@media (max-height: 680px), (max-width: 860px) {
+  .welcome.page-first > .welcome-task {
+    padding-block: 32px 16px;
+  }
+
+  .welcome.page-first :is(.cloud-sign-in, .connect-to-openbot) > .row {
+    margin-top: 28px;
+  }
+
+  .sheet.welcome:has(> .needs) > .needs {
+    margin-block: 32px;
+  }
+
+  .sheet.welcome:has(> .needs) > .row {
+    margin-top: 16px;
+  }
+
+  .update-progress > .journey {
+    margin-top: 24px;
+    gap: 16px;
+  }
+
+  .update-progress > .update-data-reassurance {
+    margin-block: 24px 0;
+  }
+
+  .update-layout .update-progress > .row {
+    margin-top: 24px;
   }
 }
