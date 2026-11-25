@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { ShareText, shareOf } from "@/components/approvals/share-details";
+import { ToolLine } from "@/components/channels/tool-line";
 import { DecisionCard } from "@/components/decisions/decision-card";
 import type { Tone } from "@/components/gallery/frame";
 import {
@@ -26,6 +27,11 @@ import { EASE_OUT } from "@/lib/motion";
  * The same request as the Approvals page, read from the same owner-scoped inbox, so a decision made
  * in either place is the one decision. Once decided the server runs the action exactly once and
  * continues the conversation, and this gives the line back to the tool's own renderer.
+ *
+ * THE ANSWER STAYS IN THE CONVERSATION. Decided, the card folds into one line saying what the person
+ * answered ("Allowed once: Click Submit"), which opens to the card as it was answered, as a Bot's
+ * work folds (`ToolLine`). It used to fold away altogether, so scrolling back, or opening the
+ * conversation again, nothing said a Bot had asked or what the person said; only Activity did.
  */
 /** What each answer does, as the row under it says it. */
 const CHOICE_WORDS: Record<
@@ -121,9 +127,20 @@ export function InlineApproval({
   const ownBody = request
     ? settingsApprovalBodyFor(request.action.toolRef)
     : null;
+  const heading = title.charAt(0).toUpperCase() + title.slice(1);
+  const caption = request
+    ? (request.action.policy?.reason ??
+      share?.caption ??
+      (handOff ? "This one is yours to do." : undefined))
+    : undefined;
+  // What the person answered, once the inbox no longer has it waiting; a rule's own answer has none.
+  const said =
+    request && !pending && request.decision
+      ? CHOICE_WORDS[request.decision]
+      : undefined;
   return (
     <>
-      {/* The card leaves by folding away; what is left behind is the tool's own line. */}
+      {/* The card leaves by folding away; what is left behind is the answer's line and the tool's own. */}
       <AnimatePresence initial={false}>
         {pending && request ? (
           <motion.section
@@ -145,11 +162,7 @@ export function InlineApproval({
                     }
                   : undefined
               }
-              caption={
-                request.action.policy?.reason ??
-                share?.caption ??
-                (handOff ? "This one is yours to do." : undefined)
-              }
+              caption={caption}
               error={decision.error}
               onSubmit={(value) => decision.mutate(value as ApprovalDecision)}
               options={choices.map((choice) => ({
@@ -161,7 +174,7 @@ export function InlineApproval({
                 description: CHOICE_WORDS[choice].description,
               }))}
               submitting={decision.isPending}
-              title={title.charAt(0).toUpperCase() + title.slice(1)}
+              title={heading}
             >
               {change && ownBody ? (
                 <ownBody.Body
@@ -184,6 +197,23 @@ export function InlineApproval({
           </motion.section>
         ) : null}
       </AnimatePresence>
+      {said && request ? (
+        <ToolLine
+          bare
+          detail={heading}
+          label={`${said.done}:`}
+          openKey={`approval:${request.id}`}
+        >
+          {/* The card as it was answered: what was asked, why, and the answer in place of the choices. */}
+          <DecisionCard
+            answer={{ label: said.done, tone: said.tone }}
+            caption={caption}
+            onSubmit={() => {}}
+            options={[]}
+            title={heading}
+          />
+        </ToolLine>
+      ) : null}
       {pending ? null : fallback}
       {/*
         The conversation could not be carried on after this was decided, so the step above never got
@@ -235,7 +265,8 @@ export function ConversationApprovals({ threadId }: { threadId: string }) {
  * The pending approvals for a group of tool calls, for a transcript that draws those calls itself
  * rather than through each tool's renderer: the browser-activity group folds every click and field
  * into one collapsed line, so a card inside a step would never be seen. Drawn beside the group,
- * outside the fold, one card per waiting call; nothing at all when none is waiting.
+ * outside the fold, one card per waiting call and one line per answered one; nothing at all when
+ * none was asked about.
  */
 export function PendingApprovals({
   toolCallIds,
@@ -244,20 +275,27 @@ export function PendingApprovals({
 }) {
   const inbox = useQuery(approvalInboxOptions());
   /*
-   * And one whose conversation could not be carried on after it was decided (`left`): what came of
-   * it is said beside the group too, since the folded line ("Used Slack") says nothing of it.
+   * And one already decided: the person's answer is said beside the group as its own line, since the
+   * folded line ("Used Slack") says nothing of what they were asked or what they said. One whose
+   * conversation could not be carried on after it was decided (`left`) says what came of it too.
    */
-  const waiting = new Set(
-    (inbox.data?.requests ?? [])
-      .filter((request) => request.status === "pending" || request.left)
-      .flatMap((request) =>
-        request.action.toolCallId ? [request.action.toolCallId] : [],
-      ),
+  const asked = (inbox.data?.requests ?? []).filter(
+    (request) =>
+      request.action.toolCallId &&
+      (request.status === "pending" || request.decision || request.left),
   );
-  const ids = toolCallIds.filter((id) => waiting.has(id));
+  const ids = toolCallIds.filter((id) =>
+    asked.some((request) => request.action.toolCallId === id),
+  );
   if (ids.length === 0) return null;
+  // Answers alone sit under the group as its next lines; a card waiting stands apart from it.
+  const cards = asked.some(
+    (request) =>
+      ids.includes(request.action.toolCallId ?? "") &&
+      (request.status === "pending" || request.left),
+  );
   return (
-    <div className="mt-2 space-y-2">
+    <div className={cards ? "mt-2 space-y-2" : undefined}>
       {ids.map((id) => (
         <InlineApproval key={id} toolCallId={id} fallback={null} />
       ))}

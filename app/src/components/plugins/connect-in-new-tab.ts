@@ -11,7 +11,10 @@ import {
   storeConsentHandoff,
 } from "@/lib/plugins/consent-handoff";
 import { finishInBackground } from "@/lib/plugins/finish-on-return";
-import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
+import {
+  connectAccountMutationOptions,
+  connectAnotherAccountMutationOptions,
+} from "@/lib/plugins/mutations";
 import { pluginKeys } from "@/lib/plugins/queries";
 
 /**
@@ -35,7 +38,15 @@ import { pluginKeys } from "@/lib/plugins/queries";
  * button that pressed it is swapped for another between the two.
  */
 
-export function useConnectInNewTab() {
+export function useConnectInNewTab(
+  options: {
+    /**
+     * One more account at an app the person already connected: the press Connections' Connect
+     * another account makes (`connectAnotherAccountMutationOptions`), from a card in a conversation.
+     */
+    another?: boolean;
+  } = {},
+) {
   /*
    * The provider's client, which is the one whoever drew the button reads from. In the app it is
    * the module's own singleton; a screen mounted under another provider is refetched through its
@@ -47,7 +58,11 @@ export function useConnectInNewTab() {
   const [needsKey, setNeedsKey] = useState(false);
   /** The authorization url, when the browser refused to open the tab holding it. */
   const [blockedUrl, setBlockedUrl] = useState<string | null>(null);
-  const connect = useMutation(connectAccountMutationOptions());
+  const connect = useMutation(
+    options.another
+      ? connectAnotherAccountMutationOptions()
+      : connectAccountMutationOptions(),
+  );
   // Stable, so a caller can list it in an effect's dependencies without re-running it every render.
   const stopWaiting = useCallback(() => setWaiting(false), []);
   /** The tab the consent is open in, while there is one to watch. */

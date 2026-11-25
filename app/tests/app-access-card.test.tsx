@@ -714,6 +714,26 @@ describe("carrying the task on once the app is ready", () => {
     },
   );
 
+  /*
+   * FOUND IN DOGFOODING. Asked to connect a personal mailbox beside a connected work one, a Bot
+   * showed Gmail's card, the latest thing in the conversation, and it read "Gmail is ready now": the
+   * job looked done. Gmail had been ready all along, and the card says only what is true of it.
+   */
+  test("show_app_access about an app ready all along never says it is ready now", async () => {
+    servingNow({ live: appAccess({ state: "ready" }) });
+    const view = inConversation(
+      <AppAccessCard
+        place={{ toolCallId: nextId(), latest: true }}
+        prompt={prompt({ reason: "access", blocked: false })}
+      />,
+    );
+    const drawn = await card(view);
+    await settleReactWork();
+    expect(drawn.textContent).toContain("Ready to use.");
+    expect(drawn.textContent).not.toContain("ready now");
+    expect(view.asked).toEqual([]);
+  });
+
   test("with no conversation around it, the card only says the app is ready", async () => {
     servingNow({ live: appAccess({ state: "ready" }) });
     const view = mount(
