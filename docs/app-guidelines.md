@@ -129,9 +129,9 @@ What the template adds:
 
 How we use it:
 
-- **Expo's SDK first, on its own.** `mobile/` is on Expo SDK 55 and the template on 58. Move
-  `mobile/` to the template's SDK in a change of its own, before any Uniwind work, so a problem
-  from the upgrade is never mistaken for one from the restyle. Keep to the newest SDK from then on.
+- **Expo's SDK first, on its own.** `mobile/` is on Expo SDK 58, the template's. It moved there in
+  a change of its own, before any Uniwind work, so a problem from the upgrade is never mistaken for
+  one from the restyle. Keep to the newest SDK from then on, each move in a change of its own.
 - **Add the template's parts to `mobile/`.** Don't generate a new app from it. Its drawer, tabs and
   sample screens are not ours.
 - **Install with `npx expo install`,** so each package gets the version that fits our Expo SDK.

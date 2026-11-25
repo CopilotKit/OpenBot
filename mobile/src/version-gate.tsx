@@ -100,7 +100,7 @@ export function VersionGate({
 
 const styles = StyleSheet.create({
   cover: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",

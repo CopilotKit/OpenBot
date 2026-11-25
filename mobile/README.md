@@ -29,8 +29,7 @@ the JavaScript server, and the installed app reloads as you edit.
 Run `npm run ios` or `npm run android` again after you add a native dependency or change
 `app.config.ts`.
 
-Xcode 27 does not build the Expo SDK the app is on today (55). Until the app moves to SDK 58, build
-for iOS with Xcode 26, or install a `development-simulator` build from Expo (below).
+The app is on Expo SDK 58, which builds with Xcode 27.
 
 `.env` holds the address of the OpenBot the app talks to: OpenBot Cloud's API,
 `https://api.open.bot`.

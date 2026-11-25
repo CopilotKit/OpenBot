@@ -160,7 +160,7 @@ export function withSecurityFloor(Layout: ComponentType) {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   cover: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
