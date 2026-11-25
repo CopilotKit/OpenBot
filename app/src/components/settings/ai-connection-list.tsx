@@ -17,7 +17,11 @@ import {
   describeConnection,
 } from "@/lib/ai-connection/describe";
 import { useProviderPaths } from "@/lib/ai-connection/paths";
-import { AI_PROVIDERS, providerById } from "@/lib/ai-connection/providers";
+import {
+  AI_PROVIDERS,
+  personalLogins,
+  providerById,
+} from "@/lib/ai-connection/providers";
 import type {
   AiConnectionEntry,
   AiConnections,
@@ -68,8 +72,12 @@ export function AiConnectionRows({
   const several = connections.length > 1;
   const noDefault =
     connections.length > 0 && !connections.some((entry) => entry.isDefault);
+  // What the page behind the last row can still connect: a provider with no way in there
+  // (Cloudflare signs in through Desktop) is not one more to add.
   const unconnected = AI_PROVIDERS.filter(
-    (provider) => !connections.some((entry) => entry.provider === provider.id),
+    (provider) =>
+      !connections.some((entry) => entry.provider === provider.id) &&
+      personalLogins(provider, list.signIns).length > 0,
   );
   return (
     <>

@@ -298,7 +298,7 @@ test("a Claude sign-in finishes in Desktop only when its redirect comes back to 
  * under the name AI Gateway knows it by, and no key ever passes through the page.
  */
 test("a Cloudflare sign-in: signed in through Desktop, and the server switched to its gateway model", async () => {
-  const view = renderGeneral();
+  const view = renderProviders();
   await userEvent.click(
     await view.findByRole("button", { name: /Uses your OpenAI API key/ }),
   );
