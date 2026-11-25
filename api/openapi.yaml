@@ -6118,7 +6118,7 @@ paths:
         - Apps
       operationId: createApp
       summary: Add an app
-      description: 'Add an app in one of two ways. With from=directory, add an entry of listAppDirectory: a catalogue entry, with the instance host or vault credential it needs, or an app from the wider directory. With from=address, add a server by its HTTPS address. Either way only an administrator may, because the app is added for everyone in the organization; anybody else is answered 403 PERMISSION_DENIED. OpenBot asks a server added by its address how it is reached first. It refuses an address the MCP allowlist doesn''t approve, a server that needs a key nobody gave, and an address already added, naming that app in the problem''s appId. A server that signs each person in answers with signIn true, and each person then connects their own account. Answers 201 with the app. Adding a directory entry that is already added updates that app with what the request names, and answers it the same way. An entry listAppDirectory offers as a sign-in in place of its key (keyVersion) is added as that sign-in; with connectsWith key it is added with its key instead, as its own app, and each person then connects it with their key. A repeated request with the same Idempotency-Key and body returns the first result.'
+      description: 'Add an app in one of two ways. With from=directory, add an entry of listAppDirectory: a catalogue entry, with the instance host or vault credential it needs, or an app from the wider directory. With from=address, add a server by its HTTPS address. The app is added for everyone in the organization. While the organization''s apps are open (getAppsSetting), any member may add one, in the same press that connects it; where they''re locked down only an administrator may, and anybody else is answered 403 PERMISSION_DENIED. Either way only an administrator gives a server a key that everyone''s Bots use (token), or adds an app that needs what only an administrator can enter. OpenBot asks a server added by its address how it is reached first. It refuses an address the MCP allowlist doesn''t approve, a server that needs a key nobody gave, and an address already added, naming that app in the problem''s appId. A server that signs each person in answers with signIn true, and each person then connects their own account. Answers 201 with the app. Adding a directory entry that is already added updates that app with what the request names, and answers it the same way. An entry listAppDirectory offers as a sign-in in place of its key (keyVersion) is added as that sign-in; with connectsWith key it is added with its key instead, as its own app, and each person then connects it with their key. A repeated request with the same Idempotency-Key and body returns the first result.'
       security:
         - webSession: []
         - appOAuth:
@@ -6567,7 +6567,7 @@ paths:
         - Apps
       operationId: listAppDirectory
       summary: List the apps that can be added
-      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue) in the catalogue''s own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. An app that connects with a key but signs in through its vendor is listed once, as the sign-in, with keyVersion naming the same app connected with its key. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included, so a person can find an app and ask an administrator to add it (createAppAccessRequest). Only an administrator adds one. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
+      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue) in the catalogue''s own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. An app that connects with a key but signs in through its vendor is listed once, as the sign-in, with keyVersion naming the same app connected with its key. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included. While the organization''s apps are open (getAppsSetting), anybody may add what they find (createApp); where they''re locked down an administrator adds it, and anybody else asks for it (createAppAccessRequest). Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
       security:
         - webSession: []
         - appOAuth:
@@ -8231,7 +8231,7 @@ paths:
         - Bot grants
       operationId: approveBotApp
       summary: Turn an app on and give it to a Bot
-      description: 'Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot every action of it (the actions that only read where the organization''s apps are locked down), or confirm the app''s shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can''t be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.'
+      description: 'Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot every action of it (the actions that only read where the organization''s apps are locked down), or confirm the app''s shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same person. When it can''t be done here, nothing is left waiting and the answer says what is missing. An administrator may do it for any Bot. While the organization''s apps are open (getAppsSetting), so may anybody who may give that Bot its apps, as with giveBotApp; connecting a shared account stays an administrator''s.'
       security:
         - webSession: []
         - appOAuth:
@@ -8481,7 +8481,7 @@ paths:
         - App access requests
       operationId: createAppAccessRequest
       summary: Ask an administrator for an app
-      description: 'Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app''s state: turning it on, giving it to the Bot, or connecting its shared account. Leave botId out to ask for an app nobody has added yet, for everyone in the organization: the request is to turn it on, and its botId is null. With actions, the request is to give the Bot those actions of the app, including a Bot that already has some of the app, and its kind is grant. Asking again answers the same request while it is waiting, with any new actions added to it. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask, and anybody signed in may ask for an app alone.'
+      description: 'Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app''s state: turning it on, giving it to the Bot, or connecting its shared account. Leave botId out to ask for an app nobody has added yet, for everyone in the organization: the request is to turn it on, and its botId is null. With actions, the request is to give the Bot those actions of the app, including a Bot that already has some of the app, and its kind is grant. Asking again answers the same request while it is waiting, with any new actions added to it. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask, and anybody signed in may ask for an app alone. Asking is how a person gets an app while the organization''s apps are locked down (getAppsSetting); while they''re open a person adds and connects an app themselves (createApp, approveBotApp), so there is nothing to ask for.'
       security:
         - webSession: []
         - appOAuth:
@@ -15415,7 +15415,7 @@ paths:
         - Shared use
       operationId: createSharedUseRequest
       summary: Ask that a Bot may use a shared app account
-      description: 'Ask an administrator to approve a Bot''s use of a shared app''s one account. What is asked for is never sent: it is the Bot''s audience as the server reads it now, so a request can''t be worded wider than the Bot is. A request already waiting for the same audience is answered again rather than filed twice, and one waiting for a different audience is replaced. Recorded on the audit trail. Only the Bot''s owner or an administrator may ask.'
+      description: 'Ask an administrator to approve a Bot''s use of a shared app''s one account. What is asked for is never sent: it is the Bot''s audience as the server reads it now, so a request can''t be worded wider than the Bot is. A request already waiting for the same audience is answered again rather than filed twice, and one waiting for a different audience is replaced. Recorded on the audit trail. Only the Bot''s owner or an administrator may ask. Asking matters only where the organization''s apps are locked down (getAppsSetting): while they''re open, anybody who can use a Bot may use its shared accounts, and there is nothing to approve.'
       security:
         - webSession: []
         - appOAuth:
@@ -15565,7 +15565,7 @@ paths:
         - Shared use
       operationId: getBotSharedUse
       summary: Read a Bot's use of shared app accounts
-      description: Return the shared apps a Bot holds, each with the audience it is approved for, the audience the Bot needs now, and whether the first covers the second, and the Bot's requests still waiting for an administrator. A Bot that holds no shared app answers with none. Only the Bot's owner or an administrator may read it.
+      description: Return the shared apps a Bot holds, each with the audience it is approved for, the audience the Bot needs now, and whether the first covers the second, and the Bot's requests still waiting for an administrator. A Bot that holds no shared app answers with none. While the organization's apps are open (getAppsSetting), every shared app reads as covered. Only the Bot's owner or an administrator may read it.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -24839,7 +24839,7 @@ components:
           description: The app's name.
     SharedAppsAfterChange:
       type: object
-      description: What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.
+      description: What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.
       required:
         - approved
         - needsApproval
@@ -26251,7 +26251,7 @@ components:
       properties:
         lockedDown:
           type: boolean
-          description: 'Whether the organization''s apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, and the apps that need no sign-in are on for every Bot. True is locked down: an administrator approves access requests, one press gives an app''s read-only actions, and an app is open to Bot owners only once an administrator opens it. Switching changes what giving does from then on. It doesn''t take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.'
+          description: 'Whether the organization''s apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, the apps that need no sign-in are on for every Bot, any member adds an app the organization hasn''t added in the press that connects it, and a connected shared account is on for every Bot for anybody who can use that Bot. True is locked down: an administrator adds apps and approves access requests and who may use a shared account through a Bot, one press gives an app''s read-only actions, and an app is open to Bot owners only once an administrator opens it. Either way each person''s own account stays theirs, and an administrator connects a shared account. Switching changes what giving does from then on. It doesn''t take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.'
     UpdateAppsSettingRequest:
       type: object
       additionalProperties: false
@@ -31175,7 +31175,7 @@ components:
             - type: 'null'
         state:
           type: string
-          description: 'ready: usable now. not_connected and reconnect: waiting on an account the person connects (see accountHolder). shared_not_connected: waiting on the shared account. shared_not_approved: an administrator hasn''t approved who may use the shared account through this Bot. disabled: turned off (see unavailable). not_granted: the Bot wasn''t given it. owner_grantable: the same, and the person may give it themselves.'
+          description: 'ready: usable now. not_connected and reconnect: waiting on an account the person connects (see accountHolder). shared_not_connected: waiting on the shared account. shared_not_approved: an administrator hasn''t approved who may use the shared account through this Bot, which happens only where the organization''s apps are locked down. disabled: turned off (see unavailable). not_granted: the Bot wasn''t given it. owner_grantable: the same, and the person may give it themselves.'
           enum:
             - ready
             - not_connected
@@ -31229,7 +31229,7 @@ components:
           format: date-time
           description: When the account the app uses for this person was connected, or null.
         requestKind:
-          description: What a request would ask an administrator for in this state (createAppAccessRequest), or null where the next step is the person's own.
+          description: What a request would ask an administrator for in this state (createAppAccessRequest), or null where the next step is the person's own. While the organization's apps are open, adding and giving an app are the person's own steps.
           oneOf:
             - $ref: '#/components/schemas/AppAccessRequestKind'
             - type: 'null'
@@ -43932,7 +43932,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     AppAddForbidden:
-      description: Only an administrator may add an app from the directory or give a server a key, or the MCP allowlist doesn't approve the address.
+      description: 'Only an administrator may add this app here: the organization''s apps are locked down, the server would be given a key everyone''s Bots use, or the app needs what only an administrator can enter. Or the MCP allowlist doesn''t approve the address.'
       headers:
         X-Request-Id:
           $ref: '#/components/headers/RequestId'
