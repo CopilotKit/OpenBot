@@ -44,6 +44,7 @@ export const COMMANDS = [
   "local_eval_steps",
   "local_eval_terms",
   "local_eval_update_step",
+  "move_destinations",
   "move_engine_here",
   "move_footprint",
   "move_offer",
