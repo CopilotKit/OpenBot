@@ -384,6 +384,11 @@ class FakeServer {
   connects: { appId: string; key: boolean }[] = [];
   /** The apps that take a key, whatever the app list says about how they connect. */
   keyApps = new Set<string>();
+  /**
+   * The organization's apps switch. Locked down unless a test opens it: the tests here that pin a
+   * member waiting for an admin pin it locked down. Open, a member adds an app as an admin does.
+   */
+  lockedDown = true;
 
   constructor(
     imports: Import[] | null,
@@ -507,6 +512,8 @@ class FakeServer {
           hostedSignIn: this.hosted,
         },
       };
+    if (path === `${ORGANIZATION}/settings/apps` && method === "GET")
+      return { status: 200, json: { lockedDown: this.lockedDown } };
     if (path === `${ORGANIZATION}/bots` && method === "GET")
       return { status: 200, json: { bots: [], nextCursor: null } };
     if (path === `${ORGANIZATION}/conversations` && method === "GET")
@@ -544,7 +551,8 @@ class FakeServer {
       expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
         0,
       );
-      expect(this.role).toBe("admin");
+      // An admin adds apps; so does anybody while apps are open.
+      if (this.lockedDown) expect(this.role).toBe("admin");
       const sent = request.postDataJSON() as Record<string, unknown>;
       CreateAppBody.parse(sent);
       // A server added by its address: reached with the organization's key, nobody signs in.
@@ -1413,6 +1421,28 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         );
         expect(server.membersAsks).toBe(0);
         await shoot(page, "admin-refused", engine, "light", WIDE);
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`apps open, a member's Reconnect adds an app the organization hasn't yet, as an admin's does, in ${engine}`, async () => {
+      const server = new FakeServer([finishedMove([SLACK])]);
+      server.lockedDown = false;
+      const page = await open("/reconnect", server, engine);
+      try {
+        // Nothing waits for an admin: the row offers Reconnect, and names nobody.
+        await row(page, "slack")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL(`${ORIGIN}/connections/composio-slack`);
+        await page.getByRole("dialog", { name: "Connecting Slack" }).waitFor();
+        expect(server.added).toEqual(["directory:slack"]);
+        expect(server.connects).toEqual([
+          { appId: "composio-slack", key: false },
+        ]);
+        expect(server.membersAsks).toBe(0);
       } finally {
         await page.close();
       }

@@ -30,7 +30,11 @@ import { carryOnMessage } from "@/lib/copilot/carry-on";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
-import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  APPS_SETTING_PATH,
+  appsSettingResponse,
+  DEPLOYMENT_PATH,
+} from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
 import {
   APP_ACCESS_REQUESTS_PATH,
@@ -117,6 +121,8 @@ type Sent = { method: string; url: string; body: unknown };
 function serving(
   role: "admin" | "member",
   answers: { whole: AppAccess; forActions: AppAccess },
+  /** Whether apps are open. Locked down unless said: the member's Request access is locked down's. */
+  open = false,
 ) {
   const sent: Sent[] = [];
   const live = { ...answers };
@@ -130,6 +136,7 @@ function serving(
     const [path, query] = url.split("?");
     const named = (body as { actions?: string[] } | undefined)?.actions ?? [];
     if (path === DEPLOYMENT_PATH) return Response.json({ edition: "team" });
+    if (path === APPS_SETTING_PATH) return appsSettingResponse(!open);
     if (path === ME_PATH)
       return meResponse({ user: { id: "usr_me", role, name: "Me" } });
     if (path === botPath(BOT))
@@ -319,7 +326,27 @@ test("an admin: says what the Bot can't do yet, gives exactly that action in one
   expect(opened).toEqual([]);
 });
 
-test("a member: is told only an admin can give it, asks for exactly that action, then sees Requested", async () => {
+test("apps open, somebody else's Bot: is told its owner can give it, with no request to file", async () => {
+  const { sent } = serving(
+    "member",
+    { whole: holdsReadOnly, forActions: lacksPatch },
+    true,
+  );
+  const view = inConversation(
+    <AppAccessCard place={place()} prompt={toolsPrompt()} />,
+  );
+  const drawn = await card(view);
+  await waitFor(() =>
+    expect(drawn.textContent).toContain(
+      "Calendar Bot can't change an event's colour yet. Its owner can give it that.",
+    ),
+  );
+  expect(drawn.textContent).not.toMatch(/admin/i);
+  expect(view.queryByRole("button", { name: /Request access/ })).toBeNull();
+  expect(writes(sent)).toEqual([]);
+});
+
+test("apps locked down, a member: is told only an admin can give it, asks for exactly that action, then sees Requested", async () => {
   const { sent } = serving("member", {
     whole: holdsReadOnly,
     forActions: lacksPatch,

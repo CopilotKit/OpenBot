@@ -20,6 +20,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import { setEnterpriseSettingMutationOptions } from "@/lib/enterprise/mutations";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
 import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
@@ -88,12 +89,15 @@ export function AddServerPage({
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   /*
-   * A server is added for everyone in the organization, so only an admin adds one, with its key if
-   * it needs one. Personal: the one person. Read as allowed until the role is known, so the form
-   * doesn't flash away for an admin; the server refuses anybody else whatever is drawn.
+   * A server is added for everyone in the organization. Locked down, only an admin adds one; with
+   * apps open (the organization's switch) anybody does. Its key is always an admin's to give: a key
+   * typed here would be every Bot's, so a member's would become everybody's. Personal: the one
+   * person. Read as allowed until the role and the switch are known, so the form doesn't flash away;
+   * the server refuses anybody else whatever is drawn.
    */
+  const open = useAppsOpen();
   const mayGiveKey = personal || isOrganizationAdmin(me?.role);
-  const mayAdd = mayGiveKey || me === undefined;
+  const mayAdd = mayGiveKey || me === undefined || open !== false;
   const add = useMutation(addServerByUrlMutationOptions(queryClient));
   // The sign-in comes back to the server's page under the same list.
   const connect = useMutation(
