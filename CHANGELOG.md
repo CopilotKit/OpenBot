@@ -180,6 +180,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     first, and opens on the one in use. Its search looks through all of them, and a pick stays on
     its provider for that conversation.
   - A Bot's default model applies on any of a person's connections of its kind.
+  - Onboarding's Connect your AI on OpenBot Cloud connects several the same way: each one goes
+    back to the provider list with a check, and one is enough to go on. Connect another AI marks
+    what is connected the same way, with Default among several and Reconnect on one that stopped.
   - A turn whose picked connection stopped working says why under the message, with Reconnect for
     whoever can fix it and Choose another model. With connections and no default, it says so with
     Choose a default.

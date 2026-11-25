@@ -505,7 +505,8 @@ export function ConnectProviderPage({ scope }: { scope: ConnectionScope }) {
             kind: "adding",
             scope,
             signIns: list.signIns,
-            connected: list.connections.map((entry) => entry.provider),
+            connected: list.connections,
+            owner: providers.owner,
           }}
           onBack={() => void navigate(paths.list())}
           onConnected={(next) =>
@@ -613,7 +614,8 @@ export function ChangeProviderPage({
                   kind: "adding",
                   scope,
                   signIns: list.signIns,
-                  connected: list.connections.map((other) => other.provider),
+                  connected: list.connections,
+                  owner: providers.owner,
                   provider: entry.provider,
                   login: entry.login,
                   reconnecting: name,
