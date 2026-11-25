@@ -46,8 +46,7 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
-import { Sections, SetupRail } from "./Sections";
-import { UPDATING_SELF_CONTAINED } from "./SelfContained";
+import { Lockup, Sections, SetupRail } from "./Sections";
 import { SetupPage } from "./SetupPage";
 import {
   engineNow,
@@ -1810,9 +1809,27 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     return (
       <SetupPage
         className={updatingSelf ? "update-layout" : "returning-layout"}
+        rail={
+          updatingSelf && (
+            <aside className="rail update-history" aria-label="Update progress">
+              <Lockup />
+              <header>
+                <h1 className="rail-title">Updating OpenBot</h1>
+                <p className="update-scope">On this computer</p>
+              </header>
+              <SetupProgress
+                steps={local.steps.filter((row) => !row.note && !row.pending)}
+                label="Update stages"
+                showElapsed={false}
+                quiet
+              />
+              <div className="rail-foot">OpenBot (Self-Contained)</div>
+            </aside>
+          )
+        }
         heading={
           updatingSelf
-            ? UPDATING_SELF_CONTAINED
+            ? "Updating OpenBot"
             : localStarting || installingAfresh
               ? "Starting OpenBot"
               : appBehind
@@ -1845,7 +1862,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         {freshInstall || appBehind || (
           <LocalIntelligence
             sequence={local}
-            presentation={updatingSelf ? "journey" : "default"}
+            presentation={updatingSelf ? "rail" : "default"}
             offerStart
             handOff={handOff}
             open={steps}

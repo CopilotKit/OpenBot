@@ -43,3 +43,28 @@ test("standalone setup keeps its heading and action outside the content scroller
   );
   expect(view.getByRole("textbox")).toBe(input);
 });
+
+test("a progress sidebar holds the page identity without duplicating it in the operation pane", () => {
+  const view = render(
+    <SetupPage
+      heading="Updating OpenBot"
+      rail={
+        <aside aria-label="Update progress">
+          <h1>Updating OpenBot</h1>
+        </aside>
+      }
+    >
+      <p>Downloading the update</p>
+    </SetupPage>,
+  );
+  expect(
+    view.getByRole("complementary", { name: "Update progress" }).parentElement,
+  ).toBe(view.container.querySelector("main"));
+  expect(view.getAllByRole("heading")).toHaveLength(1);
+  expect(
+    view.container.querySelector(".sheet > .setup-header-block"),
+  ).toBeNull();
+  expect(
+    view.getByText("Downloading the update").closest(".setup-body"),
+  ).not.toBeNull();
+});

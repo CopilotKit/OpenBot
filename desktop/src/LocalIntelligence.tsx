@@ -1261,7 +1261,7 @@ export function LocalIntelligence({
   presentation = "default",
 }: {
   sequence: LocalSequence;
-  presentation?: "default" | "journey";
+  presentation?: "default" | "rail";
   offerStart?: boolean;
   /**
    * An update this computer has no room for (`local_eval::update_room`), said with its figures
@@ -1323,30 +1323,27 @@ export function LocalIntelligence({
     <section
       aria-label="OpenBot on this computer"
       className={
-        presentation === "journey" && journeying ? "update-journey" : undefined
+        presentation === "rail" && journeying ? "update-progress" : undefined
       }
     >
-      {presentation === "journey" && journeying && (
-        <SetupProgress
-          steps={sequence.steps.filter((row) => !row.note && !row.pending)}
-          presentation="timeline"
-          showElapsed={false}
-          quiet
-        />
-      )}
       {journeying && (
         <StartJourney
           sequence={sequence}
           open={open}
           now={handOff}
           releaseDue={releaseDue}
+          description={
+            presentation === "rail"
+              ? "OpenBot opens by itself when it's ready."
+              : undefined
+          }
         />
       )}
       {journeying && !releaseDetail && detail && <p>{detail}</p>}
       {notices.length > 0 && (
         <SetupProgress steps={notices} presentation="focus" />
       )}
-      {!(presentation === "journey" && journeying) && (
+      {!(presentation === "rail" && journeying) && (
         <SetupProgress
           steps={rows}
           showElapsed={!journeying}
@@ -1357,10 +1354,10 @@ export function LocalIntelligence({
       )}
       {/* The release reassurance arrives after Start begins. Keep it below completed work so
           those milestones stay anchored when the update starts or its download changes. */}
-      {journeying && releaseDetail && presentation !== "journey" && (
+      {journeying && releaseDetail && presentation !== "rail" && (
         <p>{detail}</p>
       )}
-      {journeying && presentation === "journey" && (
+      {journeying && presentation === "rail" && (
         <p className="update-data-reassurance">
           Your Bots, sign-ins and data stay as they are.
         </p>

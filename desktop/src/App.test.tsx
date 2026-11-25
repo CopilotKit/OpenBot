@@ -5088,18 +5088,17 @@ test("relaunch upgrades an older installation to this app's release as part of S
     ).toBe(true),
   );
   const sheet = view.container.querySelector<HTMLElement>(
-    ".sheet.setup-layout.standalone-layout.update-layout",
+    ".sheet.setup-layout.update-layout",
   );
   expect(sheet).not.toBeNull();
-  const header = sheet?.querySelector<HTMLElement>(
-    ":scope > .setup-header-block",
-  );
+  const rail = view.getByRole("complementary", { name: "Update progress" });
+  const header = rail.querySelector<HTMLElement>("header");
   const body = sheet?.querySelector<HTMLElement>(":scope > .setup-body");
   const content = body?.querySelector<HTMLElement>(":scope > .setup-content");
   expect(
     header?.contains(
       view.getByRole("heading", {
-        name: "Updating OpenBot (Self-Contained)",
+        name: "Updating OpenBot",
       }),
     ),
   ).toBe(true);
@@ -5117,21 +5116,18 @@ test("relaunch upgrades an older installation to this app's release as part of S
     detail: said,
   });
   // Headed as the update it is: "Starting OpenBot" read as if nothing were being updated.
-  expect(
-    view.getByRole("heading", { name: "Updating OpenBot (Self-Contained)" }),
-  ).toBeTruthy();
+  expect(view.getByRole("heading", { name: "Updating OpenBot" })).toBeTruthy();
   expect(view.queryByRole("heading", { name: "Starting OpenBot" })).toBeNull();
   expect(view.getByText(said)).toBeTruthy();
-  expect(
-    view.container.querySelector<HTMLElement>(
-      ".update-layout > .setup-header-block",
-    ),
-  ).toBe(header!);
+  expect(rail.querySelector<HTMLElement>("header")).toBe(header!);
   expect(content?.contains(view.getByText(said))).toBe(true);
   expect(
     view.queryByRole("region", { name: "Everything runs on this computer" }),
   ).toBeNull();
-  expect(sheet?.querySelector(".setup-timeline")).not.toBeNull();
+  expect(rail.contains(view.getByRole("list", { name: "Update stages" }))).toBe(
+    true,
+  );
+  expect(sheet?.querySelector("h1, .setup-timeline")).toBeNull();
 
   await act(async () =>
     moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
@@ -5214,7 +5210,7 @@ function withMoveDue() {
 
 /*
  * A dogfooding report on 1.2.0-rc.1: installed over OpenBot (Self-Contained), the window spent about
- * three minutes on "Updating OpenBot (Self-Contained)" before it asked "Move to OpenBot Cloud?".
+ * three minutes on "Updating OpenBot" before it asked "Move to OpenBot Cloud?".
  * OpenBot Cloud is the default, so the question comes first now, before anything starts or updates.
  */
 describe("the move to OpenBot Cloud, due at a launch that would update OpenBot", () => {
@@ -5231,7 +5227,7 @@ describe("the move to OpenBot Cloud, due at a launch that would update OpenBot",
     expect(startsOrUpdates()).toEqual([]);
     expect(
       view.queryByRole("heading", {
-        name: "Updating OpenBot (Self-Contained)",
+        name: "Updating OpenBot",
       }),
     ).toBeNull();
   });
@@ -5266,7 +5262,7 @@ describe("the move to OpenBot Cloud, due at a launch that would update OpenBot",
     });
     expect(
       view.queryByRole("heading", {
-        name: "Updating OpenBot (Self-Contained)",
+        name: "Updating OpenBot",
       }),
     ).toBeNull();
     expect(
@@ -5400,7 +5396,7 @@ describe("the move to OpenBot Cloud, due at a launch that would update OpenBot",
         "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
     });
     expect(
-      view.getByRole("heading", { name: "Updating OpenBot (Self-Contained)" }),
+      view.getByRole("heading", { name: "Updating OpenBot" }),
     ).toBeTruthy();
     await act(async () =>
       updating.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
@@ -5514,12 +5510,10 @@ describe("the move to OpenBot Cloud, due at a launch that would update OpenBot",
 });
 
 /*
- * A dogfooding report: an app that shows a screen while it updates is unusual, and the screen said
- * nothing of why. It is headed as the self-contained OpenBot's update now, and under the progress
- * says that everything runs on this computer, then offers OpenBot for Business, whose Book a demo
- * opens its page in the person's browser. Nothing in it is a step: the update goes on by itself.
+ * The selected Progress rail keeps identity, update heading and native history in the full
+ * sidebar. Only the current operation and its assurances belong on the right.
  */
-test("updating OpenBot uses Journey and data reassurance without a promotional card", async () => {
+test("updating OpenBot uses its full progress sidebar and one current operation", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-self-contained",
     localStatus("ready", "valid"),
@@ -5541,7 +5535,7 @@ test("updating OpenBot uses Journey and data reassurance without a promotional c
   expect(
     view.getByRole("heading", {
       level: 1,
-      name: "Updating OpenBot (Self-Contained)",
+      name: "Updating OpenBot",
     }),
   ).toBeTruthy();
   expect(view.queryByRole("complementary", { name: /^Setup$/ })).toBeNull();
@@ -5556,11 +5550,19 @@ test("updating OpenBot uses Journey and data reassurance without a promotional c
   expect(
     view.queryByRole("region", { name: "Everything runs on this computer" }),
   ).toBeNull();
-  expect(view.container.querySelector(".setup-timeline")).not.toBeNull();
-  // The update carries on, on the same screen, and opens OpenBot when it is done.
+  const rail = view.getByRole("complementary", { name: "Update progress" });
   expect(
-    view.getByRole("heading", { name: "Updating OpenBot (Self-Contained)" }),
-  ).toBeTruthy();
+    rail.contains(view.getByRole("heading", { name: "Updating OpenBot" })),
+  ).toBe(true);
+  expect(rail.contains(view.getByRole("list", { name: "Update stages" }))).toBe(
+    true,
+  );
+  expect(view.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  expect(
+    view.container.querySelector(".update-layout h1, .setup-timeline"),
+  ).toBeNull();
+  // The update carries on, on the same screen, and opens OpenBot when it is done.
+  expect(view.getByRole("heading", { name: "Updating OpenBot" })).toBeTruthy();
   await act(async () =>
     moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
   );
@@ -5621,9 +5623,7 @@ async function handsOverWithoutRunning() {
     await expectHandover();
     // While the window is asked to show OpenBot, and after it answered and OpenBot's page loads.
     await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
-    const heading = updates
-      ? "Updating OpenBot (Self-Contained)"
-      : "Starting OpenBot";
+    const heading = updates ? "Updating OpenBot" : "Starting OpenBot";
     expect(view.getByRole("heading", { name: heading })).toBeTruthy();
     // Why the screen is there is said while it updates OpenBot, and not on a plain Start.
     expect(
@@ -5758,7 +5758,7 @@ test("the journey says the update step running now, never one that finished, on 
   for (const [events, said, bytes] of upgrade) {
     for (const event of events) await emitProgress(event);
     expect(
-      view.getByRole("heading", { name: "Updating OpenBot (Self-Contained)" }),
+      view.getByRole("heading", { name: "Updating OpenBot" }),
     ).toBeTruthy();
     // A download's measure is said with the download it counts, never as the bar's own caption: on
     // Windows K the time line read "About 2 minutes left · 304.0 MB of 317.0 MB" beside a bar a
@@ -5785,7 +5785,7 @@ test("the journey says the update step running now, never one that finished, on 
       view.getByText("Your Bots, sign-ins and data stay as they are."),
     ).toBeTruthy();
     const stages = [
-      ...view.container.querySelectorAll(".setup-timeline > .step"),
+      ...view.container.querySelectorAll(".update-history .steps > .step"),
     ];
     expect(stages.map((row) => row.getAttribute("aria-label"))).toEqual([
       "Setting up OpenBot",

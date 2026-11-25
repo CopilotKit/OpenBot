@@ -2514,12 +2514,12 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
       await toStart(page);
       const said = await page.evaluate(() => ({
         heading: document.querySelector("main h1")?.textContent,
-        lede: document.querySelector("main .lede")?.textContent ?? "",
+        lede: document.querySelector(".journey-description")?.textContent ?? "",
         card: document.querySelector(".journey-time")?.textContent ?? "",
       }));
       // This Start updates OpenBot, and its heading says so.
-      expect(said.heading).toBe("Updating OpenBot (Self-Contained)");
-      expect(said.lede).toBe("OpenBot is getting ready and opens by itself.");
+      expect(said.heading).toBe("Updating OpenBot");
+      expect(said.lede).toBe("OpenBot opens by itself when it's ready.");
       expect(said.lede).not.toMatch(/minute|second|hour/i);
       expect(said.card).toMatch(/left/);
     } finally {
@@ -2996,10 +2996,10 @@ describe.skipIf(!asked)("approved layout: shutdown Progress rail", () => {
 
 function updateScreen(page: Page) {
   return page.evaluate(() => {
-    const sheet = document.querySelector<HTMLElement>(
-      ".standalone-layout.update-layout",
-    )!;
+    const sheet = document.querySelector<HTMLElement>(".sheet.update-layout")!;
     const body = sheet.querySelector<HTMLElement>(".setup-body")!;
+    const rail = document.querySelector<HTMLElement>("main > .update-history")!;
+    const heading = rail.querySelector("h1");
     const box = (element: Element | null) => {
       const r = element?.getBoundingClientRect();
       return r
@@ -3007,18 +3007,28 @@ function updateScreen(page: Page) {
         : null;
     };
     return {
-      heading: sheet.querySelector("h1")?.textContent,
-      headingBox: box(sheet.querySelector("h1")),
+      heading: heading?.textContent,
+      headingBox: box(heading),
+      rightHeadings: sheet.querySelectorAll("h1").length,
+      pageHeadings: document.querySelectorAll("h1").length,
+      railBox: box(rail),
+      currentBox: box(sheet),
       bodyBox: box(body),
       operation: box(sheet.querySelector(".journey")),
       reassurance: box(sheet.querySelector(".update-data-reassurance")),
-      stages: [...sheet.querySelectorAll(".setup-timeline > .step")].map(
-        (row) => ({ name: row.getAttribute("aria-label"), box: box(row) }),
-      ),
+      stages: [...rail.querySelectorAll(".steps > .step")].map((row) => ({
+        name: row.getAttribute("aria-label"),
+        box: box(row),
+      })),
       promo: sheet.querySelectorAll(".self-contained").length,
       sidebars: document.querySelectorAll("main > .rail").length,
       bars: sheet.querySelectorAll("progress").length,
-      sideways: body.scrollWidth > body.clientWidth,
+      sideways: [body, rail, sheet].some(
+        (el) => el.scrollWidth > el.clientWidth + 1,
+      ),
+      bytes: sheet.querySelector(".journey-bytes")?.textContent,
+      timing: sheet.querySelector(".journey-time")?.textContent,
+      spinners: document.querySelectorAll(".step-spinner").length,
       overflow: document.documentElement.scrollHeight > window.innerHeight,
       reassuranceCopy: sheet.querySelector(".update-data-reassurance")
         ?.textContent,
@@ -3027,7 +3037,7 @@ function updateScreen(page: Page) {
   });
 }
 
-describe.skipIf(!asked)("approved layout: update Journey", () => {
+describe.skipIf(!asked)("approved layout: update Progress rail", () => {
   for (const [width, height] of [
     [1000, 800],
     [720, 560],
@@ -3050,8 +3060,13 @@ describe.skipIf(!asked)("approved layout: update Journey", () => {
             .locator(".journey-said", { hasText: "Downloading the update" })
             .waitFor();
           const seen = await updateScreen(page);
-          expect(seen.heading).toBe("Updating OpenBot (Self-Contained)");
-          expect(seen.sidebars).toBe(0);
+          expect(seen.heading).toBe("Updating OpenBot");
+          expect(seen.sidebars).toBe(1);
+          expect(seen.pageHeadings).toBe(1);
+          expect(seen.rightHeadings).toBe(0);
+          expect(seen.railBox!.right).toBeLessThanOrEqual(
+            seen.currentBox!.left,
+          );
           expect(seen.promo).toBe(0);
           expect(seen.bars).toBe(1);
           expect(seen.sideways).toBe(false);
@@ -3068,17 +3083,40 @@ describe.skipIf(!asked)("approved layout: update Journey", () => {
           ]);
           const stages = seen.stages.map((row) => row.box!);
           expect(
-            stages.every((row) => Math.abs(row.top - stages[0].top) < 1),
+            stages.every((row) => Math.abs(row.left - stages[0].left) < 1),
           ).toBe(true);
           expect(
             stages.every(
-              (row, i) => i === 0 || row.left >= stages[i - 1].right,
+              (row, i) => i === 0 || row.top >= stages[i - 1].bottom,
             ),
           ).toBe(true);
+          expect(seen.spinners).toBe(1);
+          expect(seen.timing).toMatch(/left.*so far/);
           expect(seen.operation!.top).toBeGreaterThanOrEqual(seen.bodyBox!.top);
           expect(seen.reassurance!.bottom).toBeLessThanOrEqual(
             seen.bodyBox!.bottom + 1,
           );
+          await emitProgress(page, {
+            step: "images",
+            ok: true,
+            running: true,
+            detail: "Downloading local software.",
+            downloads: {
+              done: 2,
+              total: 5,
+              bytes: 600_000_000,
+              size: 1_200_000_000,
+            },
+          });
+          const downloading = await updateScreen(page);
+          expect(downloading.bytes).toContain("600.0 MB of 1.2 GB");
+          expect(downloading.timing).not.toMatch(/MB|GB/);
+          await emitProgress(page, {
+            step: "images",
+            ok: true,
+            running: false,
+            detail: "Downloaded.",
+          });
           await emitProgress(page, {
             step: "engine",
             ok: true,
@@ -3094,7 +3132,7 @@ describe.skipIf(!asked)("approved layout: update Journey", () => {
           );
           if (process.env.OPENBOT_APP_SHOTS)
             await page.screenshot({
-              path: `${process.env.OPENBOT_APP_SHOTS}/update-journey-${width}x${height}-${colorScheme}.png`,
+              path: `${process.env.OPENBOT_APP_SHOTS}/update-progress-rail-${width}x${height}-${colorScheme}.png`,
             });
         } finally {
           await page.close();
@@ -4240,7 +4278,7 @@ const headingsSeen = (page: Page) =>
 
 /*
  * A dogfooding report on 1.2.0-rc.1: installed over OpenBot (Self-Contained) on a Mac, the window
- * showed "Updating OpenBot (Self-Contained)" for about three minutes, and only then asked "Move to
+ * showed "Updating OpenBot" for about three minutes, and only then asked "Move to
  * OpenBot Cloud?". OpenBot Cloud is the default, so the question comes first now, before anything
  * starts or updates. Picking OpenBot Cloud updates and starts OpenBot under the move's own screen,
  * which fills in what moves once it can read it; Keep runs the update as it always has. In
@@ -4323,7 +4361,7 @@ describe.skipIf(!asked)(
           made.indexOf("upgrade_and_start"),
         );
         const headings = await headingsSeen(page);
-        expect(headings).not.toContain("Updating OpenBot (Self-Contained)");
+        expect(headings).not.toContain("Updating OpenBot");
         expect(headings).not.toContain("Starting OpenBot");
         // Only the move's own screens, from the question to the end.
         expect(
@@ -4418,9 +4456,7 @@ describe.skipIf(!asked)(
         await page
           .getByRole("button", { name: "Keep OpenBot on this computer" })
           .click();
-        await page
-          .getByRole("heading", { name: "Updating OpenBot (Self-Contained)" })
-          .waitFor();
+        await page.getByRole("heading", { name: "Updating OpenBot" }).waitFor();
         await shoot(page, "keep-updating");
         const made = await calls(page);
         expect(made.indexOf("keep_self_contained")).toBeGreaterThan(-1);

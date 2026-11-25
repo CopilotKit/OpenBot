@@ -130,77 +130,127 @@ main > .rail + .sheet.welcome.page-first {
   margin-top: 20px;
 }
 
-/* Journey keeps the real operation central and its history in a horizontal timeline. */
-.standalone-layout.update-layout
-> :is(.setup-header-block, .setup-body, .setup-footer) {
-  max-width: 840px;
+/* The selected update rail owns identity/history; the right pane holds the current operation. */
+main.with-progress-rail {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+main.with-progress-rail > .sheet.update-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 48px 40px 32px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.update-layout > .setup-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow-y: auto;
 }
 
 .update-layout > .setup-body > .setup-content {
   height: 100%;
 }
 
-.update-journey {
+.update-history > header {
+  margin-bottom: 24px;
+}
+
+.update-history .rail-title {
+  margin-bottom: 8px;
+}
+
+.update-scope {
+  margin: 0 12px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.update-history > .steps {
+  margin: 0 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.update-history .step {
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-areas: "mark label" ". status";
+  gap: 4px 10px;
+  padding: 10px 0;
+  border: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.update-history .step > .detail {
+  display: none;
+}
+
+.update-history .step-status {
+  justify-self: start;
+  padding: 0;
+  background: transparent;
+}
+
+.update-history .step:has(> .mark.good) > :is(.step-label, .step-status) {
+  color: var(--text-secondary);
+}
+
+.update-history > .rail-foot {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.update-progress {
   height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.steps.setup-timeline {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px;
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  flex: none;
-}
-
-.setup-timeline > .step {
-  grid-template-columns: 16px minmax(0, 1fr);
-  grid-template-areas: "mark label";
-  align-items: start;
-  padding: 13px 0 0;
-  border-top: 2px solid var(--border);
-  border-bottom: 0;
-  font-size: var(--text-sm);
-  line-height: 20px;
-}
-
-.setup-timeline > .step:has(> .mark.active) {
-  border-top-color: var(--ring);
-}
-
-.setup-timeline > .step > :is(.step-status, .step-detail, .downloads) {
-  display: none;
-}
-
-.update-journey > .journey {
+.update-progress > .journey {
   margin-block: auto;
   padding-block: 28px;
 }
 
-.update-journey .journey-head {
-  font-size: var(--text-lg);
+.update-progress .journey-head {
+  font-size: var(--text-2xl);
 }
 
-.update-journey > .update-data-reassurance {
+.update-progress .journey-description {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.update-progress > .update-data-reassurance {
   color: var(--text-secondary);
   font-size: var(--text-sm);
   margin: 0 0 18px;
 }
 
-.update-layout .update-journey > .row {
+.update-layout .update-progress > .row {
   margin: 0;
   padding-top: 18px;
   border-top: 1px solid var(--border);
   flex: none;
 }
 
-.update-journey .cannot-cancel {
+.update-progress .cannot-cancel {
   margin: 0;
   height: auto;
   font-size: var(--text-sm);
@@ -228,12 +278,12 @@ main > .rail + .sheet.welcome.page-first {
     padding-inline: 26px;
   }
 
-  .steps.setup-timeline {
-    gap: 12px;
+  main.with-progress-rail {
+    grid-template-columns: 220px minmax(0, 1fr);
   }
 
-  .setup-timeline > .step {
-    font-size: var(--text-xs);
+  main.with-progress-rail > .sheet.update-layout {
+    padding: 32px 26px 24px;
   }
 }
 
