@@ -292,6 +292,30 @@ async function openBotChoices(page: Page) {
     .catch(() => undefined);
 }
 
+/**
+ * The Bot filter's choices, opened until the menu says `words` in their place, up to three times.
+ * On a loaded machine the menu was sometimes shut again by the time it was read (the page's words
+ * came back, no menu), though it said the sentence when open. A person opens it again; so does this.
+ * A menu that never says the words still fails where its text is compared.
+ */
+async function openBotChoicesSaying(page: Page, words: string) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await openBotChoices(page);
+    const said = await page
+      .locator("[data-slot=dropdown-menu-label]")
+      .filter({ hasText: words })
+      .first()
+      .waitFor({ timeout: 8_000 })
+      .then(
+        () => true,
+        () => false,
+      );
+    if (said) return;
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+  }
+}
+
 /** What the open filter menu says in place of its choices, or the page's words when it says nothing. */
 async function choicesSay(page: Page): Promise<string> {
   const label = page.locator("[data-slot=dropdown-menu-label]").first();
@@ -387,11 +411,7 @@ describe.skipIf(!asked)(
                 .getByRole("button", { name: "Add filter" })
                 .waitFor({ timeout: 15_000 });
               hold(server, MOVING);
-              await openBotChoices(page);
-              await page
-                .getByText(MOVING, { exact: true })
-                .waitFor({ timeout: 8_000 })
-                .catch(() => undefined);
+              await openBotChoicesSaying(page, MOVING);
               await page.waitForTimeout(300);
               await shoot(
                 page,
