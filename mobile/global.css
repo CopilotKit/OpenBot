@@ -1,0 +1,147 @@
+/*
+ * The phone app's one stylesheet: Tailwind, Uniwind, HeroUI Native, and OpenBot's color scheme.
+ *
+ * The colors between the markers are written by `bun run tokens:generate` from tokens/src/scheme.ts,
+ * under HeroUI Native's names (docs/app-guidelines.md, "The color scheme on the phone"). Don't edit
+ * them here: change the scheme there. Everything else in this file is hand-written and holds no
+ * color value.
+ */
+/* biome-ignore-all lint/suspicious/noDuplicateCustomProperties: light and dark each set every color, under @variant */
+@import "tailwindcss";
+@import "uniwind";
+@import "heroui-native/styles";
+
+@source "./app";
+@source "./src";
+
+@theme {
+  /* The web app's corners: controls rounded-md, cards rounded-lg, the message box rounded-xl. */
+  --radius: 0.5rem;
+  --field-radius: var(--radius);
+  /* A field has a hairline border, as on the web app. */
+  --field-border-width: 1px;
+
+  /* Inter, the web app's face, one family per weight: React Native picks a face by name. */
+  --font-normal: "Inter_400Regular";
+  --font-medium: "Inter_500Medium";
+  --font-semibold: "Inter_600SemiBold";
+  --font-bold: "Inter_700Bold";
+  --font-sans: "Inter_400Regular";
+}
+
+@layer theme {
+  :root {
+    @variant light {
+      /* tokens/src/scheme.ts, light: --background=background --foreground=foreground --surface=card --surface-foreground=card-foreground --surface-secondary=secondary --surface-secondary-foreground=secondary-foreground --surface-tertiary=accent --surface-tertiary-foreground=accent-foreground --overlay=popover --overlay-foreground=popover-foreground --muted=muted-foreground --default=secondary --default-foreground=secondary-foreground --accent=primary --accent-foreground=primary-foreground --field-background=card --field-foreground=foreground --field-placeholder=muted-foreground --field-border=input --success=success --success-foreground=primary-foreground --warning=warning --warning-foreground=primary-foreground --danger=destructive --danger-foreground=primary-foreground --segment=card --segment-foreground=foreground --border=border --separator=border --focus=ring --link=foreground --fill=muted --sidebar=sidebar --sidebar-foreground=sidebar-foreground --sidebar-accent=sidebar-accent --sidebar-accent-foreground=sidebar-accent-foreground --sidebar-border=sidebar-border (bun run tokens:generate) */
+      --background: oklch(0.983 0.003 247.9);
+      --foreground: oklch(0.108 0.042 264.7);
+      --surface: oklch(1 0 0);
+      --surface-foreground: oklch(0.108 0.042 264.7);
+      --surface-secondary: oklch(0.956 0.009 250.2);
+      --surface-secondary-foreground: oklch(0.108 0.042 264.7);
+      --surface-tertiary: oklch(0.956 0.009 250.2);
+      --surface-tertiary-foreground: oklch(0.108 0.042 264.7);
+      --overlay: oklch(1 0 0);
+      --overlay-foreground: oklch(0.108 0.042 264.7);
+      --muted: oklch(0.506 0.045 257.4);
+      --default: oklch(0.956 0.009 250.2);
+      --default-foreground: oklch(0.108 0.042 264.7);
+      --accent: oklch(0.108 0.042 264.7);
+      --accent-foreground: oklch(1 0 0);
+      --field-background: oklch(1 0 0);
+      --field-foreground: oklch(0.108 0.042 264.7);
+      --field-placeholder: oklch(0.506 0.045 257.4);
+      --field-border: oklch(0.108 0.042 264.7 / 20%);
+      --success: oklch(0.514 0.1 167.2);
+      --success-foreground: oklch(1 0 0);
+      --warning: oklch(0.555 0.163 49);
+      --warning-foreground: oklch(1 0 0);
+      --danger: oklch(0.504 0.178 22.9);
+      --danger-foreground: oklch(1 0 0);
+      --segment: oklch(1 0 0);
+      --segment-foreground: oklch(0.108 0.042 264.7);
+      --border: oklch(0.108 0.042 264.7 / 20%);
+      --separator: oklch(0.108 0.042 264.7 / 20%);
+      --focus: oklch(0.644 0.167 276.1);
+      --link: oklch(0.108 0.042 264.7);
+      --fill: oklch(0.956 0.009 250.2);
+      --sidebar: oklch(0.948 0.01 251.8);
+      --sidebar-foreground: oklch(0.108 0.042 264.7);
+      --sidebar-accent: oklch(0.832 0.085 281.4 / 30%);
+      --sidebar-accent-foreground: oklch(0.108 0.042 264.7);
+      --sidebar-border: oklch(0.108 0.042 264.7 / 20%);
+      /* end of tokens/src/scheme.ts */
+    }
+    @variant dark {
+      /* tokens/src/scheme.ts, dark: --background=background --foreground=foreground --surface=card --surface-foreground=card-foreground --surface-secondary=secondary --surface-secondary-foreground=secondary-foreground --surface-tertiary=accent --surface-tertiary-foreground=accent-foreground --overlay=popover --overlay-foreground=popover-foreground --muted=muted-foreground --default=secondary --default-foreground=secondary-foreground --accent=primary --accent-foreground=primary-foreground --field-background=card --field-foreground=foreground --field-placeholder=muted-foreground --field-border=input --success=success --success-foreground=primary-foreground --warning=warning --warning-foreground=primary-foreground --danger=destructive --danger-foreground=primary-foreground --segment=card --segment-foreground=foreground --border=border --separator=border --focus=ring --link=foreground --fill=muted --sidebar=sidebar --sidebar-foreground=sidebar-foreground --sidebar-accent=sidebar-accent --sidebar-accent-foreground=sidebar-accent-foreground --sidebar-border=sidebar-border (bun run tokens:generate) */
+      --background: oklch(0.182 0.017 252);
+      --foreground: oklch(0.956 0.004 252);
+      --surface: oklch(0.212 0.017 252);
+      --surface-foreground: oklch(0.956 0.004 252);
+      --surface-secondary: oklch(0.253 0.017 252);
+      --surface-secondary-foreground: oklch(0.956 0.004 252);
+      --surface-tertiary: oklch(0.28 0.016 252);
+      --surface-tertiary-foreground: oklch(0.956 0.004 252);
+      --overlay: oklch(0.212 0.017 252);
+      --overlay-foreground: oklch(0.956 0.004 252);
+      --muted: oklch(0.69 0.016 252);
+      --default: oklch(0.253 0.017 252);
+      --default-foreground: oklch(0.956 0.004 252);
+      --accent: oklch(0.956 0.004 252);
+      --accent-foreground: oklch(0.108 0.017 252);
+      --field-background: oklch(0.212 0.017 252);
+      --field-foreground: oklch(0.956 0.004 252);
+      --field-placeholder: oklch(0.69 0.016 252);
+      --field-border: oklch(0.956 0.004 252 / 16%);
+      --success: oklch(0.832 0.13 170.1);
+      --success-foreground: oklch(0.108 0.017 252);
+      --warning: oklch(0.828 0.189 84.4);
+      --warning-foreground: oklch(0.108 0.017 252);
+      --danger: oklch(0.792 0.121 16.4);
+      --danger-foreground: oklch(0.108 0.017 252);
+      --segment: oklch(0.212 0.017 252);
+      --segment-foreground: oklch(0.956 0.004 252);
+      --border: oklch(0.956 0.004 252 / 16%);
+      --separator: oklch(0.956 0.004 252 / 16%);
+      --focus: oklch(0.713 0.151 277.7);
+      --link: oklch(0.956 0.004 252);
+      --fill: oklch(0.253 0.017 252);
+      --sidebar: oklch(0.156 0.017 252);
+      --sidebar-foreground: oklch(0.956 0.004 252);
+      --sidebar-accent: oklch(0.832 0.085 281.4 / 12%);
+      --sidebar-accent-foreground: oklch(0.956 0.004 252);
+      --sidebar-border: oklch(0.956 0.004 252 / 16%);
+      /* end of tokens/src/scheme.ts */
+    }
+  }
+}
+
+/*
+ * The scheme's colors HeroUI Native has no name for: `fill` is the scheme's `muted` (a quiet fill,
+ * since HeroUI's `muted` is a text color), and the sidebar set draws the drawer.
+ */
+@theme inline {
+  --color-fill: var(--fill);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+}
+
+/*
+ * HeroUI Native's controls in the web app's shapes: a button is a rounded rectangle, not a pill,
+ * and an outlined one sits on the card color, as the web app's does.
+ */
+@layer components {
+  .button__root--size-sm,
+  .button__root--size-md {
+    border-radius: var(--radius-lg);
+  }
+  .button__root--size-lg {
+    border-radius: var(--radius-xl);
+  }
+  .button__root--variant-outline {
+    background-color: var(--color-surface);
+  }
+}
