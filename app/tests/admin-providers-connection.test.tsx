@@ -685,7 +685,7 @@ describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
               name: /Anthropic.*Signed in with your Claude plan\. Only you use it\./,
             });
             await link.waitFor();
-            expect(await link.getAttribute("href")).toBe("/settings#your-ai");
+            expect(await link.getAttribute("href")).toBe("/settings/providers");
             // One model listed is one model, not "1 models".
             await section(page, "In conversations")
               .getByText("1 model, kept current from your provider.")
@@ -936,7 +936,7 @@ describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
       );
       try {
         await section(page, "Your AI").getByRole("link").click();
-        await page.waitForURL(`${ORIGIN}/settings#your-ai`);
+        await page.waitForURL(`${ORIGIN}/settings/providers`);
         const yours = section(page, "Your AI");
         await yours
           .getByRole("button", {

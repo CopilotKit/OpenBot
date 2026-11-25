@@ -1,12 +1,15 @@
 import { Combobox as ComboboxPrimitive } from "@base-ui/react";
 import {
+  IconAlertTriangle,
   IconCheck,
   IconChevronDown,
+  IconCloud,
   IconCpu,
   IconCube,
 } from "@tabler/icons-react";
 import { useMemo, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
+import { reconnectPath } from "@/components/channels/stopped-connection-notice";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -23,7 +26,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { connectionName } from "@/lib/ai-connection/describe";
+import { providerById } from "@/lib/ai-connection/providers";
 import { markFor } from "@/lib/marks";
+import {
+  canChoose,
+  connectionOf,
+  pickerGroups,
+} from "@/lib/models/connections";
 import {
   effortLabel,
   type ModelPick,
@@ -31,7 +41,11 @@ import {
   switchModel,
   thinks,
 } from "@/lib/models/effort";
-import type { ModelCatalogue, ModelOption } from "@/lib/models/queries";
+import type {
+  CatalogueConnection,
+  ModelCatalogue,
+  ModelOption,
+} from "@/lib/models/queries";
 import { cn } from "@/lib/utils";
 
 /** The composer's message box around `inside`, if it is in one. */
@@ -45,22 +59,30 @@ function messageBox(inside: HTMLElement | null): HTMLElement | null {
   );
 }
 
-/** One row of the popup: a model, or a thinking effort for the model in use. */
+/**
+ * One row of the popup: a model (on a connection, where several are connected), a thinking effort
+ * for the model in use, or the heading of one connection's models, which is never picked.
+ */
 type Choice =
-  | { kind: "model"; model: ModelOption }
+  | { kind: "model"; model: ModelOption; connection?: string }
   | {
       kind: "effort";
       /** Null is the model's own default, offered as its own row when nobody knows what it is. */
       effort: string | null;
       label: string;
-    };
+    }
+  | { kind: "heading"; connection: CatalogueConnection };
 
 type ChoiceGroup = { value: "models" | "thinking"; items: Choice[] };
 
 const sameChoice = (a: Choice, b: Choice) =>
   a.kind === "model"
-    ? b.kind === "model" && a.model.id === b.model.id
-    : b.kind === "effort" && a.effort === b.effort;
+    ? b.kind === "model" &&
+      a.model.id === b.model.id &&
+      a.connection === b.connection
+    : a.kind === "effort"
+      ? b.kind === "effort" && a.effort === b.effort
+      : b.kind === "heading" && a.connection.id === b.connection.id;
 
 /**
  * The word beside OpenBot's own model, and beside a model's own effort: quiet text at the row's end,
@@ -93,6 +115,18 @@ function ModelMark({ model }: { model: ModelOption }) {
 }
 
 /**
+ * A connection's mark in the providers rail: its provider's, or a cloud for a server of your own.
+ */
+function ConnectionMark({ connection }: { connection: CatalogueConnection }) {
+  const provider = providerById(connection.provider);
+  return provider?.mark && markFor(provider.mark) ? (
+    <HarnessMark className="size-4" id={provider.mark} name={provider.name} />
+  ) : (
+    <IconCloud aria-hidden className="size-4 text-muted-foreground" />
+  );
+}
+
+/**
  * The model a conversation's Bot answers on, and how hard it thinks, picked in the composer.
  *
  * A quiet icon button in the controls row, a CPU and a chevron, rather than the model's mark and
@@ -118,6 +152,12 @@ function ModelMark({ model }: { model: ModelOption }) {
  * stay while a search is typed, since a search only ever looks for a model. A model that takes no
  * effort has no column, and the popup is one column wide.
  *
+ * A PROVIDERS RAIL, with several connections: one button per connection down the popup's left
+ * edge, as T3 Code's picker has its providers. The list shows the models of the one chosen there,
+ * and opens on the connection in use. A search looks through every connection, each under its
+ * name, so a model is found without knowing whose it is. The rail's buttons are not options: they
+ * change what the list shows, and keep the focus in the search.
+ *
  * Renders nothing when there is nothing to pick: a plan, a provider that could not be read, or an
  * allowlist that leaves one model.
  */
@@ -130,6 +170,7 @@ export function ModelPicker({
   showValue = false,
   disabled,
   saving,
+  stopped = false,
   className,
 }: {
   catalogue: ModelCatalogue | undefined;
@@ -142,10 +183,43 @@ export function ModelPicker({
   disabled?: boolean;
   /** A pick is being saved: the picker shows it and holds still until the save settles. */
   saving?: boolean;
+  /**
+   * The AI connection the conversation's next run would use can't run now (the model choice's
+   * `stopped`): the trigger carries a warning mark until the choice changes.
+   */
+  stopped?: boolean;
   className?: string;
 }) {
-  if (!catalogue || (!catalogue.choosable && !allowSingle) || !value)
-    return null;
+  if (!catalogue || (!canChoose(catalogue) && !allowSingle)) return null;
+  const groups = pickerGroups(catalogue);
+  if (groups.length > 0) {
+    // Several connections: the pick's own, and nothing selected while there is no default.
+    const on = value ? connectionOf(catalogue, value.connection) : undefined;
+    // A stopped connection may list nothing: its pick is still named, by its id.
+    const selected =
+      on?.models.find((model) => model.id === value?.model) ??
+      (on && !on.ready && value
+        ? { id: value.model, label: value.model }
+        : undefined);
+    const fallback = connectionOf(catalogue, null);
+    return (
+      <Picker
+        catalogue={catalogue}
+        className={className}
+        connections={groups}
+        defaultConnection={fallback?.id}
+        defaultModel={defaultModel ?? fallback?.default ?? catalogue.default}
+        disabled={disabled || saving}
+        effort={selected ? (value?.effort ?? null) : null}
+        onChange={onChange}
+        selected={selected}
+        selectedConnection={selected ? on?.id : undefined}
+        showValue={showValue}
+        stopped={stopped}
+      />
+    );
+  }
+  if (!value) return null;
   const selected =
     catalogue.models.find((model) => model.id === value.model) ??
     catalogue.models.find((model) => model.id === catalogue.default);
@@ -154,35 +228,55 @@ export function ModelPicker({
     <Picker
       catalogue={catalogue}
       className={className}
+      connections={[]}
       defaultModel={defaultModel ?? catalogue.default}
       disabled={disabled || saving}
       effort={value.model === selected.id ? value.effort : null}
       onChange={onChange}
       selected={selected}
       showValue={showValue}
+      stopped={stopped}
     />
   );
 }
 
+/** What the trigger says while several connections have no default and nothing is picked. */
+const CHOOSE_A_MODEL = "Choose a model";
+
+/** Added to the trigger's name while the connection the next run would use can't run. */
+const STOPPED_SAYS = ". Its AI connection can't run now";
+
 function Picker({
   catalogue,
+  connections,
+  defaultConnection,
   defaultModel,
   selected,
+  selectedConnection,
   showValue,
   effort,
   onChange,
   disabled,
+  stopped,
   className,
 }: {
   catalogue: ModelCatalogue;
+  /** Several connections, the default first; empty with one, which draws no headings. */
+  connections: CatalogueConnection[];
+  /** The default connection's id, whose default model is tagged. */
+  defaultConnection?: string;
   defaultModel: string;
-  selected: ModelOption;
+  /** Undefined only while several connections have no default and nothing is picked. */
+  selected: ModelOption | undefined;
+  selectedConnection?: string;
   showValue: boolean;
   effort: string | null;
   onChange: (pick: ModelPick) => void;
   disabled?: boolean;
+  stopped: boolean;
   className?: string;
 }) {
+  const grouped = connections.length > 0;
   const { contains } = ComboboxPrimitive.useFilter();
   /** What is typed in the search, to say when no model matches: the efforts always do. */
   const [query, setQuery] = useState("");
@@ -196,18 +290,52 @@ function Picker({
    */
   const stayOpen = useRef(false);
   const [effortStep, setEffortStep] = useState(false);
-  const current: Choice = useMemo(
-    () => ({ kind: "model", model: selected }),
-    [selected],
+  /** The connection the rail shows the models of: the one in use, each time the popup opens. */
+  const [tab, setTab] = useState<string | null>(null);
+  const searching = query.trim() !== "";
+  /** Shown in the list: every connection while searching, otherwise the rail's. */
+  const listed =
+    searching || tab === null
+      ? connections
+      : connections.filter((connection) => connection.id === tab);
+  const current: Choice | null = useMemo(
+    () =>
+      selected
+        ? {
+            kind: "model",
+            model: selected,
+            ...(selectedConnection ? { connection: selectedConnection } : {}),
+          }
+        : null,
+    [selected, selectedConnection],
   );
   /** The effort the model will run at, chosen or its own: the row that carries the check. */
   const running = shownEffort(selected, effort) ?? null;
   const groups = useMemo((): ChoiceGroup[] => {
     const models: ChoiceGroup = {
       value: "models",
-      items: catalogue.models.map((model) => ({ kind: "model", model })),
+      items: grouped
+        ? listed.flatMap((connection): Choice[] => [
+            // Its name over its models where the rail doesn't say it (one connection, or several
+            // searched at once). A stopped one says why, always.
+            ...(connections.length === 1 ||
+            listed.length > 1 ||
+            !connection.ready
+              ? [{ kind: "heading", connection } as Choice]
+              : []),
+            ...(connection.ready
+              ? connection.models.map(
+                  (model): Choice => ({
+                    kind: "model",
+                    model,
+                    connection: connection.id,
+                  }),
+                )
+              : []),
+          ])
+        : catalogue.models.map((model) => ({ kind: "model", model })),
     };
-    if (!thinks(selected)) return [models];
+    if (!selected || !thinks(selected)) return [models];
     const efforts: Choice[] = (selected.efforts ?? []).map((level) => ({
       kind: "effort",
       effort: level,
@@ -218,38 +346,55 @@ function Picker({
       efforts.unshift({ kind: "effort", effort: null, label: "Default" });
     const thinking: ChoiceGroup = { value: "thinking", items: efforts };
     return effortStep ? [thinking] : [models, thinking];
-  }, [catalogue.models, selected, effortStep]);
+  }, [catalogue.models, connections, listed, grouped, selected, effortStep]);
 
   const matches = (model: ModelOption, typed: string) =>
     contains(model.label, typed) || contains(model.id, typed);
+  const searchable = grouped
+    ? connections.flatMap((connection) =>
+        connection.ready ? connection.models : [],
+      )
+    : catalogue.models;
   const noModels =
-    query.trim() !== "" &&
-    !catalogue.models.some((model) => matches(model, query));
+    query.trim() !== "" && !searchable.some((model) => matches(model, query));
   const twoColumns = groups.length > 1;
   /** On the efforts alone: only the "Thinking" column shows. */
   const effortsOnly = effortStep && thinks(selected);
+  /** The providers rail, down the left: with two connections or more, beside the models. */
+  const rail = connections.length > 1 && !effortsOnly;
+  const modelsColumn = rail ? "col-start-2" : "col-start-1";
 
   const effortText = running
     ? effortLabel(running)
     : showValue && thinks(selected)
       ? "Model default"
       : null;
-  const shown = effortText
-    ? `${selected.label} · ${effortText}`
-    : selected.label;
+  const label = selected?.label ?? CHOOSE_A_MODEL;
+  const shown = effortText ? `${label} · ${effortText}` : label;
 
   return (
     <Combobox<Choice>
       disabled={disabled}
       // A search looks for a model; the efforts belong to the model in use and stay in their column.
+      // A connection's heading stays while any of its models does, and a stopped one's only unsearched.
       filter={(choice, typed) =>
-        choice.kind === "effort" || matches(choice.model, typed)
+        choice.kind === "effort" ||
+        (choice.kind === "heading"
+          ? choice.connection.ready
+            ? choice.connection.models.some((model) => matches(model, typed))
+            : typed.trim() === ""
+          : matches(choice.model, typed))
       }
       isItemEqualToValue={sameChoice}
       items={groups}
       itemToStringLabel={(choice) =>
-        choice.kind === "model" ? choice.model.label : choice.label
+        choice.kind === "model"
+          ? choice.model.label
+          : choice.kind === "heading"
+            ? connectionName(choice.connection)
+            : choice.label
       }
+      inputValue={query}
       onInputValueChange={setQuery}
       onOpenChange={(next, details) => {
         const keep =
@@ -261,16 +406,37 @@ function Picker({
         }
         // Opened or closed: both columns, the next time it shows.
         setEffortStep(false);
+        // Opened: on the connection in use, the default's while nothing is picked.
+        if (next)
+          setTab(
+            selectedConnection ??
+              defaultConnection ??
+              connections[0]?.id ??
+              null,
+          );
         setOpen(next);
       }}
       onValueChange={(choice) => {
-        if (!choice) return;
+        if (!choice || choice.kind === "heading") return;
+        if (choice.kind === "effort" && !selected) return;
         stayOpen.current = choice.kind === "model" && thinks(choice.model);
         picked.current = !stayOpen.current;
+        const on = (connection: string | undefined) =>
+          connection ? { connection } : {};
         onChange(
           choice.kind === "model"
-            ? switchModel({ model: selected.id, effort }, choice.model)
-            : { model: selected.id, effort: choice.effort },
+            ? {
+                ...switchModel(
+                  { model: selected?.id ?? choice.model.id, effort },
+                  choice.model,
+                ),
+                ...on(choice.connection),
+              }
+            : {
+                model: selected?.id ?? "",
+                effort: choice.effort,
+                ...on(selectedConnection),
+              },
         );
       }}
       open={open}
@@ -285,11 +451,13 @@ function Picker({
              */
             <ComboboxPrimitive.Trigger
               ref={trigger}
-              aria-label={
-                effortText
-                  ? `Model: ${selected.label}, thinking: ${effortText}`
-                  : `Model: ${selected.label}`
-              }
+              aria-label={`${
+                !selected
+                  ? CHOOSE_A_MODEL
+                  : effortText
+                    ? `Model: ${selected.label}, thinking: ${effortText}`
+                    : `Model: ${selected.label}`
+              }${stopped ? STOPPED_SAYS : ""}`}
               className={cn(
                 showValue
                   ? "min-w-0 w-full justify-start gap-2 px-3 font-normal"
@@ -306,7 +474,14 @@ function Picker({
               }
               nativeButton
             >
-              <IconCpu aria-hidden className="size-4 shrink-0" />
+              {stopped ? (
+                <IconAlertTriangle
+                  aria-hidden
+                  className="size-4 shrink-0 text-destructive"
+                />
+              ) : (
+                <IconCpu aria-hidden className="size-4 shrink-0" />
+              )}
               {showValue ? (
                 <span className="min-w-0 flex-1 truncate text-left">
                   {shown}
@@ -326,13 +501,17 @@ function Picker({
          */
         align={showValue ? "start" : "end"}
         className={cn(
-          // A grid: the search over the models on the left, the efforts down the right.
+          // A grid: the rail, the search over the models, and the efforts down the right.
           "grid grid-rows-[auto_minmax(0,1fr)] *:data-[slot=input-group]:m-2 *:data-[slot=input-group]:mb-1",
           effortsOnly
             ? "w-44 grid-cols-1"
-            : twoColumns
-              ? "w-[30rem] grid-cols-[minmax(0,1fr)_11rem]"
-              : "w-72 grid-cols-1",
+            : rail
+              ? twoColumns
+                ? "w-[33rem] grid-cols-[3rem_minmax(0,1fr)_11rem]"
+                : "w-[21rem] grid-cols-[3rem_minmax(0,1fr)]"
+              : twoColumns
+                ? "w-[30rem] grid-cols-[minmax(0,1fr)_11rem]"
+                : "w-72 grid-cols-1",
         )}
         // After a pick, the message box, where the person goes next; otherwise back to the trigger.
         finalFocus={() => {
@@ -348,6 +527,49 @@ function Picker({
          */
         collisionPadding={16}
       >
+        {rail ? (
+          <fieldset className="col-start-1 row-span-2 row-start-1 m-0 flex min-h-0 min-w-0 flex-col items-center gap-1 overflow-y-auto border-y-0 border-r border-l-0 p-1.5">
+            <legend className="sr-only">Providers</legend>
+            {connections.map((connection) => {
+              const shown = !searching && tab === connection.id;
+              const name = connectionName(connection);
+              return (
+                <Tooltip key={connection.id}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        aria-label={
+                          connection.ready ? name : `${name}, can't run now`
+                        }
+                        aria-pressed={shown}
+                        className={cn(
+                          "relative flex size-9 shrink-0 items-center justify-center rounded-lg outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
+                          shown && "bg-muted",
+                        )}
+                        onClick={() => {
+                          setTab(connection.id);
+                          setQuery("");
+                        }}
+                        // The focus stays in the search, where the arrows and Enter work.
+                        onMouseDown={(event) => event.preventDefault()}
+                        type="button"
+                      />
+                    }
+                  >
+                    <ConnectionMark connection={connection} />
+                    {connection.ready ? null : (
+                      <span
+                        aria-hidden
+                        className="absolute top-1 right-1 size-2 rounded-full bg-destructive"
+                      />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{name}</TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </fieldset>
+        ) : null}
         <ComboboxInput
           // On the efforts alone there is no model to search for: it stays only to keep the keys.
           className={
@@ -355,13 +577,18 @@ function Picker({
               ? // Out of the popup's flow, so it takes no row: as `sr-only` it still held one, a
                 // blank band under the last effort.
                 "pointer-events-none absolute! m-0! h-0! w-0! overflow-hidden border-0! opacity-0"
-              : "col-start-1 row-start-1"
+              : cn(modelsColumn, "row-start-1")
           }
           placeholder="Search models"
           showTrigger={false}
         />
         {noModels && !effortsOnly ? (
-          <p className="col-start-1 row-start-2 px-3 py-6 text-center text-muted-foreground text-sm">
+          <p
+            className={cn(
+              modelsColumn,
+              "row-start-2 px-3 py-6 text-center text-muted-foreground text-sm",
+            )}
+          >
             No models match.
           </p>
         ) : null}
@@ -370,18 +597,49 @@ function Picker({
             group.value === "models" ? (
               <ComboboxGroup
                 aria-label="Models"
-                className="no-scrollbar col-start-1 row-start-2 max-h-[min(20rem,calc(var(--available-height)-4rem))] min-h-0 scroll-py-1 overflow-y-auto overscroll-contain p-1.5 pt-0.5"
+                className={cn(
+                  modelsColumn,
+                  "no-scrollbar row-start-2 max-h-[min(20rem,calc(var(--available-height)-4rem))] min-h-0 scroll-py-1 overflow-y-auto overscroll-contain p-1.5 pt-0.5",
+                )}
                 items={group.items}
                 key="models"
               >
                 <ComboboxCollection>
                   {(choice: Choice) =>
-                    choice.kind === "model" ? (
+                    choice.kind === "heading" ? (
+                      // Not an option: the name of the connection the models under it are on.
+                      <div
+                        className="px-2.5 pt-2.5 pb-1 text-muted-foreground text-xs"
+                        key={`heading-${choice.connection.id}`}
+                      >
+                        <span className="font-medium">
+                          {connectionName(choice.connection)}
+                        </span>
+                        {choice.connection.ready ? null : (
+                          <p className="pt-1 text-destructive">
+                            {choice.connection.problem?.detail}
+                          </p>
+                        )}
+                        {choice.connection.ready ||
+                        choice.connection.owner !== "personal" ? null : (
+                          // Theirs to fix: the organization's waits on an admin, in Settings.
+                          <a
+                            className="mt-1 inline-block text-foreground underline underline-offset-4"
+                            href={reconnectPath(
+                              choice.connection.id,
+                              "personal",
+                            )}
+                          >
+                            Reconnect
+                          </a>
+                        )}
+                      </div>
+                    ) : choice.kind === "model" ? (
                       <ComboboxItem
                         // `pl` only: the item keeps its own right padding, where the check sits.
                         // At least a row's height, and taller where a name takes two lines.
                         className="min-h-9 gap-2.5 py-1.5 pl-2.5"
-                        key={choice.model.id}
+                        key={`${choice.connection ?? ""}/${choice.model.id}`}
                         value={choice}
                       >
                         <ModelMark model={choice.model} />
@@ -402,7 +660,9 @@ function Picker({
                           >
                             {choice.model.label}
                           </span>
-                          {choice.model.id === defaultModel ? (
+                          {choice.model.id === defaultModel &&
+                          (!grouped ||
+                            choice.connection === defaultConnection) ? (
                             <DefaultTag />
                           ) : null}
                         </span>
@@ -417,7 +677,10 @@ function Picker({
                   "min-h-0 overflow-y-auto p-1.5",
                   effortsOnly
                     ? "col-start-1 row-span-2 row-start-1"
-                    : "col-start-2 row-span-2 row-start-1 border-l",
+                    : cn(
+                        rail ? "col-start-3" : "col-start-2",
+                        "row-span-2 row-start-1 border-l",
+                      ),
                 )}
                 items={group.items}
                 key="thinking"
@@ -432,7 +695,7 @@ function Picker({
                     aria-hidden
                     className="ml-auto min-w-0 truncate text-muted-foreground text-xs"
                   >
-                    {selected.label}
+                    {selected?.label}
                   </span>
                 </div>
                 <ComboboxCollection>
@@ -448,7 +711,7 @@ function Picker({
                       >
                         <span className="min-w-0 truncate">{choice.label}</span>
                         {choice.effort !== null &&
-                        choice.effort === selected.defaultEffort ? (
+                        choice.effort === selected?.defaultEffort ? (
                           <DefaultTag />
                         ) : null}
                         {choice.effort === running ? (

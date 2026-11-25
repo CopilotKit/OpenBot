@@ -4,7 +4,16 @@ import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page, Request } from "playwright-core";
 import { compile } from "tailwindcss";
 import type { Import } from "@/lib/api/generated/model";
-import { ListImportsResponse } from "@/lib/api/generated/moving-to-openbot-cloud/moving-to-openbot-cloud.zod";
+import {
+  ApplyImportHeader,
+  ApplyImportResponse,
+  CreateImportBody,
+  CreateImportHeader,
+  CreateImportResponse,
+  GetImportResponse,
+  GetImportVerificationResponse,
+  ListImportsResponse,
+} from "@/lib/api/generated/moving-to-openbot-cloud/moving-to-openbot-cloud.zod";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import {
   GetPreferencesResponse,
@@ -28,7 +37,14 @@ import { personBody } from "./accounts-api";
  * - Working in Acme, with their move in Sam's organization: a bar names where the Bots are, Switch
  *   moves the session there (`set-active`) and the bar goes, and a reload keeps it gone.
  * - Dismiss saves the bar's notice to their preferences, and a reload keeps it gone in Acme.
- * - Working where their move is, nothing is said and their other organizations are never asked.
+ * - Move them to Acme moves the Bots across from Sam's organization (createImport with
+ *   fromOrganizationId, applyImport, getImport until imported, getImportVerification), says it is
+ *   moving while it runs, and the bar goes once they are here, after a reload too.
+ * - A move that stops says the server's sentence, and Try again goes on with the same move.
+ * - Where Acme doesn't let them use Bots, a sentence says so in place of Move; where the list says
+ *   nothing (an older OpenBot Cloud) and the server refuses, its own sentence is shown.
+ * - In the organization the Bots left, the bar names the one they went to: the newest move decides.
+ * - Working where their newest move is, nothing is said.
  * - Settings → Computer inside OpenBot Desktop connected to OpenBot Cloud names the account and the
  *   organization this app is signed in as.
  *
@@ -83,6 +99,45 @@ const NOT_FOUND = {
   code: "NOT_FOUND",
 };
 
+/**
+ * A move of Sam's Bots from Sam's organization into Acme, finished after the move from the
+ * computer: the newest, as listImports in Acme answers it.
+ */
+const MOVED_ACROSS: Import = {
+  ...MOVE,
+  id: "imp_3c9e1b7a5d2f4e8b",
+  sourceName: OWN.name,
+  fromOrganizationId: OWN.id,
+  createdAt: "2026-11-24T09:00:00Z",
+  finishedAt: "2026-11-24T09:01:30Z",
+  receivedParts: [],
+};
+
+/** OpenBot Cloud's own sentence for MOVE_NOT_ALLOWED (api/openapi/moves.yaml, MoveNotAllowed). */
+const NOT_ALLOWED = {
+  type: "https://open.bot/errors/move-not-allowed",
+  title: "You can't move Bots into this organization.",
+  status: 403,
+  detail:
+    "An admin of Acme hasn't let you use Bots there, so your Bots can't move in. Ask an admin of Acme to turn on Use Bots for you.",
+  code: "MOVE_NOT_ALLOWED",
+  category: "permission",
+  retryable: false,
+  requestId: "req_test",
+  traceId: "trace_test",
+};
+
+const INVALID = {
+  type: "https://open.bot/errors/invalid-request",
+  title: "Invalid request.",
+  status: 400,
+  detail: "That request isn't one this address takes.",
+  code: "INVALID_REQUEST",
+};
+
+/** The sentence a stopped move says in `error`, as getImport answers it when failed. */
+const STOPPED = "The move stopped before everything arrived. Try again.";
+
 type Answer = { status: number; json: unknown };
 
 /** OpenBot Cloud's server, as far as these screens ask it. */
@@ -95,9 +150,37 @@ class FakeServer {
   /** Every organization the app asked the session to work in. */
   switched: string[] = [];
   unanswered: string[] = [];
+  /** Each organization's moves, newest first, as listImports answers them. */
+  imports: Record<string, Import[]> = { [ACME.id]: [], [OWN.id]: [MOVE] };
+  /** Organization.canMoveIn for each: undefined leaves it out, as an older OpenBot Cloud does. */
+  canMoveIn: Record<string, boolean | undefined> = {
+    [ACME.id]: true,
+    [OWN.id]: true,
+  };
+  /** Each createImport the app made: where, the body, and its Idempotency-Key. */
+  created: { organization: string; body: unknown; key: string | undefined }[] =
+    [];
+  /** Each applyImport the app made: where, which import, and its Idempotency-Key. */
+  applied: { organization: string; id: string; key: string | undefined }[] = [];
+  /** Each import whose check was read. */
+  verified: string[] = [];
+  /** The first move applied stops (failed, with `STOPPED`); applying it again goes on. */
+  stopFirst = false;
+  /** Organizations whose rules refuse a move in although the list says nothing (no canMoveIn). */
+  refuseIn = new Set<string>();
+  /** The moves being carried out: how many times each was read since it was applied. */
+  private running = new Map<string, number>();
 
   constructor(active: string) {
     this.active = active;
+  }
+
+  organization(id: string) {
+    return [ACME, OWN].find((one) => one.id === id);
+  }
+
+  move(organization: string, id: string): Import | undefined {
+    return this.imports[organization]?.find((one) => one.id === id);
   }
 
   answer(request: Request): Answer {
@@ -113,12 +196,18 @@ class FakeServer {
               role: "member",
               personal: false,
               active: this.active === ACME.id,
+              ...(this.canMoveIn[ACME.id] === undefined
+                ? {}
+                : { canMoveIn: this.canMoveIn[ACME.id] }),
             },
             {
               ...OWN,
               role: "owner",
               personal: true,
               active: this.active === OWN.id,
+              ...(this.canMoveIn[OWN.id] === undefined
+                ? {}
+                : { canMoveIn: this.canMoveIn[OWN.id] }),
             },
           ],
           canCreate: true,
@@ -165,10 +254,75 @@ class FakeServer {
       return {
         status: 200,
         json: ListImportsResponse.parse({
-          items: organization === OWN.id ? [MOVE] : [],
+          items: this.imports[organization as string] ?? [],
           nextCursor: null,
         }),
       };
+    }
+    if (rest === "/imports" && method === "POST")
+      return this.createImport(organization as string, request);
+    const one = rest?.match(/^\/imports\/([^/]+)(\/apply|\/verification)?$/);
+    if (one) {
+      const [, id, what] = one;
+      const move = this.move(organization as string, id as string);
+      if (!move)
+        return {
+          status: 404,
+          json: {
+            type: "https://open.bot/errors/import-not-found",
+            title: "Import not found.",
+            status: 404,
+            detail: "That import isn't here. Start the move again.",
+            code: "IMPORT_NOT_FOUND",
+          },
+        };
+      if (what === "/apply" && method === "POST") {
+        const key = request.headers()["idempotency-key"];
+        this.applied.push({
+          organization: organization as string,
+          id: move.id,
+          key,
+        });
+        if (!ApplyImportHeader.safeParse({ "Idempotency-Key": key }).success)
+          return { status: 400, json: INVALID };
+        if (move.status !== "imported") {
+          move.status = "importing";
+          delete move.error;
+          this.running.set(move.id, 0);
+        }
+        return { status: 202, json: ApplyImportResponse.parse(move) };
+      }
+      if (what === "/verification" && method === "GET") {
+        this.verified.push(move.id);
+        if (move.status !== "imported")
+          return {
+            status: 409,
+            json: {
+              type: "https://open.bot/errors/import-not-finished",
+              title: "The import hasn't finished.",
+              status: 409,
+              detail: "This move hasn't finished yet.",
+              code: "IMPORT_NOT_FINISHED",
+            },
+          };
+        return {
+          status: 200,
+          json: GetImportVerificationResponse.parse({
+            importId: move.id,
+            matches: true,
+            kinds: [
+              { kind: "bots", expected: 4, found: 4, leftOut: 0 },
+              { kind: "conversations", expected: 37, found: 37, leftOut: 0 },
+            ],
+            notes: [],
+            reconnect: [],
+          }),
+        };
+      }
+      if (!what && method === "GET") {
+        this.carryOut(move);
+        return { status: 200, json: GetImportResponse.parse(move) };
+      }
     }
     if (rest === "/people/me" && method === "GET")
       return {
@@ -194,6 +348,54 @@ class FakeServer {
     }
     this.unanswered.push(`${method} ${path}`);
     return { status: 404, json: NOT_FOUND };
+  }
+
+  /** createImport with fromOrganizationId, by the spec: ready at once, nothing to upload. */
+  createImport(organization: string, request: Request): Answer {
+    const key = request.headers()["idempotency-key"];
+    const body = request.postDataJSON() as unknown;
+    this.created.push({ organization, body, key });
+    if (!CreateImportHeader.safeParse({ "Idempotency-Key": key }).success)
+      return { status: 400, json: INVALID };
+    const input = CreateImportBody.safeParse(body);
+    if (!input.success) return { status: 400, json: INVALID };
+    if (
+      this.canMoveIn[organization] === false ||
+      this.refuseIn.has(organization)
+    )
+      return { status: 403, json: NOT_ALLOWED };
+    const from = input.data.fromOrganizationId;
+    const source = from ? this.organization(from) : undefined;
+    if (!source || source.id === organization)
+      return { status: 400, json: INVALID };
+    const move: Import = {
+      ...MOVE,
+      id: `imp_across_${this.created.length}`,
+      status: "ready",
+      sourceName: input.data.sourceName ?? source.name,
+      fromOrganizationId: source.id,
+      createdAt: "2026-11-24T09:00:00Z",
+      receivedParts: [],
+    };
+    delete move.finishedAt;
+    this.imports[organization] = [move, ...(this.imports[organization] ?? [])];
+    return { status: 201, json: CreateImportResponse.parse(move) };
+  }
+
+  /** A move applied finishes on the next read: imported, or the first one stops if `stopFirst`. */
+  private carryOut(move: Import) {
+    if (!this.running.has(move.id)) return;
+    this.running.delete(move.id);
+    if (this.stopFirst) {
+      this.stopFirst = false;
+      move.status = "failed";
+      move.error = STOPPED;
+      return;
+    }
+    move.status = "imported";
+    move.finishedAt = "2026-11-24T09:01:30Z";
+    move.expected = [{ kind: "bots", count: 4 }];
+    move.imported = [{ kind: "bots", count: 4 }];
   }
 
   preferences() {
@@ -519,19 +721,172 @@ describe.skipIf(!asked)("after a move, where the Bots are", () => {
       }, 60_000);
     }
 
-  test("working where the move is, nothing is said and no other organization is asked", async () => {
+  test("working where the newest move is, nothing is said", async () => {
     const server = new FakeServer(OWN.id);
     const page = await open(engines[0] ?? "chromium", "light", server, "/");
     try {
       await page.getByRole("heading", { name: "Home" }).waitFor();
-      await page.waitForFunction(() => true);
       await page.waitForTimeout(800);
       expect(
         await page
           .getByRole("complementary", { name: "Your moved Bots" })
           .count(),
       ).toBe(0);
-      expect(server.importsAsked).toEqual([OWN.id]);
+      // Every organization is asked: a move here may since have moved on to another.
+      expect([...new Set(server.importsAsked)].sort()).toEqual(
+        [ACME.id, OWN.id].sort(),
+      );
+      expect(server.created).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+});
+
+describe.skipIf(!asked)("moving the Bots to where the person works", () => {
+  for (const engine of engines)
+    for (const theme of THEMES) {
+      test(`Move them to Acme moves the Bots across and the bar goes, in ${engine}, ${theme}`, async () => {
+        const server = new FakeServer(ACME.id);
+        const page = await open(engine, theme, server, "/");
+        try {
+          const bar = page.getByRole("complementary", {
+            name: "Your moved Bots",
+          });
+          await bar.getByText(BAR, { exact: true }).waitFor();
+          await bar.getByRole("button", { name: "Move them to Acme" }).click();
+          const moving = bar.getByRole("button", {
+            name: "Moving them to Acme…",
+          });
+          await moving.waitFor();
+          expect(await moving.isDisabled()).toBe(true);
+          await shoot(page, "moving", engine, theme);
+          await bar.waitFor({ state: "detached", timeout: 15_000 });
+          // Asked once, in Acme, from Sam's organization, each write with its own key.
+          expect(server.created).toHaveLength(1);
+          expect(server.created[0]?.organization).toBe(ACME.id);
+          expect(server.created[0]?.body).toEqual({
+            fromOrganizationId: OWN.id,
+          });
+          expect(server.created[0]?.key).toBeTruthy();
+          expect(server.applied.map((one) => one.organization)).toEqual([
+            ACME.id,
+          ]);
+          expect(server.applied[0]?.key).toBeTruthy();
+          expect(server.applied[0]?.key).not.toBe(server.created[0]?.key);
+          expect(server.verified).toEqual([server.applied[0]?.id]);
+          // Moved, not switched: the person is still in Acme.
+          expect(server.switched).toEqual([]);
+          await shoot(page, "moved", engine, theme);
+          await page.reload();
+          await page.getByRole("heading", { name: "Home" }).waitFor();
+          await page.waitForTimeout(800);
+          expect(await bar.count()).toBe(0);
+          expect(server.unanswered).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+
+      test(`a move that stops says the server's sentence, and Try again goes on with it, in ${engine}, ${theme}`, async () => {
+        const server = new FakeServer(ACME.id);
+        server.stopFirst = true;
+        const page = await open(engine, theme, server, "/");
+        try {
+          const bar = page.getByRole("complementary", {
+            name: "Your moved Bots",
+          });
+          await bar.getByRole("button", { name: "Move them to Acme" }).click();
+          await bar.getByRole("alert").getByText(STOPPED).waitFor({
+            timeout: 15_000,
+          });
+          await shoot(page, "stopped", engine, theme);
+          expect(await cutOff(page)).toEqual({ sideways: false, cut: [] });
+          await bar.getByRole("button", { name: "Try again" }).click();
+          await bar.waitFor({ state: "detached", timeout: 15_000 });
+          // The same move, applied again: nothing started twice.
+          expect(server.created).toHaveLength(1);
+          expect(server.applied.map((one) => one.id)).toEqual([
+            server.applied[0]?.id,
+            server.applied[0]?.id,
+          ]);
+          expect(server.unanswered).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+
+      test(`where Acme doesn't let them use Bots, the bar says so in place of Move, in ${engine}, ${theme}`, async () => {
+        const server = new FakeServer(ACME.id);
+        server.canMoveIn[ACME.id] = false;
+        const page = await open(engine, theme, server, "/");
+        try {
+          const bar = page.getByRole("complementary", {
+            name: "Your moved Bots",
+          });
+          await page.getByRole("heading", { name: "Home" }).waitFor();
+          await page.waitForTimeout(800);
+          await shoot(page, "not-allowed", engine, theme);
+          await bar
+            .getByText(
+              "You can't move them to Acme. Ask an admin to let you use Bots there.",
+              { exact: true },
+            )
+            .waitFor({ timeout: 5_000 });
+          expect(
+            await bar.getByRole("button", { name: /^Move them/ }).count(),
+          ).toBe(0);
+          await bar
+            .getByRole("button", { name: "Switch to Sam's organization" })
+            .waitFor();
+          expect(await cutOff(page)).toEqual({ sideways: false, cut: [] });
+          expect(server.created).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+
+      test(`in the organization the Bots left, the bar names the one they went to, in ${engine}, ${theme}`, async () => {
+        const server = new FakeServer(OWN.id);
+        server.imports[ACME.id] = [{ ...MOVED_ACROSS }];
+        const page = await open(engine, theme, server, "/");
+        try {
+          const bar = page.getByRole("complementary", {
+            name: "Your moved Bots",
+          });
+          await page.getByRole("heading", { name: "Home" }).waitFor();
+          await page.waitForTimeout(800);
+          await shoot(page, "left", engine, theme);
+          await bar
+            .getByText("Your Bots from Sam's organization are in Acme.", {
+              exact: true,
+            })
+            .waitFor({ timeout: 5_000 });
+          await bar
+            .getByRole("button", { name: "Move them to Sam's organization" })
+            .waitFor();
+          await bar.getByRole("button", { name: "Switch to Acme" }).click();
+          await bar.waitFor({ state: "detached" });
+          expect(server.switched).toEqual([ACME.id]);
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+    }
+
+  test("where the list says nothing and OpenBot Cloud refuses, its own sentence is shown and nothing moves", async () => {
+    const server = new FakeServer(ACME.id);
+    server.canMoveIn[ACME.id] = undefined;
+    server.refuseIn.add(ACME.id);
+    const page = await open(engines[0] ?? "chromium", "light", server, "/");
+    try {
+      const bar = page.getByRole("complementary", { name: "Your moved Bots" });
+      await bar.getByRole("button", { name: "Move them to Acme" }).click();
+      await bar.getByRole("alert").getByText(NOT_ALLOWED.detail).waitFor();
+      await bar.getByRole("button", { name: "Try again" }).waitFor();
+      expect(server.created).toHaveLength(1);
+      expect(server.applied).toEqual([]);
+      expect(server.imports[OWN.id]).toEqual([MOVE]);
     } finally {
       await page.close();
     }

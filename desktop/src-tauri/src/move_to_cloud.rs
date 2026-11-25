@@ -348,7 +348,11 @@ pub trait Local {
 
 /// OpenBot Cloud: where the import is made and checked.
 pub trait Cloud {
-    fn create_import(&mut self, source_name: &str) -> Result<Import, String>;
+    /**
+    `createImport`. A refusal Cloud says in a sentence for the person (403: the organization doesn't
+    let them use Bots) is `Failure::Stopped` with that sentence; anything else is a failure to send.
+    */
+    fn create_import(&mut self, source_name: &str) -> Result<Import, Failure>;
     fn upload(&mut self, id: &str, part: u32, bytes: &[u8]) -> Result<Import, String>;
     fn apply(&mut self, id: &str) -> Result<Import, String>;
     fn import(&mut self, id: &str) -> Result<Import, String>;
@@ -453,6 +457,11 @@ pub enum Failure {
     Stopped { said: String },
     /// Cloud has the import, but not everything in it: what was short, for the log.
     Mismatch { detail: String },
+    /**
+    The organization the person chose doesn't let them use Bots (`Organization.canMoveIn` is
+    false), so the move was refused before anything was packed up or sent. `said` names it.
+    */
+    NotAllowed { said: String },
 }
 
 /**
@@ -470,7 +479,7 @@ impl Failure {
     /// The sentence the setup window shows. Nothing was removed, which the window says too.
     pub fn said(&self) -> &str {
         match self {
-            Failure::Stopped { said } => said,
+            Failure::Stopped { said } | Failure::NotAllowed { said } => said,
             Failure::Failed {
                 stage: Stage::Export,
                 ..
@@ -490,6 +499,7 @@ impl Failure {
             Failure::Failed { .. } => "move-failed",
             Failure::Stopped { .. } => "move-stopped",
             Failure::Mismatch { .. } => "move-mismatch",
+            Failure::NotAllowed { .. } => "move-not-allowed",
         }
     }
 
@@ -497,7 +507,7 @@ impl Failure {
     pub fn detail(&self) -> &str {
         match self {
             Failure::Failed { detail, .. } | Failure::Mismatch { detail } => detail,
-            Failure::Stopped { said } => said,
+            Failure::Stopped { said } | Failure::NotAllowed { said } => said,
         }
     }
 }
@@ -583,9 +593,7 @@ pub fn run(
     // 1. The import on Cloud first: its key seals the keys in the export. Always given, so apps
     //    connected with a key move connected; the model key only when the person brings it.
     progress.running(Stage::Export, Some(0.0));
-    let import = cloud
-        .create_import(asked.source_name)
-        .map_err(failed(Stage::Upload))?;
+    let import = cloud.create_import(asked.source_name)?;
     let recipient_key = import.recipient_key.as_ref();
 
     // 2. The export here, until it is ready.
@@ -927,16 +935,33 @@ impl Api {
         credentials: Box<dyn Credentials>,
         pick: fn(&[Organization]) -> Option<String>,
     ) -> Result<Api, String> {
-        let mut api = Api::at(base, credentials, "")?;
-        let page: OrganizationPage = api.json(
-            reqwest::Method::GET,
-            "/api/v2/people/me/organizations",
-            None,
-        )?;
-        api.organization = pick(&page.organizations)
-            .ok_or_else(|| "the caller belongs to no organization there".to_owned())?;
-        api.organization_name = page
-            .organizations
+        Api::open_in(base, credentials, |list| {
+            pick(list).ok_or_else(|| Failure::Failed {
+                stage: Stage::SignIn,
+                detail: "the caller belongs to no organization there".to_owned(),
+            })
+        })
+        .map_err(|failure| failure.detail().to_owned())
+    }
+
+    /**
+    The API at `base`, in the organization `choose` takes from the caller's own list, read once
+    here: the list the person chose from is the list the move goes by. `choose` refusing, as
+    `destination` refuses an organization that won't take the person's Bots, is the answer.
+    */
+    pub fn open_in(
+        base: &str,
+        credentials: Box<dyn Credentials>,
+        choose: impl FnOnce(&[Organization]) -> Result<String, Failure>,
+    ) -> Result<Api, Failure> {
+        let failed = |detail: String| Failure::Failed {
+            stage: Stage::SignIn,
+            detail,
+        };
+        let mut api = Api::at(base, credentials, "").map_err(failed)?;
+        let organizations = api.organizations().map_err(failed)?;
+        api.organization = choose(&organizations)?;
+        api.organization_name = organizations
             .iter()
             .find(|organization| organization.id == api.organization)
             .and_then(|organization| organization.name.clone())
@@ -947,6 +972,16 @@ impl Api {
 
     pub fn organization(&self) -> &str {
         &self.organization
+    }
+
+    /// The caller's own organizations (`listMyOrganizations`), as the API lists them.
+    pub fn organizations(&self) -> Result<Vec<Organization>, String> {
+        let page: OrganizationPage = self.json(
+            reqwest::Method::GET,
+            "/api/v2/people/me/organizations",
+            None,
+        )?;
+        Ok(page.organizations)
     }
 
     /**
@@ -1104,6 +1139,19 @@ fn refusal(method: &reqwest::Method, path: &str, answered: &Answered) -> String 
     .to_owned()
 }
 
+/// A problem's own sentence for the person (`detail`), when it has one.
+fn problem_detail(body: &[u8]) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Problem {
+        detail: Option<String>,
+    }
+    serde_json::from_slice::<Problem>(body)
+        .ok()?
+        .detail
+        .map(|detail| detail.trim().to_owned())
+        .filter(|detail| !detail.is_empty())
+}
+
 fn idempotency_key() -> String {
     use rand::Rng;
     let bytes: [u8; 16] = rand::rng().random();
@@ -1129,6 +1177,7 @@ impl PersonalAi {
 
 /// One organization in the caller's list.
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Organization {
     pub id: String,
     #[serde(default)]
@@ -1137,6 +1186,26 @@ pub struct Organization {
     pub active: bool,
     #[serde(default)]
     pub personal: bool,
+    /// Whether the caller may move their Bots into it: the organization's own rule, as OpenBot
+    /// Cloud says it. Absent from an older Cloud, which is read as allowed.
+    #[serde(default)]
+    pub can_move_in: Option<bool>,
+}
+
+impl Organization {
+    /// Whether the caller may move their Bots into it. An older Cloud doesn't say: allowed.
+    pub fn takes_moves(&self) -> bool {
+        self.can_move_in != Some(false)
+    }
+
+    /// Its name, as a sentence says it, or its id when Cloud gives none.
+    pub fn said(&self) -> &str {
+        self.name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(&self.id)
+    }
 }
 
 #[derive(Deserialize)]
@@ -1151,6 +1220,42 @@ pub fn their_own_organization(list: &[Organization]) -> Option<String> {
         .or_else(|| list.iter().find(|organization| organization.active))
         .or_else(|| list.first())
         .map(|organization| organization.id.clone())
+}
+
+/**
+The organization a move goes into, from the caller's own list: `chosen` when the person chose one
+in the window, which must be in that list, otherwise their only one or their own
+(`their_own_organization`), as before they could choose. One that doesn't let them use Bots is
+refused here, before anything is packed up or sent, in a sentence that names it.
+*/
+pub fn destination(list: &[Organization], chosen: Option<&str>) -> Result<String, Failure> {
+    let id = match chosen {
+        Some(chosen) => list
+            .iter()
+            .find(|organization| organization.id == chosen)
+            .map(|organization| organization.id.clone())
+            .ok_or_else(|| Failure::Failed {
+                stage: Stage::SignIn,
+                detail: format!("{chosen} isn't one of the caller's organizations there"),
+            })?,
+        None => their_own_organization(list).ok_or_else(|| Failure::Failed {
+            stage: Stage::SignIn,
+            detail: "the caller belongs to no organization there".to_owned(),
+        })?,
+    };
+    match list.iter().find(|organization| organization.id == id) {
+        Some(organization) if !organization.takes_moves() => Err(Failure::NotAllowed {
+            said: not_allowed_in(organization.said()),
+        }),
+        _ => Ok(id),
+    }
+}
+
+/// Said when an organization doesn't let the person use Bots, so their Bots can't move into it.
+pub fn not_allowed_in(organization: &str) -> String {
+    format!(
+        "An admin of {organization} hasn't let you use Bots there. Ask them to let you, or choose another organization."
+    )
 }
 
 impl Local for Api {
@@ -1214,14 +1319,35 @@ impl Local for Api {
 }
 
 impl Cloud for Api {
-    fn create_import(&mut self, source_name: &str) -> Result<Import, String> {
+    fn create_import(&mut self, source_name: &str) -> Result<Import, Failure> {
         let name: String = source_name.chars().take(200).collect();
-        let body = (!name.trim().is_empty()).then(|| serde_json::json!({ "sourceName": name }));
-        self.json(
-            reqwest::Method::POST,
-            &self.in_organization("/imports"),
-            Some(body.unwrap_or_else(|| serde_json::json!({}))),
-        )
+        let body = if name.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({ "sourceName": name })
+        };
+        let path = self.in_organization("/imports");
+        let key = idempotency_key();
+        let answered = self
+            .send(reqwest::Method::POST, &path, &|request| {
+                request.header("Idempotency-Key", &key).json(&body)
+            })
+            .map_err(|detail| Failure::Failed {
+                stage: Stage::Upload,
+                detail,
+            })?;
+        // The organization doesn't let the person use Bots (MOVE_NOT_ALLOWED), or they can't
+        // reach it as they signed in: Cloud's own sentence is what they read.
+        if answered.status == 403 {
+            if let Some(said) = problem_detail(&answered.body) {
+                log::warn!("{}", refusal(&reqwest::Method::POST, &path, &answered));
+                return Err(Failure::Stopped { said });
+            }
+        }
+        parse(&reqwest::Method::POST, &path, answered).map_err(|detail| Failure::Failed {
+            stage: Stage::Upload,
+            detail,
+        })
     }
 
     fn upload(&mut self, id: &str, part: u32, bytes: &[u8]) -> Result<Import, String> {

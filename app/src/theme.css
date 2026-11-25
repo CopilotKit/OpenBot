@@ -137,6 +137,8 @@ body {
   --text-xs: 0.703125rem; /* 11.25px */
   --text-sm: 0.8203125rem; /* 13.125px */
   --text-base: 0.9375rem; /* 15px */
+  --text-conversation: 1rem;
+  --text-conversation--line-height: 1.5;
   --text-lg: 1.0546875rem; /* 16.875px */
   --text-xl: 1.171875rem; /* 18.75px */
   --text-2xl: 1.40625rem; /* 22.5px */

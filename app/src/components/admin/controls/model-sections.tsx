@@ -22,6 +22,11 @@ import {
 } from "@/components/layout/page-shell";
 import { AiConnectionRow } from "@/components/settings/ai-connection";
 import { ProviderTile } from "@/components/settings/ai-connection-chooser";
+import {
+  AiConnectionRows,
+  SEVERAL,
+  SEVERAL_FOR_THE_ORGANIZATION,
+} from "@/components/settings/ai-connection-list";
 import { teamPaths } from "@/components/teams/team-paths";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -49,6 +54,7 @@ import { providerById } from "@/lib/ai-connection/providers";
 import {
   type AiConnection,
   aiConnectionQueryOptions,
+  aiConnectionsQueryOptions,
   desktopAiSupportQueryOptions,
   type PersonalAiConnection,
   personalAiConnectionQueryOptions,
@@ -112,18 +118,32 @@ export function ProviderSection() {
   const connection = useQuery(aiConnectionQueryOptions());
   const support = useQuery(desktopAiSupportQueryOptions());
   const personal = useQuery(personalAiConnectionQueryOptions());
-  if (connection.isPending || support.isPending || personal.isPending)
+  const list = useQuery(aiConnectionsQueryOptions("organization"));
+  if (
+    connection.isPending ||
+    support.isPending ||
+    personal.isPending ||
+    list.isPending
+  )
     return null;
+  // Several connections, where the server lists them; the one row it had before otherwise.
+  const listed =
+    list.data &&
+    list.data.connections.length > 0 &&
+    connection.data?.editable &&
+    support.data !== "older"
+      ? list.data
+      : null;
   // Each person brings their own AI here (OpenBot Cloud): the server's verdict, never guessed.
   const cloud = personal.data?.available === true;
   return (
     <>
       <PageSection
-        description={
+        description={`${
           cloud
             ? "Bots use it for everyone in your organization who hasn't connected their own AI."
             : "Built-in Bots and the framework picked at setup run on this provider."
-        }
+        }${listed && listed.connections.length > 1 ? ` ${cloud ? SEVERAL_FOR_THE_ORGANIZATION : SEVERAL}` : ""}`}
         title={cloud ? "Organization's AI" : "AI provider"}
       >
         {connection.error ? (
@@ -136,6 +156,12 @@ export function ProviderSection() {
         ) : connection.data === null ? (
           // An OpenBot older than the AI connection: what the model listing says serves it.
           <CatalogueProviderRow />
+        ) : listed ? (
+          <AiConnectionRows
+            list={listed}
+            organizationWide={cloud}
+            scope="organization"
+          />
         ) : (
           <PageRows>
             {connection.data.editable && support.data !== "older" ? (
@@ -206,7 +232,7 @@ function ViewerAiSection({ personal }: { personal: PersonalAiConnection }) {
       title="Your AI"
     >
       <PageRows>
-        <Item render={<Link hash="your-ai" to="/settings" />} size="sm">
+        <Item render={<Link to="/settings/providers" />} size="sm">
           {described ? (
             <ProviderTile
               provider={providerById(personal.connection.provider)}

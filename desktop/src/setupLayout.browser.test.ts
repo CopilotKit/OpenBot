@@ -167,13 +167,29 @@ const MOVE_PREVIEW = {
   footprintBytes: moveFirst ? 26_600_000_000 : 20_200_000_000,
   modelKeysAvailable: true,
 };
+const MOVE_DESTINATIONS = [
+  { id: "org_northwind", name: "Northwind Traders", personal: false, canMoveIn: true },
+  { id: "org_mine", name: "Sam's organization", personal: true, canMoveIn: true },
+  { id: "org_lab", name: "Research Lab", personal: false, canMoveIn: false },
+];
 function moveAnswer(command) {
   if (command === "move_offer")
     return { due: true, fromSettings: move !== "choice" && !moveFirst, footprintBytes: moveFirst ? 23_100_000_000 : 20_200_000_000 };
   if (command === "move_preview")
     return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
+  // \`#move-where\`: in three organizations on OpenBot Cloud, one of which doesn't let them use Bots,
+  // so the window asks where the Bots go. \`#move-not-allowed\`: in one, which refuses the move.
+  if (command === "move_destinations") {
+    if (move === "where") return MOVE_DESTINATIONS;
+    if (move === "not-allowed") return [{ ...MOVE_DESTINATIONS[1], canMoveIn: true }];
+    return undefined;
+  }
   if (command !== "move_to_cloud") return undefined;
   const progress = (stage, state, share) => emit("move:progress", { stage, state, progress: share });
+  if (move === "not-allowed") {
+    progress("sign-in", "done");
+    throw { said: "An admin of Northwind Traders hasn't let you use Bots there. Ask them to let you, or choose another organization.", detail: null, kind: "move-not-allowed" };
+  }
   if (move === "signin") {
     progress("sign-in", "running");
     return new Promise(() => {});
@@ -3194,6 +3210,17 @@ describe.skipIf(!asked)(
         noButtons: true,
       },
       { hash: "#move-failed", heading: "The move didn't finish", move: true },
+      // In more than one organization on OpenBot Cloud: where the Bots go, one of them held.
+      {
+        hash: "#move-where",
+        heading: "Where should your Bots go?",
+        move: true,
+      },
+      {
+        hash: "#move-not-allowed",
+        heading: "Your Bots can't move there",
+        move: true,
+      },
       {
         hash: "#move-failed-detail",
         heading: "The move didn't finish",
@@ -3467,6 +3494,42 @@ describe.skipIf(!asked)(
                 );
               if (screen.hash.startsWith("#move-done"))
                 expect(said).toContain("20.2 GB of OpenBot files removed");
+              // Their own organization first and picked, then the others; one held, saying why.
+              if (screen.hash === "#move-where")
+                expect(
+                  await page.evaluate(() =>
+                    [
+                      ...document.querySelectorAll<HTMLInputElement>(
+                        "fieldset.picker > .tile > .tile-input",
+                      ),
+                    ].map((input) => [
+                      input.closest(".tile")?.querySelector(".tile-name")
+                        ?.textContent,
+                      input.checked,
+                      input.disabled,
+                      input.closest(".tile")?.querySelector(".tile-summary")
+                        ?.textContent,
+                    ]),
+                  ),
+                ).toEqual([
+                  ["Sam's organization", true, false, "Your own organization."],
+                  [
+                    "Northwind Traders",
+                    false,
+                    false,
+                    "An organization you belong to.",
+                  ],
+                  [
+                    "Research Lab",
+                    false,
+                    true,
+                    "An admin of this organization hasn't let you use Bots here.",
+                  ],
+                ]);
+              if (screen.hash === "#move-not-allowed")
+                expect(said).toContain(
+                  "Nothing was removed from this computer.",
+                );
               expect(said.includes("of that is free space on your disk")).toBe(
                 screen.hash === "#move-done-held",
               );
