@@ -48,19 +48,22 @@ function useLiveFrame(botId: string, enabled: boolean) {
     let socket: WebSocket | undefined;
     streaming.current = false;
     void (async () => {
-      const cookie = await authClient.getCookie();
+      const token = await authClient.getAccessToken();
       // Which organization could not be read: the screenshot poll below says why.
       const path = await screenSocketPath(botId).catch(() => undefined);
       if (closed || path === undefined) return;
       const url = `${serverUrl.replace(/^http/, "ws")}${path}`;
-      // React Native's WebSocket accepts headers, which is how the session cookie reaches the upgrade.
+      // React Native's WebSocket accepts headers, which is how the access token reaches the upgrade.
       const Native = WebSocket as unknown as new (
         url: string,
         protocols: string[] | null,
         options: { headers: Record<string, string> },
       ) => WebSocket;
       socket = new Native(url, null, {
-        headers: { ...clientHeaders(), ...(cookie ? { Cookie: cookie } : {}) },
+        headers: {
+          ...clientHeaders(),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
       socket.onmessage = (event) => {
         let message: unknown;

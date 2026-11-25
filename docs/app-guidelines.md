@@ -113,7 +113,7 @@ What `mobile/` has today, which stays:
 | App | Expo with React Native and React 19, in TypeScript's strict mode. One app for iOS and Android. |
 | Screens | Expo Router: a file under `mobile/app/` is a screen. |
 | The API | A client generated from `api/openapi.yaml` by Orval, in `src/api/generated`. Never edited by hand: see [mobile/AGENTS.md](../mobile/AGENTS.md). |
-| Sign-in | Better Auth's Expo client. The session is kept in `expo-secure-store`. |
+| Sign-in | OAuth 2.1 with PKCE, as the server's `openbot-mobile` client (`mobile/src/oauth.ts`), in the system browser's sign-in session. The refresh token is kept in `expo-secure-store`. It works on every OpenBot, OpenBot Cloud included, where the server has `EXPO_PROJECT_ID`. |
 | Notifications | `expo-notifications`. |
 | Builds | EAS. In development it runs as a development client (`expo-dev-client`), not in Expo Go. |
 | Packages | npm, with `mobile/package-lock.json`. The rest of the repository uses Bun. |

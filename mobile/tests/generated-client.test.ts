@@ -5,7 +5,7 @@
  * reached it.
  *
  * What the phone's sign-in hands every request (src/auth.ts: the deployment's address and the signed-in session's
- * cookie) and expo-crypto's randomUUID are the platform here, so those two modules are stood in for with the values the
+ * token) and expo-crypto's randomUUID are the platform here, so those two modules are stood in for with the values the
  * platform gives. Everything between a screen's call and the network is the app's own code.
  */
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
@@ -18,7 +18,7 @@ type Seen = {
   method: string;
   path: string;
   query: string;
-  cookie: string | null;
+  token: string | null;
   key: string | null;
   contentType: string | null;
   body: unknown;
@@ -29,9 +29,9 @@ const organizationNamed: { request: string; organization: string | null }[] =
   [];
 /** Which organization each read of the deployment was asked of. */
 const deploymentAsked: string[] = [];
-/** What each read of the deployment was sent with: the session cookie, and the organization it named. */
+/** What each read of the deployment was sent with: the session token, and the organization it named. */
 const deploymentSentWith: {
-  cookie: string | null;
+  token: string | null;
   organization: string | null;
 }[] = [];
 /**
@@ -84,6 +84,9 @@ const ada = {
   canManage: true,
 };
 
+/** The access token a request was sent with, as `Authorization: Bearer`. */
+const bearer = (request: Request) =>
+  request.headers.get("authorization")?.replace(/^Bearer /, "") ?? null;
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -101,14 +104,10 @@ const server = Bun.serve({
     if (deployment) {
       deploymentAsked.push(deployment[1] as string);
       deploymentSentWith.push({
-        cookie: request.headers.get("cookie"),
+        token: bearer(request),
         organization: request.headers.get("openbot-organization"),
       });
-      if (
-        outsideDefault &&
-        deployment[1] === "default" &&
-        request.headers.get("cookie")
-      )
+      if (outsideDefault && deployment[1] === "default" && bearer(request))
         return Response.json(
           {
             type: "https://open.bot/errors/organization-not-found",
@@ -247,7 +246,7 @@ const server = Bun.serve({
       method: request.method,
       path: url.pathname,
       query: url.search,
-      cookie: request.headers.get("cookie"),
+      token: bearer(request),
       key: request.headers.get("idempotency-key"),
       contentType: request.headers.get("content-type"),
       body: text ? JSON.parse(text) : null,
@@ -301,11 +300,11 @@ const server = Bun.serve({
         canCreate: false,
         nextCursor: null,
       });
-    // Only a live session reads the person's organizations. A cookie sign-in left behind (an unfinished sign-in's
-    // state, an expired session) is refused as OpenBot refuses it.
+    // Only a live session reads the person's organizations. A token left behind (revoked, or past its sign-in) is
+    // refused as OpenBot refuses it.
     if (
       route === `GET ${MINE}` &&
-      !request.headers.get("cookie")?.includes("session_token=signed-in")
+      !bearer(request)?.startsWith("oba_signed-in")
     )
       return Response.json(
         {
@@ -414,15 +413,27 @@ const server = Bun.serve({
   },
 });
 const serverUrl = `http://127.0.0.1:${server.port}`;
-const COOKIE = "better-auth.session_token=signed-in";
+const TOKEN = "oba_signed-in";
 /** The session the app holds: null before anybody has signed in. */
-let cookie: string | null = COOKIE;
+let token: string | null = TOKEN;
+/** What a refresh would give in place of a refused token, once. */
+let replacement: string | null = null;
 /** What the phone keeps in its secure store (src/auth.ts `organizationStore`). */
 const secure = new Map<string, string>();
 
 mock.module("../src/auth", () => ({
   serverUrl,
-  authClient: { getCookie: () => cookie },
+  // The token the app holds. A refused one is replaced only when a test gives a `replacement`, as a refresh would;
+  // without one the sign-in ends, as when its refresh is refused too.
+  authClient: {
+    getAccessToken: async () => token,
+    refreshAfterRefusal: async () => {
+      if (!replacement) return null;
+      token = replacement;
+      replacement = null;
+      return token;
+    },
+  },
   // The in-app browser through the hosted sign-in, as OpenBot by CopilotKit answers somebody still signed in there.
   renewHostedSignIn: async (signIn: string) => {
     renewed.push(signIn);
@@ -497,14 +508,15 @@ beforeEach(() => {
   hosted.posts = [];
   renewed.length = 0;
   setSignedInPerson("ada");
-  cookie = COOKIE;
+  token = TOKEN;
+  replacement = null;
   deploymentAnswer = { status: 200, body: fixture.deployments.current };
 });
 afterAll(() => {
   server.stop(true);
 });
 
-test("a read goes to the deployment at the API's address, in the organization the person works in, with the session's cookie and no key", async () => {
+test("a read goes to the deployment at the API's address, in the organization the person works in, with the person's access token and no key", async () => {
   const original = globalThis.fetch;
   const inits: RequestInit[] = [];
   globalThis.fetch = ((
@@ -525,7 +537,7 @@ test("a read goes to the deployment at the API's address, in the organization th
   const asked = {
     method: "GET",
     query: "",
-    cookie: COOKIE,
+    token: TOKEN,
     key: null,
     contentType: null,
     body: null,
@@ -534,7 +546,7 @@ test("a read goes to the deployment at the API's address, in the organization th
     { ...asked, path: MINE, query: "?limit=100" },
     { ...asked, path: `${ORG}/bots/a%20b` },
   ]);
-  // The session is the cookie the app holds, never the platform's own cookie jar.
+  // The sign-in is the access token the app holds, never the platform's cookie jar.
   expect(inits.map((init) => init.credentials)).toEqual(["omit", "omit"]);
 
   // Asked once: the next request goes straight to the same organization.
@@ -560,7 +572,7 @@ test("every write carries an Idempotency-Key of its own, and a retry's own key i
   expect(device).toMatchObject({
     method: "PUT",
     path: `${ORG}/people/me/devices/phone-1`,
-    cookie: COOKIE,
+    token: TOKEN,
     key: "retry-1",
     contentType: "application/json",
     body: { token: "ExponentPushToken[x]", projectId: "p", platform: "ios" },
@@ -590,7 +602,7 @@ test("Link your company account asks for a ticket where the person works, a new 
   for (const ticket of tickets)
     expect(ticket).toMatchObject({
       method: "POST",
-      cookie: COOKIE,
+      token: TOKEN,
       contentType: "application/json",
       // returnTo app: once linked, OpenBot's page sends the browser back to the app.
       body: { providerId: "harbor-okta", returnTo: "app" },
@@ -646,7 +658,7 @@ test("switching a skill on gives the Bot its grant, the grant's id one path segm
       method: "PUT",
       path: `${ORG}/bots/ada/grants/skill%3Aresearch`,
       query: "",
-      cookie: COOKIE,
+      token: TOKEN,
       key: expect.stringMatching(/^[0-9a-f-]{36}$/),
       contentType: "application/json",
       body: {},
@@ -666,7 +678,7 @@ test("every request names the phone app and the OpenBot release it was built fro
 });
 
 test("before sign-in the app reads the deployment and decides: this release's OpenBot is fine, one that serves only newer phone apps says Update OpenBot", async () => {
-  cookie = null;
+  token = null;
   expect(await checkVersion()).toEqual({ kind: "ok" });
   expect(named).toEqual([`mobile/${RELEASE}`]);
   // Before sign-in nobody works anywhere: the deployment is asked of the organization every install has, and the
@@ -815,12 +827,12 @@ test("signed in, every request names the organization it is for, and the deploym
 
 /*
  * REPORTED (fused end-to-end run, Android): the signed-out screen lost its sign-in buttons and read "Authentication
- * required" whenever the phone held a cookie that was not a live session: an unfinished sign-in's state, or an expired
+ * required" whenever the phone held a token that was not a live session: an unfinished sign-in's state, or an expired
  * or revoked session. The deployment, which says how people sign in, was read in the person's organization whenever
- * the phone held any cookie, which meant reading their organizations first, and that was refused.
+ * the phone held any token, which meant reading their organizations first, and that was refused.
  */
-test("signed out with a cookie sign-in left behind, the deployment is still read in default, with its ways to sign in", async () => {
-  cookie = "better-auth.state=unfinished-sign-in";
+test("signed out with a token left behind, the deployment is still read in default, with its ways to sign in", async () => {
+  token = "oba_left-behind";
   expect(await checkVersion(false)).toEqual({ kind: "ok" });
   expect(deploymentAsked).toEqual(["default"]);
   const deployment = await readDeployment(false);
@@ -828,16 +840,16 @@ test("signed out with a cookie sign-in left behind, the deployment is still read
     fixture.deployments.current.authProviders,
   );
   expect(deploymentAsked).toEqual(["default", "default"]);
-  // Asked as nobody: nothing asked for the person's organizations, and no cookie or organization sent.
+  // Asked as nobody: nothing asked for the person's organizations, and no token or organization sent.
   expect(seen.map((request) => request.path)).not.toContain(MINE);
   expect(deploymentSentWith).toEqual([
-    { cookie: null, organization: null },
-    { cookie: null, organization: null },
+    { token: null, organization: null },
+    { token: null, organization: null },
   ]);
 });
 
 test("a session that ended without the phone knowing yet reads the deployment in default", async () => {
-  cookie = "better-auth.session_token=expired";
+  token = "oba_expired";
   expect(await checkVersion(true)).toEqual({ kind: "ok" });
   expect(deploymentAsked).toEqual(["default"]);
   const deployment = await readDeployment(true);
@@ -851,25 +863,25 @@ test("a session that ended without the phone knowing yet reads the deployment in
 /*
  * REPORTED (fused end-to-end run, Android): on every cold start of a signed-in person who is not a member of `default`,
  * Home said "Couldn't find that organization." in red and kept it. The session had not answered yet, so the signed-out
- * screen's deployment read went to `default` with the person's own cookie, and `default` is not found for somebody
+ * screen's deployment read went to `default` with the person's own token, and `default` is not found for somebody
  * who isn't in it.
  */
 test("a cold start of a signed-in person outside default reads default's deployment as nobody, then their own", async () => {
   outsideDefault = true;
-  cookie = "better-auth.session_token=signed-in-outside-default";
-  // Signed out as far as the screen knows: `default`'s, sent with no cookie and no organization, and it answers.
+  token = "oba_signed-in-outside-default";
+  // Signed out as far as the screen knows: `default`'s, sent with no token and no organization, and it answers.
   const signedOut = await readDeployment(false);
   expect(signedOut.authProviders).toEqual(
     fixture.deployments.current.authProviders,
   );
   expect(deploymentAsked).toEqual(["default"]);
-  expect(deploymentSentWith).toEqual([{ cookie: null, organization: null }]);
+  expect(deploymentSentWith).toEqual([{ token: null, organization: null }]);
 
   // Signed in: their own organization's, and their own organization's Bots, with nothing refused.
   expect(await checkVersion(true)).toEqual({ kind: "ok" });
   expect(deploymentAsked).toEqual(["default", "org_work"]);
   expect(deploymentSentWith[1]).toEqual({
-    cookie: "better-auth.session_token=signed-in-outside-default",
+    token: "oba_signed-in-outside-default",
     organization: "org_work",
   });
   const answer = await getBot(ORGANIZATION_ID, "a b");
@@ -878,7 +890,7 @@ test("a cold start of a signed-in person outside default reads default's deploym
 });
 
 test("a signed-in person whose organization's deployment isn't found reads default's as nobody", async () => {
-  cookie = "better-auth.session_token=signed-in-not-found";
+  token = "oba_signed-in-not-found";
   deploymentAnswer = {
     status: 404,
     body: {
@@ -888,7 +900,7 @@ test("a signed-in person whose organization's deployment isn't found reads defau
   };
   await readDeployment(true).catch(() => undefined);
   expect(deploymentAsked).toEqual(["org_work", "default"]);
-  expect(deploymentSentWith[1]).toEqual({ cookie: null, organization: null });
+  expect(deploymentSentWith[1]).toEqual({ token: null, organization: null });
 });
 
 /*
@@ -901,7 +913,7 @@ test("a signed-in request refused as signed out tells the app to read the sessio
   const heard: string[] = [];
   const stop = onSessionRefused(() => heard.push("refused"));
   try {
-    cookie = "better-auth.session_token=revoked";
+    token = "oba_revoked";
     const refused = await getBot(ORGANIZATION_ID, "a b").catch(
       (error: unknown) => error,
     );
@@ -910,12 +922,31 @@ test("a signed-in request refused as signed out tells the app to read the sessio
 
     // Nobody signed in: a refusal says nothing about a session.
     heard.length = 0;
-    cookie = null;
+    token = null;
     deploymentAnswer = {
       status: 401,
       body: { detail: "Authentication required.", code: "UNAUTHENTICATED" },
     };
     await readDeployment(false).catch(() => undefined);
+    expect(heard).toEqual([]);
+  } finally {
+    stop();
+  }
+});
+
+/*
+ * An access token lasts an hour, and the phone's clock or a revocation can end it before the app expects. Refused as
+ * signed out, the request is sent again once with a new token from the refresh token, and nobody is signed out.
+ */
+test("a request refused for an access token that ended is sent again with a new one, and the person stays signed in", async () => {
+  const heard: string[] = [];
+  const stop = onSessionRefused(() => heard.push("refused"));
+  try {
+    token = "oba_ended";
+    replacement = TOKEN;
+    const bot = await getBot(ORGANIZATION_ID, "a b");
+    expect(bot).toBeDefined();
+    expect(token).toBe(TOKEN);
     expect(heard).toEqual([]);
   } finally {
     stop();
@@ -950,7 +981,7 @@ test("picking another organization sends every request after it there, and the p
 
   // The app opened again, signed in afresh: the server still says org_work is active, and the pick kept on the phone
   // wins while it is one of the person's.
-  cookie = "better-auth.session_token=signed-in-again";
+  token = "oba_signed-in-again";
   seen.length = 0;
   await getBot(ORGANIZATION_ID, "a b");
   expect(seen.map((request) => request.path)).toEqual([
@@ -973,7 +1004,7 @@ test("picking another organization sends every request after it there, and the p
  */
 test("removed from the organization they work in, the next request goes to another of theirs, and Home is told", async () => {
   setSignedInPerson("cy");
-  cookie = "better-auth.session_token=signed-in-then-removed";
+  token = "oba_signed-in-then-removed";
   const heard: string[] = [];
   const stop = onOrganizationGone(() => heard.push("gone"));
   try {
@@ -1010,20 +1041,20 @@ test("removed from the organization they work in, the next request goes to anoth
 test("on a phone two people share, each opens in their own pick, never the last person's", async () => {
   // Ada picks default.
   setSignedInPerson("ada");
-  cookie = "better-auth.session_token=signed-in-ada";
+  token = "oba_signed-in-ada";
   await chooseOrganization("default");
   expect(secure.get("ada")).toBe("default");
 
   // Ben signs in on the same phone. He is in default too, and works where the server says he does: org_work.
   setSignedInPerson("ben");
-  cookie = "better-auth.session_token=signed-in-ben";
+  token = "oba_signed-in-ben";
   seen.length = 0;
   await getBot(ORGANIZATION_ID, "a b");
   expect(seen.at(-1)?.path).toBe(`${ORG}/bots/a%20b`);
 
   // Ada again: her own pick.
   setSignedInPerson("ada");
-  cookie = "better-auth.session_token=signed-in-ada-again";
+  token = "oba_signed-in-ada-again";
   seen.length = 0;
   await getBot(ORGANIZATION_ID, "a b");
   expect(seen.at(-1)?.path).toBe("/api/v2/organizations/default/bots/a%20b");
@@ -1037,7 +1068,7 @@ test("on a phone two people share, each opens in their own pick, never the last 
  */
 test("somebody signed in to no organization gets Home for nobody's organization, and can still sign out", async () => {
   setSignedInPerson("dee");
-  cookie = "better-auth.session_token=signed-in-in-none";
+  token = "oba_signed-in-in-none";
   inNone = true;
   const failed = await organizationChoices().catch(
     (error: unknown) => (error as Error).message,
@@ -1066,7 +1097,7 @@ test("somebody signed in to no organization gets Home for nobody's organization,
  */
 test("a sign-in that needs renewing is not taken for being signed out", async () => {
   setSignedInPerson("eve");
-  cookie = "better-auth.session_token=signed-in-eve";
+  token = "oba_signed-in-eve";
   const heard: string[] = [];
   const stop = onSessionRefused(() => heard.push("refused"));
   try {
@@ -1098,7 +1129,7 @@ describe("renewing a hosted OpenBot's sign-in", () => {
 
   test("an invite refused for renewal is renewed in the in-app browser and sent again with the same key, landing once", async () => {
     setSignedInPerson("fay");
-    cookie = "better-auth.session_token=signed-in-fay";
+    token = "oba_signed-in-fay";
     hosted.proofValid = false;
     const answer = await invite();
     expect(answer.invitation.email).toBe("kit@example.com");
@@ -1110,7 +1141,7 @@ describe("renewing a hosted OpenBot's sign-in", () => {
 
   test("an invite that landed before the renewal is answered as a repeat when sent again, and lands once", async () => {
     setSignedInPerson("fay");
-    cookie = "better-auth.session_token=signed-in-fay-2";
+    token = "oba_signed-in-fay-2";
     hosted.proofValid = false;
     hosted.landsAnyway = true;
     const answer = await invite();
@@ -1121,7 +1152,7 @@ describe("renewing a hosted OpenBot's sign-in", () => {
 
   test("a renewal that doesn't take offers Sign in again, renewing once and never in a loop", async () => {
     setSignedInPerson("fay");
-    cookie = "better-auth.session_token=signed-in-fay-3";
+    token = "oba_signed-in-fay-3";
     hosted.proofValid = false;
     hosted.renewalWorks = false;
     const offered: string[] = [];

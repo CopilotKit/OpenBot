@@ -1,13 +1,6 @@
 import { Link, router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import {
-  Button,
-  RefreshControl,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Button, RefreshControl, ScrollView, Text, View } from "react-native";
 import {
   type ConversationSummary,
   chooseOrganization,
@@ -23,7 +16,6 @@ import {
   renewHostedSignIn,
   serverUrl,
   signIn,
-  signInEnterprise,
 } from "../src/auth";
 import { HELD_OUT, linkButtons } from "../src/company-sign-in";
 import { companySignInTicket } from "../src/company-sign-in-ticket";
@@ -36,7 +28,6 @@ import { useLoad } from "../src/use-load";
 export default function Home() {
   const { data: session, isPending } = authClient.useSession();
   const [error, setError] = useState("");
-  const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [pushRegistered, setPushRegistered] = useState(false);
   const [older, setOlder] = useState<ConversationSummary[]>([]);
@@ -153,9 +144,7 @@ export default function Home() {
       onPress={() => {
         void act(async () => {
           await unregisterPush();
-          const result = await authClient.signOut();
-          if (result.error)
-            throw new Error(result.error.message ?? "Could not sign out.");
+          await authClient.signOut();
         });
       }}
     />
@@ -278,41 +267,17 @@ export default function Home() {
           <Text>
             {isPending
               ? "Checking your session…"
-              : "Continue with your organization account."}
+              : "Sign in with your OpenBot account to pick up where you left off."}
           </Text>
-          {options.data?.authProviders?.map((provider) => (
-            <Button
-              key={provider}
-              disabled={busy}
-              title={`Sign in with ${provider}`}
-              onPress={() => {
-                void act(async () => {
-                  await signIn(provider);
-                  router.replace("/");
-                });
-              }}
-            />
-          ))}
-          {options.data?.ssoConfigured && (
-            <>
-              <TextInput
-                accessibilityLabel="Work email"
-                placeholder="Work email"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                value={email}
-                onChangeText={setEmail}
-                style={{ borderWidth: 1, padding: 12 }}
-              />
-              <Button
-                disabled={busy || !email}
-                title="Continue with organization"
-                onPress={() => {
-                  void act(() => signInEnterprise(email));
-                }}
-              />
-            </>
-          )}
+          <Button
+            disabled={busy || isPending}
+            title="Sign in"
+            onPress={() => {
+              void act(async () => {
+                if (await signIn()) router.replace("/");
+              });
+            }}
+          />
         </View>
       ) : (
         <>

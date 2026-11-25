@@ -150,6 +150,7 @@
         "app/src/components/computer/live-terminal.tsx",
         "app/src/lib/voice/websocket.ts",
         "mobile/src/api/request.ts",
+        "mobile/src/auth.ts",
         "mobile/app/computer.tsx",
         "mobile/src/security-floor.ts",
         "extension/src/shared/openbot-client.ts",

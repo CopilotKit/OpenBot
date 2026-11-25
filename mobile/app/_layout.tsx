@@ -60,6 +60,11 @@ function Layout() {
         <Stack.Screen name="memory" options={{ title: "Memory" }} />
         <Stack.Screen name="rules" options={{ title: "Custom rules" }} />
         <Stack.Screen name="plugins" options={{ title: "Plugins" }} />
+        {/* Only the way back to Home after signing in, for a code that arrived outside the browser's session. */}
+        <Stack.Screen
+          name="oauth/callback"
+          options={{ headerShown: false, animation: "none" }}
+        />
         {/* Only the way back to Home after linking the company account: never seen, so no header flashes. */}
         <Stack.Screen
           name="company-sign-in/linked"
