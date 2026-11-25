@@ -232,3 +232,77 @@ export function readConnectPrompt(
     return null;
   }
 }
+
+/**
+ * The first characters of `show_app_access`'s answer when the person asked to connect one more
+ * account at an app they already connected (a personal mailbox beside a work one), immediately
+ * followed by its JSON.
+ *
+ * A MARKER OF ITS OWN, NOT A NEW `ConnectReason`. A front end released before this card reads an
+ * unknown reason as `connect`, and the app's live state is `ready`, so it drew "Gmail is ready now"
+ * over a question about a second Gmail: the job read as done (reported in dogfooding). A marker it
+ * doesn't know draws only the step's line, and the Bot's reply says what to do.
+ */
+export const ANOTHER_ACCOUNT_MARKER = "[connect-another-account]";
+
+/** The card that starts the sign-in for one more account at an app, as the transcript reads it. */
+export type AnotherAccountPrompt = {
+  /** The app, as `ConnectPrompt.serverId` names it: what the card connects and lists accounts of. */
+  serverId: string;
+  /** The app's own name. */
+  title: string;
+  /** What the Bot was told, kept for a reader with no card to draw. */
+  message: string;
+  /** The Bot that asked. */
+  agentId?: string;
+  /**
+   * How many accounts the person held at the app when the Bot asked. More than this listed now is
+   * the account connected from the card, so a card scrolled back to (or drawn after a reload) says
+   * it is connected and never offers the sign-in again. Absent reads as one.
+   */
+  held?: number;
+};
+
+/** `show_app_access`'s answer for one more account at an app: the marker, then what the model reads. */
+export function anotherAccountAnswer(prompt: AnotherAccountPrompt): string {
+  const { serverId, title, message, agentId, held } = prompt;
+  return `${ANOTHER_ACCOUNT_MARKER}${JSON.stringify({
+    serverId,
+    title,
+    ...(agentId ? { agentId } : {}),
+    ...(held !== undefined ? { held } : {}),
+  })} ${message}`;
+}
+
+/** The prompt inside that answer, or null for any other text. Fails to null, as `readConnectPrompt` does. */
+export function readAnotherAccountPrompt(
+  text: string | undefined | null,
+): AnotherAccountPrompt | null {
+  if (!text?.startsWith(ANOTHER_ACCOUNT_MARKER)) return null;
+  const rest = text.slice(ANOTHER_ACCOUNT_MARKER.length);
+  const end = rest.indexOf("}");
+  if (end < 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(rest.slice(0, end + 1));
+    if (!parsed || typeof parsed !== "object") return null;
+    const { serverId, title, agentId, held } = parsed as {
+      serverId?: unknown;
+      title?: unknown;
+      agentId?: unknown;
+      held?: unknown;
+    };
+    if (typeof serverId !== "string" || typeof title !== "string") return null;
+    if (!serverId || !title) return null;
+    return {
+      serverId,
+      title,
+      message: rest.slice(end + 1).trim(),
+      ...(typeof agentId === "string" && agentId ? { agentId } : {}),
+      ...(typeof held === "number" && Number.isInteger(held) && held >= 0
+        ? { held }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
