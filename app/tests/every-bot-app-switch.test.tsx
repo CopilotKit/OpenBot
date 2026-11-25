@@ -185,7 +185,8 @@ test("an admin gives an app to every Bot with one switch, and the switch reads i
 test("the personal edition has no Every Bot switch", async () => {
   const { view } = open("personal");
   await view.findByRole("heading", { level: 1, name: "Notion" });
-  await view.findByText("Turned on");
+  // The page has drawn its rows: the person's own switch for the app.
+  await view.findByRole("switch", { name: "Notion on for your Bots" });
   expect(
     view.queryByRole("switch", { name: "Give Notion to every Bot" }),
   ).toBeNull();
