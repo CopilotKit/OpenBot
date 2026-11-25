@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
  *
  * Not behind sign-in: the person invited usually has no OpenBot account yet. The page says it is
  * joining, then leaves for the hosted sign-in carrying the ticket, which signs them in or up with it
+ * (up, with the address from the invitation, when the hosted sign-in says it has no account yet)
  * and brings them back to this OpenBot working in the organization. Somebody already signed in goes
  * the same way, so they land in the organization they were invited to.
  *
@@ -58,6 +59,10 @@ type AcceptInviteSearch = {
  * `__clerk_status=complete` is the hosted sign-in reporting that the person already had an account
  * and is signed in there, with the invitation accepted. The ticket is spent then, so it is not
  * passed on, and the person still has to sign in to this OpenBot, in that organization.
+ *
+ * `__clerk_status=sign_up` is the hosted sign-in reporting that the invited address has no account
+ * yet. It is carried on, so the person is sent to sign up with the ticket, which takes the address
+ * from the invitation. A sign-in with the ticket could only tell them there is no such account.
  */
 function invitationFrom(
   search: AcceptInviteSearch,
@@ -67,8 +72,13 @@ function invitationFrom(
     return organizationId ? { invitation: { organizationId } } : {};
   const ticket = (search.ticket ?? search.__clerk_ticket)?.trim();
   if (!ticket) return null;
+  const signUp = search.__clerk_status === "sign_up";
   return {
-    invitation: organizationId ? { ticket, organizationId } : { ticket },
+    invitation: {
+      ticket,
+      ...(organizationId ? { organizationId } : {}),
+      ...(signUp ? { signUp } : {}),
+    },
   };
 }
 

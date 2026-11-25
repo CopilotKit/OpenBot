@@ -182,6 +182,40 @@ test("the hosted sign-in's own ticket name works too, and a ticket of digits sta
   expect(left.searchParams.get("organizationId")).toBe("O");
 });
 
+/*
+ * Regression: somebody invited who has no account yet was sent to the hosted sign-in with the
+ * ticket, which can only say "User not found" and offers no way to sign up. The hosted sign-in says
+ * the address is new (`__clerk_status=sign_up`), and that is carried on so they land on sign-up.
+ */
+test("an invited address with no account yet is sent on to sign up, with the ticket and organization", async () => {
+  openApp(
+    "/accept-invite?organization=org_O&__clerk_ticket=T2&__clerk_status=sign_up",
+  );
+  await waitFor(() =>
+    expect(new URL(window.location.href).pathname).toBe(
+      "/api/auth/hosted/sign-in",
+    ),
+  );
+  const left = new URL(window.location.href);
+  expect(left.searchParams.get("invitationSignUp")).toBe("true");
+  expect(left.searchParams.get("invitationTicket")).toBe("T2");
+  expect(left.searchParams.get("organizationId")).toBe("org_O");
+});
+
+test("an invited address that already has an account signs in, and is never sent to sign up", async () => {
+  openApp(
+    "/accept-invite?organization=org_O&__clerk_ticket=T3&__clerk_status=sign_in",
+  );
+  await waitFor(() =>
+    expect(new URL(window.location.href).pathname).toBe(
+      "/api/auth/hosted/sign-in",
+    ),
+  );
+  const left = new URL(window.location.href);
+  expect(left.searchParams.get("invitationTicket")).toBe("T3");
+  expect(left.searchParams.has("invitationSignUp")).toBe(false);
+});
+
 test("an invitation the hosted sign-in already accepted signs in to that organization without the spent ticket", async () => {
   const view = openApp(
     "/accept-invite?organization=O&__clerk_ticket=spent&__clerk_status=complete",
