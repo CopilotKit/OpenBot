@@ -1,6 +1,6 @@
-name: Phone app build
+name: OpenBot Mobile build
 
-# Starts a build of the phone app (mobile/) on Expo's build service, EAS Build, in the Expo project
+# Starts a build of OpenBot Mobile (mobile/) on Expo's build service, EAS Build, in the Expo project
 # mobile/app.config.ts names. The build itself runs on Expo's machines and is listed on expo.dev
 # with its install link: this job only starts it and prints that link. mobile/README.md says what
 # each profile is for.

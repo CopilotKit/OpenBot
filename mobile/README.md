@@ -1,4 +1,4 @@
-# The phone app
+# OpenBot Mobile
 
 OpenBot for iOS and Android. It is an Expo app (React Native, Expo Router) and it talks to OpenBot
 Cloud.
@@ -78,8 +78,8 @@ eas build --profile development --platform ios
 An iOS `development` or `preview` build installs only on phones the project knows. Register a
 phone with `eas device:create`, then build.
 
-To start a build from GitHub, run the **Phone app build** workflow (Actions, then Phone app build,
-then Run workflow) and pick a profile and a platform. It starts the same build as a robot user and
+To start a build from GitHub, run the **OpenBot Mobile build** workflow (Actions, then OpenBot Mobile
+build, then Run workflow) and pick a profile and a platform. It starts the same build as a robot user and
 prints the link.
 
 The first Android build, and the first iOS build for a phone, must be started by a person from a
