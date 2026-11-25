@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import { Button } from "heroui-native/button";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, View } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import {
   type ConversationSummary,
   everyBot,
@@ -210,119 +211,126 @@ export default function Conversations() {
     error || organizations.error || conversations.error || undefined;
   return (
     <Screen>
-      <FlatList
+      {/* The search bar rides above the keyboard while the person types in it. */}
+      <KeyboardAvoidingView
+        behavior="padding"
+        automaticOffset
         className="flex-1"
-        data={listed}
-        keyExtractor={(item) => item.id}
-        contentInsetAdjustmentBehavior="automatic"
-        keyboardDismissMode="on-drag"
-        refreshControl={
-          <Refresh refreshing={pull.refreshing} onRefresh={pull.onRefresh} />
-        }
-        ListHeaderComponent={
-          problem || renewal ? (
-            <View className="gap-2 px-4 pt-2 pb-2">
-              <Notice message={problem} />
-              {renewal ? (
-                <Notice
-                  tone="warning"
-                  message="Your sign-in needs renewing before you can do that."
-                  action={
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      isDisabled={busy}
-                      className="self-start"
-                      onPress={() => {
-                        void act(async () => {
-                          await renewHostedSignIn(renewal);
-                          setRenewal(null);
-                          await refreshOrganizations();
-                          await conversations.refresh();
-                        });
-                      }}
-                    >
-                      Sign in again
-                    </Button>
-                  }
-                />
-              ) : null}
-            </View>
-          ) : undefined
-        }
-        renderItem={({ item }) => {
-          const withBots = item.botIds.map((id) => {
-            const bot = byId.get(id);
-            return {
-              id,
-              name: bot?.name ?? "Bot",
-              seed: bot?.avatarSeed ?? id,
-            };
-          });
-          const unread =
-            Boolean(item.lastMessageAt) &&
-            (!item.lastReadAt ||
-              (item.lastMessageAt ?? "") > (item.lastReadAt ?? ""));
-          return (
-            <ConversationRow
-              name={item.name}
-              bots={withBots}
-              lastMessage={item.lastMessage ?? item.summary}
-              when={shortWhen(item.lastMessageAt ?? item.createdAt)}
-              unread={unread}
-              working={Boolean(item.busy) || item.work.length > 0}
-              onPress={() =>
-                router.push({
-                  pathname: "/conversation",
-                  params: { channelId: item.id },
-                })
-              }
-            />
-          );
-        }}
-        ListEmptyComponent={
-          conversations.data ? (
-            <EmptyState
-              icon={IconMessages}
-              title={query ? "No matches" : "No conversations yet"}
-              description={
-                query
-                  ? "No conversation has those words in it."
-                  : "Start one with a Bot with the + button."
-              }
-            />
-          ) : undefined
-        }
-        ListFooterComponent={
-          nextCursor && !query ? (
-            <View className="px-4 py-4">
-              <Button
-                variant="outline"
-                isDisabled={busy}
-                onPress={() => {
-                  void act(async () => {
-                    const page = await listConversations(ORGANIZATION_ID, {
-                      limit: 100,
-                      cursor: nextCursor,
+      >
+        <FlatList
+          className="flex-1"
+          data={listed}
+          keyExtractor={(item) => item.id}
+          contentInsetAdjustmentBehavior="automatic"
+          keyboardDismissMode="on-drag"
+          refreshControl={
+            <Refresh refreshing={pull.refreshing} onRefresh={pull.onRefresh} />
+          }
+          ListHeaderComponent={
+            problem || renewal ? (
+              <View className="gap-2 px-4 pt-2 pb-2">
+                <Notice message={problem} />
+                {renewal ? (
+                  <Notice
+                    tone="warning"
+                    message="Your sign-in needs renewing before you can do that."
+                    action={
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        isDisabled={busy}
+                        className="self-start"
+                        onPress={() => {
+                          void act(async () => {
+                            await renewHostedSignIn(renewal);
+                            setRenewal(null);
+                            await refreshOrganizations();
+                            await conversations.refresh();
+                          });
+                        }}
+                      >
+                        Sign in again
+                      </Button>
+                    }
+                  />
+                ) : null}
+              </View>
+            ) : undefined
+          }
+          renderItem={({ item }) => {
+            const withBots = item.botIds.map((id) => {
+              const bot = byId.get(id);
+              return {
+                id,
+                name: bot?.name ?? "Bot",
+                seed: bot?.avatarSeed ?? id,
+              };
+            });
+            const unread =
+              Boolean(item.lastMessageAt) &&
+              (!item.lastReadAt ||
+                (item.lastMessageAt ?? "") > (item.lastReadAt ?? ""));
+            return (
+              <ConversationRow
+                name={item.name}
+                bots={withBots}
+                lastMessage={item.lastMessage ?? item.summary}
+                when={shortWhen(item.lastMessageAt ?? item.createdAt)}
+                unread={unread}
+                working={Boolean(item.busy) || item.work.length > 0}
+                onPress={() =>
+                  router.push({
+                    pathname: "/conversation",
+                    params: { channelId: item.id },
+                  })
+                }
+              />
+            );
+          }}
+          ListEmptyComponent={
+            conversations.data ? (
+              <EmptyState
+                icon={IconMessages}
+                title={query ? "No matches" : "No conversations yet"}
+                description={
+                  query
+                    ? "No conversation has those words in it."
+                    : "Start one with a Bot with the + button."
+                }
+              />
+            ) : undefined
+          }
+          ListFooterComponent={
+            nextCursor && !query ? (
+              <View className="px-4 py-4">
+                <Button
+                  variant="outline"
+                  isDisabled={busy}
+                  onPress={() => {
+                    void act(async () => {
+                      const page = await listConversations(ORGANIZATION_ID, {
+                        limit: 100,
+                        cursor: nextCursor,
+                      });
+                      setOlder((items) => [...items, ...page.conversations]);
+                      setOlderCursor(page.nextCursor);
                     });
-                    setOlder((items) => [...items, ...page.conversations]);
-                    setOlderCursor(page.nextCursor);
-                  });
-                }}
-              >
-                Older conversations
-              </Button>
-            </View>
-          ) : undefined
-        }
-      />
-      <SearchBar
-        value={query}
-        onChange={setQuery}
-        placeholder="Search conversations"
-        newLabel="New conversation"
-        onNew={() => router.push("/new-conversation")}
-      />
+                  }}
+                >
+                  Older conversations
+                </Button>
+              </View>
+            ) : undefined
+          }
+        />
+        <SearchBar
+          value={query}
+          onChange={setQuery}
+          placeholder="Search conversations"
+          newLabel="New conversation"
+          onNew={() => router.push("/new-conversation")}
+        />
+      </KeyboardAvoidingView>
     </Screen>
   );
 }

@@ -10,7 +10,6 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState, FlatList, Pressable, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   type ConversationMessage,
   everyBot,
@@ -29,6 +28,7 @@ import {
   cn,
   EmptyState,
   IconButton,
+  KeyboardBar,
   Message,
   MessageDay,
   MessageEvent,
@@ -63,7 +63,6 @@ export default function ConversationScreen() {
     agentId?: string;
     draft?: string;
   }>();
-  const insets = useSafeAreaInsets();
   const { data: session, isPending } = authClient.useSession();
   const [agentId, setAgentId] = useState("");
   // A Bot page's "Add routine" arrives with its sentence started for the person to finish.
@@ -273,29 +272,28 @@ export default function ConversationScreen() {
             ) : undefined
           }
         />
-        <View
-          className="gap-2 px-3 pt-1"
-          style={{ paddingBottom: Math.max(insets.bottom, 8) }}
-        >
-          <Notice
-            message={error || channels.error || history.error || undefined}
-          />
-          {conversation && !conversation.active ? (
+        <KeyboardBar className="px-3 pt-1">
+          <View className="gap-2">
             <Notice
-              tone="info"
-              message="This conversation has ended. Start a new one from the Bot's page."
+              message={error || channels.error || history.error || undefined}
             />
-          ) : null}
-          <Composer
-            value={text}
-            onChangeText={setText}
-            onSend={() => void send()}
-            placeholder={`Message ${current?.name ?? "this Bot"}`}
-            disabled={!conversation?.active || !agentId}
-            sending={Boolean(sending)}
-            autoFocus={Boolean(draft)}
-          />
-        </View>
+            {conversation && !conversation.active ? (
+              <Notice
+                tone="info"
+                message="This conversation has ended. Start a new one from the Bot's page."
+              />
+            ) : null}
+            <Composer
+              value={text}
+              onChangeText={setText}
+              onSend={() => void send()}
+              placeholder={`Message ${current?.name ?? "this Bot"}`}
+              disabled={!conversation?.active || !agentId}
+              sending={Boolean(sending)}
+              autoFocus={Boolean(draft)}
+            />
+          </View>
+        </KeyboardBar>
       </KeyboardAvoidingView>
     </Screen>
   );

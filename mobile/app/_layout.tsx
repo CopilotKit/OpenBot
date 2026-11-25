@@ -98,12 +98,21 @@ function Layout() {
     return () => subscription.remove();
   }, [session]);
   const signedIn = Boolean(session);
+  /*
+   * The screens wait for the first answer about the session. Drawn while it is still pending, the signed-in
+   * screens are guarded out, the app opens on a screen outside the guards (the gallery, in a development build),
+   * and stays there once the session arrives; an address the app was opened at is lost the same way. Only the
+   * first answer is waited for: a sign-in pending later keeps the screens where they are.
+   */
+  const answered = useRef(false);
+  if (!isPending) answered.current = true;
   const header = useHeaderOptions();
   const drawer = useDrawer();
   const pathname = usePathname();
   const backdrop = useCSSVariable("--color-backdrop") as string | undefined;
   // The menu swipes in only on a section's own screen: deeper in, the same swipe is the way back.
   const atSection = SECTIONS.some((item) => item.href === pathname);
+  if (!answered.current) return <View className="flex-1 bg-background" />;
   return (
     <View className="flex-1 bg-background">
       <Drawer

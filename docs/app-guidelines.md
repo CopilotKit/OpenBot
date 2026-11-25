@@ -158,6 +158,8 @@ The platform draws everything around a screen. HeroUI Native draws what is insid
 | Pickers, switches, sliders, system menus | `@expo/ui`, so they look and behave as the platform's own. |
 | Buttons, fields, cards, chips, alerts, and the rest of a screen's content | HeroUI Native. |
 | Long lists: conversations, messages, runs | A virtualized list (`FlatList`, or one built for chat). Never a `ScrollView` with a `map` inside. |
+| A page or form with fields | `ScrollScreen` (`react-native-keyboard-controller`'s `KeyboardAwareScrollView`): the field being typed in stays above the keyboard, and the form's button can be scrolled to while it is up. |
+| A bar at the bottom with a field (search, the message box) | `KeyboardBar`, inside a `KeyboardAvoidingView` around the screen, so the bar rides on the keyboard. |
 
 - **Native chrome stays native.** Don't draw a header, a tab bar or a sheet yourself, even when
   HeroUI Native could make one that looks the same. The native one gets each platform's look for

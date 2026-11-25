@@ -1,13 +1,7 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
-import {
-  Button,
-  RefreshControl,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Button, RefreshControl, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { everyBot, loadApprovalInbox, ME, ORGANIZATION_ID } from "../src/api";
 import {
   decideApproval,
@@ -73,8 +67,12 @@ export default function ApprovalsScreen() {
     }
   }
   return (
-    <ScrollView
+    // Keeps the note being typed above the keyboard, and lets the rest be scrolled to.
+    <KeyboardAwareScrollView
       contentContainerStyle={{ padding: 20, gap: 16 }}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+      bottomOffset={24}
       refreshControl={
         <RefreshControl
           refreshing={inbox.pending}
@@ -173,7 +171,7 @@ export default function ApprovalsScreen() {
       ))}
       {inbox.data?.requests.every((request) => request.status !== "pending") &&
         !inbox.data.questions?.length && <Text>No pending requests.</Text>}
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

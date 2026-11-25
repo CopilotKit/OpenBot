@@ -11,6 +11,7 @@ export { ConversationRow, type ConversationRowBot } from "./conversation-row";
 export { EmptyState } from "./empty-state";
 export { Icon } from "./icon";
 export { IconButton } from "./icon-button";
+export { KeyboardBar } from "./keyboard-bar";
 export { Message, MessageDay, MessageEvent } from "./message";
 export { Notice } from "./notice";
 export { PersonAvatar } from "./person-avatar";
