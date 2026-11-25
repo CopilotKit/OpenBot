@@ -1,12 +1,13 @@
 import { View } from "react-native";
 import type { TablerIcon } from "../icons";
+import { BotMarkdown } from "./bot-markdown";
 import { cn } from "./cn";
 import { Icon } from "./icon";
 import { Text } from "./text";
 
 /**
  * A message in a conversation, as the web app draws one: what the person said sits on the right
- * in a quiet bubble; what a Bot said is plain text across the page, with no bubble.
+ * in a quiet bubble; Bot replies render Markdown across the page.
  */
 export function Message({
   from,
@@ -31,7 +32,7 @@ export function Message({
   }
   return (
     <View className="self-stretch">
-      <Text selectable>{text}</Text>
+      <BotMarkdown text={text} />
     </View>
   );
 }
