@@ -172,6 +172,7 @@ import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
 import { ResearchResults } from "./research-results";
 import { TeamBotConsentCard } from "./team-bot-consent";
+import { ReplyToolbar } from "./telemetry-assistant-message";
 import {
   dropRepeatedAppCards,
   groupToolSteps,
@@ -188,6 +189,7 @@ import {
   AT_END_PX,
   currentTurn,
   isPersonSentMessage,
+  replyCopies,
   type Turn,
   turnsOf,
 } from "./transcript-turns";
@@ -990,6 +992,7 @@ function ResponsibilityFiring({
  */
 const TranscriptMessage = memo(function TranscriptMessage({
   commandLabels = "",
+  copy,
   role,
   slackNames = NO_SLACK_NAMES,
   streaming = false,
@@ -1001,6 +1004,11 @@ const TranscriptMessage = memo(function TranscriptMessage({
   refused = false,
 }: {
   commandLabels?: string;
+  /**
+   * The words of the finished reply this message ends, when it ends one: the toolbar under it copies
+   * them. See `replyCopies`.
+   */
+  copy?: string;
   role: "user" | "assistant";
   /** The turn this message asked for was refused before it ran: a routine's says it didn't run. */
   refused?: boolean;
@@ -1179,6 +1187,19 @@ const TranscriptMessage = memo(function TranscriptMessage({
               )}
             </BubbleContent>
           </Bubble>
+          {/*
+           * The Bot chat page's own toolbar, under a finished reply: Copy, as it has there, and as
+           * far below the last line as it sits there (a paragraph's space).
+           */}
+          {!isUser && copy !== undefined ? (
+            <div className="mt-5">
+              <ReplyToolbar
+                messageId={messageId}
+                text={copy}
+                threadId={threadId}
+              />
+            </div>
+          ) : null}
           {isUser && threadId ? (
             <MessageReactions messageId={messageId} threadId={threadId} />
           ) : null}
@@ -2236,6 +2257,14 @@ export function ChatTranscript({
     lastAskId: [...folds.at.values()].at(-1)?.askId,
   };
   /*
+   * Each finished reply's words, under its last line. A task's folded working is not what it said
+   * back, and a steer note is the person's words, not the Bot's.
+   */
+  const replies = replyCopies(
+    items,
+    (id) => folds.inside.has(id) || readTaskReport(id)?.kind === "steer",
+  );
+  /*
    * The folders this conversation's "Check your folders" steps named, for its other folder steps.
    * The same map while the names are the same: a new one on every render is a new context value,
    * and every finished tool row under it drew again while a reply streamed.
@@ -2627,6 +2656,7 @@ export function ChatTranscript({
       <TranscriptMessage
         threadId={threadId}
         messageId={item.id}
+        copy={!busy || index < turnStart ? replies.get(item.id) : undefined}
         settled={!busy || index < turnStart}
         commandLabels={commandLabels}
         role={item.role}
