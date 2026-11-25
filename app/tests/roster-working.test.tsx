@@ -351,7 +351,8 @@ describe.skipIf(!asked)("a conversation's row while its Bot works", () => {
         for (const [engine, browser] of engines) {
           const { page, server } = await open(browser, theme, screen);
           const name = `${engine}-${theme}-${screen}`;
-          expect(await rowSays(page)).toMatch(ONE_MINUTE);
+          // Waited for: on a loaded runner the row can be on the page before it is drawn.
+          await settlesOn(page, ONE_MINUTE, `${name}-before`);
           await shot(page, `${name}-before`);
 
           // The person's turn starts in this conversation, and the server tells every tab.
