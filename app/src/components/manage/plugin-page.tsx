@@ -8,7 +8,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
 import {
   PageEmpty,
@@ -58,6 +58,7 @@ import {
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
+  setEveryBotMutationOptions,
   setOwnerGrantsMutationOptions,
 } from "@/lib/apps/mutations";
 import {
@@ -411,6 +412,10 @@ export function PluginPage({
     ...setOwnerGrantsMutationOptions(queryClient),
     ...report,
   });
+  const everyBot = useMutation({
+    ...setEveryBotMutationOptions(queryClient),
+    ...report,
+  });
   const navigate = useNavigate();
   const remove = useMutation({
     ...removePluginServerMutationOptions(queryClient),
@@ -609,13 +614,33 @@ export function PluginPage({
     }
   };
 
+  /** Set when Connect opened the OAuth client form: saving it goes on to the sign-in. */
+  const connectAfterClient = useRef(false);
+
   /*
-   * THE PERSONAL EDITION'S ONE STEP. Adding an app and connecting your account are two decisions
-   * only when two people make them. Here Connect adds the app and, for an app reached as you, goes
-   * straight on to the account it needs, once the list says there is a client to consent against.
+   * ONE PRESS, IN EVERY EDITION. Connect adds the app (for everyone in the organization, in the team
+   * edition) and goes straight on to what is left, the way a Bot's card and Browse apps do: the
+   * sign-in for an app reached as you once there is a client to consent against, and otherwise the
+   * form that has to be filled in first. An app that takes a token or an instance host opens that
+   * form before anything is added, and its Save adds it. There used to be an "Enable for this
+   * organization" switch here, and Connect only appeared after it: two steps for one thing.
    */
   const connectNew = async () => {
-    if (!(await add()) || auth !== "user-oauth") return;
+    setError(null);
+    if (auth === "deployment-bearer") {
+      setDialog("token");
+      return;
+    }
+    if (entry?.perInstance) {
+      setDialog("instance");
+      return;
+    }
+    if (await add()) await signInOnceAdded();
+  };
+
+  /** What is left once Connect has added it, for an app reached as you: the sign-in. */
+  const signInOnceAdded = async () => {
+    if (auth !== "user-oauth") return;
     const fresh = await queryClient.fetchQuery({
       ...appsQueryOptions(),
       staleTime: 0,
@@ -623,7 +648,11 @@ export function PluginPage({
     const added = fresh.find((item) => item.id === key);
     if (added && (added.hasCredential || added.dynamicClient)) {
       connectSelf.mutate(key);
+      return;
     }
+    // No client to consent against yet: its form, and the sign-in once it is saved.
+    connectAfterClient.current = true;
+    setDialog("client");
   };
 
   /*
@@ -760,13 +789,18 @@ export function PluginPage({
                 </ItemDescription>
               </ItemContent>
             </Item>
-          ) : personal && !server ? (
+          ) : !server ? (
+            /*
+             * Not added yet: Connect, which adds it and goes on to whatever is left in the same
+             * press (`connectNew`). The off switch below is drawn only once it is added.
+             */
             <Item size="sm">
               <ItemContent>
-                <ItemTitle>Add {title}</ItemTitle>
+                <ItemTitle>Connect {title}</ItemTitle>
                 <ItemDescription>
-                  Connect it to give your Bots its tools. Bots can read with it
-                  right away, and ask you before they change anything.
+                  {personal
+                    ? "Connect it to give your Bots its tools. Bots can read with it right away, and ask you before they change anything."
+                    : "Connect it to make it available to everyone in the organization. Then choose which Bots get its tools."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -777,7 +811,7 @@ export function PluginPage({
                   size="sm"
                   type="button"
                 >
-                  Connect
+                  {addCurated.isPending ? "Connecting…" : "Connect"}
                 </Button>
               </ItemActions>
             </Item>
@@ -785,21 +819,19 @@ export function PluginPage({
             <Item size="sm">
               <ItemContent>
                 <ItemTitle>
-                  {personal ? "Turned on" : ORGANIZATION_SWITCH.title}
+                  {personal ? "On" : ORGANIZATION_SWITCH.title}
                 </ItemTitle>
                 <ItemDescription>
                   {personal
                     ? "Your Bots can use its tools. Turning this off removes it and every Bot's access to its tools."
-                    : server
-                      ? ORGANIZATION_SWITCH.on
-                      : "No Bot can reach this vendor. Turn it on to set it up and give Bots its tools."}
+                    : ORGANIZATION_SWITCH.on}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Switch
                   aria-label={
                     personal
-                      ? `Turn ${title} on or off`
+                      ? `${title} on for your Bots`
                       : ORGANIZATION_SWITCH.label(title)
                   }
                   checked={server !== undefined}
@@ -900,6 +932,32 @@ export function PluginPage({
                         serverId: key,
                         ownerGrants: next ? "any" : "admin",
                       });
+                    }}
+                  />
+                </ItemActions>
+              </Item>
+              {/*
+               * Every Bot in the organization, Bots made later too. Binary and immediate, so a
+               * Switch. Turning it off takes back only what this switch gave.
+               */}
+              <Separator />
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Every Bot</ItemTitle>
+                  <ItemDescription>
+                    {server.everyBot === true
+                      ? "Every Bot in this organization can use it, Bots made later too."
+                      : "Only the Bots it's given to can use it."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Switch
+                    aria-label={`Give ${title} to every Bot`}
+                    checked={server.everyBot === true}
+                    disabled={everyBot.isPending}
+                    onCheckedChange={(next) => {
+                      setError(null);
+                      everyBot.mutate({ serverId: key, everyBot: next });
                     }}
                   />
                 </ItemActions>
@@ -1389,18 +1447,13 @@ export function PluginPage({
 
           {/*
            * THE SAME APP WITH ITS KEY, for an app the directory lists as a sign-in in place of its
-           * key: the vendor's own server, or the directory's sign-in app. A quiet second way to add
-           * it, for somebody who may add apps. Connected as you add it in the personal edition;
-           * only added in Admin, where each person connects their own.
+           * key: the vendor's own server, or the directory's sign-in app. A quiet second way to
+           * connect it, for somebody who may add apps, in one press: added, then its key form.
            */}
           {server &&
           signsInForDirectory(server) &&
           (personal || isOrganizationAdmin(role)) ? (
-            <KeyVersionOffer
-              appId={key}
-              mode={personal ? "connect" : "add"}
-              title={server.title}
-            />
+            <KeyVersionOffer appId={key} title={server.title} />
           ) : null}
         </PageSection>
       ) : null}
@@ -1719,11 +1772,23 @@ export function PluginPage({
             <Button
               onClick={() => {
                 if (!server) {
-                  void add();
+                  // Opened by Connect: Save adds it, and an app reached as you goes on to its sign-in.
+                  void add().then((added) =>
+                    added ? signInOnceAdded() : undefined,
+                  );
                   return;
                 }
                 if (dialog === "client") {
-                  registerClient.mutate({ serverId: key, ...client });
+                  const thenConnect = connectAfterClient.current;
+                  connectAfterClient.current = false;
+                  registerClient.mutate(
+                    { serverId: key, ...client },
+                    {
+                      onSuccess: () => {
+                        if (thenConnect) connectSelf.mutate(key);
+                      },
+                    },
+                  );
                 }
                 setDialog(null);
               }}

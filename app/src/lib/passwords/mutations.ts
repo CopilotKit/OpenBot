@@ -1,5 +1,9 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { deleteSavedLogin } from "@/lib/api/generated/saved-logins/saved-logins";
+import type { SavedLoginCounts } from "@/lib/api/generated/model";
+import {
+  deleteSavedLogin,
+  purgeSavedLogins,
+} from "@/lib/api/generated/saved-logins/saved-logins";
 import {
   cancelSignIn,
   createSignInRequest,
@@ -12,7 +16,7 @@ import {
 } from "@/lib/api/generated/sign-in-requests/sign-in-requests";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
-import { ME, passwordKeys, type SignInRequest } from "./queries";
+import { ME, notServedHere, passwordKeys, type SignInRequest } from "./queries";
 
 const FALLBACK = "The sign-in could not be completed";
 /** What the model is told when the server refused a sign-in request without saying why. */
@@ -131,6 +135,37 @@ export function deleteSavedLoginMutationOptions(queryClient: QueryClient) {
         fallback: "Could not delete that password",
       });
     },
+    onSuccess: () => invalidate(queryClient),
+  });
+}
+
+/**
+ * What an admin's purge of the saved logins nobody may use answered: how many it deleted, for each
+ * reason, or that this OpenBot doesn't serve the purge.
+ */
+export type SavedLoginsPurge =
+  | { served: true; deleted: SavedLoginCounts }
+  | { served: false };
+
+/**
+ * An admin deleting, for the whole organization, the saved logins of people the Password manager
+ * switch is off for and of people no longer in it. An OpenBot without the operation answers as one,
+ * so the screen can say so and stop offering it.
+ */
+export function purgeSavedLoginsMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (): Promise<SavedLoginsPurge> => {
+      try {
+        const { deleted } = await purgeSavedLogins(organizationId(), once(), {
+          fallback: "Couldn't delete the saved logins. Try again.",
+        });
+        return { served: true, deleted };
+      } catch (error) {
+        if (notServedHere(error)) return { served: false };
+        throw error;
+      }
+    },
+    // The admin's own saved logins may be among them.
     onSuccess: () => invalidate(queryClient),
   });
 }

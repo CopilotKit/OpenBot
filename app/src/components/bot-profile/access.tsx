@@ -181,7 +181,7 @@ function YourApps({ agent }: { agent: AgentProfile }) {
   ];
   return (
     <PageSection
-      description={`Turn on an app to let ${agent.name} use it. It always uses the account of whoever is asking.`}
+      description={`Choose which of your apps ${agent.name} can use. It always uses the account of whoever is asking.`}
       title="Your apps"
     >
       {error ? (
@@ -471,9 +471,9 @@ function Granted({
               Connect one on <Link to="/connections">Connections</Link>.
             </>
           ) : mine ? (
-            "Turn one on under Your apps, or ask an admin. Until then this Bot can only talk with you."
+            "Give it one under Your apps, or ask an admin. Until then this Bot can only talk with you."
           ) : (
-            "An admin has to add them. Until then this Bot can only talk with you."
+            "An admin has to give it some. Until then this Bot can only talk with you."
           )}
         </PageEmpty>
       ) : (

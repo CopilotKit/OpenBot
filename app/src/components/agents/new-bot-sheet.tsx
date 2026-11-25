@@ -868,7 +868,7 @@ function EveryAppList({
     <FieldSet>
       <FieldLegend variant="label">Apps it can use</FieldLegend>
       <FieldDescription>
-        Every Bot can use every app you turn on in Connections.
+        Every Bot can use every app you connect in Connections.
       </FieldDescription>
       {turnedOn.error ? (
         <p className="text-destructive text-sm" role="alert">

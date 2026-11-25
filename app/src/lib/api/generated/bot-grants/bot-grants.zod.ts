@@ -848,7 +848,7 @@ export const ListBotAppsResponse = zod.object({
               "owner_grantable",
             ])
             .describe(
-              "ready: usable now. not_connected and reconnect: waiting on an account the person connects (see accountHolder). shared_not_connected: waiting on the shared account. shared_not_approved: an administrator hasn't approved who may use the shared account through this Bot. disabled: turned off (see unavailable). not_granted: the Bot wasn't given it. owner_grantable: the same, and the person may give it themselves.",
+              "ready: usable now. not_connected and reconnect: waiting on an account the person connects (see accountHolder). shared_not_connected: waiting on the shared account. shared_not_approved: an administrator hasn't approved who may use the shared account through this Bot, which happens only where the organization's apps are locked down. disabled: turned off (see unavailable). not_granted: the Bot wasn't given it. owner_grantable: the same, and the person may give it themselves.",
             ),
           unavailable: zod
             .union([
@@ -908,7 +908,7 @@ export const ListBotAppsResponse = zod.object({
               zod.null(),
             ])
             .describe(
-              "What a request would ask an administrator for in this state (createAppAccessRequest), or null where the next step is the person's own.",
+              "What a request would ask an administrator for in this state (createAppAccessRequest), or null where the next step is the person's own. While the organization's apps are open, adding and giving an app are the person's own steps.",
             ),
           pendingRequest: zod
             .union([
@@ -1031,7 +1031,7 @@ export const GetBotAppResponse = zod
         "owner_grantable",
       ])
       .describe(
-        "ready: usable now. not_connected and reconnect: waiting on an account the person connects (see accountHolder). shared_not_connected: waiting on the shared account. shared_not_approved: an administrator hasn't approved who may use the shared account through this Bot. disabled: turned off (see unavailable). not_granted: the Bot wasn't given it. owner_grantable: the same, and the person may give it themselves.",
+        "ready: usable now. not_connected and reconnect: waiting on an account the person connects (see accountHolder). shared_not_connected: waiting on the shared account. shared_not_approved: an administrator hasn't approved who may use the shared account through this Bot, which happens only where the organization's apps are locked down. disabled: turned off (see unavailable). not_granted: the Bot wasn't given it. owner_grantable: the same, and the person may give it themselves.",
       ),
     unavailable: zod
       .union([
@@ -1091,7 +1091,7 @@ export const GetBotAppResponse = zod
         zod.null(),
       ])
       .describe(
-        "What a request would ask an administrator for in this state (createAppAccessRequest), or null where the next step is the person's own.",
+        "What a request would ask an administrator for in this state (createAppAccessRequest), or null where the next step is the person's own. While the organization's apps are open, adding and giving an app are the person's own steps.",
       ),
     pendingRequest: zod
       .union([
@@ -1237,7 +1237,7 @@ export const TakeBackBotAppResponse = zod.object({
 });
 
 /**
- * Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot every action of it (the actions that only read where the organization's apps are locked down), or confirm the app's shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same administrator. When it can't be done here, nothing is left waiting and the answer says what is missing. Only an administrator may do it.
+ * Do in one step what approving a request for this app on this Bot would do: turn the app on if it is off, give the Bot every action of it (the actions that only read where the organization's apps are locked down), or confirm the app's shared account is connected. With actions, the Bot is given those actions of the app instead, including to a Bot that already has some of the app. The audit trail reads as a request filed and approved by the same person. When it can't be done here, nothing is left waiting and the answer says what is missing. An administrator may do it for any Bot. While the organization's apps are open (getAppsSetting), so may anybody who may give that Bot its apps, as with giveBotApp; connecting a shared account stays an administrator's.
  * @summary Turn an app on and give it to a Bot
  */
 

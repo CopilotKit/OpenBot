@@ -297,7 +297,9 @@ describe("Browse apps, for somebody who connects as they add", () => {
 
     const row = await view.findByTestId("directory-posthog");
     // The sign-in is still the row's own action, and its count is the sign-in's.
-    expect(within(row).getByRole("button", { name: "Add" })).toBeTruthy();
+    expect(
+      within(row).getByRole("button", { name: "Connect PostHog" }),
+    ).toBeTruthy();
     const keyInstead = within(row).getByRole("button", {
       name: "Connect with a key instead",
     });
@@ -322,7 +324,7 @@ describe("Browse apps, for somebody who connects as they add", () => {
     expect(tabs).toHaveLength(0);
   });
 
-  test("an app with no key version offers nothing more, and Add still starts its sign-in", async () => {
+  test("an app with no key version offers nothing more, and Connect still starts its sign-in", async () => {
     directory = [posthog(null), linear];
     const { view, user } = browse("personal", "connections");
 
@@ -330,7 +332,7 @@ describe("Browse apps, for somebody who connects as they add", () => {
     expect(within(row).queryByTestId("key-version")).toBeNull();
     expect(row.textContent).not.toContain("with a key instead");
 
-    await user.click(within(row).getByRole("button", { name: "Add" }));
+    await user.click(within(row).getByRole("button", { name: /^Connect / }));
     await waitFor(() => expect(tabs).toHaveLength(1));
     expect(adds).toEqual([
       { from: "directory", directoryEntryId: "directory:linear" },
@@ -359,25 +361,31 @@ describe("Browse apps, for somebody who connects as they add", () => {
       within(row).queryByRole("button", { name: /with a key instead/ }),
     ).toBeNull();
     // The sign-in is still offered as the row's own action.
-    expect(within(row).getByRole("button", { name: "Add" })).toBeTruthy();
+    expect(
+      within(row).getByRole("button", { name: "Connect PostHog" }),
+    ).toBeTruthy();
   });
 });
 
 describe("Admin's directory", () => {
-  test("Add with a key instead only adds, and the row then links to the key version", async () => {
+  /*
+   * One press here too: Admin's line used to say "Add with a key instead" and only add, so the
+   * admin then had to find the key version and connect it as a second step.
+   */
+  test("Connect with a key instead adds the key version and opens its key form", async () => {
     directory = [posthog(null)];
     const { view, user, history } = browse("team", "admin");
 
     const row = await view.findByTestId("directory-posthog");
+    expect(row.textContent).not.toContain("Add with a key instead");
     await user.click(
-      within(row).getByRole("button", { name: "Add with a key instead" }),
+      within(row).getByRole("button", { name: "Connect with a key instead" }),
     );
 
-    const link = await within(row).findByRole("link", {
-      name: "PostHog (key)",
-    });
-    expect(link.getAttribute("href")).toBe(`/admin/plugins/${KEY_APP}`);
-    expect(history.location.pathname).toBe("/browse");
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(`/connections/${KEY_APP}`),
+    );
+    expect(history.location.search).toContain("connect=true");
     expect(adds).toEqual([
       {
         from: "directory",
@@ -385,8 +393,6 @@ describe("Admin's directory", () => {
         connectsWith: "key",
       },
     ]);
-    // The sign-in is untouched: still Add, and nothing about it says it is being added.
-    expect(within(row).getByRole("button", { name: "Add" })).toBeTruthy();
   });
 });
 

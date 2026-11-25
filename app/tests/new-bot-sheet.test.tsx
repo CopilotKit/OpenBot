@@ -645,7 +645,7 @@ test("personal: the sheet lists every app that is turned on, with nothing to unt
       .getAttribute("href"),
   ).toBe("/routines");
   expect(
-    view.getByText("Every Bot can use every app you turn on in Connections."),
+    view.getByText("Every Bot can use every app you connect in Connections."),
   ).toBeTruthy();
   expect(view.queryAllByRole("checkbox")).toHaveLength(0);
 });

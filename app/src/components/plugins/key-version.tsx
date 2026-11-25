@@ -5,7 +5,6 @@ import type { DirectoryKeyVersion } from "@/lib/api/generated/model";
 import { addDirectoryAppMutationOptions } from "@/lib/apps/mutations";
 import { directoryAppsQueryOptions } from "@/lib/apps/queries";
 import { type Failure, failureSaid } from "@/lib/load-failure";
-import { useManagePaths } from "@/lib/manage-paths";
 import { keyVersionOffer } from "@/lib/plugins/directory-state";
 import { cn } from "@/lib/utils";
 
@@ -15,8 +14,8 @@ import { cn } from "@/lib/utils";
  * row's own action; this is the quiet second way, drawn as a line of small text under it, in the
  * same underlined style as the row's other inline links (`SignInNote`).
  *
- * - Not added: "Connect with a key instead" for somebody who connects as they add, "Add with a key
- *   instead" in Admin's directory, and nothing for a member, who asks for apps and adds none.
+ * - Not added: "Connect with a key instead" for somebody who may add apps, and nothing for a member,
+ *   who asks for apps and adds none.
  * - Added: a link to the key version's own page, by the title the server gave it.
  */
 export function KeyVersionLine({
@@ -28,7 +27,7 @@ export function KeyVersionLine({
   className,
 }: {
   keyVersion: DirectoryKeyVersion;
-  mode: "connect" | "add" | "request";
+  mode: "connect" | "request";
   pending: boolean;
   onPress: () => void;
   /** Where the added key version's page is. */
@@ -60,11 +59,7 @@ export function KeyVersionLine({
         onClick={onPress}
         type="button"
       >
-        {pending
-          ? "Adding…"
-          : mode === "connect"
-            ? "Connect with a key instead"
-            : "Add with a key instead"}
+        {pending ? "Connecting…" : "Connect with a key instead"}
       </button>
       {pending
         ? null
@@ -81,21 +76,17 @@ export function KeyVersionLine({
  * Draws nothing until that answers, and nothing if it fails: the page is about the app in hand, and
  * this is only a second way to add it.
  *
- * `connect` adds the key version and opens its key form, as Browse apps does. `add` (Admin) adds it
- * and opens its page there.
+ * It adds the key version and opens its key form, as Browse apps does, in Admin too: one press.
  */
 export function KeyVersionOffer({
   appId,
   title,
-  mode,
 }: {
   appId: string;
   title: string;
-  mode: "connect" | "add";
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const paths = useManagePaths();
   const directory = useQuery(directoryAppsQueryOptions(title));
   const entry = keyVersionOffer(directory.data, appId);
   // The refusal itself, not its words: a hold is drawn calmly (`failureSaid`).
@@ -105,13 +96,11 @@ export function KeyVersionOffer({
     onMutate: () => setError(null),
     onError: (thrown: Error) => setError(thrown),
     onSuccess: (keyAppId) =>
-      mode === "connect"
-        ? navigate({
-            to: "/connections/$key",
-            params: { key: keyAppId },
-            search: { connect: true },
-          })
-        : navigate(paths.plugin(keyAppId)),
+      navigate({
+        to: "/connections/$key",
+        params: { key: keyAppId },
+        search: { connect: true },
+      }),
   });
   if (!entry?.keyVersion) return null;
   return (
@@ -121,7 +110,7 @@ export function KeyVersionOffer({
         className="mt-3 px-3"
         keyVersion={entry.keyVersion}
         link={null}
-        mode={mode}
+        mode="connect"
         onPress={() =>
           add.mutate({ directoryEntryId: entry.id, connectsWith: "key" })
         }

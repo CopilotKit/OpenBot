@@ -4858,6 +4858,16 @@ function withMoveDue() {
       return { due: true, fromSettings: false, footprintBytes: 20_200_000_000 };
     if (command === "move_preview") return preview.promise;
     if (command === "keep_self_contained") return null;
+    // In one organization on OpenBot Cloud: the move goes straight on into it.
+    if (command === "move_destinations")
+      return [
+        {
+          id: "org_mine",
+          name: "Sam's organization",
+          personal: true,
+          canMoveIn: true,
+        },
+      ];
     if (command === "move_to_cloud")
       return {
         removedBytes: 20_200_000_000,

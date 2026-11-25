@@ -257,10 +257,16 @@ const COPY: [string, Partial<AppAccess>, RegExp][] = [
     { state: "disabled", unavailable },
     /^Gmail isn't fully set up yet\. Only an admin can finish setting it up\.$/,
   ]),
+  // Open to Bot owners by default: its owner can give it, not only an admin.
   [
-    "not_granted",
-    { state: "not_granted" },
-    /This Bot hasn't been given Gmail\. Only an admin can give it\./,
+    "not_granted, open to owners",
+    { state: "not_granted", ownerGrants: "any" },
+    /^This Bot hasn't been given Gmail\. Its owner can give it, or an admin\.$/,
+  ],
+  [
+    "not_granted, kept to admins",
+    { state: "not_granted", ownerGrants: "admin" },
+    /^This Bot hasn't been given Gmail\. Only an admin can give it\.$/,
   ],
 ];
 
@@ -528,8 +534,8 @@ test("the focus follows the press: Request access hands it to Withdraw, and With
 test.each([
   [
     "disabled",
-    "Turn on and give it to Expenses",
-    "Turn on Gmail and give it to Expenses",
+    "Connect and give it to Expenses",
+    "Connect Gmail and give it to Expenses",
   ],
   ["not_granted", "Give it to Expenses", "Give Gmail to Expenses"],
 ] as const)(
@@ -698,7 +704,7 @@ test.each([
   [
     "disabled, never switched on",
     { state: "disabled", unavailable: "absent" },
-    "Gmail isn't turned on yet.",
+    "Gmail isn't connected yet.",
   ],
   [
     "disabled, with no directory set up",
@@ -1034,7 +1040,7 @@ test.each(
 
   fireEvent.click(
     await view.findByRole("button", {
-      name: "Turn on The app and give it to Expenses",
+      name: "Connect The app and give it to Expenses",
     }),
   );
 

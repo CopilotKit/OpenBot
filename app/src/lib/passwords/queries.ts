@@ -1,15 +1,20 @@
 import { queryOptions } from "@tanstack/react-query";
 import type {
   SavedLogin as ApiSavedLogin,
+  SavedLoginCounts,
   SignInRequest as ApiSignInRequest,
   SignInStatus as ApiSignInStatus,
 } from "@/lib/api/generated/model";
-import { listSavedLogins } from "@/lib/api/generated/saved-logins/saved-logins";
+import {
+  getUnusableSavedLogins,
+  listSavedLogins,
+} from "@/lib/api/generated/saved-logins/saved-logins";
 import {
   getSignInRequest,
   listSignInRequests,
 } from "@/lib/api/generated/sign-in-requests/sign-in-requests";
 import { organizationId } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 
 /** A person's own things are addressed as theirs: the API reads `me` as the caller. */
 export const ME = "me";
@@ -29,6 +34,7 @@ export const passwordKeys = {
   logins: () => ["passwords", "logins"] as const,
   signIn: (id: string) => ["passwords", "sign-in", id] as const,
   pending: () => ["passwords", "sign-in-requests"] as const,
+  unusable: () => ["passwords", "unusable"] as const,
 };
 
 export const FINAL_SIGN_IN: readonly SignInStatus[] = [
@@ -108,5 +114,43 @@ export function savedLoginsQueryOptions() {
         logins: pages.flatMap((page) => page.savedLogins),
       };
     },
+  });
+}
+
+/**
+ * Whether a refusal is an OpenBot that has no such address: one released before the operation, or
+ * the personal edition, which serves neither the count nor the purge of saved logins nobody may use.
+ * That is the API's plain not found (`NOT_FOUND`), or a 404 that names no code, as `olderOpenBot`
+ * in lib/service-terms/queries.ts reads it. Every other 404 is about this request
+ * (`ORGANIZATION_NOT_FOUND`) and fails like any other refusal.
+ */
+export function notServedHere(error: unknown): boolean {
+  return (
+    error instanceof ClientError &&
+    error.status === 404 &&
+    (error.code === undefined || error.code === "NOT_FOUND")
+  );
+}
+
+/**
+ * For an admin: how many saved logins nobody may use, exactly what a purge would delete now, for
+ * each reason. Null on an OpenBot that doesn't serve it, which serves no purge either.
+ */
+export function unusableSavedLoginsQueryOptions() {
+  return queryOptions({
+    queryKey: passwordKeys.unusable(),
+    queryFn: async ({ signal }): Promise<SavedLoginCounts | null> => {
+      try {
+        return await getUnusableSavedLogins(organizationId(), {
+          signal,
+          fallback: "Couldn't count the saved logins. Try again.",
+        });
+      } catch (error) {
+        if (notServedHere(error)) return null;
+        throw error;
+      }
+    },
+    // A count to act on: never kept as fresh.
+    staleTime: 0,
   });
 }

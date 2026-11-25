@@ -6,7 +6,9 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
 import type {
   AiConnection,
+  AiConnectionEntry,
   AiConnectionInput,
+  AiConnectionPage,
   AiSignIn,
   AiSignInCodeInput,
   AiSignInInput,
@@ -180,6 +182,148 @@ export const getFinishPersonalAiSignInResponseMock = (): AiSignInStatus => ({
   detail: null,
   interval: 5,
 });
+
+export const getListAiConnectionsResponseMock = (): AiConnectionPage => ({
+  connections: [
+    {
+      id: "anthropic",
+      provider: "anthropic",
+      login: "plan",
+      model: null,
+      endpointHost: null,
+      isDefault: true,
+      ready: true,
+      problem: null,
+      connectedAt: "2026-11-20T09:00:00.000Z",
+    },
+    {
+      id: "google",
+      provider: "google",
+      login: "oauth",
+      model: "gemini-3.8-flash",
+      endpointHost: null,
+      isDefault: false,
+      ready: false,
+      problem: {
+        code: "sign-in-ended",
+        detail: "Your Google sign-in ended. Sign in again to use it.",
+      },
+      connectedAt: "2026-11-21T09:00:00.000Z",
+    },
+  ],
+  nextCursor: null,
+  signIns: ["openai", "anthropic", "google", "xai"],
+});
+
+export const getConnectAiConnectionResponseMock = (): AiConnectionEntry => ({
+  id: "openai",
+  provider: "openai",
+  login: "api-key",
+  model: null,
+  endpointHost: null,
+  isDefault: false,
+  ready: true,
+  problem: null,
+  connectedAt: "2026-11-23T09:00:00.000Z",
+});
+
+export const getMakeAiConnectionDefaultResponseMock =
+  (): AiConnectionEntry => ({
+    id: "openai",
+    provider: "openai",
+    login: "api-key",
+    model: null,
+    endpointHost: null,
+    isDefault: false,
+    ready: true,
+    problem: null,
+    connectedAt: "2026-11-23T09:00:00.000Z",
+  });
+
+export const getStartAiSignInResponseMock = (): AiSignIn => ({
+  id: "Y2xhdWRlLXNpZ24taW4",
+  provider: "anthropic",
+  url: "https://claude.com/cai/oauth/authorize?code=true&client_id=example&response_type=code&scope=user%3Ainference&code_challenge=example&code_challenge_method=S256&state=example",
+  userCode: null,
+  expiresAt: "2026-11-21T09:15:00.000Z",
+  interval: 5,
+  finish: "code",
+});
+
+export const getGetAiSignInResponseMock = (): AiSignInStatus => ({
+  id: "c2lnbi1pbi1leGFtcGxl",
+  provider: "unbiased",
+  status: "pending",
+  detail: null,
+  interval: 5,
+});
+
+export const getFinishAiSignInResponseMock = (): AiSignInStatus => ({
+  id: "Y2xhdWRlLXNpZ24taW4",
+  provider: "anthropic",
+  status: "approved",
+  detail: null,
+  interval: 5,
+});
+
+export const getListPersonalAiConnectionsResponseMock =
+  (): AiConnectionPage => ({
+    connections: [
+      {
+        id: "anthropic",
+        provider: "anthropic",
+        login: "plan",
+        model: null,
+        endpointHost: null,
+        isDefault: true,
+        ready: true,
+        problem: null,
+        connectedAt: "2026-11-20T09:00:00.000Z",
+      },
+      {
+        id: "google",
+        provider: "google",
+        login: "oauth",
+        model: "gemini-3.8-flash",
+        endpointHost: null,
+        isDefault: false,
+        ready: false,
+        problem: {
+          code: "sign-in-ended",
+          detail: "Your Google sign-in ended. Sign in again to use it.",
+        },
+        connectedAt: "2026-11-21T09:00:00.000Z",
+      },
+    ],
+    nextCursor: null,
+    signIns: ["openai", "anthropic", "google", "xai"],
+  });
+
+export const getConnectPersonalAiConnectionResponseMock =
+  (): AiConnectionEntry => ({
+    id: "openai",
+    provider: "openai",
+    login: "api-key",
+    model: null,
+    endpointHost: null,
+    isDefault: false,
+    ready: true,
+    problem: null,
+    connectedAt: "2026-11-23T09:00:00.000Z",
+  });
+
+export const getMakePersonalAiConnectionDefaultResponseMock =
+  (): AiConnectionEntry => ({
+    id: "openai",
+    provider: "openai",
+    login: "api-key",
+    model: null,
+    endpointHost: null,
+    isDefault: false,
+    ready: true,
+    problem: null,
+    connectedAt: "2026-11-23T09:00:00.000Z",
+  });
 
 export const getGetModelCatalogueMockHandler = (
   overrideResponse?:
@@ -589,6 +733,368 @@ export const getFinishPersonalAiSignInMockHandler = (
     options,
   );
 };
+
+export const getListAiConnectionsMockHandler = (
+  overrideResponse?:
+    | AiConnectionPage
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<AiConnectionPage> | AiConnectionPage),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/ai-connections",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getListAiConnectionsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getConnectAiConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnectionEntry
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string }, AiConnectionInput>
+        >[0],
+      ) => Promise<AiConnectionEntry> | AiConnectionEntry),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string }, AiConnectionInput>(
+    "*/api/v2/organizations/:organizationId/ai-connections",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string }, AiConnectionInput>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getConnectAiConnectionResponseMock(),
+        { status: 201 },
+      );
+    },
+    options,
+  );
+};
+
+export const getRemoveAiConnectionMockHandler = (
+  overrideResponse?:
+    | void
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; connectionId: string }>
+        >[0],
+      ) => Promise<void> | void),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{ organizationId: string; connectionId: string }>(
+    "*/api/v2/organizations/:organizationId/ai-connections/:connectionId",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; connectionId: string }>
+      >[0],
+    ) => {
+      if (typeof overrideResponse === "function") {
+        await overrideResponse(info);
+      }
+
+      return new HttpResponse(null, { status: 204 });
+    },
+    options,
+  );
+};
+
+export const getMakeAiConnectionDefaultMockHandler = (
+  overrideResponse?:
+    | AiConnectionEntry
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; connectionId: string }>
+        >[0],
+      ) => Promise<AiConnectionEntry> | AiConnectionEntry),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string; connectionId: string }>(
+    "*/api/v2/organizations/:organizationId/ai-connections/:connectionId/make-default",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; connectionId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getMakeAiConnectionDefaultResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getStartAiSignInMockHandler = (
+  overrideResponse?:
+    | AiSignIn
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string }, AiSignInInput>
+        >[0],
+      ) => Promise<AiSignIn> | AiSignIn),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string }, AiSignInInput>(
+    "*/api/v2/organizations/:organizationId/ai-connection-sign-ins",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string }, AiSignInInput>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getStartAiSignInResponseMock(),
+        { status: 201 },
+      );
+    },
+    options,
+  );
+};
+
+export const getGetAiSignInMockHandler = (
+  overrideResponse?:
+    | AiSignInStatus
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; signInId: string }>
+        >[0],
+      ) => Promise<AiSignInStatus> | AiSignInStatus),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; signInId: string }>(
+    "*/api/v2/organizations/:organizationId/ai-connection-sign-ins/:signInId",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; signInId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetAiSignInResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getFinishAiSignInMockHandler = (
+  overrideResponse?:
+    | AiSignInStatus
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; signInId: string },
+            AiSignInCodeInput
+          >
+        >[0],
+      ) => Promise<AiSignInStatus> | AiSignInStatus),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<
+    { organizationId: string; signInId: string },
+    AiSignInCodeInput
+  >(
+    "*/api/v2/organizations/:organizationId/ai-connection-sign-ins/:signInId/code",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; signInId: string },
+          AiSignInCodeInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getFinishAiSignInResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getListPersonalAiConnectionsMockHandler = (
+  overrideResponse?:
+    | AiConnectionPage
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; personId: string }>
+        >[0],
+      ) => Promise<AiConnectionPage> | AiConnectionPage),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; personId: string }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connections",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; personId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getListPersonalAiConnectionsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getConnectPersonalAiConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnectionEntry
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string },
+            AiConnectionInput
+          >
+        >[0],
+      ) => Promise<AiConnectionEntry> | AiConnectionEntry),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<
+    { organizationId: string; personId: string },
+    AiConnectionInput
+  >(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connections",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string },
+          AiConnectionInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getConnectPersonalAiConnectionResponseMock(),
+        { status: 201 },
+      );
+    },
+    options,
+  );
+};
+
+export const getRemovePersonalAiConnectionMockHandler = (
+  overrideResponse?:
+    | void
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{
+            organizationId: string;
+            personId: string;
+            connectionId: string;
+          }>
+        >[0],
+      ) => Promise<void> | void),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{
+    organizationId: string;
+    personId: string;
+    connectionId: string;
+  }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connections/:connectionId",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{
+          organizationId: string;
+          personId: string;
+          connectionId: string;
+        }>
+      >[0],
+    ) => {
+      if (typeof overrideResponse === "function") {
+        await overrideResponse(info);
+      }
+
+      return new HttpResponse(null, { status: 204 });
+    },
+    options,
+  );
+};
+
+export const getMakePersonalAiConnectionDefaultMockHandler = (
+  overrideResponse?:
+    | AiConnectionEntry
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{
+            organizationId: string;
+            personId: string;
+            connectionId: string;
+          }>
+        >[0],
+      ) => Promise<AiConnectionEntry> | AiConnectionEntry),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{
+    organizationId: string;
+    personId: string;
+    connectionId: string;
+  }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connections/:connectionId/make-default",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{
+          organizationId: string;
+          personId: string;
+          connectionId: string;
+        }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getMakePersonalAiConnectionDefaultResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getModelsMock = () => [
   getGetModelCatalogueMockHandler(),
   getGetModelChoiceMockHandler(),
@@ -602,4 +1108,15 @@ export const getModelsMock = () => [
   getStartPersonalAiSignInMockHandler(),
   getGetPersonalAiSignInMockHandler(),
   getFinishPersonalAiSignInMockHandler(),
+  getListAiConnectionsMockHandler(),
+  getConnectAiConnectionMockHandler(),
+  getRemoveAiConnectionMockHandler(),
+  getMakeAiConnectionDefaultMockHandler(),
+  getStartAiSignInMockHandler(),
+  getGetAiSignInMockHandler(),
+  getFinishAiSignInMockHandler(),
+  getListPersonalAiConnectionsMockHandler(),
+  getConnectPersonalAiConnectionMockHandler(),
+  getRemovePersonalAiConnectionMockHandler(),
+  getMakePersonalAiConnectionDefaultMockHandler(),
 ];

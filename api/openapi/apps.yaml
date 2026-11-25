@@ -63,9 +63,13 @@ paths:
         Add an app in one of two ways. With from=directory, add an entry of
         listAppDirectory: a catalogue entry, with the instance host or vault
         credential it needs, or an app from the wider directory. With
-        from=address, add a server by its HTTPS address. Either way only an
-        administrator may, because the app is added for everyone in the
-        organization; anybody else is answered 403 PERMISSION_DENIED. OpenBot
+        from=address, add a server by its HTTPS address. The app is added for
+        everyone in the organization. While the organization's apps are open
+        (getAppsSetting), any member may add one, in the same press that
+        connects it; where they're locked down only an administrator may, and
+        anybody else is answered 403 PERMISSION_DENIED. Either way only an
+        administrator gives a server a key that everyone's Bots use (token),
+        or adds an app that needs what only an administrator can enter. OpenBot
         asks a server added by its address how it is reached first. It refuses
         an address the MCP allowlist doesn't approve, a server that needs a key
         nobody gave, and an address already added, naming that app in the
@@ -578,9 +582,10 @@ paths:
         same app connected with its key. search narrows the list to entries
         whose name or description holds it, ignoring case.
         source narrows it to one kind. Anybody signed in may read it, the
-        wider directory included, so a person can find an app and ask an
-        administrator to add it (createAppAccessRequest). Only an
-        administrator adds one. Where no directory is set up, the list
+        wider directory included. While the organization's apps are open
+        (getAppsSetting), anybody may add what they find (createApp); where
+        they're locked down an administrator adds it, and anybody else asks
+        for it (createAppAccessRequest). Where no directory is set up, the list
         holds the catalogue only and source=directory is unavailable. In the
         personal edition the catalogue leaves out entries meant for a team,
         unless they're already added. A missing cursor starts at the first
@@ -1581,8 +1586,10 @@ components:
                 traceId: trace_example
     AppAddForbidden:
       description: >-
-        Only an administrator may add an app from the directory or give a
-        server a key, or the MCP allowlist doesn't approve the address.
+        Only an administrator may add this app here: the organization's apps
+        are locked down, the server would be given a key everyone's Bots use,
+        or the app needs what only an administrator can enter. Or the MCP
+        allowlist doesn't approve the address.
       headers:
         X-Request-Id:
           $ref: './common.yaml#/components/headers/RequestId'

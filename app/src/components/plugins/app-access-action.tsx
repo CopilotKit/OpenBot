@@ -133,10 +133,16 @@ export function appAccessSentence(
     case "disabled":
       return disabledSentence(access, edition, admins);
     case "not_granted":
-      return withAdmins(
-        `This Bot hasn't been given ${name}. Only an admin can give it.`,
-        admins,
-      );
+      // Open to Bot owners unless an admin closed it: then the Bot's owner can give it too.
+      return access.ownerGrants === "any"
+        ? withAdmins(
+            `This Bot hasn't been given ${name}. Its owner can give it, or an admin.`,
+            admins,
+          )
+        : withAdmins(
+            `This Bot hasn't been given ${name}. Only an admin can give it.`,
+            admins,
+          );
     case "owner_grantable": {
       const yours = access.account === "personal" ? `your ${name}` : name;
       const ask = `Let ${bot ?? "this Bot"} use ${yours}?`;
@@ -165,7 +171,8 @@ function adminSentence(access: AppAccess): string | null {
         case "token_missing":
           return `${name} isn't fully set up yet.`;
         default:
-          return `${name} isn't turned on yet.`;
+          // Said to the admin whose Connect beside it adds and connects it in one press.
+          return `${name} isn't connected yet.`;
       }
     default:
       return null;
@@ -520,12 +527,16 @@ function AdminAction({
       (access.unavailable === null || access.unavailable === "absent"));
   if (oneClick) {
     const disabled = access.state === "disabled";
+    /*
+     * Connect, never Turn on: the press adds the app and goes on to the admin's own account, and
+     * switching it on is only the first half of that.
+     */
     const label = disabled
-      ? `Turn on and give it to ${bot}`
+      ? `Connect and give it to ${bot}`
       : `Give it to ${bot}`;
     // The card names the app beside the button; on its own, the button has to.
     const spoken = disabled
-      ? `Turn on ${name} and give it to ${bot}`
+      ? `Connect ${name} and give it to ${bot}`
       : `Give ${name} to ${bot}`;
     const error = approve.error ?? tab.error;
     return (
@@ -579,7 +590,7 @@ function AdminAction({
             ? `Waiting for ${name}…`
             : approve.isPending
               ? disabled
-                ? "Turning on…"
+                ? "Connecting…"
                 : "Giving…"
               : tab.pending
                 ? "Opening sign-in…"
@@ -862,7 +873,7 @@ function PersonalConnectAction({
         {waiting
           ? `Waiting for ${name}…`
           : approve.isPending
-            ? "Turning on…"
+            ? "Connecting…"
             : tab.pending
               ? "Opening sign-in…"
               : "Connect"}

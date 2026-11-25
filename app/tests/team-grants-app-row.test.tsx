@@ -251,7 +251,7 @@ test("an app granted to no team says so, and an organization with no teams says 
 test("the personal edition has no Teams row and never asks which teams an app is granted to", async () => {
   const { view } = open("personal");
   await view.findByRole("heading", { level: 1, name: "Notion" });
-  await view.findByText("Turned on");
+  await view.findByRole("switch", { name: "Notion on for your Bots" });
   expect(view.queryByText("Teams")).toBeNull();
   expect(reads).not.toContain(`GET ${appTeamGrantsPath("notion")}`);
 });
