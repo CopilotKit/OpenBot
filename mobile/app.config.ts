@@ -49,7 +49,12 @@ const config: ExpoConfig = {
   icon: "./assets/icon.png",
   ios: {
     bundleIdentifier: "ai.open.bot.mobile",
-    supportsTablet: true,
+    // Built for the iPhone at launch. An iPad still runs it, at the iPhone's size. On, the App Store asks for
+    // iPad screenshots and a review on iPad, and a release with it on can never turn it off again.
+    supportsTablet: false,
+    // The answer to Apple's export question, which every upload asks. The app's only encryption is HTTPS, and it
+    // checks signatures (src/security-floor-check.ts). Both are exempt. Change this before the app encrypts anything.
+    config: { usesNonExemptEncryption: false },
     icon: { light: "./assets/icon.png", dark: "./assets/icon-dark.png" },
   },
   android: {
