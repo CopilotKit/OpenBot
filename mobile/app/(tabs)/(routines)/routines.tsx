@@ -25,7 +25,7 @@ import {
 } from "../../../src/components";
 import { IconClock } from "../../../src/icons";
 import { lastRunLine, when } from "../../../src/routines";
-import { useAction } from "../../../src/ui";
+import { useAction } from "../../../src/use-action";
 import { useLoad } from "../../../src/use-load";
 import { usePull } from "../../../src/use-pull";
 
@@ -99,7 +99,7 @@ export default function Routines() {
                     .join(" · ")}
                   trailing={
                     <Toggle
-                      label="Active"
+                      label={`${routine.title || routine.instruction} is active`}
                       value={routine.enabled}
                       disabled={Boolean(action.busy)}
                       onValueChange={(enabled) =>

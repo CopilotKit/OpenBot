@@ -1,14 +1,10 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
+import { Button } from "heroui-native/button";
+import { Input } from "heroui-native/input";
+import { Label } from "heroui-native/label";
+import { TextField } from "heroui-native/text-field";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  AppState,
-  Button,
-  Image,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { AppState, Image, Pressable, View } from "react-native";
 import {
   type ComputerControl,
   ORGANIZATION_ID,
@@ -25,8 +21,9 @@ import {
 } from "../src/api/generated/computers/computers";
 import type { ComputerHumanInput } from "../src/api/generated/model";
 import { authClient, serverUrl } from "../src/auth";
+import { cn, Notice, ScrollScreen, Text } from "../src/components";
 import { clientHeaders } from "../src/release";
-import { colors, input, muted, Problem, Screen, useAction } from "../src/ui";
+import { useAction } from "../src/use-action";
 
 type Frame = { uri: string; width: number; height: number };
 
@@ -217,16 +214,16 @@ export default function ComputerScreen() {
   const frame = live.frame;
 
   return (
-    <Screen>
+    <ScrollScreen className="gap-4">
       <View
-        style={{
-          padding: 12,
-          borderRadius: 8,
-          backgroundColor: driving ? "#ecfdf3" : "#f3f4f6",
-          gap: 4,
-        }}
+        className={cn(
+          "gap-1 rounded-lg border p-3",
+          driving
+            ? "border-success/30 bg-success/10"
+            : "border-border bg-surface",
+        )}
       >
-        <Text style={{ fontWeight: "600" }}>
+        <Text variant="label" className="font-semibold">
           {!control
             ? "Checking who has control…"
             : control.transitioning
@@ -235,24 +232,28 @@ export default function ComputerScreen() {
                 ? "You have control. Tap the screen to click."
                 : "The Bot has control."}
         </Text>
-        {control?.reason ? <Text style={muted}>{control.reason}</Text> : null}
+        {control?.reason ? (
+          <Text variant="caption" tone="muted">
+            {control.reason}
+          </Text>
+        ) : null}
       </View>
-      <Problem message={action.error || live.problem} />
+      <Notice message={action.error || live.problem || undefined} />
       {control?.secretWanted ? (
-        <View style={{ gap: 8 }}>
-          <Text>{control.secretWanted}</Text>
-          <TextInput
-            accessibilityLabel="Secret value"
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={secret}
-            onChangeText={setSecret}
-            style={input}
-          />
+        <View className="gap-2">
+          <TextField>
+            <Label>{control.secretWanted}</Label>
+            <Input
+              accessibilityLabel="Secret value"
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={secret}
+              onChangeText={setSecret}
+            />
+          </TextField>
           <Button
-            title="Enter it for the Bot"
-            disabled={!secret || Boolean(action.busy)}
+            isDisabled={!secret || Boolean(action.busy)}
             onPress={() => {
               void action
                 .run("secret", () =>
@@ -263,7 +264,9 @@ export default function ComputerScreen() {
                 // Never kept after it is sent, whether or not it was accepted.
                 .finally(() => setSecret(""));
             }}
-          />
+          >
+            Enter it for the Bot
+          </Button>
         </View>
       ) : null}
       <Pressable
@@ -279,75 +282,85 @@ export default function ComputerScreen() {
             y: Math.round(event.nativeEvent.locationY * scale),
           });
         }}
-        style={{
-          width: "100%",
-          aspectRatio: frame ? frame.width / frame.height : 16 / 10,
-          backgroundColor: "#111827",
-          borderRadius: 6,
-          overflow: "hidden",
-          borderWidth: driving ? 2 : 0,
-          borderColor: colors.success,
-        }}
+        className={cn(
+          "w-full items-center justify-center overflow-hidden rounded-lg border bg-fill",
+          driving ? "border-2 border-success" : "border-border",
+        )}
+        // The frame's own shape, which a class can't say.
+        style={{ aspectRatio: frame ? frame.width / frame.height : 16 / 10 }}
       >
         {frame ? (
           <Image
             source={{ uri: frame.uri }}
             resizeMode="contain"
-            style={{ width: "100%", height: "100%" }}
+            className="h-full w-full"
           />
         ) : (
-          <Text style={{ color: "white", padding: 16 }}>
-            Connecting to the screen…
-          </Text>
+          <Text tone="muted">Connecting to the screen…</Text>
         )}
       </Pressable>
       {driving ? (
-        <View style={{ gap: 10 }}>
-          <TextInput
-            accessibilityLabel="Type into the page"
-            placeholder="Type into the focused field"
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={text}
-            onChangeText={setText}
-            style={input}
-          />
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        <View className="gap-3">
+          <View className="flex-row items-end gap-2">
+            <View className="flex-1">
+              <TextField>
+                <Input
+                  accessibilityLabel="Type into the page"
+                  placeholder="Type into the focused field"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={text}
+                  onChangeText={setText}
+                />
+              </TextField>
+            </View>
             <Button
-              title="Type"
-              disabled={!text || Boolean(action.busy)}
+              isDisabled={!text || Boolean(action.busy)}
               onPress={() => {
                 void send("type", { text }).then((sent) => {
                   if (sent) setText("");
                 });
               }}
-            />
+            >
+              Type
+            </Button>
+          </View>
+          <View className="flex-row flex-wrap gap-2">
             {(["Enter", "Tab", "Backspace", "Escape"] as const).map((key) => (
               <Button
                 key={key}
-                title={key}
-                disabled={Boolean(action.busy)}
+                size="sm"
+                variant="outline"
+                isDisabled={Boolean(action.busy)}
                 onPress={() => {
                   void send("key", { key });
                 }}
-              />
+              >
+                {key}
+              </Button>
             ))}
             <Button
-              title="Scroll up"
+              size="sm"
+              variant="outline"
               onPress={() => {
                 void send("scroll", { deltaY: -500 });
               }}
-            />
+            >
+              Scroll up
+            </Button>
             <Button
-              title="Scroll down"
+              size="sm"
+              variant="outline"
               onPress={() => {
                 void send("scroll", { deltaY: 500 });
               }}
-            />
+            >
+              Scroll down
+            </Button>
           </View>
           <Button
-            title="Return control to the Bot"
-            disabled={Boolean(action.busy)}
+            variant="secondary"
+            isDisabled={Boolean(action.busy)}
             onPress={() => {
               void action.run("release", async () => {
                 setControl(
@@ -357,17 +370,20 @@ export default function ComputerScreen() {
                 );
               });
             }}
-          />
+          >
+            Return control to the Bot
+          </Button>
         </View>
       ) : (
         <Button
-          title="Take control"
-          disabled={Boolean(action.busy) || control?.transitioning}
+          isDisabled={Boolean(action.busy) || control?.transitioning}
           onPress={() => {
             void take();
           }}
-        />
+        >
+          Take control
+        </Button>
       )}
-    </Screen>
+    </ScrollScreen>
   );
 }

@@ -8,7 +8,7 @@ import {
   workOnCheckInItem,
 } from "./api/generated/check-ins/check-ins";
 import { sendConversationMessage } from "./api/generated/conversations/conversations";
-import { Text } from "./components";
+import { Card, Text } from "./components";
 import { taskLine } from "./tasks";
 
 /*
@@ -73,7 +73,7 @@ export function ItemCard({
 }) {
   const link = webLink(item.sourceLink);
   return (
-    <View className="gap-2 rounded-lg border border-border bg-surface p-4">
+    <Card>
       <Text variant="label" className="font-semibold">
         {item.title}
       </Text>
@@ -107,7 +107,7 @@ export function ItemCard({
           </Button>
         ) : null}
       </View>
-    </View>
+    </Card>
   );
 }
 

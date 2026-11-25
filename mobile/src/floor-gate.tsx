@@ -11,6 +11,7 @@
  */
 import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
+import { Button } from "heroui-native/button";
 import {
   type ComponentType,
   useCallback,
@@ -18,15 +19,10 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  ActivityIndicator,
-  AppState,
-  Button,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, AppState, View } from "react-native";
+import { useCSSVariable } from "uniwind";
 import { serverUrl } from "./auth";
+import { Text } from "./components";
 import { useLaunchSettled } from "./launch";
 import {
   type FloorStore,
@@ -39,7 +35,6 @@ import {
   heldFloorDecision,
   refreshedFloorDecision,
 } from "./security-floor-check";
-import { heading } from "./ui";
 
 /** How often an open app reads the floor again. */
 const EVERY_MS = 6 * 60 * 60 * 1000;
@@ -119,20 +114,22 @@ export function SecurityFloorGate({
   checking: boolean;
   onCheck: () => void;
 }) {
+  const muted = useCSSVariable("--color-muted") as string | undefined;
   if (decision !== "starting" && !decision.blocked) return null;
   return (
-    <View style={styles.cover} accessibilityViewIsModal>
+    <View
+      className="absolute inset-0 items-center justify-center bg-background px-6"
+      accessibilityViewIsModal
+    >
       {decision !== "starting" && (
-        <View style={styles.body}>
-          <Text accessibilityRole="header" style={heading}>
-            {SECURITY_FLOOR_HEADING}
-          </Text>
-          <Text style={styles.line}>{SECURITY_FLOOR_LINE}</Text>
-          <View style={styles.action}>
+        <View className="w-full max-w-[480px] gap-3">
+          <Text variant="title">{SECURITY_FLOOR_HEADING}</Text>
+          <Text>{SECURITY_FLOOR_LINE}</Text>
+          <View className="mt-2 min-h-10 items-start justify-center">
             {checking ? (
-              <ActivityIndicator accessibilityLabel="Checking" />
+              <ActivityIndicator color={muted} accessibilityLabel="Checking" />
             ) : (
-              <Button title="Check again" onPress={onCheck} />
+              <Button onPress={onCheck}>Check again</Button>
             )}
           </View>
         </View>
@@ -152,7 +149,7 @@ export function withSecurityFloor(Layout: ComponentType) {
       decision !== "starting" && decision.blocked,
     );
     return (
-      <View style={styles.root}>
+      <View className="flex-1">
         <Layout />
         <SecurityFloorGate
           decision={decision}
@@ -163,17 +160,3 @@ export function withSecurityFloor(Layout: ComponentType) {
     );
   };
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  cover: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "#ffffff",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-  },
-  body: { gap: 12, width: "100%", maxWidth: 480 },
-  line: { fontSize: 16, lineHeight: 22 },
-  action: { alignItems: "flex-start", minHeight: 36, justifyContent: "center" },
-});

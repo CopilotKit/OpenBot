@@ -14,9 +14,12 @@ import { Text } from "./text";
 export function Rows({
   children,
   className,
+  iconless,
 }: {
   children: ReactNode;
   className?: string;
+  /** Rows with no glyph tile: the dividers start at the text instead of after the tile. */
+  iconless?: boolean;
 }) {
   const rows = Children.toArray(children).filter(isValidElement);
   return (
@@ -28,7 +31,11 @@ export function Rows({
     >
       {rows.map((row, index) => (
         <Fragment key={row.key ?? index}>
-          {index > 0 ? <Separator className="ml-14 bg-border" /> : null}
+          {index > 0 ? (
+            <Separator
+              className={cn(iconless ? "ml-3" : "ml-14", "bg-border")}
+            />
+          ) : null}
           {row}
         </Fragment>
       ))}

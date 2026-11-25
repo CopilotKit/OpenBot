@@ -8,6 +8,7 @@
  * platform here, stood in for as in generated-client.test.ts.
  */
 import { afterAll, expect, mock, test } from "bun:test";
+import appConfig from "../app.config";
 
 const ORG = "/api/v2/organizations/default";
 
@@ -83,6 +84,12 @@ const server = Bun.serve({
 });
 const serverUrl = `http://127.0.0.1:${server.port}`;
 
+/*
+ * Bun keeps one module registry for every test file, and a module mocked again is patched in place:
+ * only the exports the first mock gave can be swapped. So this mock gives every export
+ * generated-client.test.ts's does, and the same release, or whichever file loads second is left
+ * with the first one's sign-in and release.
+ */
 mock.module("../src/auth", () => ({
   serverUrl,
   // A sign-in of its own: the mutator keeps each sign-in's organizations, and this server's are not
@@ -91,13 +98,18 @@ mock.module("../src/auth", () => ({
     getAccessToken: async () => "oba_tolerant-reader",
     refreshAfterRefusal: async () => null,
   },
+  renewHostedSignIn: async () => {},
+  organizationStore: {
+    read: async () => null,
+    write: async () => {},
+  },
 }));
 mock.module("expo-crypto", () => ({
   randomUUID: () => crypto.randomUUID(),
 }));
 // The mutator names the app on every request, from the release expo-constants gives it as built.
 mock.module("expo-constants", () => ({
-  default: { expoConfig: { extra: { openbotRelease: "1.1.0" } } },
+  default: { expoConfig: appConfig },
 }));
 
 const { getTask } = await import("../src/api/generated/tasks/tasks");

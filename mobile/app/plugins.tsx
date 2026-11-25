@@ -1,6 +1,5 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
 import { useCallback } from "react";
-import { Switch, Text, View } from "react-native";
 import { ApiError, everyPage, ORGANIZATION_ID } from "../src/api";
 import {
   deleteBotGrant,
@@ -10,17 +9,19 @@ import {
 import { listSkills } from "../src/api/generated/skills/skills";
 import { authClient } from "../src/auth";
 import {
-  card,
-  heading,
-  muted,
-  Problem,
-  Screen,
+  Notice,
+  Row,
+  Rows,
+  ScrollScreen,
   Section,
-  useAction,
-} from "../src/ui";
+  Text,
+  Toggle,
+} from "../src/components";
+import { IconBook, IconPlug } from "../src/icons";
+import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
 
-/** What a Bot can use: skills switched on and off here, connected tools listed. */
+/** Apps: what a Bot can use. Its skills are switched on and off here; its connected tools are listed. */
 export default function PluginsScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
   const { data: session, isPending } = authClient.useSession();
@@ -73,64 +74,65 @@ export default function PluginsScreen() {
       await granted.refresh();
     });
 
+  const skills = catalogue.data?.skills;
+  const tools = granted.data?.tools;
   return (
-    <Screen
+    <ScrollScreen
       refreshing={granted.pending || catalogue.pending}
       onRefresh={() => {
         void granted.refresh();
         void catalogue.refresh();
       }}
     >
-      <Text style={heading}>Plugins</Text>
-      <Problem message={action.error || granted.error || catalogue.error} />
+      <Notice
+        message={action.error || granted.error || catalogue.error || undefined}
+      />
       <Section title="Skills">
-        {catalogue.data?.skills.length === 0 && (
-          <Text style={muted}>No skills yet.</Text>
-        )}
-        {catalogue.data?.skills.map((skill) => (
-          <View
-            key={skill.slug}
-            style={[
-              card,
-              { flexDirection: "row", alignItems: "center", gap: 12 },
-            ]}
-          >
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={{ fontWeight: "600" }}>
-                {skill.title} (/{skill.slug})
-              </Text>
-              <Text style={muted}>{skill.summary}</Text>
-            </View>
-            <Switch
-              accessibilityLabel={`Use ${skill.title}`}
-              value={on.has(skill.slug)}
-              disabled={Boolean(action.busy) || !granted.data}
-              onValueChange={(enabled) => {
-                void setSkill(skill.slug, enabled);
-              }}
-            />
-          </View>
-        ))}
+        {skills?.length === 0 ? <Text tone="muted">No skills yet.</Text> : null}
+        {skills?.length ? (
+          <Rows>
+            {skills.map((skill) => (
+              <Row
+                key={skill.slug}
+                icon={IconBook}
+                title={skill.title}
+                description={skill.summary || `/${skill.slug}`}
+                trailing={
+                  <Toggle
+                    label={`Use ${skill.title}`}
+                    value={on.has(skill.slug)}
+                    disabled={Boolean(action.busy) || !granted.data}
+                    onValueChange={(enabled) => {
+                      void setSkill(skill.slug, enabled);
+                    }}
+                  />
+                }
+              />
+            ))}
+          </Rows>
+        ) : null}
       </Section>
       <Section title="Connected tools">
-        <Text style={muted}>
+        <Text tone="muted">
           Connecting an app needs its sign-in, so add and remove tools in
           OpenBot on your computer.
         </Text>
-        {granted.data?.tools.length === 0 && (
-          <Text style={muted}>No connected tools.</Text>
-        )}
-        {granted.data?.tools.map((tool) => (
-          <View key={tool.ref} style={card}>
-            <Text style={{ fontWeight: "600" }}>{tool.ref}</Text>
-            {tool.description ? (
-              <Text numberOfLines={3} style={muted}>
-                {tool.description}
-              </Text>
-            ) : null}
-          </View>
-        ))}
+        {tools?.length === 0 ? (
+          <Text tone="muted">No connected tools.</Text>
+        ) : null}
+        {tools?.length ? (
+          <Rows>
+            {tools.map((tool) => (
+              <Row
+                key={tool.ref}
+                icon={IconPlug}
+                title={tool.ref}
+                description={tool.description || undefined}
+              />
+            ))}
+          </Rows>
+        ) : null}
       </Section>
-    </Screen>
+    </ScrollScreen>
   );
 }

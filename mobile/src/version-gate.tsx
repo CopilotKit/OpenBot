@@ -3,15 +3,11 @@
  * the security sentence when the minimum was raised for a security problem). It covers everything, headers included,
  * so nothing behind it is shown failing.
  */
+
+import { Button } from "heroui-native/button";
 import { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  AppState,
-  Button,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, AppState, View } from "react-native";
+import { useCSSVariable } from "uniwind";
 import { serverUrl } from "./auth";
 import {
   APP_UPDATE_SENTENCE,
@@ -19,7 +15,7 @@ import {
   SECURITY_UPDATE_SENTENCE,
   type VersionVerdict,
 } from "./client-version";
-import { heading, muted } from "./ui";
+import { Text } from "./components";
 import { checkVersion } from "./version-check";
 
 /** How long the check may hold the app before it opens anyway: a slow network decides nothing. */
@@ -68,45 +64,37 @@ export function VersionGate({
   verdict: VersionVerdict | "checking";
   onRetry: () => void;
 }) {
+  const muted = useCSSVariable("--color-muted") as string | undefined;
   if (verdict !== "checking" && verdict.kind === "ok") return null;
   return (
-    <View style={styles.cover} accessibilityViewIsModal>
+    <View
+      className="absolute inset-0 items-center justify-center bg-background px-6"
+      accessibilityViewIsModal
+    >
       {verdict === "checking" ? (
-        <ActivityIndicator accessibilityLabel="Checking OpenBot" />
+        <ActivityIndicator
+          color={muted}
+          accessibilityLabel="Checking OpenBot"
+        />
       ) : (
-        <View style={styles.body}>
+        <View className="w-full max-w-[480px] gap-3">
           {verdict.security ? (
             // The security sentence is the heading, and says what to do: nothing repeats it below.
-            <Text accessibilityRole="header" style={heading}>
-              {SECURITY_UPDATE_SENTENCE}
-            </Text>
+            <Text variant="title">{SECURITY_UPDATE_SENTENCE}</Text>
           ) : (
             <>
-              <Text accessibilityRole="header" style={heading}>
-                {APP_UPDATE_SENTENCE}
-              </Text>
-              <Text style={styles.sentence}>{verdict.detail}</Text>
+              <Text variant="title">{APP_UPDATE_SENTENCE}</Text>
+              <Text>{verdict.detail}</Text>
             </>
           )}
-          <Text style={muted}>{serverUrl}</Text>
-          <View style={styles.action}>
-            <Button title="Try again" onPress={onRetry} />
-          </View>
+          <Text variant="caption" tone="muted">
+            {serverUrl}
+          </Text>
+          <Button className="mt-2 self-start" onPress={onRetry}>
+            Try again
+          </Button>
         </View>
       )}
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  cover: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "#ffffff",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-  },
-  body: { gap: 12, width: "100%", maxWidth: 480 },
-  sentence: { fontSize: 16, lineHeight: 22 },
-  action: { alignItems: "flex-start" },
-});

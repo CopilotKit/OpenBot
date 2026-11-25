@@ -1,7 +1,9 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
+import { Button } from "heroui-native/button";
+import { TextArea } from "heroui-native/text-area";
+import { TextField } from "heroui-native/text-field";
 import { useCallback, useState } from "react";
-import { Button, RefreshControl, Text, TextInput, View } from "react-native";
-import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { View } from "react-native";
 import { everyBot, loadApprovalInbox, ME, ORGANIZATION_ID } from "../src/api";
 import {
   decideApproval,
@@ -17,8 +19,22 @@ import {
   type PhoneDecision,
 } from "../src/approval-words";
 import { authClient } from "../src/auth";
-import { colors } from "../src/ui";
+import {
+  Card,
+  cn,
+  EmptyState,
+  Notice,
+  ScrollScreen,
+  Text,
+} from "../src/components";
+import { IconChecks } from "../src/icons";
 import { useLoad } from "../src/use-load";
+
+/**
+ * The approval inbox: what the person's Bots want to do and asked first about, each with only the
+ * answers the server takes, and the questions they asked. A notification opens it at one of them,
+ * which is ringed.
+ */
 export default function ApprovalsScreen() {
   const { requestId } = useLocalSearchParams<{ requestId?: string }>();
   const { data: session, isPending } = authClient.useSession();
@@ -66,112 +82,111 @@ export default function ApprovalsScreen() {
       setBusy("");
     }
   }
+  const pending = inbox.data?.requests.filter(
+    (request) => request.status === "pending",
+  );
+  const questions = inbox.data?.questions ?? [];
   return (
-    // Keeps the note being typed above the keyboard, and lets the rest be scrolled to.
-    <KeyboardAwareScrollView
-      contentContainerStyle={{ padding: 20, gap: 16 }}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="interactive"
-      bottomOffset={24}
-      refreshControl={
-        <RefreshControl
-          refreshing={inbox.pending}
-          onRefresh={() => {
-            void inbox.refresh();
-          }}
-        />
-      }
+    <ScrollScreen
+      className="gap-3"
+      refreshing={inbox.pending}
+      onRefresh={() => void inbox.refresh()}
     >
-      <Text style={{ fontSize: 24, fontWeight: "600" }}>
-        Questions and approvals
-      </Text>
-      {(error || inbox.error) && (
-        <Text accessibilityRole="alert" style={{ color: "#b42318" }}>
-          {error || inbox.error}
-        </Text>
-      )}
-      {inbox.data?.requests
-        .filter((request) => request.status === "pending")
-        .map((request) => {
-          // In the web card's words: what the Bot wants to do, why it asks, and what would change.
-          const change = approvalChange(request.action.target);
-          const details = change ? [] : approvalDetails(request.action.args);
-          return (
-            <View
-              key={request.id}
-              style={{
-                gap: 10,
-                borderWidth: request.id === requestId ? 2 : 1,
-                borderColor: "#9ca3af",
-                borderRadius: 8,
-                padding: 14,
-              }}
-            >
-              <Text style={{ fontWeight: "600" }}>
-                {approvalTitle(request.action, botName(request.action.botId))}
+      <Notice message={error || inbox.error || undefined} />
+      {pending?.map((request) => {
+        // In the web card's words: what the Bot wants to do, why it asks, and what would change.
+        const change = approvalChange(request.action.target);
+        const details = change ? [] : approvalDetails(request.action.args);
+        return (
+          <Card
+            key={request.id}
+            highlighted={request.id === requestId}
+            className="gap-3"
+          >
+            <Text variant="label" className="font-semibold">
+              {approvalTitle(request.action, botName(request.action.botId))}
+            </Text>
+            {request.action.policy?.reason ? (
+              <Text tone="muted" className="-mt-1">
+                {request.action.policy.reason}
               </Text>
-              {request.action.policy?.reason ? (
-                <Text style={{ color: colors.muted }}>
-                  {request.action.policy.reason}
-                </Text>
-              ) : null}
-              {change ? <ChangeRows change={change} /> : null}
-              {details.map((line) => (
-                <Text key={line.label}>
-                  <Text style={{ color: colors.muted }}>{line.label}: </Text>
-                  {line.value}
-                </Text>
-              ))}
-              {/* Only the answers the server takes: no "Always allow" where it always asks. */}
-              {approvalChoices(request.action).map((choice) => (
+            ) : null}
+            {change ? <ChangeRows change={change} /> : null}
+            {details.length > 0 ? (
+              <View className="gap-1">
+                {details.map((line) => (
+                  <Text key={line.label}>
+                    <Text tone="muted">{line.label}: </Text>
+                    {line.value}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+            {/* Only the answers the server takes: no "Always allow" where it always asks. */}
+            <View className="flex-row flex-wrap gap-2">
+              {approvalChoices(request.action).map((choice, index) => (
                 <Button
                   key={choice}
-                  disabled={Boolean(busy)}
-                  title={DECISION_LABELS[choice]}
+                  size="sm"
+                  variant={index === 0 ? "primary" : "outline"}
+                  isDisabled={Boolean(busy)}
                   onPress={() => {
                     void decide(request.id, choice);
                   }}
-                />
+                >
+                  {DECISION_LABELS[choice]}
+                </Button>
               ))}
             </View>
-          );
-        })}
-      {inbox.data?.questions?.map((question) => (
-        <View
+          </Card>
+        );
+      })}
+      {questions.map((question) => (
+        <Card
           key={question.id}
-          style={{
-            gap: 10,
-            borderWidth: question.id === requestId ? 2 : 1,
-            borderColor: "#9ca3af",
-            borderRadius: 8,
-            padding: 14,
-          }}
+          highlighted={question.id === requestId}
+          className="gap-3"
         >
-          <Text style={{ fontWeight: "600" }}>{question.botId}</Text>
-          <Text>{question.question}</Text>
-          {question.why && <Text>{question.why}</Text>}
-          <TextInput
-            accessibilityLabel="Your answer"
-            multiline
-            placeholder="Your answer"
-            value={answers[question.id] ?? ""}
-            onChangeText={(answer) =>
-              setAnswers((current) => ({ ...current, [question.id]: answer }))
-            }
-            style={{ borderWidth: 1, padding: 10 }}
-          />
+          <Text variant="caption" tone="muted">
+            {botName(question.botId) ?? "A Bot"} asks
+          </Text>
+          <Text variant="label" className="-mt-2 font-semibold">
+            {question.question}
+          </Text>
+          {question.why ? <Text tone="muted">{question.why}</Text> : null}
+          <TextField>
+            <TextArea
+              accessibilityLabel="Your answer"
+              placeholder="Your answer"
+              value={answers[question.id] ?? ""}
+              onChangeText={(answer) =>
+                setAnswers((current) => ({
+                  ...current,
+                  [question.id]: answer,
+                }))
+              }
+            />
+          </TextField>
           <Button
-            disabled={Boolean(busy) || !answers[question.id]?.trim()}
-            title="Send answer"
+            size="sm"
+            className="self-start"
+            isDisabled={Boolean(busy) || !answers[question.id]?.trim()}
             onPress={() => {
               void respond(question.id);
             }}
-          />
-        </View>
+          >
+            {busy === question.id ? "Sending…" : "Send answer"}
+          </Button>
+        </Card>
       ))}
-      {inbox.data?.requests.every((request) => request.status !== "pending") &&
-        !inbox.data.questions?.length && <Text>No pending requests.</Text>}
-    </KeyboardAwareScrollView>
+      {inbox.data && !pending?.length && !questions.length ? (
+        <EmptyState
+          icon={IconChecks}
+          title="Nothing to approve"
+          description="When a Bot asks before it acts, or asks you a question, it shows up here."
+        />
+      ) : null}
+    </ScrollScreen>
   );
 }
 
@@ -181,56 +196,42 @@ export default function ApprovalsScreen() {
  */
 function ChangeRows({ change }: { change: ApprovalChange }) {
   return (
-    <View style={{ gap: 10 }}>
+    <View className="gap-2">
       <Text>{change.summary}</Text>
       {change.rows.length > 0 ? (
-        <View
-          style={{
-            borderWidth: 1,
-            borderColor: colors.border,
-            borderRadius: 8,
-          }}
-        >
+        <View className="overflow-hidden rounded-md border border-border">
           {change.rows.map((row, index) => (
             <View
               key={row.label}
-              style={{
-                gap: 4,
-                paddingHorizontal: 12,
-                paddingVertical: 10,
-                borderTopWidth: index === 0 ? 0 : 1,
-                borderTopColor: colors.border,
-              }}
+              className={cn(
+                "gap-1 px-3 py-2.5",
+                index > 0 && "border-t border-border",
+              )}
             >
-              <Text style={{ color: colors.muted, fontSize: 12 }}>
+              <Text variant="caption" tone="muted">
                 {row.label}
               </Text>
               <Text
-                style={{
-                  color: colors.muted,
-                  textDecorationLine:
-                    row.before === null ? "none" : "line-through",
-                }}
+                tone="muted"
+                className={cn(row.before !== null && "line-through")}
               >
                 {row.before ?? "Not set"}
               </Text>
-              <Text accessible={false} style={{ color: colors.muted }}>
+              <Text accessible={false} tone="muted">
                 ↓
               </Text>
-              <Text style={{ fontWeight: "600" }}>
-                {row.after ?? "Not set"}
-              </Text>
+              <Text className="font-semibold">{row.after ?? "Not set"}</Text>
             </View>
           ))}
         </View>
       ) : null}
       {change.affected ? (
-        <View style={{ gap: 2 }}>
-          <Text style={{ color: colors.muted, fontSize: 12 }}>
+        <View className="gap-0.5">
+          <Text variant="caption" tone="muted">
             {change.affected.summary}
           </Text>
           {change.affected.people.length > 0 ? (
-            <Text style={{ fontSize: 13 }}>
+            <Text className="text-sm">
               {change.affected.people.join(", ")}
               {change.affected.more > 0
                 ? ` and ${change.affected.more} more`

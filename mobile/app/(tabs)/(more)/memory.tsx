@@ -14,6 +14,7 @@ import {
 import type { UpdateMemoryRequest } from "../../../src/api/generated/model";
 import { authClient } from "../../../src/auth";
 import {
+  Card,
   cn,
   EmptyState,
   Notice,
@@ -23,7 +24,7 @@ import {
   Toggle,
 } from "../../../src/components";
 import { IconBrain } from "../../../src/icons";
-import { useAction } from "../../../src/ui";
+import { useAction } from "../../../src/use-action";
 import { useLoad } from "../../../src/use-load";
 
 const ORIGIN: Record<Memory["formedBy"], string> = {
@@ -108,10 +109,7 @@ export default function MemoryScreen() {
         <Section title="Remembered">
           <View className="gap-3">
             {list.map((memory) => (
-              <View
-                key={memory.id}
-                className="gap-3 rounded-lg border border-border bg-surface p-4"
-              >
+              <Card key={memory.id} className="gap-3">
                 {editing?.id === memory.id ? (
                   <View className="gap-2">
                     <TextField>
@@ -227,7 +225,7 @@ export default function MemoryScreen() {
                     </Button>
                   </View>
                 </View>
-              </View>
+              </Card>
             ))}
           </View>
         </Section>

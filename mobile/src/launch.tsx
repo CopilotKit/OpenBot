@@ -228,6 +228,8 @@ function LaunchCover({
 }) {
   const reduceMotion = useReducedMotion();
   const background = useCSSVariable("--color-background") as string | undefined;
+  // The glow is the scheme's violet, the focus ring's, fading out before the edge of its square.
+  const glowColor = useCSSVariable("--color-focus") as string | undefined;
   const orbRef = useRef<HostInstance>(null);
   const start = useRef<Rect | null>(null);
 
@@ -363,7 +365,17 @@ function LaunchCover({
       />
       <View style={styles.center} pointerEvents="none">
         <Animated.View style={orbStyle}>
-          <Animated.View style={[styles.glow, glowStyle]} />
+          <Animated.View
+            style={[
+              styles.glow,
+              glowColor
+                ? {
+                    backgroundImage: `radial-gradient(circle closest-side, ${glowColor} 0%, transparent 100%)`,
+                  }
+                : null,
+              glowStyle,
+            ]}
+          />
           <View ref={orbRef} collapsable={false} style={styles.orb}>
             <Image source={ORB} style={styles.fill} />
           </View>
@@ -454,8 +466,8 @@ const styles = StyleSheet.create({
   orb: { width: LAUNCH_ORB_SIZE, height: LAUNCH_ORB_SIZE },
   fill: { width: "100%", height: "100%" },
   /*
-   * The glow: the orb's colors, fading to nothing before the edge of its square. A blurred copy of the
-   * orb was blurred only inside its own square on Android, so the glow stopped at a hard square edge.
+   * The glow's square, twice the orb's size; its gradient is set where the scheme is read. A blurred
+   * copy of the orb was blurred only inside its own square on Android, so it stopped at a hard edge.
    */
   glow: {
     position: "absolute",
@@ -463,8 +475,6 @@ const styles = StyleSheet.create({
     top: -LAUNCH_ORB_SIZE * 0.5,
     width: LAUNCH_ORB_SIZE * 2,
     height: LAUNCH_ORB_SIZE * 2,
-    backgroundImage:
-      "radial-gradient(circle closest-side, rgba(196, 112, 222, 0.75) 0%, rgba(150, 120, 240, 0.45) 50%, rgba(96, 140, 230, 0.15) 75%, rgba(96, 140, 230, 0) 100%)",
   },
   // Below the orb, out of the way of where it was, so the orb stays exactly where the phone's splash put it.
   slow: {

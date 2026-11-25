@@ -5,8 +5,7 @@
  */
 import { expect, test } from "bun:test";
 import type { Task } from "../src/api";
-import { colors } from "../src/colors";
-import { lastRunLine, runColor, runLabel } from "../src/routines";
+import { lastRunLine, runLabel, runTone } from "../src/routines";
 import { taskLine, waitingTasks } from "../src/tasks";
 
 const task = (status: string, updatedAt: string): Task =>
@@ -30,12 +29,12 @@ test("a task in a status the phone doesn't know is not listed as waiting on the 
   ]);
 });
 
-test("a run status the phone doesn't know shows no label, and a muted colour", () => {
+test("a run status the phone doesn't know shows no label, and a muted tone", () => {
   expect(runLabel("cancelled")).toBeNull();
-  expect(runColor("cancelled")).toBe(colors.muted);
+  expect(runTone("cancelled")).toBe("muted");
   expect(lastRunLine("cancelled")).toBeNull();
   expect(runLabel("succeeded")).toBe("Succeeded");
-  expect(runColor("failed")).toBe(colors.error);
+  expect(runTone("failed")).toBe("danger");
   expect(lastRunLine("waiting")).toBe("Last run: Waiting for you");
   expect(lastRunLine(null)).toBeNull();
 });

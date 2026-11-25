@@ -1,6 +1,7 @@
-import { Redirect, router, useLocalSearchParams } from "expo-router";
+import { Redirect, router, Stack, useLocalSearchParams } from "expo-router";
+import { Button } from "heroui-native/button";
 import { useCallback } from "react";
-import { Alert, Button, Switch, Text, View } from "react-native";
+import { Alert, View } from "react-native";
 import { everyPage, ORGANIZATION_ID } from "../src/api";
 import {
   deleteRoutine,
@@ -11,20 +12,25 @@ import {
   runRoutine,
 } from "../src/api/generated/routines/routines";
 import { authClient } from "../src/auth";
-import { runColor, runLabel, when } from "../src/routines";
 import {
-  card,
-  colors,
-  heading,
-  muted,
-  Problem,
-  Screen,
+  Card,
+  Notice,
+  Row,
+  Rows,
+  ScrollScreen,
   Section,
-  useAction,
-} from "../src/ui";
+  Text,
+  Toggle,
+} from "../src/components";
+import { IconClock } from "../src/icons";
+import { runLabel, runTone, when } from "../src/routines";
+import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
 
-/** One routine: Active, schedule, next run, instruction, Run now, and its run history. */
+/**
+ * One routine: whether it is active, when it runs, what it does and where it reports, Run now, and
+ * its run history. The header names it, by its title where it has one.
+ */
 export default function RoutineScreen() {
   const { routineId = "" } = useLocalSearchParams<{ routineId: string }>();
   const { data: session, isPending } = authClient.useSession();
@@ -74,89 +80,109 @@ export default function RoutineScreen() {
   }
 
   return (
-    <Screen
+    <ScrollScreen
       refreshing={routines.pending || runs.pending}
       onRefresh={() => {
         void routines.refresh();
         void runs.refresh();
       }}
     >
-      <Text style={heading}>Routine</Text>
-      <Problem message={action.error || routines.error || runs.error} />
-      {routines.data && !routine && <Text>This routine no longer exists.</Text>}
-      {routine && (
+      <Stack.Screen options={{ title: routine?.title || "Routine" }} />
+      <Notice
+        message={action.error || routines.error || runs.error || undefined}
+      />
+      {routines.data && !routine ? (
+        <Text tone="muted">This routine no longer exists.</Text>
+      ) : null}
+      {routine ? (
         <>
-          <View
-            style={[
-              card,
-              {
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-              },
-            ]}
-          >
-            <Text style={{ fontWeight: "600" }}>Active</Text>
-            <Switch
-              accessibilityLabel="Active"
-              value={routine.enabled}
-              disabled={Boolean(action.busy)}
-              onValueChange={(enabled) => {
-                void setActive(enabled);
-              }}
+          <Rows>
+            <Row
+              icon={IconClock}
+              title="Active"
+              description={
+                routine.enabled
+                  ? `Next run ${when(routine.nextRunAt)}`
+                  : "Paused"
+              }
+              trailing={
+                <Toggle
+                  label="Active"
+                  value={routine.enabled}
+                  disabled={Boolean(action.busy)}
+                  onValueChange={(enabled) => {
+                    void setActive(enabled);
+                  }}
+                />
+              }
             />
+          </Rows>
+          <Card className="gap-3">
+            <Detail
+              label="Schedule"
+              value={`${routine.schedule} (${routine.timezone})`}
+            />
+            <Detail label="Instruction" value={routine.instruction} />
+            <Detail
+              label="Reports in"
+              value={
+                routine.conversation.gone
+                  ? "A deleted conversation. Change it from chat."
+                  : (routine.conversation.name ?? "A conversation")
+              }
+            />
+          </Card>
+          <View className="gap-2">
+            <Button
+              isDisabled={!routine.enabled || Boolean(action.busy) || running}
+              onPress={() => {
+                void runNow();
+              }}
+            >
+              {running ? "Running…" : "Run now"}
+            </Button>
+            {!routine.enabled ? (
+              <Text variant="caption" tone="muted" className="text-center">
+                Turn on Active to run it.
+              </Text>
+            ) : null}
           </View>
-          <View style={card}>
-            <Text style={muted}>Schedule</Text>
-            <Text>
-              {routine.schedule} ({routine.timezone})
-            </Text>
-            <Text style={muted}>Next run</Text>
-            <Text>{routine.enabled ? when(routine.nextRunAt) : "Paused"}</Text>
-            <Text style={muted}>Instruction</Text>
-            <Text>{routine.instruction}</Text>
-            <Text style={muted}>Reports in</Text>
-            <Text>
-              {routine.conversation.gone
-                ? "A deleted conversation. Change it from chat."
-                : (routine.conversation.name ?? "A conversation")}
-            </Text>
-          </View>
-          <Button
-            title={running ? "Running…" : "Run now"}
-            disabled={!routine.enabled || Boolean(action.busy) || running}
-            onPress={() => {
-              void runNow();
-            }}
-          />
-          {!routine.enabled && (
-            <Text style={muted}>Turn on Active to run it.</Text>
-          )}
           <Section title="Run history">
-            {runs.data?.length === 0 && <Text style={muted}>No runs yet</Text>}
-            {runs.data?.map((run) => (
-              <View key={run.id} style={card}>
-                {runLabel(run.status) ? (
-                  <Text
-                    style={{ fontWeight: "600", color: runColor(run.status) }}
-                  >
-                    {runLabel(run.status)}
-                  </Text>
-                ) : null}
-                <Text style={muted}>
-                  Started {when(run.startedAt)}
-                  {run.finishedAt ? ` · finished ${when(run.finishedAt)}` : ""}
-                </Text>
-                {run.error ? (
-                  <Text style={{ color: colors.error }}>{run.error}</Text>
-                ) : null}
-              </View>
-            ))}
+            {runs.data?.length === 0 ? (
+              <Text tone="muted">No runs yet.</Text>
+            ) : null}
+            {runs.data?.length ? (
+              <Rows iconless>
+                {runs.data.map((run) => (
+                  <View key={run.id} className="gap-0.5 px-3 py-2.5">
+                    {runLabel(run.status) ? (
+                      <Text
+                        variant="label"
+                        tone={runTone(run.status)}
+                        className="font-semibold"
+                      >
+                        {runLabel(run.status)}
+                      </Text>
+                    ) : null}
+                    <Text variant="caption" tone="muted">
+                      Started {when(run.startedAt)}
+                      {run.finishedAt
+                        ? ` · finished ${when(run.finishedAt)}`
+                        : ""}
+                    </Text>
+                    {run.error ? (
+                      <Text variant="caption" tone="danger">
+                        {run.error}
+                      </Text>
+                    ) : null}
+                  </View>
+                ))}
+              </Rows>
+            ) : null}
           </Section>
           <Button
-            title="Delete routine"
-            color={colors.error}
-            disabled={Boolean(action.busy)}
+            variant="danger-soft"
+            isDisabled={Boolean(action.busy)}
             onPress={() =>
               Alert.alert(
                 "Delete this routine?",
@@ -173,9 +199,23 @@ export default function RoutineScreen() {
                 ],
               )
             }
-          />
+          >
+            Delete routine
+          </Button>
         </>
-      )}
-    </Screen>
+      ) : null}
+    </ScrollScreen>
+  );
+}
+
+/** One fact about the routine: a quiet label over its value. */
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <View className="gap-0.5">
+      <Text variant="caption" tone="muted">
+        {label}
+      </Text>
+      <Text>{value}</Text>
+    </View>
   );
 }

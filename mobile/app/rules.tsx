@@ -1,14 +1,10 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
+import { Button } from "heroui-native/button";
+import { Input } from "heroui-native/input";
+import { Label } from "heroui-native/label";
+import { TextField } from "heroui-native/text-field";
 import { useCallback, useState } from "react";
-import {
-  Alert,
-  Button,
-  Pressable,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert } from "react-native";
 import {
   type ApprovalRule,
   BEHAVIOUR_LABELS,
@@ -25,51 +21,22 @@ import {
 } from "../src/api/generated/approvals/approvals";
 import { authClient } from "../src/auth";
 import {
-  card,
-  colors,
-  heading,
-  input,
-  muted,
-  Problem,
-  Screen,
+  Card,
+  ChoiceList,
+  Notice,
+  Row,
+  Rows,
+  ScrollScreen,
   Section,
-  useAction,
-} from "../src/ui";
+  Text,
+  Toggle,
+} from "../src/components";
+import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
 
-const BEHAVIOURS = Object.keys(BEHAVIOUR_LABELS) as RuleBehaviour[];
-
-function BehaviourPicker({
-  value,
-  disabled,
-  onChange,
-}: {
-  value: RuleBehaviour;
-  disabled?: boolean;
-  onChange: (value: RuleBehaviour) => void;
-}) {
-  return (
-    <View accessibilityRole="radiogroup" style={{ gap: 6 }}>
-      {BEHAVIOURS.map((behaviour) => (
-        <Pressable
-          key={behaviour}
-          accessibilityRole="radio"
-          accessibilityState={{ checked: value === behaviour, disabled }}
-          disabled={disabled}
-          onPress={() => onChange(behaviour)}
-          style={{
-            borderWidth: value === behaviour ? 2 : 1,
-            borderColor: value === behaviour ? colors.link : colors.border,
-            borderRadius: 8,
-            padding: 10,
-          }}
-        >
-          <Text>{BEHAVIOUR_LABELS[behaviour]}</Text>
-        </Pressable>
-      ))}
-    </View>
-  );
-}
+const BEHAVIOURS = (Object.keys(BEHAVIOUR_LABELS) as RuleBehaviour[]).map(
+  (value) => ({ value, label: BEHAVIOUR_LABELS[value] }),
+);
 
 const describe = (rule: ApprovalRule) =>
   [
@@ -80,7 +47,10 @@ const describe = (rule: ApprovalRule) =>
     .filter(Boolean)
     .join(" · ");
 
-/** Custom rules: what a Bot may do without asking, and the ask-first switches. */
+/**
+ * Custom rules: what a Bot may do without asking, and the ask-first switches. The header says
+ * "Custom rules"; the page opens on the switches, then the team's rules, yours, and adding one.
+ */
 export default function RulesScreen() {
   const { botId = "*" } = useLocalSearchParams<{ botId?: string }>();
   const { data: session, isPending } = authClient.useSession();
@@ -114,89 +84,90 @@ export default function RulesScreen() {
     });
 
   return (
-    <Screen
+    <ScrollScreen
       refreshing={settings.pending}
       onRefresh={() => void settings.refresh()}
     >
-      <Text style={heading}>Custom rules</Text>
-      <Problem message={action.error || settings.error} />
-      {data?.preferences && (
-        <View style={card}>
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ flex: 1 }}>Ask before acting on my behalf</Text>
-            <Switch
-              accessibilityLabel="Ask before acting on my behalf"
-              value={data.preferences.enabled}
-              disabled={Boolean(action.busy)}
-              onValueChange={(enabled) => {
-                void setPreference({ enabled });
-              }}
-            />
-          </View>
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ flex: 1 }}>
-              Auto-review low-risk actions
-              {data.team?.enforceAutoReview ? " (required by your team)" : ""}
-            </Text>
-            <Switch
-              accessibilityLabel="Auto-review low-risk actions"
-              value={data.preferences.autoReview}
-              disabled={
-                Boolean(action.busy) || Boolean(data.team?.enforceAutoReview)
-              }
-              onValueChange={(autoReview) => {
-                void setPreference({ autoReview });
-              }}
-            />
-          </View>
-        </View>
-      )}
-      {teamRules && teamRules.length > 0 && (
+      <Notice message={action.error || settings.error || undefined} />
+      {data?.preferences ? (
+        <Rows iconless>
+          <Row
+            title="Ask before acting on my behalf"
+            trailing={
+              <Toggle
+                label="Ask before acting on my behalf"
+                value={data.preferences.enabled}
+                disabled={Boolean(action.busy)}
+                onValueChange={(enabled) => {
+                  void setPreference({ enabled });
+                }}
+              />
+            }
+          />
+          <Row
+            title="Auto-review low-risk actions"
+            description={
+              data.team?.enforceAutoReview ? "Required by your team" : undefined
+            }
+            trailing={
+              <Toggle
+                label="Auto-review low-risk actions"
+                value={data.preferences.autoReview}
+                disabled={
+                  Boolean(action.busy) || Boolean(data.team?.enforceAutoReview)
+                }
+                onValueChange={(autoReview) => {
+                  void setPreference({ autoReview });
+                }}
+              />
+            }
+          />
+        </Rows>
+      ) : null}
+      {teamRules && teamRules.length > 0 ? (
         <Section title="Team rules">
-          {teamRules.map((rule) => (
-            <View key={rule.id} style={card}>
-              <Text style={{ fontWeight: "600" }}>{describe(rule)}</Text>
-              <Text style={muted}>
-                {BEHAVIOUR_LABELS[rule.behaviour]} · set by your team
-              </Text>
-            </View>
-          ))}
+          <Rows iconless>
+            {teamRules.map((rule) => (
+              <Row
+                key={rule.id}
+                title={describe(rule)}
+                description={`${BEHAVIOUR_LABELS[rule.behaviour]} · Set by your team`}
+              />
+            ))}
+          </Rows>
         </Section>
-      )}
+      ) : null}
       <Section title="Your rules">
-        {!editable && (
-          <Text style={muted}>
+        {!editable ? (
+          <Text tone="muted">
             Your workspace has switched custom rules off.
           </Text>
-        )}
-        {rules?.length === 0 && <Text style={muted}>No rules yet.</Text>}
+        ) : null}
+        {rules?.length === 0 ? <Text tone="muted">No rules yet.</Text> : null}
         {rules?.map((rule) => (
-          <View key={rule.id} style={card}>
-            <Text style={{ fontWeight: "600" }}>{describe(rule)}</Text>
-            {rule.botId === "*" && <Text style={muted}>Every Bot</Text>}
-            <BehaviourPicker
+          <Card key={rule.id} className="gap-3">
+            <Text variant="label" className="font-semibold">
+              {describe(rule)}
+            </Text>
+            {rule.botId === "*" ? (
+              <Text variant="caption" tone="muted" className="-mt-2">
+                Every Bot
+              </Text>
+            ) : null}
+            <ChoiceList
+              label={`What a Bot does with ${describe(rule)}`}
+              options={BEHAVIOURS}
               value={rule.behaviour}
               disabled={!editable || Boolean(action.busy)}
               onChange={(next) => {
-                if (next !== rule.behaviour) void changeRule(rule, next);
+                void changeRule(rule, next);
               }}
             />
             <Button
-              title="Remove rule"
-              color={colors.error}
-              disabled={Boolean(action.busy)}
+              size="sm"
+              variant="danger-soft"
+              className="self-start"
+              isDisabled={Boolean(action.busy)}
               onPress={() =>
                 Alert.alert("Remove this rule?", describe(rule), [
                   { text: "Cancel", style: "cancel" },
@@ -216,27 +187,34 @@ export default function RulesScreen() {
                   },
                 ])
               }
-            />
-          </View>
+            >
+              Remove rule
+            </Button>
+          </Card>
         ))}
       </Section>
-      {editable && (
+      {editable ? (
         <Section title="Add a rule">
-          <View style={card}>
-            <TextInput
-              accessibilityLabel="Tool or app"
-              placeholder="Tool or app, such as gmail/send_email or *"
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={toolRef}
-              onChangeText={setToolRef}
-              maxLength={300}
-              style={input}
+          <Card className="gap-3">
+            <TextField>
+              <Label>Tool or app</Label>
+              <Input
+                placeholder="gmail/send_email, or * for any"
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={toolRef}
+                onChangeText={setToolRef}
+                maxLength={300}
+              />
+            </TextField>
+            <ChoiceList
+              label="What a Bot does with it"
+              options={BEHAVIOURS}
+              value={behaviour}
+              onChange={setBehaviour}
             />
-            <BehaviourPicker value={behaviour} onChange={setBehaviour} />
             <Button
-              title="Add rule"
-              disabled={Boolean(action.busy) || !toolRef.trim()}
+              isDisabled={Boolean(action.busy) || !toolRef.trim()}
               onPress={() => {
                 void action.run("add", async () => {
                   await createPersonApprovalRule(ORGANIZATION_ID, ME, {
@@ -248,10 +226,12 @@ export default function RulesScreen() {
                   await settings.refresh();
                 });
               }}
-            />
-          </View>
+            >
+              {action.busy === "add" ? "Adding…" : "Add rule"}
+            </Button>
+          </Card>
         </Section>
-      )}
-    </Screen>
+      ) : null}
+    </ScrollScreen>
   );
 }

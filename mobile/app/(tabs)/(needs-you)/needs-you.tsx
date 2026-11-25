@@ -20,7 +20,7 @@ import {
 import { IconBell } from "../../../src/icons";
 import { showNeedsYouCount } from "../../../src/needs-you-count";
 import { waitingTasks } from "../../../src/tasks";
-import { useAction } from "../../../src/ui";
+import { useAction } from "../../../src/use-action";
 import { useLoad } from "../../../src/use-load";
 
 /**

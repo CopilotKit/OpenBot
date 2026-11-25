@@ -1,5 +1,3 @@
-import { colors } from "./colors";
-
 /** Run history in the words the routine page uses: Running, Succeeded, Failed. */
 const RUN_LABELS: Record<string, string> = {
   running: "Running",
@@ -8,12 +6,14 @@ const RUN_LABELS: Record<string, string> = {
   skipped: "Skipped",
   waiting: "Waiting for you",
 };
-const RUN_COLORS: Record<string, string> = {
-  running: colors.link,
-  succeeded: colors.success,
-  failed: colors.error,
-  skipped: colors.muted,
-  waiting: colors.warning,
+/** A run's status as the tone its words are drawn in (`Text`'s `tone`). */
+export type RunTone = "default" | "muted" | "danger" | "success" | "warning";
+const RUN_TONES: Record<string, RunTone> = {
+  running: "default",
+  succeeded: "success",
+  failed: "danger",
+  skipped: "muted",
+  waiting: "warning",
 };
 
 /** A run's status in words. Null for one a newer server sends that this app doesn't know. */
@@ -21,9 +21,9 @@ export function runLabel(status: string): string | null {
   return RUN_LABELS[status] ?? null;
 }
 
-/** A run's status as a colour, muted for one this app doesn't know. */
-export function runColor(status: string | null | undefined): string {
-  return (status && RUN_COLORS[status]) || colors.muted;
+/** A run's status as a tone, muted for one this app doesn't know. */
+export function runTone(status: string | null | undefined): RunTone {
+  return (status && RUN_TONES[status]) || "muted";
 }
 
 /** The Bot screen's line about a routine's last run. Null when there is none, or its status is unknown. */

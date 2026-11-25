@@ -74,8 +74,6 @@ Two places don't keep these rules yet. Don't add to either:
 - A few web app files still draw with Tailwind's palette: decorative tones in onboarding, a
   sidebar badge, a call button. The test lists them, and the list only gets shorter. Move a file's
   colors to tokens and take it off the list.
-- The phone app's `src/colors.ts` takes its colors from the scheme but one: a blue for a tappable
-  word. The file goes as the screens move to the stack below.
 
 ## The phone app
 
@@ -141,9 +139,6 @@ How we use it:
   Native API from memory.
 - **Style with `className`.** No `StyleSheet.create`, and no style object for something a class can
   say.
-- **`src/ui.tsx` and `src/colors.ts` are the old way.** They are the hand-written styles the
-  screens use today. A screen moved to Uniwind stops using them, and they are deleted when the last
-  screen has moved.
 
 ### What draws what
 
@@ -184,10 +179,10 @@ The rules under [One color scheme, used sparingly](#one-color-scheme-used-sparin
 HeroUI Native has its own names for the tokens, and two of them mean something else than the web
 app's token of the same name. `mobile/global.css` takes the scheme under HeroUI Native's names, for
 light and for dark, written by `bun run tokens:generate` with the mapping below (an entry
-`--surface=card` in its marker comment). Screens not moved to Uniwind yet read `src/scheme.ts`.
+`--surface=card` in its marker comment).
 
-No other file in `mobile/` has a color value in it, but two: `src/colors.ts`'s one blue, and
-`src/orb-palette.ts`, a Bot's orb colors. Those are a Bot's identity, the same on the phone as on
+No other file in `mobile/` has a color value in it, but one: `src/orb-palette.ts`, a Bot's orb
+colors. Those are a Bot's identity, the same on the phone as on
 the web app, and `mobile/tests/orb-palette.test.ts` holds them to `app/src/lib/orb-palette.ts`.
 
 | HeroUI Native token | Takes the scheme's |
@@ -212,7 +207,8 @@ the web app, and `mobile/tests/orb-palette.test.ts` holds them to `app/src/lib/o
 
 `mobile/src/components` is the phone app's library, drawn from the scheme with Uniwind and HeroUI
 Native: text in Inter, a Bot's orb, rows, conversation rows, messages, the message box, notices,
-empty states, the switch and the segmented control. A screen uses these first, then HeroUI
+empty states, cards, the switch, the segmented control, a choice list for options too long
+for it, and the search field and large title Android draws itself. A screen uses these first, then HeroUI
 Native's, and builds its own only when neither fits. The development build shows every one at
 `/gallery` (`mobile/app/gallery.tsx`), in light and dark; a new component goes there too.
 

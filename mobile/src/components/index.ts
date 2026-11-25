@@ -1,11 +1,13 @@
 /**
  * The phone app's components, drawn with Uniwind and HeroUI Native from OpenBot's color scheme.
  * A screen uses these first, then HeroUI Native's, and builds its own only when neither fits
- * (docs/app-guidelines.md). `src/ui.tsx` is the old way, for screens not moved yet.
+ * (docs/app-guidelines.md).
  */
 export { BotIntro } from "./bot-intro";
 export { BotOrb } from "./bot-orb";
 export { BotTile } from "./bot-tile";
+export { Card } from "./card";
+export { ChoiceList } from "./choice-list";
 export { cn } from "./cn";
 export { Composer } from "./composer";
 export { ConversationRow, type ConversationRowBot } from "./conversation-row";

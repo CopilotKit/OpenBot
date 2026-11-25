@@ -44,7 +44,7 @@ import {
 } from "../src/icons";
 import { openConversationWith } from "../src/open-conversation";
 import { ADD_ROUTINE_DRAFT, lastRunLine, when } from "../src/routines";
-import { useAction } from "../src/ui";
+import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
 import { usePull } from "../src/use-pull";
 import { dayHeading, shortWhen } from "../src/when";
@@ -303,7 +303,7 @@ export default function BotScreen() {
                         .join(" · ")}
                       trailing={
                         <Toggle
-                          label="Active"
+                          label={`${routine.title || routine.instruction} is active`}
                           value={routine.enabled}
                           disabled={Boolean(action.busy)}
                           onValueChange={(enabled) =>

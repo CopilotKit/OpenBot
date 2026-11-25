@@ -6,6 +6,8 @@ import { Uniwind, useUniwind } from "uniwind";
 import {
   BotOrb,
   BotTile,
+  Card,
+  ChoiceList,
   Composer,
   ConversationRow,
   EmptyState,
@@ -19,6 +21,7 @@ import {
   Rows,
   ScrollScreen,
   SearchBar,
+  SearchField,
   Section,
   Segmented,
   Text,
@@ -78,6 +81,7 @@ export default function Gallery() {
     "conversations",
   );
   const [on, setOn] = useState(true);
+  const [choice, setChoice] = useState<"allow" | "ask" | "hand_off">("ask");
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
   if (!__DEV__) return <Redirect href="/" />;
@@ -202,6 +206,44 @@ export default function Gallery() {
             />
             <Row title="Sign out" tone="danger" onPress={() => {}} />
           </Rows>
+        </Part>
+
+        <Part only={params.only} title="Choice list">
+          <ChoiceList
+            label="What a Bot does with gmail/send_email"
+            options={[
+              { value: "allow", label: "Take action without asking" },
+              { value: "ask", label: "Ask before taking action" },
+              { value: "hand_off", label: "Hand off to you" },
+            ]}
+            value={choice}
+            onChange={setChoice}
+          />
+        </Part>
+
+        <Part only={params.only} title="Cards">
+          <Card>
+            <Text variant="label" className="font-semibold">
+              Reply to Dana about the renewal
+            </Text>
+            <Text>Her contract ends Friday.</Text>
+            <Text variant="caption" tone="muted">
+              Juno · From gmail
+            </Text>
+          </Card>
+          <Card highlighted>
+            <Text variant="label" className="font-semibold">
+              The one a notification opened
+            </Text>
+          </Card>
+        </Part>
+
+        <Part only={params.only} title="Search field">
+          <SearchField
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search conversations"
+          />
         </Part>
 
         <Part only={params.only} title="Conversation rows">
