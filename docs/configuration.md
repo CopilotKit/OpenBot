@@ -829,7 +829,9 @@ message it sends.
 The native app in `mobile/` reads two variables of its own when it is built, from `mobile/.env`:
 `EXPO_PUBLIC_SERVER_URL`, the deployment's public URL (required, `https` outside development, no
 credentials or query string), and `EXPO_PUBLIC_EAS_PROJECT_ID`, the same project id as
-`EXPO_PROJECT_ID` above.
+`EXPO_PROJECT_ID` above. Without a project id the app is built for OpenBot Cloud's own Expo
+project. A build on Expo's build service does not read `mobile/.env`: it takes
+`EXPO_PUBLIC_SERVER_URL` from the build profile in `mobile/eas.json`.
 
 ## Inbound email triggers
 

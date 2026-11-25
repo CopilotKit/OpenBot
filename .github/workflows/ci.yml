@@ -307,6 +307,18 @@ jobs:
       # existing desktop/server installation contract. CI installs its own reviewed lockfile.
       - run: npm ci --prefix mobile --ignore-scripts
       - run: npm run --prefix mobile typecheck
+      # Expo's own checks of the project: its config, its lockfile, and one version of each native
+      # module. The comparison against Expo's live list of versions is left out: a patch Expo
+      # publishes would fail a pull request that changed nothing. `npm run doctor` on a laptop
+      # still makes it. The checks that remain ask Expo's API for a schema, so an outage there
+      # warns and does not fail.
+      - run: npm run --prefix mobile doctor
+        env:
+          EXPO_DOCTOR_SKIP_DEPENDENCY_VERSION_CHECK: "1"
+          EXPO_DOCTOR_WARN_ON_NETWORK_ERRORS: "1"
+      # The JavaScript both phones load, built the way a release builds it: an import that does not
+      # resolve fails here and not on a phone.
+      - run: npm run --prefix mobile bundle
 
   # The app's and the desktop window's tests that need a real Chromium, asked for by name because a
   # machine running `bun test` is not required to have a browser. The browser is the one the root's
