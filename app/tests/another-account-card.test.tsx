@@ -26,6 +26,7 @@ import {
 import type { ReactNode } from "react";
 import { ServerToolLine } from "@/components/channels/chat-transcript";
 import { setCurrentOrganization } from "@/lib/organizations/current";
+import type { BrokeredAccountRecord } from "@/lib/plugins/queries";
 import { appAccess } from "./app-access-fixture";
 import { botAppResponse } from "./bot-grants-api";
 import {
@@ -63,14 +64,14 @@ afterEach(() => {
 });
 
 const APP = "composio-gmail";
-const WORK = {
+const WORK: BrokeredAccountRecord = {
   id: "00000000-0000-4000-8000-000000000001",
   identity: "sam@work.example",
   label: "sam@work.example",
   isDefault: true,
   connectedAt: "2026-11-01T09:00:00.000Z",
 };
-const PERSONAL = {
+const PERSONAL: BrokeredAccountRecord = {
   id: "00000000-0000-4000-8000-000000000002",
   identity: "sam@home.example",
   label: "sam@home.example",
@@ -88,7 +89,7 @@ const answer = anotherAccountAnswer({
 });
 
 /** The server: Gmail's accounts as `state.accounts` says now, and every write the card sends. */
-function serving(state: { accounts: (typeof WORK)[] }) {
+function serving(state: { accounts: BrokeredAccountRecord[] }) {
   const writes: { path: string; body: unknown }[] = [];
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), "http://openbot.test").pathname;
