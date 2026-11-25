@@ -100,7 +100,7 @@ Expo holds what an upload needs. This repository holds none of it.
 
 | Store | What Expo holds | What `eas.json` says |
 | --- | --- | --- |
-| App Store | An App Store Connect API key, the distribution certificate, the provisioning profile and the push key. | `submit.production.ios`: `ascAppId`, the number of the app's record in App Store Connect, and `appleTeamId`. Not set yet. |
+| App Store | An App Store Connect API key, the distribution certificate, the provisioning profile and the push key. | `submit.production.ios`: `appleTeamId` (`FHRBUNLTRH`), and `ascAppId` (`6839378233`), the number of the app's record in App Store Connect, "OpenBot by CopilotKit". |
 | Google Play | The upload keystore, and the key of a Google service account that may release to testing tracks. | `submit.production.android`: the `internal` track. |
 
 Add or replace a key with `eas credentials`, from a terminal. Expo takes no new key from a run
@@ -118,7 +118,7 @@ two things from it:
 - `google-services.json`, the Android app's Firebase settings, in the EAS file variable
   `GOOGLE_SERVICES_JSON`. `app.config.ts` reads it there. To build on your machine with
   notifications, download the file from the Firebase console (Project settings, then the Android
-  app `ai.openbot.mobile`) into `mobile/`. Git ignores it.
+  app `ai.open.bot.mobile`) into `mobile/`. Git ignores it.
 - The Firebase service account key, in the project's Android credentials (FCM V1), so that Expo's
   push service can reach Android phones. Never commit it.
 

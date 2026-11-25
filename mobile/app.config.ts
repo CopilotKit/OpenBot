@@ -48,12 +48,12 @@ const config: ExpoConfig = {
   // OpenBot's orb, the desktop app's icon (desktop/src-tauri/icons/icon.png), on the scheme's background.
   icon: "./assets/icon.png",
   ios: {
-    bundleIdentifier: "ai.openbot.mobile",
+    bundleIdentifier: "ai.open.bot.mobile",
     supportsTablet: true,
     icon: { light: "./assets/icon.png", dark: "./assets/icon-dark.png" },
   },
   android: {
-    package: "ai.openbot.mobile",
+    package: "ai.open.bot.mobile",
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: SPLASH.light,

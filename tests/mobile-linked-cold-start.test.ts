@@ -14,7 +14,7 @@ const plugin = require("../mobile/plugins/linked-cold-start") as {
 };
 
 /** MainActivity.kt as Expo 55's prebuild writes it (`expo prebuild --platform android`), up to its onCreate. */
-const GENERATED = `package ai.openbot.mobile
+const GENERATED = `package ai.open.bot.mobile
 
 import android.os.Build
 import android.os.Bundle
