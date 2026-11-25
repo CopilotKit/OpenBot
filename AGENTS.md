@@ -10,6 +10,11 @@ Before you plan a screen or a feature for the phone app, the web app or OpenBot 
 [docs/app-guidelines.md](docs/app-guidelines.md): the one color scheme every app keeps to, what the
 phone app is for, and the stack it is built with.
 
+**Before you change a token or a primitive, or build a screen from a design, read
+[docs/design-system.md](docs/design-system.md). Not optional.** That means anything under `tokens/`
+or `app/src/components/ui`, `app/src/theme.css`, a new font, icon set or picture, and any work
+that starts from Figma. The design system stays compatible with shadcn, in light and in dark.
+
 Skills for coding agents live in `.claude/skills/<name>/SKILL.md`. Claude Code finds them on its
 own. Other agents: when a task matches a skill, read its `SKILL.md` before starting.
 
