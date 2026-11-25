@@ -27,6 +27,7 @@ import {
   View,
 } from "react-native";
 import { serverUrl } from "./auth";
+import { useLaunchSettled } from "./launch";
 import {
   type FloorStore,
   SECURITY_FLOOR_HEADING,
@@ -144,6 +145,12 @@ export function SecurityFloorGate({
 export function withSecurityFloor(Layout: ComponentType) {
   return function SecurityFloorLayout() {
     const { decision, checking, check } = useSecurityFloor();
+    // The launch cover waits for the floor's first decision, and fades onto the notice when it stops the app.
+    useLaunchSettled(
+      "floor",
+      decision !== "starting",
+      decision !== "starting" && decision.blocked,
+    );
     return (
       <View style={styles.root}>
         <Layout />
@@ -160,7 +167,7 @@ export function withSecurityFloor(Layout: ComponentType) {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   cover: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",

@@ -14,6 +14,8 @@ export const REGIONS = [
   "desktop/src/styles.css",
   "desktop/src-tauri/src/connected/sign_in.rs",
   "desktop/src-tauri/src/first_paint.rs",
+  // The phone app's stylesheet, under HeroUI Native's names (docs/app-guidelines.md).
+  "mobile/global.css",
 ] as const;
 
 /** Files the generator writes whole. */

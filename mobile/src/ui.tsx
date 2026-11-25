@@ -1,12 +1,12 @@
 import { type ReactNode, useState } from "react";
 import {
   RefreshControl,
-  ScrollView,
   Text,
   type TextStyle,
   View,
   type ViewStyle,
 } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { colors } from "./colors";
 
 export { colors };
@@ -39,8 +39,12 @@ export function Screen({
   onRefresh?: () => void;
 }) {
   return (
-    <ScrollView
+    // Keeps the field being typed in above the keyboard, and lets the rest be scrolled to.
+    <KeyboardAwareScrollView
       contentContainerStyle={{ padding: 20, gap: 16 }}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+      bottomOffset={24}
       refreshControl={
         onRefresh ? (
           <RefreshControl
@@ -51,7 +55,7 @@ export function Screen({
       }
     >
       {children}
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

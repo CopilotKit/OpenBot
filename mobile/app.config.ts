@@ -15,6 +15,15 @@ const openbotRelease = (
     version: string;
   }
 ).version;
+/**
+ * The screen's background, light and dark (src/scheme.ts), and the orb's width on the splash (src/launch-orb.ts).
+ * Written out because Expo reads this file without the app's modules; tests/launch-splash.test.ts holds them equal.
+ */
+export const SPLASH = {
+  orbWidth: 112,
+  light: "#f8fafb",
+  dark: "#0d1319",
+} as const;
 const config: ExpoConfig = {
   name: "OpenBot",
   slug: "openbot",
@@ -22,11 +31,41 @@ const config: ExpoConfig = {
   ...(ownProjectId ? {} : { owner: "copilotkit" }),
   version: "0.0.1",
   scheme: "openbotmobile",
-  ios: { bundleIdentifier: "ai.openbot.mobile", supportsTablet: true },
-  android: { package: "ai.openbot.mobile" },
+  // Follow the phone's light or dark setting. Expo's default is light only, which kept the app light
+  // under a dark phone even though every color has a dark value.
+  userInterfaceStyle: "automatic",
+  // OpenBot's orb, the desktop app's icon (desktop/src-tauri/icons/icon.png), on the scheme's background.
+  icon: "./assets/icon.png",
+  ios: {
+    bundleIdentifier: "ai.openbot.mobile",
+    supportsTablet: true,
+    icon: { light: "./assets/icon.png", dark: "./assets/icon-dark.png" },
+  },
+  android: {
+    package: "ai.openbot.mobile",
+    adaptiveIcon: {
+      foregroundImage: "./assets/adaptive-icon.png",
+      backgroundColor: SPLASH.light,
+    },
+  },
   plugins: [
     "expo-router",
     "expo-secure-store",
+    // The phone's own splash: the same orb, the same size, on the screen's background, light or dark. The app
+    // draws it again exactly where the phone left it and carries on from there (src/launch.tsx).
+    [
+      "expo-splash-screen",
+      {
+        image: "./assets/orb.png",
+        imageWidth: SPLASH.orbWidth,
+        resizeMode: "contain",
+        backgroundColor: SPLASH.light,
+        dark: {
+          image: "./assets/orb.png",
+          backgroundColor: SPLASH.dark,
+        },
+      },
+    ],
     ["expo-notifications", { defaultChannel: "openbot" }],
     // Back from linking the company account after the process died mid-sign-in: no Custom Tab left below Home.
     "./plugins/linked-cold-start",

@@ -50,6 +50,24 @@ export async function registerPush() {
   return id;
 }
 /**
+ * Whether this phone gets push notifications: the person allowed them, and the app registered the
+ * phone (it keeps the id it registered under until sign-out takes it off).
+ */
+export async function pushTurnedOn(): Promise<boolean> {
+  if (!Device.isDevice) return false;
+  const permission = await Notifications.getPermissionsAsync();
+  if (permission.status !== "granted") return false;
+  return Boolean(await SecureStore.getItemAsync(key));
+}
+/**
+ * Register again, each time the app starts signed in, on a phone the person already turned
+ * notifications on for: a push token Expo changed since replaces the old one, and a phone the server
+ * dropped (Expo said it stopped taking them) is registered again. Never asks for permission.
+ */
+export async function renewPush(): Promise<void> {
+  if (await pushTurnedOn()) await registerPush();
+}
+/**
  * Stop push notifications to this phone, from every organization the person is in: a device is registered in each
  * organization it gets notifications from, so signing out removes it from each.
  */
@@ -67,4 +85,6 @@ export async function unregisterPush() {
       throw error;
     }
   }
+  // Signed out, the phone is nobody's: not registered again at the next start until turned on.
+  await SecureStore.deleteItemAsync(key);
 }

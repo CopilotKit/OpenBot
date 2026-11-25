@@ -128,6 +128,11 @@ export const STAYS: { prefix: string; rule: Rule; why: string }[] = [
     why: "released Desktop shells, 1.0.2 and 1.0.3, hand a Recorder its connect code here",
   },
   {
+    prefix: "/api/me",
+    rule: "sign-in-protocol",
+    why: "who an app's access token belongs to, one of the four addresses outside /api/v2 the API's token scheme names (people:read), and the one that answers somebody in no organization",
+  },
+  {
     prefix: "/api/attachments",
     rule: "stored-format",
     why: "the form a sent message keeps its attachment in",
@@ -208,6 +213,24 @@ export const ALLOWED: Allowed[] = [
     what: "/api/auth/organization/set-active",
     rule: "sign-in-protocol",
     why: "Better Auth's own address for the organization a session works in, which switching sets",
+  },
+  {
+    file: "mobile/src/auth.ts",
+    what: "fetch()",
+    rule: "sign-in-protocol",
+    why: "the phone's OAuth sign-in: the discovery document, the code's exchange, the refresh token's rotation and revocation at sign-out",
+  },
+  {
+    file: "mobile/src/oauth.ts",
+    what: "/.well-known/oauth-authorization-server/api/auth",
+    rule: "before-sign-in",
+    why: "OAuth's discovery document, which names the sign-in's addresses and scopes",
+  },
+  {
+    file: "mobile/src/auth.ts",
+    what: "/api/me",
+    rule: "sign-in-protocol",
+    why: "who an access token belongs to, the address the API's token scheme names for an app's sign-in, asked once each time the phone signs in or opens",
   },
   {
     file: "mobile/src/api/request.ts",

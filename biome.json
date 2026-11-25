@@ -9,6 +9,7 @@
       "!**/.venv*",
       "!app/src/lib/generated/application-config.ts",
       "!app/src/routeTree.gen.ts",
+      "!mobile/src/uniwind-types.d.ts",
       "!desktop/src-tauri/gen",
       "!**/target",
       "!app/tests/fixtures/arcade-catalogue.json"
@@ -150,6 +151,7 @@
         "app/src/components/computer/live-terminal.tsx",
         "app/src/lib/voice/websocket.ts",
         "mobile/src/api/request.ts",
+        "mobile/src/auth.ts",
         "mobile/app/computer.tsx",
         "mobile/src/security-floor.ts",
         "extension/src/shared/openbot-client.ts",

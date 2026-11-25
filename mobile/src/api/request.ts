@@ -3,7 +3,7 @@
  *
  * Every operation the app uses calls this with the address, method, headers and serialised body the spec gives it. It
  * goes to the deployment the app was built for, in the organization the signed-in person is working in, with the
- * session's cookie and never the platform's own cookie jar, and a refusal is thrown as an {@link ApiError} in the server's own sentence.
+ * signed-in person's access token (../auth.ts) and never the platform's cookie jar, and a refusal is thrown as an {@link ApiError} in the server's own sentence.
  * Every request names the app and the OpenBot release it was built from (`OpenBot-Client: mobile/<release>`), and a
  * refusal of this app as too old (CLIENT_UPDATE_REQUIRED) is also told to the root layout, which shows Update OpenBot.
  */
@@ -24,8 +24,8 @@ import {
   type OrganizationChoices,
 } from "../organization";
 import { reportOrganizationGone } from "../organization-gone";
-import { reportRenewalNeedsClick } from "../renewal";
 import { clientHeaders } from "../release";
+import { reportRenewalNeedsClick } from "../renewal";
 import { reportSessionRefused } from "../session-refused";
 import type { Deployment } from "./generated/model";
 import { getDeployment } from "./generated/organization-settings/organization-settings";
@@ -135,13 +135,13 @@ const organizations = createOrganizationChoice(
   () => signedInPerson,
 );
 
-/** An address with its organization filled in, for whoever holds `cookie`. Any other address is left as it is. */
-function inOrganization(url: string, cookie: string | null): Promise<string> {
+/** An address with its organization filled in, for whoever holds `token`. Any other address is left as it is. */
+function inOrganization(url: string, token: string | null): Promise<string> {
   return organizations.address(
     url.startsWith(WRITTEN)
       ? `${ORGANIZATION}${url.slice(WRITTEN.length)}`
       : url,
-    cookie ?? "",
+    token ?? "",
   );
 }
 
@@ -152,14 +152,14 @@ function inOrganization(url: string, cookie: string | null): Promise<string> {
  */
 async function organizationFor(
   address: string,
-  cookie: string | null,
+  token: string | null,
 ): Promise<string | undefined> {
-  if (!cookie || address.startsWith(OWN_ORGANIZATIONS)) return undefined;
+  if (!token || address.startsWith(OWN_ORGANIZATIONS)) return undefined;
   const named = /^\/api\/v2\/organizations\/([^/?]+)/.exec(address)?.[1];
   if (named) return decodeURIComponent(named);
-  // A cookie that is not a live session can't read the person's organizations: the request goes without the header,
-  // and is answered as whoever holds that cookie is.
-  return organizations.current(cookie).catch(() => undefined);
+  // A token that is no longer good can't read the person's organizations: the request goes without the header, and is
+  // answered as whoever holds that token is.
+  return organizations.current(token).catch(() => undefined);
 }
 
 /**
@@ -167,20 +167,23 @@ async function organizationFor(
  * the organization, starting with a slash.
  */
 export async function organizationAddress(rest: string): Promise<string> {
-  return inOrganization(`${ORGANIZATION}${rest}`, await authClient.getCookie());
+  return inOrganization(
+    `${ORGANIZATION}${rest}`,
+    await authClient.getAccessToken(),
+  );
 }
 
 /**
  * What the deployment offers (how people sign in, which apps it serves), read in the organization the person works in
  * while they hold a live session (`signedIn`, the session the sign-in client reports), and in `default` otherwise.
  *
- * Whether somebody is signed in is the session's answer, never whether the phone holds a cookie: sign-in leaves cookies
- * of its own behind (an unfinished sign-in's state, an expired or revoked session), and reading the person's
- * organizations with one of those is refused, which left the signed-out screen with no way to sign in. A session that
+ * Whether somebody is signed in is the session's answer, never whether the phone holds a token: a token can outlive
+ * its sign-in (revoked, or its owner removed), and reading the person's organizations with one of those is refused,
+ * which would leave the signed-out screen with no way to sign in. A session that
  * turns out to have ended on the way (refused as signed out), or whose organization isn't found, is read in `default`
  * too.
  *
- * `default`'s is read as nobody: no cookie and no organization of the person's. It answers anybody, and a signed-in
+ * `default`'s is read as nobody: no token and no organization of the person's. It answers anybody, and a signed-in
  * person who isn't a member of `default` is refused there as if it didn't exist.
  */
 export async function readDeployment(signedIn: boolean): Promise<Deployment> {
@@ -215,7 +218,7 @@ export async function organizationsHeld(): Promise<ListedOrganization[]> {
 
 /** The signed-in person's organizations, and the one they work in. */
 export async function organizationChoices(): Promise<OrganizationChoices> {
-  return organizations.choices((await authClient.getCookie()) ?? "");
+  return organizations.choices((await authClient.getAccessToken()) ?? "");
 }
 
 /**
@@ -225,7 +228,7 @@ export async function organizationChoices(): Promise<OrganizationChoices> {
 export async function chooseOrganization(
   id: string,
 ): Promise<OrganizationChoices> {
-  return organizations.choose(id, (await authClient.getCookie()) ?? "");
+  return organizations.choose(id, (await authClient.getAccessToken()) ?? "");
 }
 
 /** The person asking, as the API addresses them in its `people/{personId}` operations. */
@@ -256,20 +259,27 @@ function refusal(body: unknown): {
 }
 
 /**
- * What a generated call may add to its request. `anonymous` sends it as nobody: no session cookie and no organization,
+ * What a generated call may add to its request. `anonymous` sends it as nobody: no session token and no organization,
  * for an address that answers anybody (`default`'s deployment) and would refuse the person's own session.
  */
 export type ApiRequestInit = RequestInit & {
   anonymous?: boolean;
   /** Sent again after the hosted sign-in was renewed: refused for renewal again, it isn't renewed again. */
   renewed?: boolean;
+  /** Sent again with a new access token after the last one was refused: refused again, the sign-in is over. */
+  refreshed?: boolean;
 };
 
 export async function apiRequest<T>(
   url: string,
   options: ApiRequestInit = {},
 ): Promise<T> {
-  const { anonymous = false, renewed = false, ...init } = options;
+  const {
+    anonymous = false,
+    renewed = false,
+    refreshed = false,
+    ...init
+  } = options;
   if (!url.startsWith("/api/")) throw new Error("Use an OpenBot API path.");
   const method = (init.method ?? "GET").toUpperCase();
   const headers: Record<string, string> = {};
@@ -280,10 +290,10 @@ export async function apiRequest<T>(
   if (apiWrite(url, method) && !headers["idempotency-key"])
     headers["idempotency-key"] = Crypto.randomUUID();
   Object.assign(headers, clientHeaders());
-  const cookie = anonymous ? null : await authClient.getCookie();
-  if (cookie) headers.cookie = cookie;
-  const address = await inOrganization(url, cookie);
-  const organization = await organizationFor(address, cookie);
+  const token = anonymous ? null : await authClient.getAccessToken();
+  if (token) headers.authorization = `Bearer ${token}`;
+  const address = await inOrganization(url, token);
+  const organization = await organizationFor(address, token);
   if (organization) headers[ORGANIZATION_HEADER] = organization;
   const response = await fetch(`${serverUrl}${address}`, {
     ...init,
@@ -295,21 +305,40 @@ export async function apiRequest<T>(
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const { said, code, minimumVersion, security } = refusal(body);
-    // Sent as somebody signed in and refused as nobody: the session is gone, and the app reads it again.
-    // Except a hosted OpenBot's sign-in needing renewal, which is never being signed out: the session still works.
-    if (response.status === 401 && cookie && code !== RENEWAL_REQUIRED)
+    /*
+     * Sent as somebody signed in and refused as nobody. The access token may have ended early: replaced once, the
+     * request is sent again exactly as it was, its Idempotency-Key and all. Refused again, or with no new token to be
+     * had, the sign-in is over, and the app reads it again. Except a hosted OpenBot's sign-in needing renewal, which is
+     * never being signed out: the sign-in still works.
+     */
+    if (response.status === 401 && token && code !== RENEWAL_REQUIRED) {
+      if (!refreshed && (await authClient.refreshAfterRefusal(token))) {
+        const { authorization: _refused, ...again } = headers;
+        return apiRequest<T>(url, {
+          ...init,
+          headers: again,
+          renewed,
+          refreshed: true,
+        });
+      }
       reportSessionRefused();
+    }
     /*
      * A hosted OpenBot's proof ran out: renewed through the hosted sign-in in the in-app browser, then the request is
      * sent again, once, exactly as it was, its Idempotency-Key and all, so a write that did land is answered as a
      * repeat and never done twice. Refused for renewal again, the person is offered "Sign in again".
      */
-    if (code === RENEWAL_REQUIRED && cookie) {
+    if (code === RENEWAL_REQUIRED && token) {
       const signIn = signInAddress(response.headers.get(SIGN_IN_HEADER));
       if (!renewed && auth.renewHostedSignIn) {
-        const { cookie: _sent, ...again } = headers;
+        const { authorization: _sent, ...again } = headers;
         await auth.renewHostedSignIn(signIn);
-        return apiRequest<T>(url, { ...init, headers: again, renewed: true });
+        return apiRequest<T>(url, {
+          ...init,
+          headers: again,
+          renewed: true,
+          refreshed,
+        });
       }
       reportRenewalNeedsClick(signIn);
     }
@@ -317,9 +346,9 @@ export async function apiRequest<T>(
     // organizations again and works in another of theirs, and Home is told.
     if (
       code === ORGANIZATION_NOT_FOUND &&
-      cookie &&
+      token &&
       organization &&
-      (await organizations.gone(organization, cookie))
+      (await organizations.gone(organization, token))
     )
       reportOrganizationGone();
     if (code === CLIENT_UPDATE_REQUIRED) {
