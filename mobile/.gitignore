@@ -4,3 +4,5 @@ dist/
 ios/
 android/
 .env
+# Firebase settings for Android push; builds on EAS get them from GOOGLE_SERVICES_JSON.
+google-services.json

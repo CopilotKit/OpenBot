@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExpoConfig } from "expo/config";
 
@@ -24,6 +24,17 @@ export const SPLASH = {
   light: "#f8fafb",
   dark: "#0d1319",
 } as const;
+/**
+ * Firebase's settings for the Android app, which Android needs to get a push token. A build on EAS
+ * gets the file from the EAS variable GOOGLE_SERVICES_JSON; on your machine it is
+ * `google-services.json` next to this file, which git ignores. Without it the app still builds, but
+ * an Android phone gets no notifications.
+ */
+const googleServicesFile =
+  process.env.GOOGLE_SERVICES_JSON ??
+  (existsSync(join(__dirname, "google-services.json"))
+    ? "./google-services.json"
+    : undefined);
 const config: ExpoConfig = {
   name: "OpenBot",
   slug: "openbot",
@@ -47,6 +58,7 @@ const config: ExpoConfig = {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: SPLASH.light,
     },
+    ...(googleServicesFile ? { googleServicesFile } : {}),
   },
   plugins: [
     "expo-router",

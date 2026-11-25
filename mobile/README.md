@@ -85,4 +85,18 @@ The first Android build, and the first iOS build for a phone, must be started by
 terminal. EAS asks then to create the Android keystore and the iOS certificate, and it keeps both.
 After that the workflow builds without questions.
 
+## Push notifications on Android
+
+Android gets its push token through Firebase, from the Firebase project `openbot-e63ea`. Expo keeps
+two things from it:
+
+- `google-services.json`, the Android app's Firebase settings, in the EAS file variable
+  `GOOGLE_SERVICES_JSON`. `app.config.ts` reads it there. To build on your machine with
+  notifications, download the file from the Firebase console (Project settings, then the Android
+  app `ai.openbot.mobile`) into `mobile/`. Git ignores it.
+- The Firebase service account key, in the project's Android credentials (FCM V1), so that Expo's
+  push service can reach Android phones. Never commit it.
+
+iOS push uses the key Expo created with the first iOS build.
+
 Not set up yet: updates sent to installed apps without a store release, and uploads to the stores.
