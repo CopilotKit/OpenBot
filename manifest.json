@@ -1,0 +1,261 @@
+{
+  "sourceCommit": "f47ccabc0cc1ad7ffbcbb3c51fe0e5361f639d2c",
+  "pr": 2189,
+  "captures": [
+    {
+      "name": "01-cloud-sign-in",
+      "scene": "state-first-run",
+      "at": 1,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Set up OpenBot",
+        "OpenBot Cloud"
+      ],
+      "errors": []
+    },
+    {
+      "name": "02-business-self-hosted",
+      "scene": "state-first-run",
+      "at": 1,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Set up OpenBot",
+        "OpenBot for Business"
+      ],
+      "errors": []
+    },
+    {
+      "name": "03-booking-calendar",
+      "scene": "state-first-run",
+      "at": 1,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Set up OpenBot",
+        "Book a demo"
+      ],
+      "errors": []
+    },
+    {
+      "name": "03a-booking-calendar-day",
+      "scene": "state-first-run",
+      "at": 1,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Set up OpenBot",
+        "Book a demo"
+      ],
+      "errors": [],
+      "state": "Live calendar before choosing an available day"
+    },
+    {
+      "name": "04-self-contained",
+      "scene": "state-first-run",
+      "at": 1,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Set up OpenBot",
+        "OpenBot (Self-Contained)"
+      ],
+      "errors": []
+    },
+    {
+      "name": "05-connect-to-work",
+      "scene": "state-first-run",
+      "at": 1,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Set up OpenBot",
+        "Already have OpenBot at work?"
+      ],
+      "errors": []
+    },
+    {
+      "name": "06-account-sign-in",
+      "scene": "install-mac",
+      "at": 10,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Get your free license key"
+      ],
+      "errors": []
+    },
+    {
+      "name": "07-agreement",
+      "scene": "install-mac",
+      "at": 40,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Accept the license agreement"
+      ],
+      "errors": []
+    },
+    {
+      "name": "08-ai-provider",
+      "scene": "install-mac",
+      "at": 52,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Connect your AI"
+      ],
+      "errors": []
+    },
+    {
+      "name": "09-finishing-setup",
+      "scene": "install-mac",
+      "at": 100,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Finishing setup"
+      ],
+      "errors": []
+    },
+    {
+      "name": "10-update-progress-rail",
+      "scene": "relaunch-update-progress",
+      "at": 35,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Updating OpenBot"
+      ],
+      "errors": []
+    },
+    {
+      "name": "11-shutdown-progress-rail",
+      "scene": "shutting-down",
+      "at": 18,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Shutting down OpenBot"
+      ],
+      "errors": []
+    },
+    {
+      "name": "12-recovery-disk-space",
+      "scene": "state-update-short",
+      "at": 5,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "OpenBot needs more free space to update"
+      ],
+      "errors": []
+    },
+    {
+      "name": "13-running-status",
+      "scene": "state-status",
+      "at": 5,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Status",
+        "App",
+        "OpenBot's services",
+        "Software OpenBot runs on"
+      ],
+      "errors": []
+    },
+    {
+      "name": "14-app-shared-orb",
+      "scene": "app-home-bots",
+      "at": 1,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Conversations",
+        "Start a conversation",
+        "Explore Bots"
+      ],
+      "errors": []
+    },
+    {
+      "name": "15-cloud-light",
+      "scene": "state-first-run",
+      "at": 1,
+      "theme": "light",
+      "size": "1000x800",
+      "headings": [
+        "Set up OpenBot",
+        "OpenBot Cloud"
+      ],
+      "errors": []
+    },
+    {
+      "name": "16-provider-light",
+      "scene": "install-mac",
+      "at": 52,
+      "theme": "light",
+      "size": "1000x800",
+      "headings": [
+        "Connect your AI"
+      ],
+      "errors": []
+    },
+    {
+      "name": "17-update-light",
+      "scene": "relaunch-update-progress",
+      "at": 35,
+      "theme": "light",
+      "size": "1000x800",
+      "headings": [
+        "Updating OpenBot"
+      ],
+      "errors": []
+    },
+    {
+      "name": "18-shutdown-light",
+      "scene": "shutting-down",
+      "at": 18,
+      "theme": "light",
+      "size": "1000x800",
+      "headings": [
+        "Shutting down OpenBot"
+      ],
+      "errors": []
+    },
+    {
+      "name": "19-update-compact",
+      "scene": "relaunch-update-progress",
+      "at": 35,
+      "theme": "dark",
+      "size": "720x560",
+      "headings": [
+        "Updating OpenBot"
+      ],
+      "errors": []
+    },
+    {
+      "name": "20-windows-setup",
+      "scene": "state-first-run",
+      "at": 1,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Turn on Windows Subsystem for Linux"
+      ],
+      "errors": []
+    },
+    {
+      "name": "21-windows-restart",
+      "scene": "state-first-run",
+      "at": 1,
+      "theme": "dark",
+      "size": "1000x800",
+      "headings": [
+        "Restart Windows to finish"
+      ],
+      "errors": []
+    }
+  ]
+}
