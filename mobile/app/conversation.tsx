@@ -7,7 +7,7 @@ import {
   useFocusEffect,
   useLocalSearchParams,
 } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, FlatList, Pressable, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import {
@@ -70,6 +70,7 @@ export default function ConversationScreen() {
   const [text, setText] = useState(draft ?? "");
   const [error, setError] = useState("");
   const [sending, setSending] = useState<string | null>(null);
+  const list = useRef<FlatList<Item>>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload for whoever is signed in now, not the previous person
   const loadChannels = useCallback(
     () => getConversation(ORGANIZATION_ID, channelId ?? ""),
@@ -169,6 +170,8 @@ export default function ConversationScreen() {
     if (!text.trim() || !agentId || sending) return;
     const pendingText = text;
     setSending(pendingText);
+    // What they send shows at once, wherever they had scrolled to: the newest end is offset 0.
+    list.current?.scrollToOffset({ offset: 0, animated: true });
     setError("");
     setText("");
     try {
@@ -272,6 +275,7 @@ export default function ConversationScreen() {
           </View>
         ) : null}
         <FlatList
+          ref={list}
           className="flex-1"
           inverted
           data={items}
