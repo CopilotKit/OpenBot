@@ -446,31 +446,66 @@ test("an app connected with a typed key goes to its page in Settings, with the k
   );
 });
 
-test("a brokered sign-in app to reconnect goes to its page in Settings, on Composio and on Arcade alike", async () => {
-  /*
-   * ONE DESTINATION FOR BOTH BROKERS: the app's page as it is, where its own Reconnect and
-   * Disconnect are. No tab is opened from here.
-   */
-  const composio = mounted(appAccess({ state: "reconnect" }));
-  fireEvent.click(
-    await composio.view.findByRole("button", { name: "Reconnect Gmail" }),
-  );
-  expect((await composio.view.findByTestId("app-page")).textContent).toBe(
-    "/connections/composio-gmail",
-  );
-  cleanup();
-
-  const arcade = mounted(
-    appAccess({ key: "arcade-Gmail", state: "reconnect" }),
-  );
-  fireEvent.click(
-    await arcade.view.findByRole("button", { name: "Reconnect Gmail" }),
-  );
-  expect((await arcade.view.findByTestId("app-page")).textContent).toBe(
-    "/connections/arcade-Gmail",
-  );
-  expect(arcade.opened).toEqual([]);
-});
+/*
+ * FOUND AFTER KEY APPS WERE MADE ONE PRESS: Reconnect on an app that signs in through the directory
+ * opened its page as it was, where a second press began the sign-in. Every app that signs in now
+ * starts its sign-in from the press, and the button says so until the sign-in opens.
+ */
+test.each([
+  ["Composio's directory", "composio-gmail", "Gmail", "consent", "composio"],
+  ["Arcade's directory", "arcade-Gmail", "Gmail", "consent", "arcade"],
+  ["OpenBot's own sign-in", "notion", "Notion", "oauth", "composio"],
+  [
+    "an app's own sign-in server",
+    "fireflies-mcp",
+    "Fireflies",
+    "oauth",
+    "composio",
+  ],
+  [
+    "an MCP server that signs people in",
+    "mcp-linear",
+    "Linear",
+    "oauth",
+    "composio",
+  ],
+] as const)(
+  "Reconnect on a sign-in app through %s starts its sign-in in one press",
+  async (_, key, name, connect, directory) => {
+    let release: () => void = () => {};
+    const connectGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { view, sent, opened } = mounted(
+      appAccess({ key, displayName: name, state: "reconnect", connect }),
+      undefined,
+      { connectGate, directory },
+    );
+    fireEvent.click(
+      await view.findByRole("button", { name: `Reconnect ${name}` }),
+    );
+    // Asked for the sign-in from the press, and saying so where it was pressed until it opens.
+    await waitFor(() =>
+      expect(
+        sent.some(
+          (call) =>
+            call.method === "POST" &&
+            call.url === myConnectionPath(key, "connect"),
+        ),
+      ).toBe(true),
+    );
+    const working = await view.findByText("Opening sign-in…");
+    expect(working.closest("button")?.hasAttribute("disabled")).toBe(true);
+    expect(view.getByText(/connection needs reconnecting/)).toBeTruthy();
+    release();
+    await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+    // The screen stays: the sign-in is in the tab that opened.
+    expect(view.queryByTestId("app-page")).toBeNull();
+    expect(
+      await view.findByText("Finish in the tab that opened."),
+    ).toBeTruthy();
+  },
+);
 
 /*
  * FOUND IN DOGFOODING: Reconnect on Fireflies, whose key the app didn't take, opened its page as it
@@ -1021,10 +1056,16 @@ test("an admin already signed in to Notion gives it in one press, with no sign-i
 });
 
 test.each([
+  // The shared account's sign-in starts as its page opens: one press.
   [
     { state: "shared_not_connected", requestKind: "connect_shared" },
     "Connect the shared Gmail account",
-    "/admin/plugins/composio-gmail",
+    "/admin/plugins/composio-gmail?connect=true",
+  ],
+  [
+    { state: "shared_not_connected", requestKind: null },
+    "Reconnect the shared Gmail account",
+    "/admin/plugins/composio-gmail?connect=true",
   ],
   [
     { state: "disabled", unavailable: "token_missing", requestKind: "enable" },
