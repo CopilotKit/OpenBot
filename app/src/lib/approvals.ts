@@ -20,6 +20,7 @@ import {
   getApprovalMode,
   getApprovalPreferences,
   listApprovals,
+  listConversationApprovals,
   listConversationGrants,
   listPersonApprovalRules,
   listQuestions,
@@ -281,6 +282,37 @@ export const approvalInboxOptions = () =>
     },
     refetchInterval: 10_000,
   });
+/** One request the person was asked, as the inbox and a conversation's own list both hold it. */
+export type ApprovalRequest = ApprovalInboxData["requests"][number];
+
+/**
+ * Every request the person was asked in one conversation, by its thread, however long ago: the ones
+ * waiting and every one decided, newest first.
+ *
+ * The inbox keeps only the person's last hundred, across every conversation, so in an older
+ * conversation it no longer holds the requests its answered lines are drawn from. This reads them
+ * for the one conversation on screen. Under the inbox's key, so every decision that reads the inbox
+ * again reads this again too.
+ */
+export const conversationApprovalsQueryOptions = (threadId: string) =>
+  queryOptions({
+    queryKey: ["approvals", "conversation", threadId] as const,
+    queryFn: ({ signal }): Promise<ApprovalRequest[]> =>
+      everyPage(async (cursor) => {
+        const answer = await listConversationApprovals(
+          organizationId(),
+          ME,
+          threadId,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          {
+            signal,
+            fallback: "This conversation's approvals could not be loaded.",
+          },
+        );
+        return { items: answer.approvals, nextCursor: answer.nextCursor };
+      }),
+  });
+
 /**
  * A request the person has decided and the server has not finished carrying on from.
  *

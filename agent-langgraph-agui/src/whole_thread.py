@@ -45,13 +45,19 @@ from .parallel_tools import ParallelToolAgent
 # server/src/copilot.ts. The server drops every incoming message whose id starts with one of these
 # before it adds its own, so in a run only its own carry one.
 SERVER_INSTRUCTION_ID_PREFIXES = ("openbot-opener:", "standing-role:", "granted-tools:")
+# And the Bot's learned Skills catalog (`RemoteLearnedSkillsMiddleware` in
+# server/src/learning/remote.ts), which the server also drops from a request and writes itself.
+SERVER_INSTRUCTION_IDS = frozenset({"openbot:learned-skills"})
 
 
 def is_server_instruction(message):
     return (
         isinstance(message, SystemMessage)
         and isinstance(message.id, str)
-        and message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+        and (
+            message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+            or message.id in SERVER_INSTRUCTION_IDS
+        )
     )
 
 

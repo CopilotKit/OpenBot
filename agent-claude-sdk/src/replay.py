@@ -25,7 +25,13 @@ import tempfile
 from contextlib import suppress
 from datetime import datetime
 
-from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, StateSnapshotEvent
+from ag_ui.core import (
+    EventType,
+    RunErrorEvent,
+    RunFinishedEvent,
+    StateSnapshotEvent,
+    SystemMessage,
+)
 from ag_ui_claude_sdk.session import SessionWorker
 
 logger = logging.getLogger(__name__)
@@ -42,6 +48,15 @@ MODEL_QUERY_TIMEOUT_SECONDS = 300
 # The browser inserts system rows too (a skill's instructions arrive that way), and those are part
 # of the conversation, not the Bot's instructions.
 SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
+# And the Bot's learned Skills catalog (`RemoteLearnedSkillsMiddleware` in
+# server/src/learning/remote.ts), which the server also drops from a request and writes itself.
+SERVER_INSTRUCTION_IDS = frozenset({"openbot:learned-skills"})
+
+# Context entries that carry data and never instructions: the person's memory, its records quoted
+# as untrusted data by the server (`PersonalMemoryMiddleware` in server/src/memory/tools.ts).
+DATA_CONTEXT = frozenset({"OpenBot personal memory"})
+# The row a data entry is replayed as, among the conversation, never in the system prompt.
+DATA_ROW_ID = "openbot:personal-memory"
 
 # How much of the thread one query replays, in estimated tokens.
 #
@@ -97,7 +112,59 @@ def is_server_instruction(message):
     return (
         message.role == "system"
         and isinstance(message.id, str)
-        and message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+        and (
+            message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+            or message.id in SERVER_INSTRUCTION_IDS
+        )
+    )
+
+
+def as_sent_to_model(input_data):
+    """The run with its context sorted into instructions and data, before anything reads it.
+
+    Upstream appends every AG-UI context entry to the system prompt
+    (`build_state_context_addendum`), which gives each the authority of the Bot's own role.
+    - A context entry that repeats one of the server's instruction rows goes: the row is already
+      in the system prompt (`system_instructions`), so it is said once.
+    - The person's memory ("OpenBot personal memory") is data, never an instruction. It leaves the
+      context and is replayed among the conversation as a labelled system row, quoted like any
+      other row that is not the server's own, unless the thread already carries it.
+    Every other context entry is left for upstream, as before.
+    """
+    messages = list(input_data.messages or [])
+    instructions = {
+        message.content.strip()
+        for message in messages
+        if is_server_instruction(message) and isinstance(message.content, str)
+    }
+    carried = {
+        message.content.strip()
+        for message in messages
+        if message.role == "system" and isinstance(message.content, str)
+    }
+    context = []
+    data = []
+    for entry in input_data.context or []:
+        value = str(entry.value)
+        if value.strip() in instructions:
+            continue
+        if entry.description in DATA_CONTEXT:
+            if value.strip() not in carried:
+                data.append(SystemMessage(id=DATA_ROW_ID, role="system", content=value))
+            continue
+        context.append(entry)
+    if len(context) == len(input_data.context or []) and not data:
+        return input_data
+    # After the server's instruction rows, ahead of the conversation they describe.
+    first_turn = next(
+        (index for index, message in enumerate(messages) if not is_server_instruction(message)),
+        len(messages),
+    )
+    return input_data.model_copy(
+        update={
+            "context": context,
+            "messages": [*messages[:first_turn], *data, *messages[first_turn:]],
+        }
     )
 
 
@@ -128,6 +195,7 @@ def conversation_content(messages, model_only=True, fit_results=False):
         message
         for message in messages
         if message.role != "system"
+        or message.id == DATA_ROW_ID
         or not (model_only or is_server_instruction(message))
     ]
     entries = fit_to_budget(

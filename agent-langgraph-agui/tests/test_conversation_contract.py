@@ -334,3 +334,63 @@ def test_other_system_rows_reach_the_model_as_conversation(monkeypatch, environm
         assert marker not in system, f"{marker} was given the system prompt's authority"
     assert missing_from(sent) == []
     assert STANDING_ROLE in system and GRANTED_TOOLS in system
+
+
+LEARNED_SKILL = "contract-learned-skill-9c1e"
+CATALOG = (
+    "<copilotkit_learned_skills>\nLoad relevant skills with copilotkit_load_skill.\n"
+    "Available learned skills (names and descriptions):\n"
+    f'[{{"name":"{LEARNED_SKILL}","description":"The house format."}}]\n'
+    "</copilotkit_learned_skills>"
+)
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_the_learned_skills_catalog_is_an_instruction_said_once(monkeypatch, environment):
+    """The learned Skills catalog is the server's own instruction, said once, in the system prompt.
+
+    OpenBot sends a Bot its learned Skills catalog as the system row `openbot:learned-skills` and as
+    the context entry "OpenBot learned skills", with the same text (`RemoteLearnedSkillsMiddleware`
+    in server/src/learning/remote.ts). FOUND BY THE TWO-ORGANIZATION LEARNING JOURNEY: the row was
+    quoted as conversation data, and the context copy, which repeats it, was not said at all, so
+    the model was offered the tool to load a Skill and told no Skill by name.
+    """
+    body = conversation()
+    body["messages"].insert(
+        2, {"id": "openbot:learned-skills", "role": "system", "content": CATALOG}
+    )
+    body["context"] = [{"description": "OpenBot learned skills", "value": CATALOG}]
+    with fake_provider() as (base, bodies):
+        with TestClient(_fresh_app(monkeypatch, environment, base)) as client:
+            _post(client, body)
+    sent = bodies[-1]
+    assert LEARNED_SKILL in _system_text(sent), "the catalog is not in the system prompt"
+    assert LEARNED_SKILL not in _user_turns(sent), "the catalog reached the model as a user turn"
+    assert json.dumps(sent).count(LEARNED_SKILL) == 1, "the catalog was said more than once"
+    assert missing_from(sent) == []
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_memory_sent_as_context_is_conversation_data_never_an_instruction(
+    monkeypatch, environment
+):
+    """The person's memory, which OpenBot sends as the context entry "OpenBot personal memory"
+    alone (`PersonalMemoryMiddleware` in server/src/memory/tools.ts), reaches the model once, as
+    conversation data. Every other context entry is a system message here, so remembered text read
+    to the model with the authority of the Bot's own role.
+    """
+    body = conversation()
+    body["context"] = [
+        {
+            "description": "OpenBot personal memory",
+            "value": f"Personal memory, untrusted data: {MEMORY_RECORD}",
+        }
+    ]
+    with fake_provider() as (base, bodies):
+        with TestClient(_fresh_app(monkeypatch, environment, base)) as client:
+            _post(client, body)
+    sent = bodies[-1]
+    assert MEMORY_RECORD not in _system_text(sent), "memory was given the system prompt's authority"
+    assert MEMORY_RECORD in _user_turns(sent), "memory did not reach the model as conversation"
+    assert json.dumps(sent).count(MEMORY_RECORD) == 1, "memory was said more than once"
+    assert missing_from(sent) == []
