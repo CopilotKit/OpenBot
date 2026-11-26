@@ -81,6 +81,11 @@ function off(row: MergedRoutine): string | null {
   }
 }
 
+/** Whether a row is switched off: paused, or for a goal, completed too. */
+export function isOff(row: MergedRoutine): boolean {
+  return off(row) !== null;
+}
+
 /**
  * The one fact a row says, the first of these that applies: running, a warning, off, and otherwise
  * when it starts. `goalStarts` is a goal's starts in words, which only the caller has read.

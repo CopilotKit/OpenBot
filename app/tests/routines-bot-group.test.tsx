@@ -133,6 +133,22 @@ test("a paused routine reads Paused, at 60% opacity", async () => {
   expect(fact.closest("a")?.className).toContain("opacity-60");
 });
 
+test("a routine that is off shows the pause icon even when its last run failed", async () => {
+  const view = draw([
+    routineRow({
+      enabled: false,
+      lastRun: { at: new Date().toISOString(), status: "failed" },
+    }),
+  ]);
+
+  const fact = await view.findByText(/^Failed /);
+  const row = fact.closest("a");
+  expect(row?.querySelector("svg")?.getAttribute("class")).toContain(
+    "tabler-icon-player-pause",
+  );
+  expect(row?.className).not.toContain("opacity-60");
+});
+
 test("a check-in with no subject reads Everything it reads", async () => {
   const view = draw([checkInRow()]);
 

@@ -11,6 +11,7 @@ import { KIND_LABEL } from "@/components/responsibilities/triggers";
 import { useGoalTriggers } from "@/components/responsibilities/use-goal-reads";
 import {
   type BotGroup,
+  isOff,
   isRunning,
   type RowTone,
   rowFact,
@@ -38,8 +39,7 @@ function RowIcon({ row }: { row: MergedRoutine }) {
         className={cn(className, "animate-spin motion-reduce:animate-none")}
       />
     );
-  if (rowFact(row, null).tone === "muted")
-    return <IconPlayerPause className={className} />;
+  if (isOff(row)) return <IconPlayerPause className={className} />;
   switch (row.kind) {
     case "routine":
       return <IconClock className={className} />;
