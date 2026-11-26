@@ -40,6 +40,7 @@ import {
   accountMenuItemClassName,
   StripVersion,
 } from "./account-label";
+import { DesktopAppMenuItem } from "./desktop-app-item";
 import { TroubleshootingLogsMenuItem } from "./troubleshooting-logs-item";
 import { useSignOut } from "./use-sign-out";
 
@@ -138,7 +139,7 @@ function PageItem({ item }: { item: NavigationLink }) {
 
 /**
  * The account at the strip's foot, and the menu it opens: organizations, the account's pages, Get
- * troubleshooting logs, Sign out.
+ * the desktop app on OpenBot Cloud, Get troubleshooting logs, Sign out.
  */
 function StripAccount() {
   const navigation = useNavigationItems();
@@ -192,6 +193,7 @@ function StripAccount() {
               <BrandName>{item.label}</BrandName>
             </DropdownMenuItem>
           ))}
+        <DesktopAppMenuItem className={accountMenuItemClassName} />
         <TroubleshootingLogsMenuItem className={accountMenuItemClassName} />
         {signOutOffered ? (
           <DropdownMenuItem
