@@ -1,35 +1,42 @@
 /**
  * One AG-UI run: the LangGraph graph that answers it, and the events it streams.
  *
- * THE HARNESS CONTRACT, as agent-langgraph-agui keeps it (`tool_runtime.py`, `whole_thread.py`):
- *  - The whole thread the server sent is the conversation. Nothing is remembered between runs.
- *  - `input.tools` are this run's tools. A call to a tool the server runs here
- *    (`forwardedProps.openbotDeploymentTools`) goes through its signed callback, with the run's
- *    signed statement (`openbotRun`). Any other call (computer_*, render_ui, a component, a tool this
- *    step was not sent) ends the run for the surface to answer, and the next run brings the call and
- *    its result back in `messages`. A mixed step ends too: a governed action is never run while the
- *    surface still owns an unanswered call.
- *  - Several calls in one step stream as parallel tool events, each with its own id.
+ * THE CONTRACT: PLAIN AG-UI, the one a Bot somebody connects keeps. Nothing here is OpenBot's alone,
+ * so anything the built-in Bot does, a connected Bot can do the same way.
+ *  - The whole thread the caller sent is the conversation. Its system messages are the Bot's
+ *    instructions (`history.ts`).
+ *  - `input.tools` are this run's tools, and the caller runs them. A call to any of them ends the
+ *    run with the call unanswered: streamed as TOOL_CALL_START / ARGS / END, then RUN_FINISHED with a
+ *    success outcome naming the calls left (`pendingToolCallIds`, in the order the model made them),
+ *    as AG-UI's tool calls say (https://docs.ag-ui.com/spec/draft/events/tool-calls). The next run
+ *    brings each result back as a `tool` message, and the turn carries on from there. Several calls
+ *    in one step hand back together, each under its own id. OpenBot answers them through policy,
+ *    approvals and the audit trail, and runs computer calls in the order the model made them.
+ *  - The one tool answered here is the engine's own `recall_earlier_results` (`context-room.ts`),
+ *    which reads back a result this engine cleared for room. A step mixing it with other calls
+ *    answers the recall and hands back the rest; nothing else is ever run here.
+ *  - Gemini's thought signature on a handed-back call travels the AG-UI way: a
+ *    REASONING_ENCRYPTED_VALUE on the call, and `encryptedValue` on it in the snapshot, which the
+ *    caller returns unchanged with the call (https://docs.ag-ui.com/spec/draft/events/reasoning).
  *  - Every run ends with RUN_FINISHED or one RUN_ERROR (`errors.ts`).
  *
- * WHAT BUILT-IN BOTS HAVE THAT THE PYTHON HARNESS LACKS:
- *  - The built-in Bot's full prompt (`openbotSystemPrompt`), see `history.ts`.
- *  - A 40-step budget. The last step is sent with tools off (`tool_choice: "none"`) and the server's
- *    own last-step notice (shared/run-notices.ts), so a run always ends by saying something rather
- *    than on its fortieth search (`answersOnLastStep` in the built-in engine).
+ * THE ONE OPENBOT EXTENSION: MODEL ROUTING. This engine has no model of its own, so the caller may
+ * name one in `forwardedProps`, AG-UI's channel for what only the agent reads: `openbotModel`,
+ * `openbotModelRoute`, `openbotOrganization` and `openbotSendOnce` (`models.ts`). Every key is
+ * optional, and a stock agent ignores them; a connected Bot brings its own model.
+ *
+ * HOW THIS AGENT WORKS INSIDE, which no caller needs to know:
+ *  - A 40-step budget per turn. The last step is sent with tools off (`tool_choice: "none"`) and the
+ *    last-step notice (shared/run-notices.ts), so a turn always ends by saying something rather than
+ *    on its fortieth search. A turn spans its hand-backs, so the steps it has already taken are the
+ *    assistant tool-call messages since the person's latest message (`stepsTaken`).
  *  - History sanitising, so no dangling tool call reaches the model.
  *  - Room in the conversation (`context-room.ts`): old tool results cleared from what each step
  *    sends, harder retries when a provider still says too long, and `recall_earlier_results` to read
  *    a cleared result back. Without it a long task outgrew the model's window and stopped.
  */
 import { randomUUID } from "node:crypto";
-import type {
-  BaseEvent,
-  Context,
-  Message,
-  RunAgentInput,
-  Tool,
-} from "@ag-ui/core";
+import type { BaseEvent, Message, RunAgentInput, Tool } from "@ag-ui/core";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import {
   AIMessage,
@@ -39,6 +46,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
+import { ChatGoogle } from "@langchain/google";
 import {
   Annotation,
   END,
@@ -63,7 +71,7 @@ import {
   ModelDeclinedError,
   runFailure,
 } from "./errors.ts";
-import { modelMessages, STANDING_ROLE_PREFIX } from "./history.ts";
+import { forGemini, modelMessages, STANDING_ROLE_PREFIX } from "./history.ts";
 import {
   chatModel,
   type Env,
@@ -75,22 +83,17 @@ import {
   runRoute,
 } from "./models.ts";
 
-/** Model steps a run may take: the built-in Bot's `TOOL_STEPS`. The last one answers in words. */
+/** Model steps a turn may take: the built-in Bot's `TOOL_STEPS`. The last one answers in words. */
 export const MAX_STEPS = 40;
 
 export type Emit = (event: BaseEvent) => void;
 
 export type RunContext = {
   tools: readonly Tool[];
-  context: readonly Context[];
-  deployment: ReadonlySet<string>;
-  assertion: string;
   model: BaseChatModel;
   emit: Emit;
   signal?: AbortSignal;
   maxSteps: number;
-  env: Env;
-  fetch: typeof fetch;
   /**
    * How hard this run clears what it sends (`STAGES` in context-room.ts). A stage that got a
    * too-long request through is where every later step starts, so it is not refused again first.
@@ -105,7 +108,6 @@ export type RunOptions = {
   /** For tests: the model a run would otherwise build from the environment. */
   makeModel?: (run: RunModel, env: Env) => BaseChatModel;
   maxSteps?: number;
-  fetch?: typeof fetch;
   log?: Pick<Console, "warn" | "error">;
 };
 
@@ -162,6 +164,16 @@ function declined(message: AIMessageChunk): string | undefined {
   )
     return said || "Gemini declined to answer this request.";
   return undefined;
+}
+
+/**
+ * The provider's opaque artefact on a call: Gemini's thought signature, as @langchain/google puts it
+ * on the call. It goes out as the call's AG-UI `encryptedValue` and comes back the same way.
+ */
+function signatureOf(call: unknown): string | undefined {
+  const value = (call as { thoughtSignature?: unknown } | undefined)
+    ?.thoughtSignature;
+  return typeof value === "string" && value ? value : undefined;
 }
 
 /**
@@ -267,6 +279,14 @@ async function streamStep(
     slot.name ??= parsed[position]?.name ?? "";
     if (!slot.started) start(slot);
     run.emit({ type: "TOOL_CALL_END", toolCallId: slot.id } as BaseEvent);
+    const sealed = signatureOf(parsed[position]);
+    if (sealed)
+      run.emit({
+        type: "REASONING_ENCRYPTED_VALUE",
+        subtype: "tool-call",
+        entityId: slot.id,
+        encryptedValue: sealed,
+      } as BaseEvent);
     let args: Record<string, unknown> = {};
     try {
       const value = slot.args.trim() ? JSON.parse(slot.args) : {};
@@ -314,11 +334,12 @@ async function answer(state: StateType, config: RunnableConfig) {
   for (;;) {
     // Only what this call sends is cleared: the run's own thread stays whole, for recall and for
     // the snapshot it hands back.
-    const sent = roomFor(state.messages, {
+    const room = roomFor(state.messages, {
       stage: run.room.stage,
       clearsOnServer: clearsOnServer(run.model),
       extraChars: toolChars,
     });
+    const sent = run.model instanceof ChatGoogle ? forGemini(room) : room;
     // The notice is this call's only: the conversation keeps what the model said and did.
     const messages = last
       ? [...sent, new HumanMessage(LAST_STEP_NOTICE)]
@@ -346,103 +367,29 @@ async function answer(state: StateType, config: RunnableConfig) {
   }
 }
 
-/** Where a step goes next: the server's tools here, or back to the surface (`next_step` in Python). */
-export function nextStep(
-  state: StateType,
-  config: RunnableConfig,
-): "tools" | typeof END {
-  const last = state.messages.at(-1) as AIMessage | undefined;
-  const calls = last?.tool_calls ?? [];
-  if (calls.length === 0) return END;
-  const run = runOf(config);
-  const offered = new Set(run.tools.map((tool) => tool.name));
-  // A tool this run was not offered is handed back like a call the surface owns: the caller answers
-  // it, through its own governance, or refuses a name it holds nothing for.
-  if (calls.some((call) => !offered.has(call.name))) return END;
-  // Mixed turns yield too: never invent a UI result or run a governed action while the surface
-  // still owns an unanswered call. A recall is answered here, from the run's own thread.
-  if (
-    calls.some((call) => call.name !== RECALL && !run.deployment.has(call.name))
-  )
-    return END;
-  return "tools";
+/** The calls of the step the run just took, or none. */
+function lastCalls(state: StateType) {
+  const last = [...state.messages]
+    .reverse()
+    .find((message) => message.getType() === "ai") as AIMessage | undefined;
+  return last?.tool_calls ?? [];
 }
 
-/** The deployment's own reason for refusing a callback, when its body says one. */
-async function refusalReason(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { error?: unknown };
-    return typeof body?.error === "string" && body.error.trim()
-      ? ` ${body.error.trim()}`
-      : "";
-  } catch {
-    return "";
-  }
+/**
+ * Where a step goes next: its recalls answered here, or the end of the run.
+ *
+ * Every other call, whatever its name, is the caller's: a tool OpenBot runs, a component the
+ * browser draws, the computer, or a name nobody holds, which OpenBot refuses in words. The run ends
+ * with those calls unanswered, and the next run brings their results.
+ */
+export function nextStep(state: StateType): "tools" | typeof END {
+  const calls = lastCalls(state);
+  return calls.some((call) => call.name === RECALL) ? "tools" : END;
 }
 
-/** One server tool, run through the deployment's signed callback (`_call_tool` in Python). */
-async function callTool(
-  call: { id?: string; name: string; args: unknown },
-  run: RunContext,
-): Promise<ToolMessage> {
-  const result = async (): Promise<[string, boolean]> => {
-    const token = run.env.AGENT_TOOL_TOKEN?.trim();
-    if (!token)
-      return [
-        "Refused. This Bot has no credential for calling tools through its deployment.",
-        true,
-      ];
-    if (!run.assertion)
-      return [
-        "Refused. This run carried no signed statement of which Bot and person it is for.",
-        true,
-      ];
-    const url =
-      run.env.OPENBOT_TOOL_URL?.trim() ||
-      "http://127.0.0.1:3001/api/agent-tools/call";
-    try {
-      // Redirects must never carry this deployment's credential elsewhere.
-      const response = await run.fetch(url, {
-        method: "POST",
-        redirect: "manual",
-        signal: AbortSignal.any([
-          AbortSignal.timeout(30_000),
-          ...(run.signal ? [run.signal] : []),
-        ]),
-        headers: {
-          "content-type": "application/json",
-          "x-openbot-agent-token": token,
-        },
-        body: JSON.stringify({
-          name: call.name,
-          args: call.args,
-          run: run.assertion,
-        }),
-      });
-      if (!response.ok) {
-        return [
-          `Refused. Tool callback returned HTTP ${response.status}.${await refusalReason(response)}`,
-          true,
-        ];
-      }
-      const body = (await response.json()) as { text?: unknown };
-      if (!body || typeof body.text !== "string")
-        return ["The tool callback returned no readable result.", true];
-      return [body.text, false];
-    } catch (error) {
-      if (run.signal?.aborted) throw error;
-      // The error's text can carry the URL; the boundary is reported, never the request.
-      return ["The tool callback could not be completed.", true];
-    }
-  };
-  const [content, failed] = await result();
-  return new ToolMessage({
-    id: randomUUID(),
-    content,
-    tool_call_id: call.id ?? "",
-    name: call.name,
-    status: failed ? "error" : "success",
-  });
+/** After the recalls: the next step, or the end of the run if the caller still owns a call. */
+export function afterRecall(state: StateType): "answer" | typeof END {
+  return lastCalls(state).some((call) => call.name !== RECALL) ? END : "answer";
 }
 
 /** A recall, read from the whole thread this run holds rather than from what the model was sent. */
@@ -463,40 +410,13 @@ async function recalled(
   });
 }
 
+/** Answer the step's recalls, and only those: every other call is the caller's to answer. */
 async function tools(state: StateType, config: RunnableConfig) {
   const run = runOf(config);
-  if (nextStep(state, config) !== "tools") {
-    throw new Error(
-      "This turn must return to the surface before tools can execute.",
-    );
-  }
-  const calls = (state.messages.at(-1) as AIMessage).tool_calls ?? [];
-  // A Bot has one browser: its computer calls go one after another, in the order the model made
-  // them. Everything else runs alongside them.
-  const computer = calls.filter((call) => call.name.startsWith("computer_"));
-  const inOrder = async () => {
-    const answered: ToolMessage[] = [];
-    for (const call of computer) answered.push(await callTool(call, run));
-    return answered;
-  };
-  const [ordered, others] = await Promise.all([
-    inOrder(),
-    Promise.all(
-      calls
-        .filter((call) => !call.name.startsWith("computer_"))
-        .map((call) =>
-          call.name === RECALL
-            ? recalled(call, state.messages)
-            : callTool(call, run),
-        ),
-    ),
-  ]);
-  const fromComputer = ordered[Symbol.iterator]();
-  const fromOthers = others[Symbol.iterator]();
-  const results = calls.map(
-    (call) =>
-      (call.name.startsWith("computer_") ? fromComputer : fromOthers).next()
-        .value as ToolMessage,
+  const results = await Promise.all(
+    lastCalls(state)
+      .filter((call) => call.name === RECALL)
+      .map((call) => recalled(call, state.messages)),
   );
   for (const result of results) {
     run.emit({
@@ -518,7 +438,7 @@ export const graph = new StateGraph(State)
   .addNode("tools", tools)
   .addEdge(START, "answer")
   .addConditionalEdges("answer", nextStep, ["tools", END])
-  .addEdge("tools", "answer")
+  .addConditionalEdges("tools", afterRecall, ["answer", END])
   .compile();
 
 /** A message the graph added, as AG-UI carries it, for the run's closing snapshot. */
@@ -533,14 +453,18 @@ function asAgui(message: BaseMessage): Message | undefined {
       content: ai.text,
       ...(calls.length
         ? {
-            toolCalls: calls.map((call) => ({
-              id: call.id ?? "",
-              type: "function" as const,
-              function: {
-                name: call.name,
-                arguments: JSON.stringify(call.args ?? {}),
-              },
-            })),
+            toolCalls: calls.map((call) => {
+              const sealed = signatureOf(call);
+              return {
+                id: call.id ?? "",
+                type: "function" as const,
+                function: {
+                  name: call.name,
+                  arguments: JSON.stringify(call.args ?? {}),
+                },
+                ...(sealed ? { encryptedValue: sealed } : {}),
+              };
+            }),
           }
         : {}),
     } as Message;
@@ -560,7 +484,46 @@ function asAgui(message: BaseMessage): Message | undefined {
   return undefined;
 }
 
-/** The Bot a run is for, from the server's standing-role id. */
+/**
+ * The calls this run made and left for the caller, in the order the model made them: every call
+ * with no result in the run. AG-UI's `pendingToolCallIds` must be exactly these.
+ */
+function pendingCalls(added: readonly BaseMessage[]): string[] {
+  const answered = new Set(
+    added
+      .filter((message) => message.getType() === "tool")
+      .map((message) => (message as ToolMessage).tool_call_id),
+  );
+  return added
+    .filter((message) => message.getType() === "ai")
+    .flatMap((message) => (message as AIMessage).tool_calls ?? [])
+    .map((call) => call.id ?? "")
+    .filter((id) => id && !answered.has(id));
+}
+
+/**
+ * The model steps this turn has already taken, in the runs before this one: the assistant messages
+ * that called a tool since the person's latest message. Each was one step that ended its run on a
+ * hand-back (or answered a recall), so a turn's budget runs across its hand-backs rather than
+ * starting again on each.
+ */
+export function stepsTaken(thread: readonly BaseMessage[]): number {
+  let taken = 0;
+  for (const message of [...thread].reverse()) {
+    if (message.getType() === "human") break;
+    if (
+      message.getType() === "ai" &&
+      ((message as AIMessage).tool_calls?.length ?? 0) > 0
+    )
+      taken += 1;
+  }
+  return taken;
+}
+
+/**
+ * The Bot a run is for, from its standing role's id, for model routing only: a Claude plan's query
+ * is named by it (`claudeThreadId`). Absent, every run of the thread still shares one name.
+ */
 function botIdOf(messages: readonly Message[]): string | undefined {
   const role = messages.find(
     (message) =>
@@ -614,12 +577,6 @@ export async function runAgent(
       ? input.forwardedProps
       : {}
   ) as Record<string, unknown>;
-  const names = props.openbotDeploymentTools;
-  const assertion = props.openbotRun;
-  const systemPrompt =
-    typeof props.openbotSystemPrompt === "string"
-      ? props.openbotSystemPrompt
-      : undefined;
   // The route and its token stay in this run's model: neither is logged or sent anywhere else.
   const choice: RunModel = {
     ...runModel(props),
@@ -645,35 +602,24 @@ export async function runAgent(
     const run: RunContext = {
       // A Bot with tools can read back a result cleared to make room (context-room.ts).
       tools: withRecall(input.tools ?? []),
-      context: input.context ?? [],
-      deployment: new Set(
-        Array.isArray(names)
-          ? names.filter((name): name is string => typeof name === "string")
-          : [],
-      ),
-      assertion: typeof assertion === "string" ? assertion : "",
       model,
       emit,
       signal: options.signal,
       maxSteps: options.maxSteps ?? MAX_STEPS,
-      env,
-      fetch: options.fetch ?? fetch,
       room: { stage: 0 },
     };
-    const thread = modelMessages(input.messages ?? [], {
-      systemPrompt,
-      context: run.context,
-    });
+    const thread = modelMessages(input.messages ?? [], input.context ?? []);
     const final = await graph.invoke(
-      { messages: thread, steps: 0 },
+      { messages: thread, steps: stepsTaken(thread) },
       {
         configurable: { openbot: run },
-        // Each step is an answer and, at most, a tools turn: room for every step and the last.
+        // Each step is an answer and, at most, a recall: room for every step and the last.
         recursionLimit: run.maxSteps * 2 + 2,
         signal: options.signal,
       },
     );
-    const added = (final.messages as BaseMessage[])
+    const all = final.messages as BaseMessage[];
+    const added = all
       .slice(thread.length)
       .map(asAgui)
       .filter((message): message is Message => !!message);
@@ -681,10 +627,14 @@ export async function runAgent(
       type: "MESSAGES_SNAPSHOT",
       messages: [...(input.messages ?? []), ...added],
     } as BaseEvent);
+    const pending = pendingCalls(all.slice(thread.length));
     emit({
       type: "RUN_FINISHED",
       threadId: input.threadId,
       runId: input.runId,
+      ...(pending.length
+        ? { outcome: { type: "success", pendingToolCallIds: pending } }
+        : {}),
     } as BaseEvent);
   } catch (error) {
     if (options.signal?.aborted) return;

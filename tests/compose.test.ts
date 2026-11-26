@@ -1206,11 +1206,7 @@ test("gives the selected harness the same governed callback as the managed Bot",
     OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
     AGENT_TOOL_TOKEN: "synthetic-callback-token",
   });
-  for (const service of [
-    "agent-harness",
-    "agent-langgraph-agui",
-    "agent-langgraph-ts",
-  ] as const) {
+  for (const service of ["agent-harness", "agent-langgraph-agui"] as const) {
     expect(config.services[service].environment).toMatchObject({
       OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
       AGENT_TOOL_TOKEN: "synthetic-callback-token",
@@ -1219,6 +1215,21 @@ test("gives the selected harness the same governed callback as the managed Bot",
       "host.docker.internal=host-gateway",
     );
   }
+});
+
+/**
+ * The TypeScript engine calls nothing back: every OpenBot tool it calls is handed back over AG-UI,
+ * as a Bot somebody connects hands it back, so it holds neither the callback's address nor its
+ * secret.
+ */
+test("gives the TypeScript engine no tool callback", () => {
+  const config = runComposeConfig({
+    OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
+    AGENT_TOOL_TOKEN: "synthetic-callback-token",
+  });
+  const environment = config.services["agent-langgraph-ts"].environment;
+  expect(environment.OPENBOT_TOOL_URL).toBeUndefined();
+  expect(environment.AGENT_TOOL_TOKEN).toBeUndefined();
 });
 
 /**

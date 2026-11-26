@@ -94,6 +94,13 @@ Bot. Unset, and with no picked harness that is that engine, new Bots run on the 
 engine. `scripts/start.sh` points it at the engine on 4215 on a laptop, and Compose's `server`
 service reaches it by name. OpenBot Desktop needs neither: its picked harness is that engine.
 
+That engine speaks plain AG-UI, as a Bot somebody connects does. Its instructions are the run's
+system messages, and every OpenBot tool it calls ends its run with the call unanswered, for the
+server to answer and carry on, so it reads neither `AGENT_TOOL_TOKEN` nor `OPENBOT_TOOL_URL`. The one
+OpenBot extension it reads is the model for the run, in `forwardedProps` (`openbotModel`,
+`openbotModelRoute`, `openbotOrganization`, `openbotSendOnce`), which an agent that brings its own
+model ignores.
+
 ## General variables
 
 | Variable             | Default                            | Meaning                                                             |
