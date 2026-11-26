@@ -3,8 +3,12 @@ import { NativeTabs } from "expo-router/native-tabs";
 import { useCSSVariable } from "uniwind";
 import { useNeedsYouCount } from "../../src/needs-you-count";
 
-/** The Bots tab is OpenBot's orb, drawn in one color as the other tabs' icons are: its shading is in its alpha. */
+/**
+ * The Bots tab is OpenBot's orb as a flat glyph, at SF Symbols' line weight: an outline with the orb's
+ * sheen, filled when the tab is open, tinted as the other tabs' icons are.
+ */
 const ORB = require("../../assets/tab-orb.png");
+const ORB_FILLED = require("../../assets/tab-orb-filled.png");
 
 /**
  * The signed-in app's tabs, in the platform's own tab bar: UIKit's on iOS (iOS 26's glass, with SF
@@ -47,7 +51,10 @@ export default function TabsLayout() {
         </NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="(bots)">
-        <NativeTabs.Trigger.Icon src={ORB} renderingMode="template" />
+        <NativeTabs.Trigger.Icon
+          src={{ default: ORB, selected: ORB_FILLED }}
+          renderingMode="template"
+        />
         <NativeTabs.Trigger.Label hidden>Bots</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="(account)">

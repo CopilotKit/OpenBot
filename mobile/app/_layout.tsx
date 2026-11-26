@@ -24,6 +24,7 @@ import {
 import { notificationDestination } from "../src/links";
 import { renewPush } from "../src/notifications";
 import { aboutShownConversation } from "../src/on-screen";
+import { OrbFlightProvider } from "../src/orb-flight";
 import { onSessionRefused } from "../src/session-refused";
 import { useVersionVerdict, VersionGate } from "../src/version-gate";
 
@@ -119,53 +120,64 @@ function Layout() {
   return (
     <View className="flex-1 bg-background">
       {statusBar}
-      <Stack screenOptions={header}>
-        {/*
-         * Each guard says where it sends a person. Without one, expo-router picks the first screen no guard
-         * covers by file name, which is the gallery: a signed-out start opened there rather than on Welcome.
-         */}
-        <Stack.Protected guard={signedIn} redirectTo="/sign-in">
-          {/* The tabs, in the platform's tab bar: everything below opens over them. */}
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="conversation" options={{ title: "" }} />
-          <Stack.Screen name="bot" options={{ title: "" }} />
+      {/* A Bot's orb flies over the screens and their headers (src/orb-flight.tsx). */}
+      <OrbFlightProvider>
+        <Stack screenOptions={header}>
+          {/*
+           * Each guard says where it sends a person. Without one, expo-router picks the first screen no guard
+           * covers by file name, which is the gallery: a signed-out start opened there rather than on Welcome.
+           */}
+          <Stack.Protected guard={signedIn} redirectTo="/sign-in">
+            {/* The tabs, in the platform's tab bar: everything below opens over them. */}
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="conversation" options={{ title: "" }} />
+            <Stack.Screen name="bot" options={{ title: "" }} />
+            <Stack.Screen
+              name="new-conversation"
+              options={{
+                title: "New conversation",
+                ...SHEET,
+                sheetAllowedDetents: [0.6, 1],
+              }}
+            />
+            <Stack.Screen
+              name="conversation-info"
+              options={{
+                title: "Conversation",
+                ...SHEET,
+                sheetAllowedDetents: [0.6, 1],
+              }}
+            />
+            <Stack.Screen
+              name="new-bot"
+              options={{ title: "New Bot", ...SHEET, sheetAllowedDetents: [1] }}
+            />
+            <Stack.Screen
+              name="approvals"
+              options={{ title: "Approval inbox" }}
+            />
+            <Stack.Screen name="computer" options={{ title: "Computer" }} />
+            <Stack.Screen name="routine" options={{ title: "Routine" }} />
+            <Stack.Screen name="rules" options={{ title: "Custom rules" }} />
+            <Stack.Screen name="plugins" options={{ title: "Apps" }} />
+            {/* Only the way back to Home after linking the company account: never seen, so no header flashes. */}
+            <Stack.Screen
+              name="company-sign-in/linked"
+              options={{ headerShown: false, animation: "none" }}
+            />
+          </Stack.Protected>
+          {/* Only the way back to Home after signing in, for a code that arrived outside the browser's session. */}
           <Stack.Screen
-            name="new-conversation"
-            options={{
-              title: "New conversation",
-              ...SHEET,
-              sheetAllowedDetents: [0.6, 1],
-            }}
-          />
-          <Stack.Screen
-            name="new-bot"
-            options={{ title: "New Bot", ...SHEET, sheetAllowedDetents: [1] }}
-          />
-          <Stack.Screen
-            name="approvals"
-            options={{ title: "Approval inbox" }}
-          />
-          <Stack.Screen name="computer" options={{ title: "Computer" }} />
-          <Stack.Screen name="routine" options={{ title: "Routine" }} />
-          <Stack.Screen name="rules" options={{ title: "Custom rules" }} />
-          <Stack.Screen name="plugins" options={{ title: "Apps" }} />
-          {/* Only the way back to Home after linking the company account: never seen, so no header flashes. */}
-          <Stack.Screen
-            name="company-sign-in/linked"
+            name="oauth/callback"
             options={{ headerShown: false, animation: "none" }}
           />
-        </Stack.Protected>
-        {/* Only the way back to Home after signing in, for a code that arrived outside the browser's session. */}
-        <Stack.Screen
-          name="oauth/callback"
-          options={{ headerShown: false, animation: "none" }}
-        />
-        {/* The component gallery, in development builds only (app/gallery.tsx). */}
-        <Stack.Screen name="gallery" options={{ title: "Components" }} />
-        <Stack.Protected guard={!signedIn} redirectTo="/">
-          <Stack.Screen name="sign-in" options={{ headerShown: false }} />
-        </Stack.Protected>
-      </Stack>
+          {/* The component gallery, in development builds only (app/gallery.tsx). */}
+          <Stack.Screen name="gallery" options={{ title: "Components" }} />
+          <Stack.Protected guard={!signedIn} redirectTo="/">
+            <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+          </Stack.Protected>
+        </Stack>
+      </OrbFlightProvider>
       <VersionGate verdict={verdict} onRetry={() => void check()} />
     </View>
   );

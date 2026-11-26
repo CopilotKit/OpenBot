@@ -37,6 +37,7 @@ import {
   IconBrain,
   IconChecks,
   IconClock,
+  IconDeviceDesktop,
   IconMessages,
   IconPlayerPause,
   IconPlug,
@@ -323,6 +324,14 @@ export default function BotScreen() {
             </Section>
             <Section title="Settings for this Bot">
               <Rows>
+                <Row
+                  icon={IconDeviceDesktop}
+                  title="Computer"
+                  description="Watch its screen, or take over."
+                  onPress={() =>
+                    router.push({ pathname: "/computer", params: { botId } })
+                  }
+                />
                 <Row
                   icon={IconBrain}
                   title="Memory"

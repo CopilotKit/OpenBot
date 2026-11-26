@@ -17,6 +17,8 @@ export { default as IconCheck } from "@tabler/icons-react-native/IconCheck";
 export { default as IconChecks } from "@tabler/icons-react-native/IconChecks";
 export { default as IconChevronLeft } from "@tabler/icons-react-native/IconChevronLeft";
 export { default as IconChevronRight } from "@tabler/icons-react-native/IconChevronRight";
+export { default as IconCircle } from "@tabler/icons-react-native/IconCircle";
+export { default as IconCircleCheckFilled } from "@tabler/icons-react-native/IconCircleCheckFilled";
 export { default as IconClock } from "@tabler/icons-react-native/IconClock";
 export { default as IconDeviceDesktop } from "@tabler/icons-react-native/IconDeviceDesktop";
 export { default as IconDots } from "@tabler/icons-react-native/IconDots";
@@ -36,4 +38,5 @@ export { default as IconSettings } from "@tabler/icons-react-native/IconSettings
 export { default as IconSquare } from "@tabler/icons-react-native/IconSquare";
 export { default as IconSquareCheck } from "@tabler/icons-react-native/IconSquareCheck";
 export { default as IconTool } from "@tabler/icons-react-native/IconTool";
+export { default as IconUsersGroup } from "@tabler/icons-react-native/IconUsersGroup";
 export { default as IconX } from "@tabler/icons-react-native/IconX";
