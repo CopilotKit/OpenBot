@@ -41,7 +41,7 @@ body:
     attributes:
       label: Version
       description: The release you installed, the image tag you run, or the commit you built from (`git rev-parse --short HEAD`).
-      placeholder: v0.2.0
+      placeholder: v1.2.0
     validations:
       required: true
 
@@ -51,8 +51,10 @@ body:
       label: How you run OpenBot
       options:
         - Desktop app
+        - OpenBot Cloud
         - Published container image (ghcr.io/copilotkit/openbot)
-        - Helm chart
+        - Helm chart openbot-bundle (OpenBot and Intelligence together)
+        - Helm chart openbot (beside an Intelligence you already run)
         - From a clone (Quick start)
         - Other
     validations:
@@ -71,17 +73,7 @@ body:
         - Slack
         - Microsoft Teams
         - Server or API only
-
-  - type: dropdown
-    id: intelligence
-    attributes:
-      label: CopilotKit Intelligence
-      description: Where the deployment's Intelligence runs. Threads and memory live there, so it matters for those bugs.
-      options:
-        - Managed (copilotkit.ai)
-        - Local, on this machine
-        - Self-hosted
-        - Not sure
+        - Other
 
   - type: input
     id: environment

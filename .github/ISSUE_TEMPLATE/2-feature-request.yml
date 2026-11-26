@@ -34,4 +34,4 @@ body:
     attributes:
       label: Contributing
       options:
-        - label: I would like to work on this.
+        - label: I would like to work on this ([CONTRIBUTING.md](https://github.com/CopilotKit/OpenBot/blob/main/CONTRIBUTING.md) explains how CI approval and local checks work).
