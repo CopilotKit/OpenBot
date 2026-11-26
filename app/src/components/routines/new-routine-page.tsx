@@ -38,7 +38,6 @@ import {
 } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
-  type ProactiveSetting,
   proactiveAllowedQueryOptions,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
@@ -50,7 +49,6 @@ import {
   ROUTINE_FORM_DEFAULTS,
   type RoutineEventSource,
   type RoutineFormValues,
-  routineFormSchema,
   STARTS,
 } from "@/lib/routines/form";
 import { CHECK_IN_INTERVALS } from "@/lib/routines/merged";
@@ -58,7 +56,12 @@ import {
   createFromPlanMutationOptions,
   SavedButRefused,
 } from "@/lib/routines/mutations";
-import { checkInSubject, planRoutine } from "@/lib/routines/plan";
+import { planRoutine } from "@/lib/routines/plan";
+import {
+  brokenRules,
+  type RuleField,
+  type RuleMessages,
+} from "@/lib/routines/rules";
 import { openingOf } from "@/lib/voice/cut";
 import { queryClient } from "@/query-client";
 import { failureSaid } from "@/lib/load-failure";
@@ -80,72 +83,11 @@ function conversationName(channel: ChannelSummary): string {
   return title ? openingOf(title, 60) : "New conversation";
 }
 
-/** What Name says when an Only tell you would land on a check-in the Bot already has. */
-const SAME_CHECK_IN =
-  "This Bot already checks in on this. Give this one a different name, or change that one on its row.";
-
-/**
- * Whether an Only tell you called `title` (`checkInSubject`: its Name, else its instruction) is a
- * check-in this Bot already has. The server counts a check-in with no link and the same subject, in
- * any case, as the same one. Asked for a new one, as this screen asks, it refuses that with 409 and
- * this sentence (`refuseExisting` in `proactiveStore.create`); this check says it while Name is typed.
- */
-function sameCheckIn(
-  settings: ProactiveSetting[] | undefined,
-  agentId: string,
-  title: string,
-): boolean {
-  const subject = title.trim().toLowerCase();
-  return (settings ?? []).some(
-    (setting) =>
-      setting.botId === agentId &&
-      !setting.sourceLink &&
-      (setting.subject ?? "").toLowerCase() === subject,
-  );
-}
-
-/** What It should says when Only tell you was picked and an admin then turned check-ins off. */
-const TELL_OFF =
-  "An admin turned check-ins off, so it can't only tell you. Choose Act for you to go on.";
-
-type FieldName = keyof RoutineFormValues;
-
 /** The id of a field's message, which its control names in `aria-describedby`. */
-const errorId = (name: FieldName) => `${name}-error`;
+const errorId = (name: RuleField) => `${name}-error`;
 
-/** One message per field: the first rule its answer breaks. */
-type Messages = Partial<Record<FieldName, string>>;
-
-/**
- * What the answers break now, field by field. The schema holds every rule about the answers alone,
- * its own fields' and the ones that read other answers (`crossFieldIssues`); the two below also read
- * what the server said: whether an admin allows check-ins, and the check-ins the Bot already has.
- */
-function brokenRules(
-  values: RoutineFormValues,
-  allowed: boolean,
-  checkIns: ProactiveSetting[] | undefined,
-): Messages {
-  const messages: Messages = {};
-  const add = (name: FieldName, message: string) => {
-    messages[name] ??= message;
-  };
-  const parsed = routineFormSchema.safeParse(values);
-  if (!parsed.success)
-    for (const issue of parsed.error.issues)
-      add(issue.path[0] as FieldName, issue.message);
-  if (values.does === "tell" && !allowed) add("does", TELL_OFF);
-  // Only a check-in can clash: not acting, and not a tell held because check-ins are off.
-  else if (
-    values.does === "tell" &&
-    sameCheckIn(checkIns, values.agentId, checkInSubject(values))
-  )
-    add("title", SAME_CHECK_IN);
-  return messages;
-}
-
-function sameMessages(a: Messages, b: Messages): boolean {
-  const names = Object.keys(a) as FieldName[];
+function sameMessages(a: RuleMessages, b: RuleMessages): boolean {
+  const names = Object.keys(a) as RuleField[];
   return (
     names.length === Object.keys(b).length &&
     names.every((name) => a[name] === b[name])
@@ -284,10 +226,10 @@ export function NewRoutinePage({
     form.store,
     (state) => {
       const pressed = state.submissionAttempts > 0;
-      const messages: Messages = {};
+      const messages: RuleMessages = {};
       for (const [name, message] of Object.entries(
         brokenRules(state.values, allowed, checkIns.data),
-      ) as [FieldName, string][])
+      ) as [RuleField, string][])
         if (name === "does" || pressed || state.fieldMeta[name]?.isTouched)
           messages[name] = message;
       return messages;
