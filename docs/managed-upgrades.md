@@ -143,6 +143,19 @@ chart. For a mirror whose charts you sign with your own key, set `product.verify
 `product.verify.secretRef`, a Secret holding `cosign.pub`); to turn the check off for a mirror whose
 charts carry no signature you can check, set `product.verify.enabled=false`.
 
+**What to install is signed too.** The release it moves to, with its chart digest, its image and the window, comes from a desired
+state CopilotKit signs with the same key as commands. The agent acts on it only if:
+
+- the signature verifies;
+- it names this install;
+- it hasn't expired;
+- its counter isn't below the last one the agent accepted. The agent keeps that counter in its
+  state ConfigMap (`desired.json`).
+
+The agent never moves to a release older than the one it runs: going back is the signed rollback
+command, to the release it ran before. A refusal shows on the agent's status line in the heartbeat
+and in its log.
+
 1. **Your product values in a Secret.** Flux installs your release from these values, not from the
    ones Helm keeps, so put the values you install OpenBot with in a Secret in `openbot-system`
    (default name `openbot-values`, key `values.yaml`).
