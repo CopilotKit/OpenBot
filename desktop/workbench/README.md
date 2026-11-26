@@ -16,6 +16,10 @@ Change the viewport, zoom, OS, theme, host, role, skin and sidebar from the Wind
 Fit scales the window to its available space; a fixed zoom lets the stage scroll. Resizing and
 changing theme preserve the current interaction. Host, OS and session changes restart the frame.
 
+Select mode sets what the pointer does when Comment is off. Inspect outlines the element under the
+pointer, with its size and the gaps to its neighbours. Off draws nothing over the app, so you can
+just click through it. The workbench keeps your choice in this browser.
+
 ## Request changes
 
 Press Comment (or C), then click an element or drag over an area. Write what should change and

@@ -45,7 +45,8 @@ import {
 } from "./WarningHighlight";
 import { WarningsList, warningKey } from "./WarningsList";
 import { WindowFrame } from "./WindowFrame";
-import { WindowSettingsPanel } from "./WindowSettingsPanel";
+import { type SelectMode, WindowSettingsPanel } from "./WindowSettingsPanel";
+import { readPref, writePref } from "./viewerPrefs";
 import type { Warning } from "./layoutWatch";
 
 type FrameWindow = Window & typeof globalThis;
@@ -97,6 +98,13 @@ export type WorkbenchLoadedProps = {
   catalog: readonly SceneEntry[];
   catalogNotices: readonly string[];
 };
+/** Select mode is this viewer's choice, kept in this browser only. */
+const SELECT_MODE_PREF = "selectMode";
+
+function isSelectMode(value: unknown): value is SelectMode {
+  return value === "inspect" || value === "off";
+}
+
 export function WorkbenchLoaded({
   catalog,
   catalogNotices,
@@ -115,6 +123,9 @@ export function WorkbenchLoaded({
   const [route, setRoute] = useState(state.route ?? "");
   const [address, setAddress] = useState(state.route ?? "");
   const [commenting, setCommenting] = useState(false);
+  const [selectMode, setSelectMode] = useState<SelectMode>(
+    () => readPref(SELECT_MODE_PREF, isSelectMode) ?? "inspect",
+  );
   const [command, setCommand] = useState<CritiqueCommand>("critique");
   const [gridColor, setGridColor] = useState("#ff00ff");
   const [fit, setFit] = useState(
@@ -482,6 +493,7 @@ export function WorkbenchLoaded({
               {...state.window}
               zoom={zoom}
               gridColor={gridColor}
+              inspect={selectMode === "inspect"}
               onFrame={onFrame}
               comment={
                 commenting
@@ -573,6 +585,11 @@ export function WorkbenchLoaded({
           value={state.window}
           gridColor={gridColor}
           onGridColor={setGridColor}
+          selectMode={selectMode}
+          onSelectMode={(mode) => {
+            setSelectMode(mode);
+            writePref(SELECT_MODE_PREF, mode);
+          }}
           fit={{ on: fit, zoom: fitZoom }}
           onFit={setFit}
           onCopyLink={() =>

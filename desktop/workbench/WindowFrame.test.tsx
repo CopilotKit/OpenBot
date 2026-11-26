@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { WindowFrame, type WindowFrameProps } from "./WindowFrame";
 
 beforeAll(() =>
@@ -95,4 +95,27 @@ test("the Mac lights sit where macOS draws them: 21, 41 and 61 px in, 26.5 px do
   // Over the page: after the iframe in the window's content.
   const bar = container.querySelector("[data-window-bar=mac]");
   expect(bar?.closest("[data-window-content]")).not.toBeNull();
+});
+
+async function hover(container: HTMLElement) {
+  const iframe = container.querySelector("iframe") as HTMLIFrameElement;
+  await act(() => new Promise((done) => setTimeout(done, 50)));
+  const doc = iframe.contentDocument as Document;
+  const box = doc.createElement("div");
+  doc.body.appendChild(box);
+  await act(async () => {
+    box.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+    await new Promise((done) => setTimeout(done, 50));
+  });
+  return container.querySelector("[data-workbench-inspector]");
+}
+
+test("the inspector outlines the element under the pointer", async () => {
+  const { container } = render(<WindowFrame {...props()} />);
+  expect(await hover(container)).not.toBeNull();
+});
+
+test("inspect false draws nothing over the app, so the pointer just clicks through", async () => {
+  const { container } = render(<WindowFrame {...props({ inspect: false })} />);
+  expect(await hover(container)).toBeNull();
 });

@@ -26,6 +26,11 @@ export type WindowFrameProps = {
    * title text (`window_title_shown` in main.rs).
    */
   titled?: boolean;
+  /**
+   * Select mode Inspect (default): the inspector outlines the element under the pointer. False:
+   * nothing is drawn over the app, and the pointer just uses it.
+   */
+  inspect?: boolean;
   /** Comment mode: set, the comment layer replaces the inspector. */
   comment?: Omit<CommentLayerProps, "frame"> | null;
   onFrame?(iframe: HTMLIFrameElement | null): void;
@@ -125,6 +130,7 @@ export function WindowFrame({
   host = "desktop",
   address,
   titled = true,
+  inspect = true,
   comment,
   onFrame,
 }: WindowFrameProps) {
@@ -184,7 +190,7 @@ export function WindowFrame({
         {comment ? (
           <CommentLayer frame={frame} {...comment} />
         ) : (
-          <Inspector frame={frame} />
+          inspect && <Inspector frame={frame} />
         )}
       </div>
     </div>

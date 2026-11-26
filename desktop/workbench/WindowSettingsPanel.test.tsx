@@ -259,3 +259,21 @@ test("Sidebar sends open or closed, and Preset default sends null", async () => 
   await pick(view, "Sidebar", "Preset default");
   expect(onAppChange).toHaveBeenLastCalledWith({ sidebar: null });
 });
+
+test("Select mode shows Inspect and sends off for Off", async () => {
+  const p = {
+    ...props(),
+    selectMode: "inspect" as const,
+    onSelectMode: mock(),
+  };
+  const view = render(<WindowSettingsPanel {...p} />);
+  expect(shown(view, "Select mode")).toBe("Inspect");
+  await pick(view, "Select mode", "Off");
+  expect(p.onSelectMode).toHaveBeenCalledWith("off");
+  expect(p.onChange).not.toHaveBeenCalled();
+});
+
+test("without onSelectMode there is no Select mode row", () => {
+  const view = render(<WindowSettingsPanel {...props()} />);
+  expect(view.queryByRole("combobox", { name: "Select mode" })).toBeNull();
+});

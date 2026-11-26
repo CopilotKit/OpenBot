@@ -46,6 +46,14 @@ const SKIN_LABELS: Record<AppSkin, string> = {
   openfuse: "OpenFuse",
 };
 
+/** What the pointer does over the app when Comment is off. */
+export type SelectMode = "inspect" | "off";
+
+const SELECT_MODES: readonly Option[] = [
+  { value: "inspect", label: "Inspect" },
+  { value: "off", label: "Off" },
+];
+
 export type WindowSettingsPanelProps = {
   value: WindowSettingsValue;
   gridColor: string;
@@ -61,6 +69,12 @@ export type WindowSettingsPanelProps = {
   /** Set for an app scene: shows the App fields. */
   app?: AppWindowSettings;
   onAppChange?(patch: Partial<AppWindowSettings>): void;
+  /**
+   * Select mode: Inspect outlines the element under the pointer, Off draws nothing so the pointer
+   * just clicks through. Without onSelectMode the panel has no Select mode row.
+   */
+  selectMode?: SelectMode;
+  onSelectMode?(mode: SelectMode): void;
 };
 
 /** The select value for "Preset default" (role null). */
@@ -362,6 +376,16 @@ export function WindowSettingsPanel(props: WindowSettingsPanelProps) {
           />
         </div>
       </Field>
+      {props.onSelectMode && (
+        <SelectRow
+          label="Select mode"
+          value={props.selectMode ?? "inspect"}
+          options={SELECT_MODES}
+          onValue={(mode) =>
+            props.onSelectMode?.(mode === "off" ? "off" : "inspect")
+          }
+        />
+      )}
       <div className="flex flex-wrap gap-2 px-1">
         <Button variant="outline" size="sm" onClick={props.onCopyLink}>
           Copy link
