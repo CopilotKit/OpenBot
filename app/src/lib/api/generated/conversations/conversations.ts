@@ -36,6 +36,8 @@ import type {
   ConversationNotJoinableResponse,
   ConversationPage,
   ConversationResponse,
+  ConversationRunNotFoundResponse,
+  ConversationRunResponse,
   ConversationThread,
   ConversationThreadStatus,
   CreateConversationHeaders,
@@ -4225,3 +4227,249 @@ export const useCreateTranscription = <
     queryClient,
   );
 };
+export const getGetConversationRunUrl = (
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/conversations/${encodeURIComponent(String(conversationId))}/runs/${encodeURIComponent(String(runId))}`;
+};
+
+/**
+ * Say how one of a Bot's runs in the conversation ended, as the run's own last event said: it finished, it stopped to ask a person, it was stopped, or it failed. The run is named by the runId its events carry (RUN_STARTED on the threadStream channel of api/asyncapi.yaml). A client that stopped hearing a run before its end asks this, once createConversationJoinToken says the conversation has no run going, to tell a run that finished from one that stopped part way. outcome is null while the run is going, and for a run that ended without saying how (its server stopped under it). A run this server keeps no record of, or one of another conversation, is not found. Only a person in the conversation may ask, about the thread they see there.
+ * @summary See how a Bot's run in a conversation ended
+ */
+export const getConversationRun = async (
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ConversationRunResponse> => {
+  return apiRequest<ConversationRunResponse>(
+    getGetConversationRunUrl(organizationId, conversationId, runId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetConversationRunQueryKey = (
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/conversations/${conversationId}/runs/${runId}`,
+  ] as const;
+};
+
+export const getGetConversationRunQueryOptions = <
+  TData = Awaited<ReturnType<typeof getConversationRun>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationRunNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getConversationRun>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetConversationRunQueryKey(organizationId, conversationId, runId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getConversationRun>>
+  > = ({ signal }) =>
+    getConversationRun(organizationId, conversationId, runId, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      conversationId !== null &&
+      conversationId !== undefined &&
+      runId !== null &&
+      runId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getConversationRun>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetConversationRunQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getConversationRun>>
+>;
+export type GetConversationRunQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | ConversationRunNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetConversationRun<
+  TData = Awaited<ReturnType<typeof getConversationRun>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationRunNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getConversationRun>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getConversationRun>>,
+          TError,
+          Awaited<ReturnType<typeof getConversationRun>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetConversationRun<
+  TData = Awaited<ReturnType<typeof getConversationRun>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationRunNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getConversationRun>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getConversationRun>>,
+          TError,
+          Awaited<ReturnType<typeof getConversationRun>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetConversationRun<
+  TData = Awaited<ReturnType<typeof getConversationRun>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationRunNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getConversationRun>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary See how a Bot's run in a conversation ended
+ */
+
+export function useGetConversationRun<
+  TData = Awaited<ReturnType<typeof getConversationRun>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationRunNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getConversationRun>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetConversationRunQueryOptions(
+    organizationId,
+    conversationId,
+    runId,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
