@@ -1676,13 +1676,14 @@ fn on_podman_at_stop(shell: &Shell, root: &Path) -> bool {
     owned.or_else(|| preparation::saved_engine(root)) == Some(engine::Engine::Podman)
 }
 
-/// The person chose Try again after closing the password prompt, so Install asks again now rather
-/// than after its short wait. See `install::GoAhead`. False when nothing was waiting for it.
+/// The person chose Continue before the password prompt, which lets it come up, or Try again after
+/// closing it, so Install asks again now rather than after its short wait. See `install::GoAhead`.
+/// False when nothing was waiting for it.
 #[tauri::command]
 fn allow_podman_install() -> bool {
     let waiting = install::allow_podman_install();
     log::info!(
-        "[install] Try again to install Podman{}",
+        "[install] go-ahead (Continue or Try again) to install Podman{}",
         if waiting {
             ""
         } else {
