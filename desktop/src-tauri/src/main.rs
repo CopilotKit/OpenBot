@@ -6595,6 +6595,21 @@ fn machine_home_fallback_line(root: &Path, profile: Option<&str>) -> String {
     format!("{install} can't hold OpenBot's storage, so it's on {profile}.")
 }
 
+/// At every launch, delete the Google sign-in for Gemini an earlier version saved in the install
+/// folder `root` (`provider_oauth::forget_google_sign_in`). The saved choice stays, so the AI screen
+/// and Start still say to add a Gemini API key. Logged; a launch never stops over it.
+fn forget_google_sign_in_at_launch(root: &Path) {
+    match openbot_desktop_lib::provider_oauth::forget_google_sign_in(root) {
+        Ok(0) => {}
+        Ok(count) => {
+            log::info!("[launch] deleted the saved Google sign-in for Gemini ({count} file(s))")
+        }
+        Err(error) => {
+            log::warn!("[launch] could not delete the saved Google sign-in for Gemini: {error}")
+        }
+    }
+}
+
 /// On Windows, put the Podman machine's disk in the install folder `root`, or in the user profile
 /// when the drive cannot hold it. Other systems keep Podman's own place.
 fn use_machine_home(root: &Path) {
@@ -15207,6 +15222,9 @@ fn main() {
             );
             // On Windows, the Podman machine's disk goes in the install folder.
             use_machine_home(&selected_root_or_default(app.handle()));
+            if !connected {
+                forget_google_sign_in_at_launch(&selected_root_or_default(app.handle()));
+            }
 
             remember_setup_url(app.handle())?;
             // After the setup page's address is known, which the notice is shown at.
@@ -18062,6 +18080,67 @@ mod tests {
             "Google sign-in for Gemini has ended. Add a Gemini API key to keep your Bots running on Gemini."
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A launch deletes the Google sign-in for Gemini an earlier version saved, and a copy a write
+    /// left half-done beside it, and leaves an xAI sign-in and anything it can't tell is Google's.
+    /// The saved Google choice stays: Start still says to add a Gemini API key.
+    #[test]
+    fn a_launch_deletes_a_saved_google_sign_in_and_keeps_an_xai_one() {
+        let session = |provider: &str| serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":provider,"clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","quotaProject":"synthetic-project","proxyToken":"synthetic-proxy"});
+        let google = temp_root("launch-forgets-google");
+        let xai = temp_root("launch-keeps-xai");
+        for (root, provider) in [(&google, "google"), (&xai, "xai")] {
+            std::fs::create_dir_all(root.join(".openbot")).unwrap();
+            std::fs::write(
+                root.join(openbot_desktop_lib::provider_oauth::FILE),
+                serde_json::to_vec(&session(provider)).unwrap(),
+            )
+            .unwrap();
+        }
+        let half_written = google.join(".openbot/model-oauth.json.synthetic.tmp");
+        std::fs::write(
+            &half_written,
+            serde_json::to_vec(&session("google")).unwrap(),
+        )
+        .unwrap();
+        let unreadable = google.join(".openbot/other.tmp");
+        std::fs::write(&unreadable, b"not a sign-in").unwrap();
+
+        forget_google_sign_in_at_launch(&google);
+        forget_google_sign_in_at_launch(&xai);
+
+        assert!(!google
+            .join(openbot_desktop_lib::provider_oauth::FILE)
+            .exists());
+        assert!(!half_written.exists());
+        assert!(unreadable.exists());
+        assert_eq!(
+            openbot_desktop_lib::provider_oauth::read(&xai, "xai")
+                .unwrap()
+                .proxy_token,
+            "synthetic-proxy"
+        );
+        let refused = start_stack_credential_with(&google, oauth_choice("google"), |_, _| {
+            panic!("a Google sign-in must not resolve an API key")
+        })
+        .unwrap_err();
+        assert_eq!(
+            refused.said,
+            "Google sign-in for Gemini has ended. Add a Gemini API key to keep your Bots running on Gemini."
+        );
+        // And launch runs it, in setup, for the installation this computer runs.
+        let main = include_str!("main.rs");
+        let setup = &main[main.find(".setup(move |app| {\n").unwrap()..];
+        let setup = &setup[..setup.find("\n        })\n").unwrap()];
+        assert!(
+            setup.contains(
+                "if !connected {\n                forget_google_sign_in_at_launch(&selected_root_or_default(app.handle()));\n            }"
+            ),
+            "launch does not delete a saved Google sign-in"
+        );
+        std::fs::remove_dir_all(google).unwrap();
+        std::fs::remove_dir_all(xai).unwrap();
     }
 
     #[test]
