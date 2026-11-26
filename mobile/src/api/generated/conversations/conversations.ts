@@ -13,6 +13,7 @@ import type {
   ConversationMessagePage,
   ConversationPage,
   ConversationResponse,
+  ConversationRunResponse,
   ConversationThread,
   ConversationThreadStatus,
   CreateConversationRequest,
@@ -835,4 +836,31 @@ export const createTranscription = async (
     method: "POST",
     body: formData,
   });
+};
+
+export const getGetConversationRunUrl = (
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/conversations/${encodeURIComponent(String(conversationId))}/runs/${encodeURIComponent(String(runId))}`;
+};
+
+/**
+ * Say how one of a Bot's runs in the conversation ended, as the run's own last event said: it finished, it stopped to ask a person, it was stopped, or it failed. The run is named by the runId its events carry (RUN_STARTED on the threadStream channel of api/asyncapi.yaml). A client that stopped hearing a run before its end asks this, once createConversationJoinToken says the conversation has no run going, to tell a run that finished from one that stopped part way. outcome is null while the run is going, and for a run that ended without saying how (its server stopped under it). A run this server keeps no record of, or one of another conversation, is not found. Only a person in the conversation may ask, about the thread they see there.
+ * @summary See how a Bot's run in a conversation ended
+ */
+export const getConversationRun = async (
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ConversationRunResponse> => {
+  return apiRequest<ConversationRunResponse>(
+    getGetConversationRunUrl(organizationId, conversationId, runId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
