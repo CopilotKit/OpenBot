@@ -130,6 +130,9 @@ Endpoint registration uses target checks. Cloud metadata addresses are refused u
 
 `POST /api/v2/organizations/{organizationId}/bots/test-connection` checks whether an endpoint answers before saving it.
 
+Some frameworks' AG-UI adapters drop the system messages that carry the Bot's role and tool
+guidance. [Connect your agent's framework](agent-frameworks.md) gives the few lines each one needs.
+
 ## What a role does not grant
 
 A Bot's role grants it nothing. What it may use is set separately, on the Bot's page, in Settings
