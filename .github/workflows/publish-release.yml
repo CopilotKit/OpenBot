@@ -373,8 +373,6 @@ jobs:
       manifest_artifact: ${{ needs.images.outputs.manifest-artifact }}
       retention_days: 30
       platforms: '["macos","windows"]'
-    secrets:
-      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
     permissions:
       contents: read
 

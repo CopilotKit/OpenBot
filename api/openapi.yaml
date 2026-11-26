@@ -5069,7 +5069,7 @@ paths:
         - Models
       operationId: replaceAiConnection
       summary: Change how OpenBot reaches its AI provider
-      description: 'Switch the AI provider OpenBot''s Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can''t use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization''s vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider. On OpenBot Cloud an administrator may also share their own plan (openai, anthropic) or provider sign-in (google, xai) as the organization''s AI: send that login once they have signed in to the provider through OpenBot (startPersonalAiSignIn) and the sign-in is kept for them. Bots across the organization then run on that sign-in for everyone with no AI of their own, and sharedSignIn names whose it is. It stops working if that person removes their own sign-in; another administrator can switch it at any time. With several connections (listAiConnections) this changes the default: the connection saved becomes the default, in place of the provider''s own connection where it already had one (its id stays the provider), and a default of another provider stays connected as one of the others, no longer the default.'
+      description: 'Switch the AI provider OpenBot''s Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can''t use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization''s vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider. On OpenBot Cloud an administrator may also share their own plan (openai, anthropic) or provider sign-in (xai) as the organization''s AI: send that login once they have signed in to the provider through OpenBot (startPersonalAiSignIn) and the sign-in is kept for them. Bots across the organization then run on that sign-in for everyone with no AI of their own, and sharedSignIn names whose it is. It stops working if that person removes their own sign-in; another administrator can switch it at any time. With several connections (listAiConnections) this changes the default: the connection saved becomes the default, in place of the provider''s own connection where it already had one (its id stays the provider), and a default of another provider stays connected as one of the others, no longer the default.'
       security:
         - webSession: []
         - appOAuth:
@@ -5241,7 +5241,7 @@ paths:
         - Models
       operationId: replacePersonalAiConnection
       summary: Set a person's own AI connection
-      description: 'Connect the AI a person''s runs use, with their own key or an address, or a key a sign-in through OpenBot kept for them (useSavedKey). OpenBot checks the connection with the provider first: a key, an address or a model it can''t use is refused and nothing is saved. Once saved, the person''s next run uses it, ahead of the organization''s. The key is encrypted and kept for the person alone, never in the organization''s vault, and never sent back. A plan (openai, anthropic) or a provider sign-in (google, xai) is accepted only once the person has signed in to that provider through OpenBot (startPersonalAiSignIn) and the sign-in was approved: the server keeps that sign-in for them alone and renews it itself. Without one it is refused, since the server runs the person''s Bots and can''t use a sign-in held on a computer. With several connections of their own (listPersonalAiConnections) this changes their default: the connection saved becomes the default, in place of the provider''s own connection where they already had one (its id stays the provider), and a default of another provider stays connected as one of the others, no longer the default. Recorded on the audit trail, never with a key. Only the person themselves may set it, and only where available is true.'
+      description: 'Connect the AI a person''s runs use, with their own key or an address, or a key a sign-in through OpenBot kept for them (useSavedKey). OpenBot checks the connection with the provider first: a key, an address or a model it can''t use is refused and nothing is saved. Once saved, the person''s next run uses it, ahead of the organization''s. The key is encrypted and kept for the person alone, never in the organization''s vault, and never sent back. A plan (openai, anthropic) or a provider sign-in (xai) is accepted only once the person has signed in to that provider through OpenBot (startPersonalAiSignIn) and the sign-in was approved: the server keeps that sign-in for them alone and renews it itself. Without one it is refused, since the server runs the person''s Bots and can''t use a sign-in held on a computer. With several connections of their own (listPersonalAiConnections) this changes their default: the connection saved becomes the default, in place of the provider''s own connection where they already had one (its id stays the provider), and a default of another provider stays connected as one of the others, no longer the default. Recorded on the audit trail, never with a key. Only the person themselves may set it, and only where available is true.'
       security:
         - webSession: []
         - appOAuth:
@@ -5359,7 +5359,7 @@ paths:
         - Models
       operationId: startPersonalAiSignIn
       summary: Start signing in to an AI provider
-      description: 'Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude''s page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies anything: Desktop listens on the person''s own computer for the provider''s redirect and the app sends what arrives with finishPersonalAiSignIn. For Claude, loopbackPort names the port Desktop listens on; ChatGPT''s browser sign-in always redirects to localhost:1455. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan''s sign-in (connect with login plan), or a Google or xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true.'
+      description: 'Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude''s page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies anything: Desktop listens on the person''s own computer for the provider''s redirect and the app sends what arrives with finishPersonalAiSignIn. For Claude, loopbackPort names the port Desktop listens on; ChatGPT''s browser sign-in always redirects to localhost:1455. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan''s sign-in (connect with login plan), or an xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true. Google is refused: Gemini connects with an API key only.'
       security:
         - webSession: []
         - appOAuth:
@@ -29229,7 +29229,7 @@ components:
       description: 'The AI provider OpenBot''s Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI''s API, at an address given. The list can grow: a client shows a provider it doesn''t know by its id. A request still names one of AiConnectionProvider.'
     AiConnectionLogin:
       type: string
-      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person''s Google or xAI sign-in (google, xai).'
+      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person''s xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.'
       enum:
         - plan
         - api-key
@@ -29250,7 +29250,8 @@ components:
             - unreachable
             - no-key
             - no-default
-          description: 'sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn''t answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.'
+            - sign-in-retired
+          description: 'sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn''t answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider''s sign-in (a Google sign-in for Gemini), so it can''t run, and signing in again isn''t offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.'
         detail:
           type: string
           description: One sentence a person reads, saying what to do.
@@ -29461,7 +29462,7 @@ components:
     AiConnectionInput:
       type: object
       additionalProperties: false
-      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused.
+      description: 'The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.'
       required:
         - provider
         - login
@@ -29536,7 +29537,7 @@ components:
           description: Whether the person can set an AI connection of their own here. False where the organization's AI is the only one.
         signIns:
           type: array
-          description: 'The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), Google and xAI sign-ins, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.'
+          description: 'The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), an xAI sign-in, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.'
           items:
             $ref: '#/components/schemas/AiConnectionProviderAnswer'
     AiSignInInput:
@@ -44053,7 +44054,19 @@ components:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
-                detail: Google Gemini doesn't take a plan. Pick an API key or a sign-in.
+                detail: xAI doesn't take a plan. Pick an API key or a sign-in.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            googleSignInRetired:
+              summary: A Google sign-in for Gemini, which OpenBot no longer offers.
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
@@ -44161,7 +44174,7 @@ components:
                 type: https://open.bot/errors/ai-connection-refused
                 title: OpenBot couldn't use that connection.
                 status: 422
-                detail: Sign in to Google first, then try again.
+                detail: Sign in to xAI first, then try again.
                 code: AI_CONNECTION_SIGN_IN_MISSING
                 category: validation
                 retryable: false
@@ -50784,7 +50797,7 @@ components:
         detail: null
         interval: 5
     AiConnectionPageExample:
-      summary: A Claude plan as the default, and a Google sign-in that ended.
+      summary: A Claude plan as the default, an xAI sign-in that ended, and a Google sign-in OpenBot no longer offers.
       value:
         connections:
           - id: anthropic
@@ -50796,6 +50809,17 @@ components:
             ready: true
             problem: null
             connectedAt: '2026-11-20T09:00:00.000Z'
+          - id: xai
+            provider: xai
+            login: oauth
+            model: grok-4.7
+            endpointHost: null
+            isDefault: false
+            ready: false
+            problem:
+              code: sign-in-ended
+              detail: Your xAI sign-in ended. Sign in again to use it.
+            connectedAt: '2026-11-21T09:00:00.000Z'
           - id: google
             provider: google
             login: oauth
@@ -50804,14 +50828,13 @@ components:
             isDefault: false
             ready: false
             problem:
-              code: sign-in-ended
-              detail: Your Google sign-in ended. Sign in again to use it.
-            connectedAt: '2026-11-21T09:00:00.000Z'
+              code: sign-in-retired
+              detail: Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.
+            connectedAt: '2026-11-22T09:00:00.000Z'
         nextCursor: null
         signIns:
           - openai
           - anthropic
-          - google
           - xai
     AiConnectionPageNoDefaultExample:
       summary: Two connections left after an older app disconnected the default, neither the default.

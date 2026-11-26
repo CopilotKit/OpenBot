@@ -115,9 +115,7 @@ const endpointPresets: Record<
 
 /** What approving in the browser does, for each provider that signs in that way. */
 const oauthExplanation: Record<string, string> = {
-  google:
-    "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
-  xai: "Authorize OpenBot to use models available to your xAI account.",
+  xai:"Authorize OpenBot to use models available to your xAI account.",
   unbiased:
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here. OpenBot receives an API key for Pareto and keeps it on this computer.",
 };
@@ -166,14 +164,17 @@ export function recordedModel(held: HeldConfiguration): ModelChoice | null {
         login: "plan",
         saved: held.saved.chatgptSignInChanged !== true,
       };
-    case "google-oauth":
     case "xai-oauth":
       return {
-        provider: held.saved.model === "google-oauth" ? "google" : "xai",
+        provider: "xai",
         login: "oauth",
         saved: true,
         model: held.BOT_MODEL,
       };
+    // A Google sign-in saved before Gemini took an API key only: nothing to resume. The screen
+    // says so and asks for a key instead (`googleSignInEnded`).
+    case "google-oauth":
+      return null;
     case "compatible-endpoint":
       return {
         provider: "openai-compatible",
@@ -240,6 +241,12 @@ export function ProviderPicker({
   onProviderChange?: () => void;
 }) {
   const initialChoice = chosen ?? recordedModel(held);
+  /*
+   * The connection saved last is a Google sign-in, which Gemini no longer takes: the screen says so
+   * above the list, with one button that opens Google Gemini's API key.
+   */
+  const googleSignInEnded =
+    chosen === null && held.saved?.model === "google-oauth";
   const [reuse, setReuse] = useState(
     initialChoice?.saved
       ? { provider: initialChoice.provider, login: initialChoice.login }
@@ -515,6 +522,7 @@ export function ProviderPicker({
   }, []);
 
   const row = rows.find((r) => r.id === open) ?? null;
+  const googleRow = rows.find((r) => r.id === "google");
   const preset = row ? endpointPresets[row.id] : undefined;
   const token = row ? (tokens[row.id] ?? "") : "";
   const savedPlan =
@@ -662,6 +670,54 @@ export function ProviderPicker({
     return () => window.removeEventListener("keydown", onKey);
   }, [anyChosen]);
 
+  /** Open one provider's row, as choosing it in the list does. `focused`: its radio had focus. */
+  function openRow(r: Provider, focused = false) {
+    // Selecting a row moves its fieldset outside the scrolling catalogue. Keep the
+    // focused radio focused when React mounts it in that anchored position.
+    restoreProviderFocus.current = focused ? r.id : null;
+    if (oauthAttempt.current) void cancelOAuth();
+    stopPlanSignIn();
+    signInRunRef.current += 1;
+    setOpen(r.id);
+    // A failure belongs to the row that produced it. Left in place, a refused OpenAI
+    // sign-in stayed on screen under the endpoint row's fields, where it read as a
+    // complaint about the address just typed. The same goes for a failure setup sent
+    // back here: a refused OpenAI key stayed under the Anthropic row.
+    setFailure(null);
+    onProviderChange?.();
+    setSignInUrl(null);
+    setBusy(false);
+    setProgress(null);
+    setDownload(null);
+    // The first way in is the default, which is the plan wherever there is one.
+    setLogin(r.logins[0] ?? null);
+    // Fill from what is already on this machine, if anything.
+    const kept =
+      r.id === "openai"
+        ? held.OPENAI_API_KEY
+        : r.id === "anthropic"
+          ? held.ANTHROPIC_API_KEY
+          : undefined;
+    setApiKey(kept ?? "");
+    const nextPreset = endpointPresets[r.id];
+    const restoreEndpoint =
+      r.id === "openai-compatible" ||
+      (nextPreset && endpointProvider(held.OPENAI_BASE_URL) === r.id);
+    setReuseEndpointKey(
+      Boolean(restoreEndpoint) &&
+        held.saved?.modelApiKeys?.compatible === true,
+    );
+    if (restoreEndpoint && held.OPENAI_BASE_URL) {
+      setBaseUrl(held.OPENAI_BASE_URL);
+      setContainerBaseUrl(held.OPENAI_CONTAINER_BASE_URL ?? "");
+      setModel(held.BOT_MODEL ?? nextPreset?.model ?? "");
+    } else {
+      setBaseUrl(nextPreset?.baseUrl ?? "");
+      setContainerBaseUrl("");
+      setModel(nextPreset?.model ?? "");
+    }
+  }
+
   const providerPicker = (
     <fieldset ref={providerPickerRef} className="picker providers">
       <legend className="sr-only">Model provider</legend>
@@ -677,53 +733,9 @@ export function ProviderPicker({
             className="tile-input"
             value={r.id}
             checked={open === r.id}
-            onChange={(event) => {
-              // Selecting a row moves its fieldset outside the scrolling catalogue. Keep the
-              // focused radio focused when React mounts it in that anchored position.
-              restoreProviderFocus.current =
-                document.activeElement === event.currentTarget ? r.id : null;
-              if (oauthAttempt.current) void cancelOAuth();
-              stopPlanSignIn();
-              signInRunRef.current += 1;
-              setOpen(r.id);
-              // A failure belongs to the row that produced it. Left in place, a refused OpenAI
-              // sign-in stayed on screen under the endpoint row's fields, where it read as a
-              // complaint about the address just typed. The same goes for a failure setup sent
-              // back here: a refused OpenAI key stayed under the Anthropic row.
-              setFailure(null);
-              onProviderChange?.();
-              setSignInUrl(null);
-              setBusy(false);
-              setProgress(null);
-              setDownload(null);
-              // The first way in is the default, which is the plan wherever there is one.
-              setLogin(r.logins[0] ?? null);
-              // Fill from what is already on this machine, if anything.
-              const kept =
-                r.id === "openai"
-                  ? held.OPENAI_API_KEY
-                  : r.id === "anthropic"
-                    ? held.ANTHROPIC_API_KEY
-                    : undefined;
-              setApiKey(kept ?? "");
-              const nextPreset = endpointPresets[r.id];
-              const restoreEndpoint =
-                r.id === "openai-compatible" ||
-                (nextPreset && endpointProvider(held.OPENAI_BASE_URL) === r.id);
-              setReuseEndpointKey(
-                Boolean(restoreEndpoint) &&
-                  held.saved?.modelApiKeys?.compatible === true,
-              );
-              if (restoreEndpoint && held.OPENAI_BASE_URL) {
-                setBaseUrl(held.OPENAI_BASE_URL);
-                setContainerBaseUrl(held.OPENAI_CONTAINER_BASE_URL ?? "");
-                setModel(held.BOT_MODEL ?? nextPreset?.model ?? "");
-              } else {
-                setBaseUrl(nextPreset?.baseUrl ?? "");
-                setContainerBaseUrl("");
-                setModel(nextPreset?.model ?? "");
-              }
-            }}
+            onChange={(event) =>
+              openRow(r, document.activeElement === event.currentTarget)
+            }
           />
           {r.id === "openai-compatible" ? (
             <EndpointMark />
@@ -768,6 +780,21 @@ export function ProviderPicker({
         {row && <div className="setup-provider-identity">{providerPicker}</div>}
 
         <div ref={setupBodyRef} className="setup-body">
+          {googleSignInEnded && !row && (
+            <div className="blocker google-sign-in-ended" role="alert">
+              <h2>Google sign-in for Gemini has ended</h2>
+              <p>Add a Gemini API key to keep your Bots running on Gemini.</p>
+              <div className="row">
+                <button
+                  type="button"
+                  disabled={!googleRow}
+                  onClick={() => googleRow && openRow(googleRow)}
+                >
+                  Add a Gemini API key
+                </button>
+              </div>
+            </div>
+          )}
           {!row && providerPicker}
 
           {row && (
@@ -837,10 +864,8 @@ export function ProviderPicker({
                       onClick={beginOAuth}
                     >
                       <ButtonMark id={row.mark} />
-                      {/* Google's guidelines allow only "Sign in with Google" beside its G. The
-                      row above already says Gemini. */}
                       Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
-                      {row.id === "google" ? "Google" : row.name}
+                      {row.name}
                     </button>
                   )}
                   {busy && !signInUrl && (

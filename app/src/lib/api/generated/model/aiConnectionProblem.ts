@@ -6,7 +6,7 @@
  * Why an AI connection can't run now, in OpenBot's own words.
  */
 export interface AiConnectionProblem {
-  /** sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. */
+  /** sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. */
   code: string;
   /** One sentence a person reads, saying what to do. */
   detail: string;

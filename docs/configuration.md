@@ -334,7 +334,7 @@ Who decides what is offered depends on who uses the deployment. With `OPENBOT_SI
 | -------------- | ------------------ | -------------------- |
 | OpenAI key | `GET https://api.openai.com/v1/models`, chat models only, dropping any past its `shutdown_date` | models.dev |
 | Anthropic key | `GET https://api.anthropic.com/v1/models` | Anthropic's own `capabilities.effort` |
-| Google key or sign-in | Google's model list (the OpenAI-compatible `/models` for a key, the native list for a sign-in) | models.dev |
+| Google key | Google's model list (the OpenAI-compatible `/models`) | models.dev |
 | xAI key or sign-in | `GET https://api.x.ai/v1/language-models` | xAI's own `capabilities.reasoning_effort` and default |
 | ChatGPT plan | the plan's own Codex listing, read by the LangGraph harness that holds the sign-in | the plan's `supported_reasoning_levels` and default |
 | Claude plan | `GET https://api.anthropic.com/v1/models` with the plan's token | Anthropic's own `capabilities.effort` |
@@ -391,7 +391,7 @@ Joining includes recent thread messages and previous voice chats, capped at 12,0
 Ending a nonempty call saves its text transcript to the database and creates a compact, expandable
 Voice chat card in the same channel. A separate summary request uses the deployment's default chat
 model and its existing credential: OpenAI-compatible or Anthropic API keys, Claude or ChatGPT plan
-sign-in, or the deployment's Google/xAI OAuth proxy. It does not need a separate OpenAI key when
+sign-in, or the deployment's xAI OAuth proxy. It does not need a separate OpenAI key when
 another provider is selected. Plan summaries use an isolated conversation with no tools. A failed
 summary leaves the saved transcript available with a retry button. A successful retry updates the
 sidebar preview only while that call is still the latest activity. Interrupted answers are marked

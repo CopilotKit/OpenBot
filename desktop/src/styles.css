@@ -644,6 +644,18 @@ fieldset.picker.providers {
   position: relative;
 }
 
+/*
+ * A notice above the list (a saved Google sign-in that ended): set under the lede as the list
+ * would be, and apart from the first row, so it reads as the screen's and not as a row's.
+ */
+.lede + .blocker {
+  margin-top: 0;
+}
+
+.blocker + fieldset.picker {
+  margin-top: 16px;
+}
+
 /* The chosen row's own text stops short of Change rather than running under it. */
 .tile.beside-change {
   padding-right: 84px;
