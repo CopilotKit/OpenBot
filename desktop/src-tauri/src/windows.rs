@@ -2797,7 +2797,8 @@ mod tests {
         let cli = crate::test_support::probe_cli("windows-probes-hang");
         let fake = |name: &str| {
             let path = cli.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
-            std::fs::copy(&cli, &path).unwrap();
+            // Immutable fixture, on the same volume: no writable copy handle for another fork to inherit.
+            std::fs::hard_link(&cli, &path).unwrap();
             path
         };
         let (powershell, wsl) = (fake("powershell"), fake("wsl"));
@@ -2884,7 +2885,8 @@ mod tests {
         use crate::telemetry::{WindowsProbeKind as Probe, WindowsProbeOutcome as Outcome};
         let cli = crate::test_support::probe_cli("windows-probe-slow");
         let powershell = cli.with_file_name(format!("powershell{}", std::env::consts::EXE_SUFFIX));
-        std::fs::copy(&cli, &powershell).unwrap();
+        // Linking avoids Linux ETXTBSY when another test forks while a copy is open for writing.
+        std::fs::hard_link(&cli, &powershell).unwrap();
         let heard = std::cell::RefCell::new(Vec::new());
         let hear = |said: Heard| heard.borrow_mut().push(said);
         let mut probing = Probing {
