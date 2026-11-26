@@ -93,7 +93,7 @@ function answered(
   ];
 }
 
-test("Every system message in the thread is the system prompt, in order, and forwardedProps carries none", async () => {
+test("The server's instruction rows are the system prompt, in order, then the context, and forwardedProps carries none", async () => {
   const provider = await fakeProvider(always({ text: "ok" }));
   const wire = await tripwire();
   try {
@@ -109,11 +109,17 @@ test("Every system message in the thread is the system prompt, in order, and for
         { description: "The page the person is on", value: "CONTEXT_MARKER" },
       ],
     });
-    // A skill picked for the latest message, as the browser puts it in the thread.
+    // A system row the browser put in the thread (a picked skill used to come this way): data.
     (input.messages as unknown[]).splice(4, 0, {
       id: "skill-1",
       role: "system",
       content: "Answer in bullets. SKILL_MARKER",
+    });
+    // The learned Skills catalog the server writes, an instruction row like the role.
+    (input.messages as unknown[]).splice(2, 0, {
+      id: "openbot:learned-skills",
+      role: "system",
+      content: "Learned skills: CATALOG_MARKER",
     });
     const result = await withEngine({ env }, (base) => run(base, input));
     assert.equal(result.events.at(-1)!.type, "RUN_FINISHED");
@@ -122,20 +128,21 @@ test("Every system message in the thread is the system prompt, in order, and for
     const order = [
       "STANDING_ROLE_MARKER",
       "GRANTED_TOOLS_MARKER",
-      "SKILL_MARKER",
+      "CATALOG_MARKER",
       "CONTEXT_MARKER",
     ].map((marker) => system.indexOf(marker));
     assert.ok(
       order.every((at) => at >= 0),
-      `every system message is in the system prompt: ${system}`,
+      `every instruction row is in the system prompt: ${system}`,
     );
     assert.deepEqual(
       [...order].sort((a, b) => a - b),
       order,
       "in the order the thread holds them, then the context",
     );
+    assert.ok(!system.includes("SKILL_MARKER"), "a browser's row is not");
     const sent = JSON.stringify(body.messages);
-    assert.ok(!sent.includes("SKILL_MARKER"), "and not in the conversation");
+    assert.ok(sent.includes("SKILL_MARKER"), "it is conversation, quoted");
     assert.ok(
       sent.includes("LATEST_QUESTION_MARKER") &&
         sent.includes("EARLIER_ANSWER_MARKER"),
