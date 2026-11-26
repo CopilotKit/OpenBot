@@ -83,10 +83,13 @@ export function BoxLineView({
   onDismiss: () => void;
 }) {
   const amber = line.kind === "refused" || line.kind === "maybeMade";
-  const leadsWithName = line.text.startsWith(bot.name);
+  const leadsWithName = line.text.startsWith(`${bot.name} `);
   return (
     <div role="status" className="flex items-center gap-2 text-sm">
-      <BotOrb seed={bot.avatarSeed} name={bot.name} size={18} />
+      {/* The name is in the text: the orb would have a screen reader say it twice. */}
+      <span aria-hidden="true" className="contents">
+        <BotOrb seed={bot.avatarSeed} name={bot.name} size={18} />
+      </span>
       <p
         className={cn(
           "min-w-0 flex-1",
