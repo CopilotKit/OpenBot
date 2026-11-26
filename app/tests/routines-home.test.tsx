@@ -14,7 +14,7 @@ import { viewerTimeZone } from "@/components/routines/routine-page";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
-import { answerBotsList } from "./bots-api";
+import { answerBotsList, BOTS_PATH } from "./bots-api";
 import { answerScheduleLists, pathOf, ROUTINES_PATH } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -64,11 +64,13 @@ function serving({
   hidden = [] as unknown[],
   routines = [] as unknown[],
   routinesFail = false,
+  botsFail = false,
 }: {
   shown?: unknown[];
   hidden?: unknown[];
   routines?: unknown[];
   routinesFail?: boolean;
+  botsFail?: boolean;
 } = {}) {
   writes = [];
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -83,6 +85,8 @@ function serving({
       return Response.json(meBody({ user: { id: "u1" } }));
     if (pathOf(input) === PREFERENCES_PATH)
       return Response.json({ proactive: "on" });
+    if (botsFail && pathOf(input) === BOTS_PATH)
+      return new Response(null, { status: 500 });
     const bots = answerBotsList(input, init, { visible: shown, hidden });
     if (bots) return bots;
     const lists = answerScheduleLists(input, init, { routines });
@@ -196,6 +200,18 @@ test("a failed read says so, shows no examples, and keeps the box", async () => 
       name: "Every weekday at 9, send me yesterday's new leads",
     }),
   ).toBeNull();
+});
+
+test("a failed Bots read says so", async () => {
+  serving({
+    botsFail: true,
+    routines: [routine({ botId: "atlas", title: "Standup summary" })],
+  });
+  const view = draw();
+  const alert = await view.findByRole("alert");
+  expect(alert.textContent).toBe(
+    "Couldn't load your Bots. Try again in a moment.",
+  );
 });
 
 test("the check-ins switch is drawn once, as the line", async () => {

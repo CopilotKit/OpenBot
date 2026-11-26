@@ -62,6 +62,7 @@ export function RoutinesHome() {
     routines.error ? "routines" : null,
     goals.error ? "goals" : null,
     checkIns.error ? "check-ins" : null,
+    shownBots.error || hiddenBots.error ? "Bots" : null,
   ].filter((name): name is string => name !== null);
   const empty = !pending && failed.length === 0 && rows.length === 0;
 
@@ -91,7 +92,13 @@ export function RoutinesHome() {
           {failed.length > 0 ? (
             <p className="mb-4 text-destructive text-sm" role="alert">
               {loadFailure(
-                [routines.error, goals.error, checkIns.error],
+                [
+                  routines.error,
+                  goals.error,
+                  checkIns.error,
+                  shownBots.error,
+                  hiddenBots.error,
+                ],
                 `Couldn't load your ${failed.join(" and ")}. Try again in a moment.`,
               )}
             </p>
