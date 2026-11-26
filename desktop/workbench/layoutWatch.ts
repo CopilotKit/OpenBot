@@ -457,7 +457,20 @@ function cutOffBy(element: Element, view: Window): number {
     }
   }
   if (!clip) return 0;
-  return hiddenPx(ownTextRects(element), clip);
+  const rects = ownTextRects(element);
+  // None of the text shows, as in a closed panel: hidden on purpose, not cut off.
+  if (!rects.some((r) => overlaps(r, clip))) return 0;
+  return hiddenPx(rects, clip);
+}
+
+/** True when the two boxes share some area. */
+function overlaps(a: Box, b: Box): boolean {
+  return (
+    a.x < b.x + b.width &&
+    b.x < a.x + a.width &&
+    a.y < b.y + b.height &&
+    b.y < a.y + a.height
+  );
 }
 
 /** True when an element moves with the page's own scroll (it is not fixed to the window). */
@@ -493,14 +506,10 @@ export function clippedAndOutside(
   const warnings: Warning[] = [];
   const page = pageScrolls(root, view);
   for (const { element, label, box } of visibleElements(root)) {
-    const style = view.getComputedStyle(element);
+    // The text may fit its own box and still be cut by a smaller box above it, so every
+    // element with text is measured against the boxes that clip it.
     if (ownText(element) && element.clientWidth > 0) {
-      const overflowing =
-        (element.scrollWidth > element.clientWidth + 1 &&
-          !scrolls(style.overflowX || style.overflow)) ||
-        (element.scrollHeight > element.clientHeight + 1 &&
-          !scrolls(style.overflowY || style.overflow));
-      if (overflowing && cutOffBy(element, view) > CLIP_TOLERANCE_PX)
+      if (cutOffBy(element, view) > CLIP_TOLERANCE_PX)
         warnings.push({
           kind: "clipped",
           at,

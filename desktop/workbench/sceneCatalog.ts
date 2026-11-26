@@ -58,21 +58,40 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * How long the page keeps asking for the app scenes. The desktop server takes requests before the
+ * app server it starts has come up (up to 90 s, APP_START_TIMEOUT_MS in vite.workbench.config.ts),
+ * so a first failure is usually the app server still starting.
+ */
+const APP_SCENES_TRIES = 46;
+const APP_SCENES_WAIT_MS = 2000;
+
 export async function loadScenes(
   load: (url: string) => Promise<unknown> = (url) =>
     import(/* @vite-ignore */ url),
+  { tries = APP_SCENES_TRIES, waitMs = APP_SCENES_WAIT_MS } = {},
 ): Promise<{ scenes: SceneEntry[]; notices: string[] }> {
   const desktop: SceneEntry[] = [...SCENES];
   let module: unknown;
-  try {
-    module = await load(APP_SCENES_URL);
-  } catch (error) {
-    return {
-      scenes: desktop,
-      notices: [
-        `The app scenes did not load: ${messageOf(error)}. ${APP_SERVER_HINT}`,
-      ],
-    };
+  for (let attempt = 1; ; attempt++) {
+    try {
+      // A new URL for each try: a browser can keep a failed import and answer the same URL with it.
+      module = await load(
+        attempt === 1 ? APP_SCENES_URL : `${APP_SCENES_URL}?try=${attempt}`,
+      );
+      break;
+    } catch (error) {
+      if (attempt < tries) {
+        await new Promise((done) => setTimeout(done, waitMs));
+        continue;
+      }
+      return {
+        scenes: desktop,
+        notices: [
+          `The app scenes did not load: ${messageOf(error)}. ${APP_SERVER_HINT}`,
+        ],
+      };
+    }
   }
   const picked = pickAppScenes(module, new Set(SCENES.map((s) => s.id)));
   return { scenes: [...picked.scenes, ...desktop], notices: picked.notices };
@@ -88,5 +107,7 @@ export function loadScenesInBun(): Promise<{
       import(
         /* @vite-ignore */ `${import.meta.dir}/../../app/workbench/scenes/index.ts`
       ),
+    // A file on disk: a failure is not a server still starting.
+    { tries: 1 },
   );
 }

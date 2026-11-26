@@ -563,3 +563,23 @@ test("a held-still mark (step-current, step-waiting) is not a spinner", () => {
     expect(spinnerWarnings(document, 1)).toEqual([]);
   });
 });
+
+test("text that fits its own box but a smaller box with hidden overflow cuts is cut off", () => {
+  // A 200 px paragraph whose text fits it, in an 80 px box that hides overflow.
+  expect(
+    clippedIn(`
+      <div data-box="0 0 80 20" data-size="80 20 200 20" style="overflow: hidden">
+        <p data-box="0 0 200 20" data-size="200 20 200 20" data-text="0 0 190 20" style="white-space: nowrap">A paragraph wider than its box</p>
+      </div>`),
+  ).toEqual(['p "A paragraph wider than its box"']);
+});
+
+test("text that a box with hidden overflow hides entirely is hidden, not cut off", () => {
+  // A collapsed panel: the box shows none of the text, which is hidden on purpose.
+  expect(
+    clippedIn(`
+      <div data-box="0 0 200 20" data-size="200 20 200 60" style="overflow: hidden">
+        <p data-box="0 30 200 20" data-size="200 20 200 20" data-text="0 30 190 20">In the closed part</p>
+      </div>`),
+  ).toEqual([]);
+});
