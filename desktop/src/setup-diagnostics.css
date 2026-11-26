@@ -30,3 +30,13 @@
 .finishing-layout > .setup-footer .usage-choice .usage-choice-failed {
   grid-column: 2;
 }
+
+/* Open OpenBot, once OpenBot is ready: under the choice, as far from it as the footer is from the rows. */
+main
+  > .rail
+  + .sheet.setup-layout.finishing-layout
+  > .setup-footer
+  > .usage-choice
+  + .row {
+  margin-top: 20px;
+}

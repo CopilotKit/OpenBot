@@ -85,6 +85,8 @@ sequenceDiagram
   W->>N: connect_local_eval, run_local_eval
   N->>C: local connect, local start / status
   W->>N: start_stack
+  Note over W: Finishing setup says OpenBot is ready
+  P->>W: Open OpenBot
   W->>N: show_openbot
   Note over W: The window becomes OpenBot
 ```
@@ -107,16 +109,20 @@ sequenceDiagram
 4. **AI.** The person chooses a provider and gives a key or signs in with that provider. If Start
    is later refused because of the model, the person comes back here and changes it.
 5. **Start.** Continue starts everything in order: connect OpenBot to the local Intelligence, start
-   Intelligence, start OpenBot, then open it. The window becomes OpenBot as soon as the stack
-   answers. There is no question step before the handover.
+   Intelligence, then start OpenBot. This screen, Finishing setup, holds the usage-data choice.
+   Once the stack answers, it says OpenBot is ready and stays until the person selects **Open
+   OpenBot**, so there is time to read the choice and change it. The window then becomes OpenBot.
 
-A return visit with a recorded local stack goes straight to Start. Any other saved state,
+A return visit with a recorded local stack goes straight to Start, and the window becomes OpenBot
+as soon as the stack answers. So does a Start that updates an existing installation. Only a first
+run waits for Open OpenBot. Any other saved state,
 including an installation that an earlier app connected to a hosted Intelligence, starts at the
 first screen and keeps its finished install.
 
 ## Usage data and account attribution
 
-The last setup screen, Finishing setup, ends with a usage-data checkbox, checked by default. It
+The last setup screen, Finishing setup, ends with a usage-data checkbox, checked by default, above
+**Open OpenBot**. Whatever the box says when the person selects Open OpenBot is the setting. It
 says OpenBot shares diagnostics like errors, hangs, updates and available memory, never any
 content, and links [Desktop telemetry](../desktop/TELEMETRY.md). Once the person signs in, the
 data is linked to their OpenBot account (their CopilotKit sign-in), as that document says. The
