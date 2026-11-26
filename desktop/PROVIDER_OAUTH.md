@@ -18,8 +18,9 @@ them, and a person outside that project needs a role on it before Google takes
 the call at all. Google's own Gemini SDK also takes an API key, not a sign-in,
 on the Gemini API.
 
-A Google sign-in saved before this is never resumed. Desktop refuses it at
-Start, and its AI screen says "Google sign-in for Gemini has ended" with one
+A Google sign-in saved before this is never resumed. Desktop deletes its saved
+tokens (`.openbot/model-oauth.json` when it holds a Google sign-in) at every
+launch and keeps the choice, refuses it at Start, and its AI screen says "Google sign-in for Gemini has ended" with one
 button, "Add a Gemini API key", that opens the Google Gemini row's API key.
 The server lists a saved one with the problem `sign-in-retired` and refuses a
 run on it; saving a Gemini API key on the same connection fixes it for every
