@@ -141,15 +141,20 @@ the next run.
 
 ### Your own LangGraph agent
 
-`ag-ui-langgraph` drops the first system message of every run, so a LangGraph graph never sees the
-standing role in its messages. When you connect a LangGraph agent, choose **LangChain** as its
-framework in New Bot (`"harness": "langgraph"` when you create the Bot through the API). OpenBot then
-also sends the role and the tool guidance as two AG-UI context entries, `OpenBot standing role` and
-`OpenBot granted tools guidance`, which `ag-ui-langgraph` hands your graph in
-`state["ag-ui"]["context"]`. A Bot connected without a framework gets no context copy.
+`ag-ui-langgraph` drops the first system message of every run, which is the standing role, and keeps
+the second, so a LangGraph graph sees what it may use but not its role. When you connect a LangGraph
+agent, choose **LangChain** as its framework in New Bot (`"harness": "langgraph"` when you create the
+Bot through the API). OpenBot then also sends the role as an AG-UI context entry, `OpenBot standing
+role`, which `ag-ui-langgraph` hands your graph in `state["ag-ui"]["context"]`. A Bot connected
+without a framework gets no context copy.
 
-Add these lines to your graph and put `openbot_instructions(state)` ahead of the messages you send
-your model:
+**Built with CopilotKit's `CopilotKitMiddleware`?** Add nothing. The middleware writes the AG-UI
+context into your model's system prompt as "App Context", so your model is told the role from there,
+once. CopilotKit's LangGraph examples are built this way. Adding the lines below as well would tell
+it twice.
+
+**Without that middleware**, add these lines to your graph and put `openbot_role(state)` ahead of
+the messages you send your model:
 
 ```python
 from typing import Annotated, TypedDict
@@ -165,30 +170,27 @@ State = TypedDict(
     total=False,
 )
 
-OPENBOT_INSTRUCTIONS = ("OpenBot standing role", "OpenBot granted tools guidance")
 
-
-def openbot_instructions(state: State) -> list[SystemMessage]:
-    """The Bot's role and tool guidance OpenBot sent with this run, each once."""
+def openbot_role(state: State) -> list[SystemMessage]:
+    """The Bot's role OpenBot sent with this run, unless the thread already says it."""
     said = {m.content for m in state["messages"] if isinstance(m, SystemMessage)}
-    found = {}
     for entry in (state.get("ag-ui") or {}).get("context") or []:
         if isinstance(entry, dict):
             description, value = entry.get("description"), entry.get("value")
         else:
             description, value = entry.description, entry.value
-        if description in OPENBOT_INSTRUCTIONS and value and value not in said:
-            found[description] = value
-    return [SystemMessage(content=found[name]) for name in OPENBOT_INSTRUCTIONS if name in found]
+        if description == "OpenBot standing role" and value and value not in said:
+            return [SystemMessage(content=value)]
+    return []
 
 
 def chat(state: State):
-    reply = model.invoke([*openbot_instructions(state), *state["messages"]])
+    reply = model.invoke([*openbot_role(state), *state["messages"]])
     return {"messages": [reply]}
 ```
 
-The tool guidance usually also stays in your graph's messages, and the snippet adds only what they
-lack, so your model is told each once.
+The tool guidance stays in your graph's messages as a system message, so your model is told the
+role and the guidance once each.
 
 ## What a role does not grant
 
