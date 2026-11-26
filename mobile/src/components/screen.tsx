@@ -1,11 +1,12 @@
 import { HeaderHeightContext } from "expo-router/react-navigation";
-import { type ReactNode, useContext } from "react";
 import {
-  Platform,
-  RefreshControl,
-  type RefreshControlProps,
-  View,
-} from "react-native";
+  type ComponentRef,
+  type ReactNode,
+  useContext,
+  useRef,
+  useState,
+} from "react";
+import { RefreshControl, type RefreshControlProps, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { useCSSVariable, withUniwind } from "uniwind";
@@ -26,33 +27,47 @@ const FADE = 36;
  */
 export function TopFade() {
   const background = useCSSVariable("--color-background") as string | undefined;
-  // On iOS the content runs under the header, so the fade starts at the header's bottom edge, where the bar would
-  // otherwise cut it; on Android the content starts below the header.
-  const headerHeight = useContext(HeaderHeightContext) ?? 0;
+  // The header's bottom edge, from the top of the window (it counts the status bar). Some screens' content runs
+  // under the header and some starts below it, so where this screen starts is measured, and the fade sits at the
+  // header's edge either way: never inside the content, never hidden behind the bar.
+  const headerBottom = useContext(HeaderHeightContext) ?? 0;
+  const [screenTop, setScreenTop] = useState<number | null>(null);
+  const probe = useRef<ComponentRef<typeof View>>(null);
   if (!background) return null;
+  const top = screenTop === null ? null : Math.max(0, headerBottom - screenTop);
   return (
-    <View
-      pointerEvents="none"
-      className="absolute right-0 left-0"
-      style={{
-        top: Platform.OS === "ios" ? headerHeight : 0,
-        height: FADE,
-      }}
-    >
-      <Svg width="100%" height={FADE}>
-        <Defs>
-          <LinearGradient id="top-fade" x1="0" y1="0" x2="0" y2="1">
-            {/* Eased, not straight: nearly solid at the bar, then a long soft tail, so no edge reads as a line. */}
-            <Stop offset="0" stopColor={background} stopOpacity="1" />
-            <Stop offset="0.25" stopColor={background} stopOpacity="0.92" />
-            <Stop offset="0.5" stopColor={background} stopOpacity="0.62" />
-            <Stop offset="0.75" stopColor={background} stopOpacity="0.25" />
-            <Stop offset="1" stopColor={background} stopOpacity="0" />
-          </LinearGradient>
-        </Defs>
-        <Rect width="100%" height={FADE} fill="url(#top-fade)" />
-      </Svg>
-    </View>
+    <>
+      <View
+        ref={probe}
+        collapsable={false}
+        pointerEvents="none"
+        className="absolute top-0 left-0 h-px w-px"
+        onLayout={() =>
+          probe.current?.measureInWindow((_, y) => setScreenTop(Math.round(y)))
+        }
+      />
+      {top === null ? null : (
+        <View
+          pointerEvents="none"
+          className="absolute right-0 left-0"
+          style={{ top, height: FADE }}
+        >
+          <Svg width="100%" height={FADE}>
+            <Defs>
+              <LinearGradient id="top-fade" x1="0" y1="0" x2="0" y2="1">
+                {/* Eased, not straight: nearly solid at the bar, then a long soft tail, so no edge reads as a line. */}
+                <Stop offset="0" stopColor={background} stopOpacity="1" />
+                <Stop offset="0.25" stopColor={background} stopOpacity="0.92" />
+                <Stop offset="0.5" stopColor={background} stopOpacity="0.62" />
+                <Stop offset="0.75" stopColor={background} stopOpacity="0.25" />
+                <Stop offset="1" stopColor={background} stopOpacity="0" />
+              </LinearGradient>
+            </Defs>
+            <Rect width="100%" height={FADE} fill="url(#top-fade)" />
+          </Svg>
+        </View>
+      )}
+    </>
   );
 }
 
