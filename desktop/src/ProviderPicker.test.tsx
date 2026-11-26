@@ -616,7 +616,7 @@ test("a saved provider-scoped plan session enables continue without exposing a t
 
   await pick(view, /OpenAI/);
   expect(view.getByText(/A saved OpenAI sign-in will be checked/)).toBeTruthy();
-  expect(view.getByText(/Your Bot will use LangChain/)).toBeTruthy();
+  expect(view.getByText(/Your Bot will use OpenAI Agents SDK/)).toBeTruthy();
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 
   expect(choices).toEqual([
