@@ -113,13 +113,15 @@ export function RoutineBox({ examples }: { examples?: readonly string[] }) {
         // `said` is a write only for a ready reading, which carries the draft.
         if (reading.outcome === "ready")
           setLine(lineForMade(made, reading.draft, botId, botName));
-        setSentence("");
+        // Only the sentence that was sent goes: anything typed meanwhile stays.
+        setSentence((current) => (current === text ? "" : current));
       } catch (error) {
         const failed = lineForWriteError(error, botId);
         setLine(failed);
         // A routine that may have been made is not sent again, so its sentence goes; any other
         // failure keeps it to try again.
-        if (failed.kind === "maybeMade") setSentence("");
+        if (failed.kind === "maybeMade")
+          setSentence((current) => (current === text ? "" : current));
       }
     } finally {
       sending.current = false;
@@ -127,7 +129,8 @@ export function RoutineBox({ examples }: { examples?: readonly string[] }) {
     }
   }
 
-  if (box.isError) return null;
+  // A failed first read draws nothing; a failed refetch keeps the Bots it already has.
+  if (box.isError && !box.bots) return null;
   if (box.bots && box.bots.length === 0) return <NoBotsYet />;
 
   const lineBot = line

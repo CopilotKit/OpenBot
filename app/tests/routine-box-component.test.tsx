@@ -7,7 +7,13 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RoutineBox } from "@/components/routines/routine-box";
 import type { RoutineDraft, RoutineReading } from "@/lib/api/generated/model";
@@ -238,6 +244,19 @@ test("Enter twice while the read is out sends one read", async () => {
       "Couldn't read that as a routine.",
     ),
   );
+});
+
+test("two Enters before React draws again send one read", async () => {
+  serving({ read: () => new Promise<Response>(() => {}) });
+  const view = draw();
+  const { textarea } = await type(view, "Brief me");
+  // One act around both: React draws nothing between them, so only the ref stops the second.
+  await act(async () => {
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+  });
+  await settleReactWork();
+  expect(readsAndCreates()).toEqual([`POST ${READ_PATH}`]);
 });
 
 test("a ready check-in the Bot already has makes no routine and says so", async () => {
