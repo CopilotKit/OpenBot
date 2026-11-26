@@ -527,7 +527,7 @@ test("the send button spins while the sentence is read, and is an arrow again af
   );
 });
 
-test("the box is a rounded rectangle two lines tall, not a pill", async () => {
+test("the box is one line, Send beside the words, in a rounded rectangle", async () => {
   serving();
   const view = draw();
   await box(view);
@@ -536,11 +536,15 @@ test("the box is a rounded rectangle two lines tall, not a pill", async () => {
   ) as HTMLElement;
   expect(frame.className).toMatch(/\brounded-(xl|2xl)\b/);
   expect(frame.className).not.toContain("rounded-full");
-  // Two 24px lines before anything is typed.
+  // The words and Send share one row, and nothing makes the empty box taller than a line.
   const input = view.container.querySelector(
     '[data-slot="composer-input"]',
   ) as HTMLElement;
-  expect(
-    input.querySelector('[class*="prompt-area-editor]:min-h-12"]'),
-  ).not.toBeNull();
+  const send = view.getByRole("button", { name: "Send message" });
+  const row = input.parentElement?.parentElement as HTMLElement;
+  expect(row.className).toContain("flex");
+  expect(row.contains(send)).toBe(true);
+  // The editor opens one 24px line tall, not at its own 80px.
+  expect(input.querySelector('[style*="min-height: 24px"]')).not.toBeNull();
+  expect(input.querySelector('[style*="min-height: 80px"]')).toBeNull();
 });

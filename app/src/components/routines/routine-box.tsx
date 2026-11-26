@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { AnimatePresence } from "motion/react";
 import { useRef, useState } from "react";
 import {
   Composer,
@@ -7,6 +8,7 @@ import {
   toAgentOptions,
 } from "@/components/channels/composer";
 import { BoxLineView } from "@/components/routines/box-line";
+import { Unfold } from "@/components/routines/unfold";
 import { Button } from "@/components/ui/button";
 import type { AgentProfile } from "@/lib/agents/queries";
 import {
@@ -204,16 +206,16 @@ export function RoutineBox({
     : null;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col">
       <Composer
         agents={toAgentOptions(bots)}
         className="w-full"
         commands={[]}
         dictates={false}
         disabled={!bots}
-        // Two lines tall before anything is typed, not a one-line pill.
-        editorClassName="[&_.prompt-area-editor]:min-h-12"
         key={filled?.times ?? 0}
+        // One line, with Send beside the words, growing as they wrap.
+        oneLine
         onSubmit={send}
         placeholder="@Assistant check my email every day at 9AM"
         spinsWhileSending
@@ -222,17 +224,25 @@ export function RoutineBox({
         {...(filled ? { initialValue: filled.text, autoFocus: true } : {})}
       />
 
-      {line && lineBot ? (
-        <BoxLineView
-          bot={lineBot}
-          line={line}
-          onUndo={undoMade}
-          undoing={undo.isPending}
-        />
-      ) : null}
+      {/* The line opens under the box when there is something to say, and folds when it goes. */}
+      <AnimatePresence initial={false}>
+        {line && lineBot ? (
+          <Unfold key="line">
+            {/* The space above the line is inside it, so it opens with the line. */}
+            <div className="pt-3">
+              <BoxLineView
+                bot={lineBot}
+                line={line}
+                onUndo={undoMade}
+                undoing={undo.isPending}
+              />
+            </div>
+          </Unfold>
+        ) : null}
+      </AnimatePresence>
 
       {examples?.length ? (
-        <div className="flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           {examples.map((example) => (
             <Button
               className="h-auto max-w-full whitespace-normal py-1 text-left"

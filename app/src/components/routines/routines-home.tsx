@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { AnimatePresence } from "motion/react";
 import { LoadingRows } from "@/components/layout/loading-rows";
 import { PageColumn } from "@/components/layout/page-parts";
 import {
@@ -7,6 +8,7 @@ import {
 } from "@/components/layout/sidebar-toggle";
 import { BotGroupSection } from "@/components/routines/bot-group";
 import { RoutineBox } from "@/components/routines/routine-box";
+import { Unfold } from "@/components/routines/unfold";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { loadFailure } from "@/lib/load-failure";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
@@ -88,7 +90,8 @@ export function RoutinesHome() {
           examples={empty ? EXAMPLES : undefined}
         />
 
-        <div className="mt-8">
+        {/* Inset from the box's edges, so the list reads as under it rather than as wide as it. */}
+        <div className="mt-8 px-3 sm:px-4">
           {/* One read failing leaves the others listed, and says which part is missing. */}
           {failed.length > 0 ? (
             <p className="mb-4 text-destructive text-sm" role="alert">
@@ -108,9 +111,14 @@ export function RoutinesHome() {
           {pending ? (
             <LoadingRows label="Loading your routines" />
           ) : (
-            groups.map((group) => (
-              <BotGroupSection group={group} key={group.botId} />
-            ))
+            // A Bot's first routine opens its group; its last one removed folds it away.
+            <AnimatePresence initial={false}>
+              {groups.map((group) => (
+                <Unfold key={group.botId}>
+                  <BotGroupSection group={group} />
+                </Unfold>
+              ))}
+            </AnimatePresence>
           )}
         </div>
       </PageColumn>

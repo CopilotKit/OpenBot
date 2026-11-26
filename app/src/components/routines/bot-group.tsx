@@ -6,9 +6,11 @@ import {
   IconTarget,
 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
+import { AnimatePresence } from "motion/react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { KIND_LABEL } from "@/components/responsibilities/triggers";
 import { useGoalTriggers } from "@/components/responsibilities/use-goal-reads";
+import { Unfold } from "@/components/routines/unfold";
 import {
   type BotGroup,
   isOff,
@@ -141,7 +143,9 @@ function GroupRow({ row }: { row: MergedRoutine }) {
  */
 export function BotGroupSection({ group }: { group: BotGroup }) {
   return (
-    <section aria-label={group.name} className="mt-6 first:mt-0">
+    // Spaced with padding, not margin: the group's height opens and folds, and a margin outside it
+    // would jump.
+    <section aria-label={group.name} className="pb-6">
       <div className="flex items-center gap-2 px-2 pb-1.5 text-muted-foreground text-sm">
         <BotOrb name={group.name} seed={group.seed} size={18} />
         {group.known ? (
@@ -157,9 +161,14 @@ export function BotGroupSection({ group }: { group: BotGroup }) {
         )}
         <span className="tabular-nums">{group.rows.length}</span>
       </div>
-      {group.rows.map((row) => (
-        <GroupRow key={`${row.kind}:${row.id}`} row={row} />
-      ))}
+      {/* A routine made or removed while the page is open opens or folds; the rest just appear. */}
+      <AnimatePresence initial={false}>
+        {group.rows.map((row) => (
+          <Unfold key={`${row.kind}:${row.id}`}>
+            <GroupRow row={row} />
+          </Unfold>
+        ))}
+      </AnimatePresence>
     </section>
   );
 }
