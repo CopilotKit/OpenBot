@@ -17,6 +17,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import {
+  NavigationTarget,
   openTeamFeatures,
   TEAM_FEATURE_GROUPS,
   TEAM_FEATURES,
@@ -25,6 +26,8 @@ import {
 import { BOOKING_CALENDAR_TIMEOUT_MS } from "@/components/onboarding/booking-calendar";
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { navigationFor } from "@/lib/navigation";
+import type { AppBusinessPlace } from "@/lib/openbot-for-business";
 import { Route as AdminRoute } from "@/routes/_authed/admin/route";
 import { settleReactWork } from "./settle-react-work";
 
@@ -57,7 +60,7 @@ describe("the team features dialog", () => {
   test("says where it runs first in its list, lists every feature, and embeds the booking calendar", async () => {
     const view = render(<TeamFeaturesDialog />);
     expect(view.queryByRole("dialog")).toBeNull();
-    act(() => openTeamFeatures());
+    act(() => openTeamFeatures("account_menu"));
     const dialog = await view.findByRole("dialog", {
       name: "OpenBot for Business",
     });
@@ -86,7 +89,7 @@ describe("the team features dialog", () => {
 
   test("a calendar that can't load gives way to Book a demo, which opens the business page in a new tab", async () => {
     const view = render(<TeamFeaturesDialog />);
-    act(() => openTeamFeatures());
+    act(() => openTeamFeatures("account_menu"));
     const dialog = await view.findByRole("dialog", {
       name: "OpenBot for Business",
     });
@@ -186,7 +189,7 @@ describe("the team features dialog", () => {
     }) as typeof setTimeout;
     try {
       const view = render(<TeamFeaturesDialog />);
-      act(() => openTeamFeatures());
+      act(() => openTeamFeatures("account_menu"));
       const dialog = await view.findByRole("dialog", {
         name: "OpenBot for Business",
       });
@@ -216,7 +219,7 @@ describe("the team features dialog", () => {
 
   test("opens at its title, with focus on the column that holds it", async () => {
     const view = render(<TeamFeaturesDialog />);
-    act(() => openTeamFeatures());
+    act(() => openTeamFeatures("account_menu"));
     const dialog = await view.findByRole("dialog");
     const title = view.getByRole("heading", { name: "OpenBot for Business" });
     // Base UI moves focus on the next frame; wait for it to land somewhere inside the dialog.
@@ -227,6 +230,89 @@ describe("the team features dialog", () => {
     expect(view.getByRole("button", { name: "Close" })).not.toBe(
       document.activeElement,
     );
+  });
+});
+
+/*
+ * A call booked inside OpenBot arrived with nothing to say which screen it came from. The calendar
+ * now carries the entry that opened the dialog as `utm_content`, which Calendly keeps on the
+ * booking, beside the source and medium it already had.
+ */
+describe("where OpenBot for Business was opened from", () => {
+  async function tagFrom(place: AppBusinessPlace) {
+    const view = render(<TeamFeaturesDialog />);
+    act(() => openTeamFeatures(place));
+    const dialog = await view.findByRole("dialog", {
+      name: "OpenBot for Business",
+    });
+    const src = new URL(calendarFrame(dialog)?.getAttribute("src") ?? "");
+    return { view, src };
+  }
+
+  test("tags the calendar with the entry that opened it", async () => {
+    for (const place of [
+      "home",
+      "admin",
+      "computer_line",
+      "self_host_banner",
+      "sign_in",
+    ] as const) {
+      const { view, src } = await tagFrom(place);
+      expect(src.searchParams.get("utm_source")).toBe("openbot_app");
+      expect(src.searchParams.get("utm_medium")).toBe("in_app");
+      expect(src.searchParams.get("utm_content")).toBe(place);
+      fireEvent.click(view.getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+      cleanup();
+    }
+  });
+
+  // Closed and opened again from another entry: the calendar is drawn afresh with that entry.
+  test("closed and opened again from another entry, the calendar is that entry's", async () => {
+    const view = render(<TeamFeaturesDialog />);
+    act(() => openTeamFeatures("home"));
+    const first = await view.findByRole("dialog", {
+      name: "OpenBot for Business",
+    });
+    expect(
+      new URL(calendarFrame(first)?.getAttribute("src") ?? "").searchParams.get(
+        "utm_content",
+      ),
+    ).toBe("home");
+    fireEvent.click(view.getByRole("button", { name: "Close" }));
+    act(() => openTeamFeatures("admin"));
+    const again = await view.findByRole("dialog", {
+      name: "OpenBot for Business",
+    });
+    await waitFor(() =>
+      expect(
+        new URL(
+          calendarFrame(again)?.getAttribute("src") ?? "",
+        ).searchParams.get("utm_content"),
+      ).toBe("admin"),
+    );
+  });
+
+  test("the account menu's entry opens it as the account menu", async () => {
+    const item = navigationFor("user", "personal").find(
+      (entry) => entry.kind === "dialog",
+    );
+    if (!item) throw new Error("no OpenBot for Business entry");
+    const view = render(
+      <>
+        <NavigationTarget item={item}>{item.label}</NavigationTarget>
+        <TeamFeaturesDialog />
+      </>,
+    );
+    fireEvent.click(view.getByRole("button", { name: item.label }));
+    const dialog = await view.findByRole("dialog", {
+      name: "OpenBot for Business",
+    });
+    expect(
+      new URL(
+        calendarFrame(dialog)?.getAttribute("src") ?? "",
+      ).searchParams.get("utm_content"),
+    ).toBe("account_menu");
   });
 });
 
