@@ -271,10 +271,10 @@ function disabledSentence(
  *   administrator's request, so there is no second one to make.
  * - `reconnect` on an account the Bot's owner holds — nothing. Only the owner can reconnect their
  *   own account, and nobody else's press could do it for them.
- * - `not_connected` / `reconnect` — the person's own connection. Connect starts it in a new tab
- *   with the connect route Settings presses; an app connected with a typed key goes to the app's own
- *   page with the key form open, Reconnect included, and a sign-in app that already has a row goes
- *   to that page as it is, where its Reconnect is.
+ * - `not_connected` / `reconnect` — the person's own connection. Connect and Reconnect start the
+ *   sign-in in a new tab with the connect route Settings presses, for every app that signs in; an
+ *   app connected with a typed key goes to the app's own page with the key form open, Reconnect
+ *   included.
  * - the three an administrator fixes — Request access, which files the request the server decides
  *   the kind of, and then Requested with a way to withdraw it. Pressed by an administrator, it would
  *   be a request to themselves, so they get the fix itself instead: see `AdminAction`.
@@ -730,10 +730,17 @@ function AdminAction({
    * edition. There `/connections/composio` would read as an app called "composio" and say there is
    * none; the team edition's `/admin/plugins/composio` happens to be that directory already.
    */
+  /*
+   * THE SHARED ACCOUNT'S SIGN-IN STARTS AS ITS PAGE OPENS (`?connect=true`), so Connect or Reconnect
+   * the shared account is one press, as the admin's own Connect is. It used to open the page, where
+   * a second Connect began it.
+   */
   const target =
     page === "composio" || page === "arcade"
       ? paths.brokerDirectory(page)
-      : paths.plugin(page);
+      : access.state === "shared_not_connected"
+        ? { ...paths.plugin(page), search: { connect: true as const } }
+        : paths.plugin(page);
   return (
     <Button
       render={<Link {...target} rel="noreferrer" target="_blank" />}
@@ -1151,19 +1158,21 @@ function ConnectAction({
   );
 
   /*
-   * A FORM, OR A CONNECTION THAT ALREADY HAS A ROW, IS SETTINGS' JOB. A typed key has nowhere to be
-   * typed but the app's page, and a Composio app whose row still stands — a refused key, an account
-   * the vendor lost — is refused by the connect route until it is disconnected there. Only this
-   * deployment's own OAuth flow takes a fresh consent over a withdrawn one.
+   * A FORM IS SETTINGS' JOB: a typed key has nowhere to be typed but the app's page. A SIGN-IN IS
+   * STARTED HERE, Connect and Reconnect alike, on every kind of app that signs in: this OpenBot's own
+   * sign-in (`oauth`) and a directory's (`consent`, Composio's or Arcade's). The connect route takes
+   * a fresh sign-in over a connection that stands: a new consent over a withdrawn grant, an Arcade
+   * consent over the connection it adds to, and on Composio a new account beside one the call
+   * found lost. Reconnect used to open a sign-in app's page as it was, where a second press began it.
+   * Only an app that says nothing of how it connects still opens its page.
    */
   const viaSettings =
     access.connect === "key" ||
-    (access.state === "reconnect" && access.connect !== "oauth") ||
+    (access.state === "reconnect" && access.connect === null) ||
     tab.needsKey;
   /*
    * A key to type opens the page with its form open, so Connect goes straight to the key, and so
-   * does Reconnect on a key the app didn't take: the new key replaces it in the same form. A
-   * sign-in to repair opens the page as it is, where its own Reconnect is.
+   * does Reconnect on a key the app didn't take: the new key replaces it in the same form.
    */
   const typesKey = access.connect === "key" || tab.needsKey;
   /*
