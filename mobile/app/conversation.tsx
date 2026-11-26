@@ -587,7 +587,9 @@ function ConversationHeading({
       }
       hitSlop={8}
       onPress={onPress}
-      className="items-center gap-0.5 active:opacity-60"
+      // Sized to sit inside the bar's own height on iOS, clear of the Dynamic Island: a small orb, a line of
+      // name, and a nudge down to the bar's middle.
+      className="items-center pt-1 active:opacity-60"
     >
       <Animated.View style={orbs} className="flex-row">
         {bots.slice(0, 4).map((bot, index) => (
@@ -600,17 +602,20 @@ function ConversationHeading({
             <BotOrb
               seed={bot.seed}
               name={bot.name}
-              size={26}
+              size={22}
               state={working && index === 0 ? "working" : "idle"}
             />
           </View>
         ))}
       </Animated.View>
       <Animated.View style={label} className="flex-row items-center gap-0.5">
-        <Text numberOfLines={1} className="max-w-52 font-medium text-xs">
+        <Text
+          numberOfLines={1}
+          className="max-w-52 font-medium text-[11px] leading-[14px]"
+        >
           {names}
         </Text>
-        <Icon icon={IconChevronRight} size={11} color="accent-muted" />
+        <Icon icon={IconChevronRight} size={10} color="accent-muted" />
       </Animated.View>
     </Pressable>
   );
