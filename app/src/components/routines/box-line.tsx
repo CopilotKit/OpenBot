@@ -1,4 +1,3 @@
-import { IconX } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { Button } from "@/components/ui/button";
@@ -27,18 +26,29 @@ function openMade(open: Extract<BoxLine, { kind: "made" }>["open"]) {
   }
 }
 
-/** The one thing the line offers beside its words, or nothing. */
-function LineAction({ line }: { line: BoxLine }) {
+/** What the line offers beside its words, or nothing. */
+function LineActions({
+  line,
+  onUndo,
+  undoing,
+}: {
+  line: BoxLine;
+  onUndo: () => void;
+  undoing: boolean;
+}) {
   switch (line.kind) {
     case "made":
       return (
-        <Button variant="link" size="sm" render={openMade(line.open)}>
-          Open
-        </Button>
+        <>
+          <Button variant="link" size="sm" render={openMade(line.open)}>
+            Open
+          </Button>
+          <Button variant="link" size="sm" disabled={undoing} onClick={onUndo}>
+            Undo
+          </Button>
+        </>
       );
     case "finish":
-    case "useForm": {
-      const draft = line.draft;
       return (
         <Button
           variant="link"
@@ -47,14 +57,13 @@ function LineAction({ line }: { line: BoxLine }) {
             <Link
               to="/routines/new"
               search={{ agentId: line.botId }}
-              state={draft ? { routineDraft: draft } : undefined}
+              state={{ routineDraft: line.draft }}
             />
           }
         >
-          {line.kind === "finish" ? "Finish" : "Use the form"}
+          Finish
         </Button>
       );
-    }
     case "refused":
       if (line.fix !== "connectApp") return null;
       return (
@@ -63,24 +72,28 @@ function LineAction({ line }: { line: BoxLine }) {
         </Button>
       );
     case "maybeMade":
+    case "unread":
+    case "removed":
       return null;
   }
 }
 
 /**
- * The line under the Routines box: what the box did with the sentence, in the Bot's words, and at
- * most one action. The Bot's name leads the text, so it is set in the foreground colour once, and
- * the words wrap so a refusal reads whole. A refusal, or a routine that may not have been saved,
- * is amber.
+ * The line under the Routines box: what the box did with the sentence, in the Bot's words, and what
+ * fits beside it. There is no close button: the line goes when the next sentence is sent or the page
+ * is left. The Bot's name leads the text, so it is set in the foreground colour once, and the words
+ * wrap so a refusal reads whole. A refusal, or a routine that may not have been saved, is amber.
  */
 export function BoxLineView({
   line,
   bot,
-  onDismiss,
+  onUndo,
+  undoing = false,
 }: {
   line: BoxLine;
   bot: { name: string; avatarSeed: string };
-  onDismiss: () => void;
+  onUndo: () => void;
+  undoing?: boolean;
 }) {
   const amber = line.kind === "refused" || line.kind === "maybeMade";
   const leadsWithName = line.text.startsWith(`${bot.name} `);
@@ -105,15 +118,7 @@ export function BoxLineView({
           line.text
         )}
       </p>
-      <LineAction line={line} />
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Dismiss"
-        onClick={onDismiss}
-      >
-        <IconX />
-      </Button>
+      <LineActions line={line} onUndo={onUndo} undoing={undoing} />
     </div>
   );
 }
