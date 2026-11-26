@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { GoAhead } from "./SetupProgress";
 
 type Call = { command: string; args?: Record<string, unknown> };
 
@@ -309,41 +310,56 @@ test("while Install sets up the engine, the signed-in account step says so, then
 }, 15000);
 
 /**
- * Closing macOS's password prompt without a password is a decision: Install asks again, the step
- * says why, and Continue works again.
+ * macOS's password prompt comes only on Continue, said in a card on the Account step, and closing
+ * it without a password is a decision: Install asks again, the step says why, and Try again works.
  */
-test("a closed password prompt is said with Try again, and no Continue comes before one", async () => {
+test("the password prompt waits for Continue in the step, and a closed one is said with Try again", async () => {
   invokeHandler = alreadySignedIn(async ({ command }) => {
     if (command === "local_eval_terms") return noEngine;
     if (command === "allow_podman_install") return true;
     throw new Error(`unexpected ${command}`);
   });
-  const account = (goAhead: string | null) => (
+  const account = (goAhead: GoAhead | null) => (
     <CopilotKitAccount
       root="/tmp/account-go-ahead"
       onDone={() => {}}
       goAhead={goAhead}
     />
   );
-  // Before any prompt: nothing to click.
+  // Nothing waits on the person: nothing to click.
   const screen = render(account(null));
   await screen.findByRole("heading", { name: "Setting up this computer" });
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  const allowed = () =>
+    invokeCalls.filter((call) => call.command === "allow_podman_install");
+
+  // Before the prompt: what comes next and why, and Continue, which lets the prompt come up.
+  const before =
+    "OpenBot needs to install the software it runs on. Choose Continue, then enter your Mac password when your Mac asks for it.";
+  screen.rerender(account({ line: before, beforePrompt: true }));
+  const card = screen.getByRole("region", {
+    name: "Your Mac will ask for your password",
+  });
+  expect(card.textContent).toContain(before);
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(allowed()).toHaveLength(1);
 
   // Closed without a password: what that means, and Try again.
   const declined =
     "OpenBot needs your password to install what it needs to run. It asks again in a moment, or choose Try again.";
-  screen.rerender(account(declined));
+  screen.rerender(account({ line: declined, beforePrompt: false }));
+  expect(
+    screen.getByRole("region", { name: "Your password is needed" }),
+  ).toBeTruthy();
   expect(screen.getByText(declined)).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(
     (screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
-  expect(
-    invokeCalls.filter((call) => call.command === "allow_podman_install"),
-  ).toHaveLength(1);
+  expect(allowed()).toHaveLength(2);
 });
 
 /** A refusal with no sentence of the CLI's own still says what is wrong, and is not waited out. */

@@ -278,6 +278,10 @@ struct Progress {
     /// The step waits for the person's go-ahead in this window: see `install::GoAhead`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     asks: bool,
+    /// The go-ahead it waits for comes before the system's password prompt, which comes up only on
+    /// Continue: see `engine::StepLine::before_prompt`.
+    #[serde(rename = "beforePrompt", skip_serializing_if = "std::ops::Not::not")]
+    before_prompt: bool,
     /// The engine itself is being updated: see `engine::StepLine::updating`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     updating: bool,
@@ -976,6 +980,7 @@ fn report_line<R: tauri::Runtime>(
             downloads: None,
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         },
@@ -1194,6 +1199,7 @@ fn report_running_row<R: tauri::Runtime>(
         elsewhere,
         asks,
         updating,
+        before_prompt,
         detail: _,
     } = line;
     setup_phase(step);
@@ -1219,6 +1225,7 @@ fn report_running_row<R: tauri::Runtime>(
             downloads: None,
             elsewhere,
             asks,
+            before_prompt,
             updating,
             paused,
         },
@@ -1669,13 +1676,14 @@ fn on_podman_at_stop(shell: &Shell, root: &Path) -> bool {
     owned.or_else(|| preparation::saved_engine(root)) == Some(engine::Engine::Podman)
 }
 
-/// The person chose Try again after closing the password prompt, so Install asks again now rather
-/// than after its short wait. See `install::GoAhead`. False when nothing was waiting for it.
+/// The person chose Continue before the password prompt, which lets it come up, or Try again after
+/// closing it, so Install asks again now rather than after its short wait. See `install::GoAhead`.
+/// False when nothing was waiting for it.
 #[tauri::command]
 fn allow_podman_install() -> bool {
     let waiting = install::allow_podman_install();
     log::info!(
-        "[install] Try again to install Podman{}",
+        "[install] go-ahead (Continue or Try again) to install Podman{}",
         if waiting {
             ""
         } else {
@@ -1715,6 +1723,7 @@ fn report_running_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: line.elsewhere,
             asks: line.asks,
+            before_prompt: line.before_prompt,
             updating: line.updating,
             paused: false,
         },
@@ -1748,6 +1757,7 @@ fn report_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         },
@@ -6151,6 +6161,7 @@ impl QuitStatus {
             downloads: None,
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         };

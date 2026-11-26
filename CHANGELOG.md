@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **OpenBot Desktop on a Mac asks for your password only after you choose Continue.** When OpenBot
+  installs the software it runs on, a card says your Mac will ask for your password and why, and
+  macOS's prompt comes up only once you choose Continue. Before, the prompt came up by itself a
+  moment after a line in OpenBot's window, and on a new Mac it covered the browser's sign-in page
+  before anybody had read why it was there.
 - **OpenBot Cloud's account menu offers the desktop app.** Get the desktop app, in the menu under
   your name, opens the download page for Mac and Windows in a new tab. It shows only on OpenBot
   Cloud in a browser, not in OpenBot Desktop and not on an OpenBot a company runs itself.

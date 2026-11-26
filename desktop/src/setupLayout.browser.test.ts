@@ -5828,6 +5828,36 @@ describe.skipIf(!asked)("approved layout: install", () => {
             .waitFor();
           await check();
           await shot("unpack");
+          // Before macOS's password prompt: why, and Continue, in reach at every size. The prompt
+          // comes only on Continue.
+          await emit({
+            step: "install-engine",
+            ok: true,
+            running: true,
+            asks: true,
+            beforePrompt: true,
+            detail:
+              "OpenBot needs to install the software it runs on. Choose Continue, then enter your Mac password when your Mac asks for it.",
+          });
+          await page
+            .getByRole("region", {
+              name: "Your Mac will ask for your password",
+            })
+            .waitFor();
+          await check();
+          await reach("Continue");
+          await shot("before-prompt");
+          await page
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+          expect(
+            await page.evaluate(
+              () =>
+                globalThis
+                  .__workbench!.calls()
+                  .filter((c) => c.command === "allow_podman_install").length,
+            ),
+          ).toBe(1);
           const asking =
             "OpenBot needs your password to install what it needs to run. Try again to open the password prompt.";
           await emit({
@@ -5853,7 +5883,7 @@ describe.skipIf(!asked)("approved layout: install", () => {
                   .__workbench!.calls()
                   .filter((c) => c.command === "allow_podman_install").length,
             ),
-          ).toBe(1);
+          ).toBe(2);
           await emit({
             step: "install-engine",
             ok: true,

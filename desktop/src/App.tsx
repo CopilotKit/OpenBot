@@ -1559,8 +1559,8 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
               {/* Intelligence sets itself up alongside, once the install has Docker answering. Its
               download is the list's third step, once the second is done. */}
               <SetupProgress steps={installRows} presentation="focus" />
-              {/* The person closed macOS's password prompt: said, with Try again. */}
-              {goAhead && <PodmanGoAhead asking={goAhead} />}
+              {/* macOS's password prompt: Continue before it comes up, Try again once closed. */}
+              {goAhead && <PodmanGoAhead goAhead={goAhead} />}
               {pauseCard}
               <LocalStatus sequence={local} download={false} />
               {/* The first screen's downloads, until a row of Install's own shows the one it waits on. */}
@@ -1885,7 +1885,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
             }
           />
         )}
-        {goAhead && <PodmanGoAhead asking={goAhead} />}
+        {goAhead && <PodmanGoAhead goAhead={goAhead} />}
         {pauseCard}
         {updatingLine}
         {displayedFailure &&
@@ -2005,7 +2005,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
                   onStartFresh={startFresh}
                 />
               )}
-              {goAhead && <PodmanGoAhead asking={goAhead} />}
+              {goAhead && <PodmanGoAhead goAhead={goAhead} />}
               {pauseCard}
               {updatingLine}
               {/* Leftover data is a choice, offered above, not a failure to report here. */}
