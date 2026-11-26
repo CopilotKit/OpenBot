@@ -880,6 +880,8 @@ export const PYTHON_CLIENTS = [
   "strands-agents",
   "agent-framework",
   "agent-framework-core",
+  "openai-agents",
+  "ag-ui-openai-agents",
 ];
 export const NODE_CLIENTS = [
   "@mastra/core",
