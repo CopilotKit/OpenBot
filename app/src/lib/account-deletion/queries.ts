@@ -5,6 +5,10 @@ import type {
 } from "@/lib/api/generated/model";
 import { getAccountDeletion } from "@/lib/api/generated/people/people";
 import { ClientError } from "@/lib/client";
+import {
+  type DeploymentCapabilities,
+  deploymentCapabilitiesQueryOptions,
+} from "@/lib/deployment/queries";
 
 /**
  * Where deleting the person's own account stands (getAccountDeletion, api/openapi/accounts.yaml):
@@ -57,6 +61,18 @@ export function olderOpenBot(error: unknown): boolean {
   );
 }
 
+/**
+ * Whether this OpenBot deletes accounts at all. NOT IN THE PERSONAL EDITION: its one person is the
+ * install's own (single-user mode), with no account to delete, and the server doesn't serve the
+ * question there, so nothing asks it. An edition that could not be read is the team edition, as
+ * everywhere else.
+ */
+export function offersAccountDeletion(
+  capabilities: Pick<DeploymentCapabilities, "edition"> | undefined,
+): boolean {
+  return capabilities?.edition !== "personal";
+}
+
 /** The person's own account deletion. */
 export function accountDeletionQueryOptions() {
   return queryOptions({
@@ -73,11 +89,16 @@ export function accountDeletionQueryOptions() {
  * The date a scheduled deletion happens, for the signed-in gate: undefined when nothing is
  * scheduled. A read that fails says nothing about a deletion (an OpenBot older than the question,
  * or one that couldn't answer), so it lets the person in: a session whose account is scheduled is
- * refused everywhere else anyway, and that refusal shows the pending page.
+ * refused everywhere else anyway, and that refusal shows the pending page. In the personal edition
+ * nothing is asked ({@link offersAccountDeletion}).
  */
 export async function scheduledDeletion(
   queryClient: QueryClient,
 ): Promise<AccountDeletion | undefined> {
+  const capabilities = await queryClient
+    .ensureQueryData(deploymentCapabilitiesQueryOptions())
+    .catch(() => undefined);
+  if (!offersAccountDeletion(capabilities)) return undefined;
   try {
     // Asked once: the app waits on it, and a failure lets the person in anyway.
     const deletion = await queryClient.ensureQueryData({

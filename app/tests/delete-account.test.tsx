@@ -35,6 +35,7 @@ import {
   resumeDeletionAfterSignIn,
   showPendingDeletion,
 } from "@/lib/account-deletion/pending";
+import { scheduledDeletion } from "@/lib/account-deletion/queries";
 import { reauthenticationDeps } from "@/lib/account-deletion/reauthenticate";
 import type { AccountDeletionBlocker } from "@/lib/api/generated/model";
 import { getDeployment } from "@/lib/api/generated/organization-settings/organization-settings";
@@ -112,6 +113,8 @@ let server: {
   pendingEverywhere: boolean;
   /** The operation isn't served: an OpenBot older than it. */
   older: boolean;
+  /** Which product the deployment says it is; the personal edition doesn't serve the operation. */
+  edition: "team" | "personal";
   /** The sign-in providers the deployment offers, and the ones the person signed in through. */
   providers: string[];
   signedInWith: string[];
@@ -161,7 +164,7 @@ async function answer(
 
   if (path === "/api/auth/sign-out" && method === "POST")
     return Response.json({ success: true });
-  if (path.startsWith(DELETION) && server.older)
+  if (path.startsWith(DELETION) && (server.older || server.edition !== "team"))
     return Response.json({ error: "not served" }, { status: 404 });
   if (path === DELETION && method === "GET")
     return checked(
@@ -242,8 +245,8 @@ async function answer(
     return Response.json({
       generativeUi: true,
       selfHostBanner: false,
-      localEvaluation: false,
-      edition: "team",
+      localEvaluation: server.edition === "personal",
+      edition: server.edition,
       authProviders: server.providers,
       hostedSignIn: false,
       ssoConfigured: false,
@@ -310,6 +313,7 @@ beforeEach(() => {
     refuse: null,
     pendingEverywhere: false,
     older: false,
+    edition: "team",
     providers: [],
     signedInWith: [],
   };
@@ -802,5 +806,20 @@ describe("deleting your account", () => {
     await waitFor(() => expect(requests).toContain(`GET ${DELETION}`));
     await settleReactWork();
     expect(app.view.queryByText("Delete account")).toBeNull();
+  });
+
+  test("the personal edition, with no account to delete, never asks: not on the way in, not in Settings", async () => {
+    server.edition = "personal";
+    // The signed-in gate (routes/_authed.tsx), as every page is opened.
+    expect(await scheduledDeletion(queryClient)).toBeUndefined();
+    const app = await open();
+    await waitFor(() =>
+      expect(requests).toContain(
+        "GET /api/v2/organizations/default/deployment",
+      ),
+    );
+    await settleReactWork();
+    expect(app.view.queryByText("Delete account")).toBeNull();
+    expect(requests.filter((one) => one.includes(DELETION))).toEqual([]);
   });
 });

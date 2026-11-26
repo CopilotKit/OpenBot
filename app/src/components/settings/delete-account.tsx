@@ -49,6 +49,7 @@ import {
   blockerWords,
   DELETE_PHRASE,
   DELETION_WAIT_DAYS,
+  offersAccountDeletion,
   olderOpenBot,
   reauthenticationRequired,
   sameEmail,
@@ -59,6 +60,7 @@ import { signInAgainAtProvider } from "@/lib/account-deletion/reauthenticate";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { ClientError } from "@/lib/client";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { failureSaid } from "@/lib/load-failure";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { switchOrganizationMutationOptions } from "@/lib/organizations/mutations";
@@ -90,10 +92,17 @@ export function ResumeAccountDeletion() {
  * it; one with other owners they leave, here. With none left, Delete account opens the dialog that
  * says what goes and what stays, and asks for their email address and the phrase.
  *
- * Nothing on an OpenBot older than the question, which can't delete an account.
+ * Nothing on an OpenBot older than the question, which can't delete an account, and nothing in the
+ * personal edition, which has no account to delete and isn't asked.
  */
 export function DeleteAccountSection() {
-  const deletion = useQuery(accountDeletionQueryOptions());
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const offered =
+    !capabilities.isPending && offersAccountDeletion(capabilities.data);
+  const deletion = useQuery({
+    ...accountDeletionQueryOptions(),
+    enabled: offered,
+  });
   const [open, setOpen] = useState(false);
   const blockers = deletion.data?.blockers ?? [];
   const scheduled =
@@ -112,7 +121,7 @@ export function DeleteAccountSection() {
     if (deletion.data?.blockers.length === 0) setOpen(true);
   }, [deletion.isPending, deletion.data]);
 
-  if (deletion.isPending) return null;
+  if (!offered || deletion.isPending) return null;
   if (deletion.error && olderOpenBot(deletion.error)) return null;
   return (
     <PageSection
