@@ -130,6 +130,66 @@ Endpoint registration uses target checks. Cloud metadata addresses are refused u
 
 `POST /api/v2/organizations/{organizationId}/bots/test-connection` checks whether an endpoint answers before saving it.
 
+### What your agent is sent
+
+Every run carries the Bot's standing role as the first message of `messages`, a system message with
+the id `standing-role:<bot id>`, and then what the Bot may use as a second system message,
+`granted-tools:<bot id>`. Your agent is sent each once, on every run, including the runs that carry
+a turn on after one of OpenBot's tools answered. OpenBot's tools arrive in `tools`; when your agent
+calls one, it ends its run with the call unanswered, and OpenBot runs it and sends the result in
+the next run.
+
+### Your own LangGraph agent
+
+`ag-ui-langgraph` drops the first system message of every run, so a LangGraph graph never sees the
+standing role in its messages. When you connect a LangGraph agent, choose **LangChain** as its
+framework in New Bot (`"harness": "langgraph"` when you create the Bot through the API). OpenBot then
+also sends the role and the tool guidance as two AG-UI context entries, `OpenBot standing role` and
+`OpenBot granted tools guidance`, which `ag-ui-langgraph` hands your graph in
+`state["ag-ui"]["context"]`. A Bot connected without a framework gets no context copy.
+
+Add these lines to your graph and put `openbot_instructions(state)` ahead of the messages you send
+your model:
+
+```python
+from typing import Annotated, TypedDict
+
+from langchain_core.messages import SystemMessage
+from langgraph.graph.message import add_messages
+
+# ag-ui-langgraph hands the graph the run's AG-UI context in state["ag-ui"]["context"].
+# LangGraph keeps only the keys a state declares, so the state declares that one.
+State = TypedDict(
+    "State",
+    {"messages": Annotated[list, add_messages], "ag-ui": dict},
+    total=False,
+)
+
+OPENBOT_INSTRUCTIONS = ("OpenBot standing role", "OpenBot granted tools guidance")
+
+
+def openbot_instructions(state: State) -> list[SystemMessage]:
+    """The Bot's role and tool guidance OpenBot sent with this run, each once."""
+    said = {m.content for m in state["messages"] if isinstance(m, SystemMessage)}
+    found = {}
+    for entry in (state.get("ag-ui") or {}).get("context") or []:
+        if isinstance(entry, dict):
+            description, value = entry.get("description"), entry.get("value")
+        else:
+            description, value = entry.description, entry.value
+        if description in OPENBOT_INSTRUCTIONS and value and value not in said:
+            found[description] = value
+    return [SystemMessage(content=found[name]) for name in OPENBOT_INSTRUCTIONS if name in found]
+
+
+def chat(state: State):
+    reply = model.invoke([*openbot_instructions(state), *state["messages"]])
+    return {"messages": [reply]}
+```
+
+The tool guidance usually also stays in your graph's messages, and the snippet adds only what they
+lack, so your model is told each once.
+
 ## What a role does not grant
 
 A Bot's role grants it nothing. What it may use is set separately, on the Bot's page, in Settings
