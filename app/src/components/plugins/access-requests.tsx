@@ -22,8 +22,13 @@ import {
   type AppAccessRequest,
   appAccessInboxQueryOptions,
 } from "@/lib/app-access/queries";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
+import {
+  DELETED_USER,
+  isDeletedUser,
+  personLabel,
+} from "@/lib/people/deleted-user";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
 
@@ -122,7 +127,13 @@ function AccessRequestRow({ request }: { request: AppAccessRequest }) {
   );
   const busy = approve.isPending || dismiss.isPending;
   const error = approve.error ?? dismiss.error;
-  const who = request.requesterName ?? request.requesterEmail ?? "Somebody";
+  // Named by a pseudonym, or with neither a name nor an address: they deleted their account.
+  const who = isDeletedUser(request.requestedBy)
+    ? DELETED_USER
+    : personLabel({
+        name: request.requesterName,
+        email: request.requesterEmail,
+      });
   return (
     <Item data-request={request.id} size="sm">
       <ItemMedia variant="icon">

@@ -97,8 +97,10 @@ agent instead. The server looks in this order: `LANGGRAPH_TS_AG_UI_URL`; then th
 when it is that engine (OpenBot Desktop's); then `LANGGRAPH_TS_COMPOSE_AG_UI_URL`, which
 `docker-compose.yml` always sets to its own `agent-langgraph-ts` service. So Compose and
 `scripts/start.sh` run the engine and wire it in every edition, the personal edition included, and
-OpenBot Desktop needs neither setting. The one-container image does not carry the engine: run
-`agent-langgraph-ts` beside it and set this address (see [deployment.md](deployment.md)).
+OpenBot Desktop needs neither setting. The one-container image runs the engine itself, beside the
+server on the container's loopback, and wires it in with nothing set (see
+[deployment.md](deployment.md)); `EMBEDDED_ENGINE=off` turns that off, for an image pointed at an
+engine that runs elsewhere through this address.
 
 `OPENBOT_DEFAULT_BOT_ENGINE=built-in` puts every Bot back on the server's built-in agent, for a
 deployment that does not run the engine.

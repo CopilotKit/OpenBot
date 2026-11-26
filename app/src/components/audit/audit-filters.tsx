@@ -42,6 +42,7 @@ import {
 } from "@/lib/audit/outcome";
 import type { AuditVocabulary } from "@/lib/audit/queries";
 import { loadFailure } from "@/lib/load-failure";
+import { DELETED_USER, isDeletedUser } from "@/lib/people/deleted-user";
 
 /**
  * Admin's filters on the trail, as chips: the one place a filter is set, beside the search.
@@ -207,6 +208,7 @@ function appName(key: string, names: Names): string {
 }
 
 function personName(id: string, names: Names): string {
+  if (isDeletedUser(id)) return DELETED_USER;
   const person = names.vocabulary?.people.find((entry) => entry.id === id);
   return names.labels.people[id] ?? person?.name ?? person?.email ?? id;
 }
@@ -375,7 +377,9 @@ function FilterOptions({
             "actorUserId",
             vocabulary.people.map((person) => ({
               value: person.id,
-              label: person.name ?? person.email,
+              label: isDeletedUser(person.id)
+                ? DELETED_USER
+                : (person.name ?? person.email),
             })),
           )
         : loading;

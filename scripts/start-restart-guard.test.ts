@@ -489,7 +489,8 @@ describe("start.sh and the browser's way to an Intelligence gateway on this mach
     });
     // And the computers still relay that port, so a recording made in a Bot's browser saves.
     expect(result.loopbackRelays).toContain("14401=host.docker.internal:14401");
-  });
+    // The first `docker compose config` on a CI runner takes six to seven seconds, past bun's five.
+  }, 30_000);
 
   test.each([
     ["in .env", { settings: { OPENBOT_PUBLIC_URL: "http://127.0.0.1:3010" } }],

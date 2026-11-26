@@ -194,6 +194,23 @@ test("lists who asked for what, for which Bot, and when — and nothing about an
   expect(view.queryByText(/connected/i)).toBeNull();
 });
 
+test("a request from somebody who deleted their account says Deleted user asked", async () => {
+  serving({
+    requests: [
+      request({
+        requestedBy: "deleted-user:8f14e45fceea167a5a36dedd4bea2543",
+        requesterName: null,
+        requesterEmail: null,
+      }),
+    ],
+  });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  expect(
+    await view.findByText(/Deleted user asked 5 minutes ago/),
+  ).toBeTruthy();
+  expect(view.queryByText(/Somebody/)).toBeNull();
+});
+
 test("approve does what was asked through the approve route", async () => {
   const sent = serving({ requests: [request()] });
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
