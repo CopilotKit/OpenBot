@@ -611,6 +611,71 @@ pub fn read(root: &Path, provider: &str) -> Result<Credentials, String> {
     }
     Ok(saved)
 }
+
+/**
+Delete the Google sign-in for Gemini this computer still keeps: the saved sign-in file, and any copy
+of it a write that never finished left beside it. Run at every launch, so a Google sign-in saved before
+Gemini took an API key only is gone from disk. The saved choice stays, so the AI screen still says
+what to do instead.
+
+Only a file that is positively a Google sign-in goes: an xAI sign-in, a file that can't be read or
+isn't one, a link, and anything over the size a sign-in has are left as they are. Takes the same lock
+as a sign-in's own write. Answers how many files went.
+*/
+pub fn forget_google_sign_in(root: &Path) -> Result<usize, String> {
+    let saved = root.join(FILE);
+    let directory = saved.parent().unwrap();
+    let Ok(metadata) = std::fs::symlink_metadata(directory) else {
+        return Ok(0);
+    };
+    if !metadata.is_dir() {
+        return Ok(0);
+    }
+    let file_name = saved.file_name().unwrap().to_owned();
+    let candidates: Vec<PathBuf> = std::fs::read_dir(directory)
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name().is_some_and(|name| {
+                name == file_name.as_os_str() || name.to_string_lossy().ends_with(".tmp")
+            })
+        })
+        .filter(|path| holds_google_sign_in(path))
+        .collect();
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+    let _lock = credential_lock::acquire(&saved)
+        .map_err(|error| format!("Could not lock the provider sign-in: {error}"))?;
+    let mut forgotten = 0;
+    for path in candidates {
+        // Read again under the lock: an xAI sign-in written meanwhile stays.
+        if holds_google_sign_in(&path) {
+            std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+            forgotten += 1;
+        }
+    }
+    Ok(forgotten)
+}
+
+/// A plain file, no bigger than a sign-in, that is a Google sign-in's tokens.
+fn holds_google_sign_in(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() > 64 * 1024 {
+        return false;
+    }
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    value.get("provider").and_then(|v| v.as_str()) == Some("google")
+        && (value.get("accessToken").is_some() || value.get("refreshToken").is_some())
+}
 fn write(
     root: &Path,
     credentials: &Credentials,
