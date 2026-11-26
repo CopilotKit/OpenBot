@@ -7,9 +7,11 @@ import { compile } from "tailwindcss";
 /**
  * Deleting your account, in a real browser, in light and dark, wide and on a phone: General's
  * Delete account section with the organizations that stand in the way, the dialog filled in, the
- * dialog asking to sign in again, and the page an account scheduled to be deleted shows. Drawn
- * from delete-account.fixture.tsx, styled by the app's stylesheet. Nothing scrolls sideways,
- * the dialog's buttons are all on screen, and the blockers' buttons sit inside their rows.
+ * dialog asking to sign in again, and the page an account scheduled to be deleted shows. And such
+ * a member as others see them: "Deactivated" beside their name in the organization's members and
+ * in the box that picks somebody from it. Drawn from delete-account.fixture.tsx, styled by the
+ * app's stylesheet. Nothing scrolls sideways, the dialog's buttons are all on screen, and the
+ * blockers' buttons and the label sit inside their rows.
  *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/delete-account-layout.test.tsx
  *
@@ -33,7 +35,14 @@ const WINDOWS = [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
 ];
-const STATES = ["blockers", "dialog", "reauthenticate", "pending"] as const;
+const STATES = [
+  "blockers",
+  "dialog",
+  "reauthenticate",
+  "pending",
+  "members",
+  "picker",
+] as const;
 
 async function bundle(): Promise<string> {
   const built = await Bun.build({
@@ -173,6 +182,17 @@ async function open(
     await style(page);
     return page;
   }
+  if (state === "members") {
+    await page.getByRole("button", { name: "Remove Priya Raman" }).waitFor();
+    await style(page);
+    return page;
+  }
+  if (state === "picker") {
+    await page.getByRole("combobox", { name: "Name or email" }).fill("a");
+    await page.getByRole("option", { name: /Priya Raman/ }).waitFor();
+    await style(page);
+    return page;
+  }
   const remove = page.getByRole("button", { name: "Delete account" });
   await remove.waitFor().catch(async (error) => {
     // What the page drew instead, to say why.
@@ -258,6 +278,28 @@ describe.skipIf(!asked)("deleting your account, on screen", () => {
             if (state === "pending")
               for (const name of ["Cancel deletion", "Sign out"])
                 expect(await onScreen(page, name)).toBe(true);
+            // The label is beside Priya's name, inside her row, and beside nobody else's.
+            if (state === "members" || state === "picker") {
+              const label = page.getByText("Deactivated", { exact: true });
+              expect(await label.count()).toBe(1);
+              const row =
+                state === "members"
+                  ? page
+                      .getByRole("button", { name: "Remove Priya Raman" })
+                      .locator("xpath=ancestor::*[@data-slot='item'][1]")
+                  : page.getByRole("option", { name: /Priya Raman/ });
+              const [box, inside] = await Promise.all([
+                label.boundingBox(),
+                row.boundingBox(),
+              ]);
+              expect(box && inside).toBeTruthy();
+              if (box && inside) {
+                expect(box.x).toBeGreaterThanOrEqual(inside.x);
+                expect(box.x + box.width).toBeLessThanOrEqual(
+                  inside.x + inside.width,
+                );
+              }
+            }
             await page.close();
           }, 60_000);
         }

@@ -63,6 +63,7 @@ import {
   useOrganizationChoices,
 } from "@/lib/organizations/queries";
 import {
+  DEACTIVATED,
   givableRoles,
   memberControl,
   memberLine,
@@ -475,6 +476,12 @@ function MembersSection({
                       {member.id === me?.id ? (
                         <span className="shrink-0 font-normal text-muted-foreground">
                           You
+                        </span>
+                      ) : null}
+                      {/* Their account is to be deleted: still listed, using nothing, until it goes. */}
+                      {member.deactivated ? (
+                        <span className="shrink-0 font-normal text-muted-foreground">
+                          {DEACTIVATED}
                         </span>
                       ) : null}
                     </ItemTitle>

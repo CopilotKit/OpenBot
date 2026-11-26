@@ -9,6 +9,8 @@ import {
 import type { ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { PendingDeletionGate } from "@/components/auth/pending-deletion-page";
+import { OrganizationSettingsPage } from "@/components/organizations/organization-settings-page";
+import { PeopleTypeahead } from "@/components/teams/people-typeahead";
 import { ThemeProvider } from "@/components/theme-provider";
 import { showPendingDeletion } from "@/lib/account-deletion/pending";
 import { deploymentKeys } from "@/lib/deployment/queries";
@@ -75,6 +77,23 @@ const BLOCKERS = [
   },
 ];
 
+/** The organization's members: Priya's account is scheduled to be deleted. */
+const MEMBERS = [
+  ["dana", "Dana Whitfield", "owner", false],
+  ["priya", "Priya Raman", "member", true],
+  ["sam", "Sam Ortiz", "member", false],
+].map(([id, name, role, deactivated], index) => ({
+  id,
+  email: `${id}@acme.test`,
+  name,
+  image: null,
+  role,
+  joinedAt: `2026-11-0${index + 1}T09:00:00.000Z`,
+  removable: id !== "dana",
+  assignableRoles: id === "dana" ? [] : ["admin"],
+  deactivated,
+}));
+
 if (state === "pending")
   showPendingDeletion({ deleteAfter: "2026-12-09T10:00:00.000Z" });
 
@@ -103,6 +122,20 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       proactive: "on",
     });
   if (path === "/api/v2/people/me/organizations") return Response.json(MINE);
+  if (path === "/api/v2/organizations/default/members") {
+    const search =
+      new URL(String(input), location.origin).searchParams
+        .get("search")
+        ?.toLowerCase() ?? "";
+    return Response.json({
+      members: MEMBERS.filter((one) =>
+        `${one.name} ${one.email}`.toLowerCase().includes(search),
+      ),
+      nextCursor: null,
+    });
+  }
+  if (path === "/api/v2/organizations/default/invitations")
+    return Response.json({ invitations: [], nextCursor: null });
   if (path === "/api/v2/people/me/account-deletion" && method === "GET")
     return Response.json(
       state === "pending"
@@ -136,13 +169,33 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch;
 
 const General = GeneralRoute.options.component as ComponentType;
+
+/** The box that picks somebody from the organization, as the Add people dialog holds it. */
+function Picker() {
+  return (
+    <div className="mx-auto w-full max-w-lg px-4 pt-12">
+      <PeopleTypeahead
+        label="People to add to Sales"
+        onChoose={() => {}}
+        unavailable={(person) => (person.id === "dana" ? "In this team" : null)}
+      />
+    </div>
+  );
+}
+
+const Page =
+  state === "members"
+    ? OrganizationSettingsPage
+    : state === "picker"
+      ? Picker
+      : General;
 const rootRoute = createRootRoute({
   component: () => (
     <div className="bg-background text-foreground">
       <ThemeProvider>
         <PendingDeletionGate>
           <div className="flex h-svh flex-col">
-            <General />
+            <Page />
           </div>
         </PendingDeletionGate>
       </ThemeProvider>
