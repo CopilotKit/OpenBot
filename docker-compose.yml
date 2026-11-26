@@ -614,8 +614,9 @@ services:
       timeout: 5s
       retries: 24
 
-  # A CHATGPT PLAN'S ENGINE: the LangGraph harness, reading the plan's token store. Started alone,
-  # as `agent-claude-plan` above. The server reaches it by name (CHATGPT_PLAN_HARNESS_URL).
+  # A CHATGPT PLAN'S ENGINE: the OpenAI Agents SDK over AG-UI (agent-openai-agents/), reading the
+  # plan's Sign in with ChatGPT credential record. Started alone, as `agent-claude-plan` above. The
+  # server reaches it by name (CHATGPT_PLAN_HARNESS_URL), and it is the plan's Bot.
   agent-chatgpt-plan:
     profiles: ["chatgpt-plan", "harness"]
     image: ${CHATGPT_PLAN_IMAGE:-busybox:1.37}
@@ -641,7 +642,7 @@ services:
       # mount has to be the containing directory rather than the file mount point.
       - ./.langchain:/root/.langchain
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4206/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4216/health')"]
       interval: 5s
       timeout: 5s
       retries: 24

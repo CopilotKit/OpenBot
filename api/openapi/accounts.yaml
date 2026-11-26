@@ -1444,6 +1444,180 @@ paths:
           $ref: '#/components/responses/SignInUnavailable'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/people/me/account-deletion:
+    get:
+      tags: [People]
+      operationId: getAccountDeletion
+      summary: Read where deleting the caller's account stands
+      description: >-
+        Return whether the caller's account is scheduled to be deleted, and
+        when, and what stops it being deleted now. An account belongs to the
+        person, not to an organization, so this sits outside every
+        organization's address. blockers lists each organization the person
+        has to deal with first, as GitHub does: one where they are the only
+        owner (only_owner), which they hand to another owner or delete, and
+        one where they are an owner beside others (owner_must_leave), which
+        they leave. Memberships that are not ownerships end with the account
+        and block nothing; so does the person's own organization when they
+        are its only member. Once a deletion is scheduled, every other
+        operation answers 403 with the code ACCOUNT_PENDING_DELETION until it
+        is cancelled or the account is gone; this one and
+        cancelAccountDeletion still answer, so the apps can say when the
+        account goes and offer to cancel. Only the person themselves may read
+        it, signed in to OpenBot or its app, never with an API key.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+      responses:
+        '200':
+          description: Where deleting the account stands.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDeletion'
+              examples:
+                blocked:
+                  $ref: '#/components/examples/AccountDeletionBlockedExample'
+                clear:
+                  $ref: '#/components/examples/AccountDeletionClearExample'
+                scheduled:
+                  $ref: '#/components/examples/AccountDeletionScheduledExample'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDeletionSignInOnly'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [People]
+      operationId: requestAccountDeletion
+      summary: Delete the caller's account
+      description: >-
+        Schedule the caller's account to be deleted, 14 days from now, or at
+        once with immediate true. From this moment the person is signed out everywhere,
+        their API keys, app sign-ins and connections end, their Bots,
+        routines and computers stop, and nothing runs for them. Their
+        memberships read as deactivated. Signing in again before the
+        deletion is allowed only to see when it happens and to cancel it
+        (cancelAccountDeletion). When the wait ends, the account is deleted
+        on its own, with everything the person owns. What they wrote in
+        organizations shared with others stays, shown as from a deleted
+        user, and security log entries are kept for 180 days without their
+        name or email. The person confirms by sending the email address they
+        sign in with and the words delete my account; either one wrong is
+        refused with 422. The session must have signed in within the last 10
+        minutes: an older one is refused with 403 and the code REAUTHENTICATE,
+        and the apps send the person through sign-in again. An organization
+        that blocks it (getAccountDeletion's blockers) refuses it with 409
+        and the code ACCOUNT_DELETION_BLOCKED, listing them. Only the person
+        themselves may do this, signed in to OpenBot or its
+        app, never with an API key.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestAccountDeletionRequest'
+            examples:
+              inFourteenDays:
+                value:
+                  confirmEmail: dana@acme.com
+                  confirmPhrase: delete my account
+              now:
+                value:
+                  confirmEmail: dana@acme.com
+                  confirmPhrase: delete my account
+                  immediate: true
+      responses:
+        '202':
+          description: The deletion is scheduled. With immediate true it has already started.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduledAccountDeletion'
+              examples:
+                scheduled:
+                  $ref: '#/components/examples/ScheduledAccountDeletionExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDeletionForbidden'
+        '409':
+          $ref: '#/components/responses/AccountDeletionConflict'
+        '422':
+          $ref: '#/components/responses/AccountDeletionNotConfirmed'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/people/me/account-deletion/cancel:
+    post:
+      tags: [People]
+      operationId: cancelAccountDeletion
+      summary: Cancel deleting the caller's account
+      description: >-
+        Cancel a scheduled deletion of the caller's account, any time before
+        it starts. The account is the person's again: they use OpenBot as
+        before, their memberships are active again, and they sign in afresh
+        on their other devices, make new API keys and reconnect what was
+        ended when they asked. Cancelling when nothing is scheduled changes
+        nothing. A deletion already under way can't be cancelled: that
+        answers 409 with the code ACCOUNT_DELETION_UNDER_WAY. Only the person
+        themselves may cancel, signed in to OpenBot or its app, never with an
+        API key.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Nothing is scheduled any more.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelledAccountDeletion'
+              examples:
+                cancelled:
+                  value:
+                    status: none
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDeletionSignInOnly'
+        '409':
+          $ref: '#/components/responses/AccountDeletionUnderWay'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
     ApiKeyId:
@@ -2110,6 +2284,123 @@ components:
             openbotmobile://company-sign-in/linked, which ends its sign-in
             session. Without it the browser stays on a page saying the
             account is linked. Nothing else is a place to go back to.
+    AccountDeletionStatus:
+      type: string
+      x-extensible-enum: [none, scheduled]
+      description: >-
+        Whether the account is to be deleted. none: nothing is scheduled.
+        scheduled: it is deleted at deleteAfter, unless the person cancels
+        first. A later OpenBot may add a state; read one you don't know as
+        scheduled.
+    AccountDeletionBlocker:
+      type: object
+      description: >-
+        An organization the person has to deal with before their account can
+        be deleted, and why.
+      required: [organizationId, organizationName, reason]
+      properties:
+        organizationId:
+          type: string
+          description: The organization's id.
+        organizationName:
+          type: string
+          description: The organization's name, as its members see it.
+        reason:
+          type: string
+          x-extensible-enum: [only_owner, owner_must_leave]
+          description: >-
+            only_owner: the person is its only owner, so they make another
+            member an owner or delete the organization. owner_must_leave:
+            it has other owners, so the person leaves it. A later OpenBot may
+            add a reason; read one you don't know as having to leave it.
+    AccountDeletion:
+      type: object
+      description: >-
+        Where deleting the caller's account stands. blockers is the server's
+        verdict; a client renders it and never recomputes it.
+      required: [status, blockers]
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountDeletionStatus'
+        requestedAt:
+          type: string
+          format: date-time
+          description: When the person asked. Only while a deletion is scheduled.
+        deleteAfter:
+          type: string
+          format: date-time
+          description: When the account is deleted. Only while a deletion is scheduled.
+        blockers:
+          type: array
+          description: >-
+            The organizations that stop the account being deleted now. Empty
+            when nothing does.
+          items:
+            $ref: '#/components/schemas/AccountDeletionBlocker'
+    RequestAccountDeletionRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmEmail, confirmPhrase]
+      properties:
+        confirmEmail:
+          type: string
+          minLength: 1
+          maxLength: 320
+          pattern: ^[^\x00]*$
+          description: >-
+            The email address the person signs in with, typed by them. Matched
+            without regard to case or the spaces around it.
+        confirmPhrase:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[^\x00]*$
+          description: >-
+            The words delete my account, typed by the person. Matched without
+            regard to case or the spaces around it.
+        immediate:
+          type: boolean
+          default: false
+          description: >-
+            true deletes the account now instead of after the wait, and it
+            can't be cancelled.
+    ScheduledAccountDeletion:
+      type: object
+      description: A deletion, scheduled.
+      required: [status, requestedAt, deleteAfter]
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountDeletionStatus'
+        requestedAt:
+          type: string
+          format: date-time
+          description: When the person asked.
+        deleteAfter:
+          type: string
+          format: date-time
+          description: >-
+            When the account is deleted. Now, for immediate true, when the
+            deletion has already started.
+    CancelledAccountDeletion:
+      type: object
+      description: Nothing is scheduled any more.
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountDeletionStatus'
+    AccountDeletionProblem:
+      description: >-
+        A refused account deletion: the shared problem details, with the
+        organizations that block it (ACCOUNT_DELETION_BLOCKED).
+      allOf:
+        - $ref: './common.yaml#/components/schemas/Problem'
+        - type: object
+          properties:
+            blockers:
+              type: array
+              description: The organizations to deal with first, as getAccountDeletion lists them.
+              items:
+                $ref: '#/components/schemas/AccountDeletionBlocker'
     CompanySignInTicket:
       type: object
       required: [url, expiresAt]
@@ -2258,6 +2549,184 @@ components:
           saml: '#/components/schemas/SamlIdentityProviderRequest'
           oidc: '#/components/schemas/OidcIdentityProviderRequest'
   responses:
+    AccountDeletionSignInOnly:
+      description: >-
+        The request was signed with an API key rather than by the person
+        signed in to OpenBot or its app.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            key:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: An API key can't delete an account. Sign in to OpenBot to do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionForbidden:
+      description: >-
+        The session signed in more than 10 minutes ago, so the person signs in
+        again first (REAUTHENTICATE). Or the account is already scheduled to
+        be deleted (ACCOUNT_PENDING_DELETION). Or the request was signed with
+        an API key.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            reauthenticate:
+              value:
+                type: https://open.bot/errors/reauthenticate
+                title: Sign in again.
+                status: 403
+                detail: To delete your account, sign in again first.
+                code: REAUTHENTICATE
+                category: auth
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            pendingDeletion:
+              value:
+                type: https://open.bot/errors/account-pending-deletion
+                title: Your account is being deleted.
+                status: 403
+                detail: Your account is scheduled to be deleted. Cancel the deletion to use OpenBot again.
+                code: ACCOUNT_PENDING_DELETION
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            key:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: An API key can't delete an account. Sign in to OpenBot to do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionConflict:
+      description: >-
+        An organization stops the account being deleted
+        (ACCOUNT_DELETION_BLOCKED): blockers lists each. Or the
+        Idempotency-Key was already used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/AccountDeletionProblem'
+          examples:
+            blocked:
+              value:
+                type: https://open.bot/errors/account-deletion-blocked
+                title: Deal with your organizations first.
+                status: 409
+                detail: You're the only owner of Acme. Make someone else an owner, or delete the organization, then try again.
+                code: ACCOUNT_DELETION_BLOCKED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                blockers:
+                  - organizationId: org_acme
+                    organizationName: Acme
+                    reason: only_owner
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionNotConfirmed:
+      description: >-
+        The email address isn't the one the person signs in with, or the
+        words aren't delete my account.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            email:
+              value:
+                type: https://open.bot/errors/account-deletion-not-confirmed
+                title: The confirmation doesn't match.
+                status: 422
+                detail: That isn't the email address you sign in with.
+                code: ACCOUNT_DELETION_NOT_CONFIRMED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            phrase:
+              value:
+                type: https://open.bot/errors/account-deletion-not-confirmed
+                title: The confirmation doesn't match.
+                status: 422
+                detail: Type delete my account to confirm.
+                code: ACCOUNT_DELETION_NOT_CONFIRMED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionUnderWay:
+      description: >-
+        The account is already being deleted, so it's too late to cancel
+        (ACCOUNT_DELETION_UNDER_WAY). Or the Idempotency-Key was already used
+        for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            underWay:
+              value:
+                type: https://open.bot/errors/account-deletion-under-way
+                title: Your account is already being deleted.
+                status: 409
+                detail: Your account is already being deleted, so it can't be cancelled.
+                code: ACCOUNT_DELETION_UNDER_WAY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ServiceTermsConflict:
       description: >-
         The version sent isn't the current one, so the person has to read the
@@ -2810,6 +3279,34 @@ components:
                 requestId: req_example
                 traceId: trace_example
   examples:
+    AccountDeletionBlockedExample:
+      summary: Two organizations to deal with first
+      value:
+        status: none
+        blockers:
+          - organizationId: org_acme
+            organizationName: Acme
+            reason: only_owner
+          - organizationId: org_globex
+            organizationName: Globex
+            reason: owner_must_leave
+    AccountDeletionClearExample:
+      summary: Nothing stops it
+      value:
+        status: none
+        blockers: []
+    AccountDeletionScheduledExample:
+      summary: Scheduled
+      value:
+        status: scheduled
+        requestedAt: '2026-11-25T10:00:00.000Z'
+        deleteAfter: '2026-12-09T10:00:00.000Z'
+        blockers: []
+    ScheduledAccountDeletionExample:
+      value:
+        status: scheduled
+        requestedAt: '2026-11-25T10:00:00.000Z'
+        deleteAfter: '2026-12-09T10:00:00.000Z'
     ServiceTermsToAgreeExample:
       summary: OpenBot Cloud, for somebody who hasn't agreed yet.
       value:

@@ -949,6 +949,14 @@ components:
             (removable says whether they can be). They can't be given another
             role here until they open OpenBot (assignableRoles is empty).
             Absent for everybody else.
+        deactivated:
+          type: boolean
+          description: >-
+            True while this person's account is scheduled to be deleted
+            (requestAccountDeletion): they can't use OpenBot, nothing runs
+            for them, and the membership ends when the account is deleted,
+            unless they cancel first. The server's verdict. False or absent
+            for everybody else.
     OrganizationMemberPage:
       type: object
       required: [members, nextCursor]

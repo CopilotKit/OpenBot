@@ -103,7 +103,7 @@ impl Plan {
     pub fn port(self) -> u16 {
         match self {
             Plan::Claude => 4212,
-            Plan::ChatGpt => 4206,
+            Plan::ChatGpt => 4216,
         }
     }
 
@@ -439,6 +439,9 @@ pub fn prepare(engine: &Address, root: &Path, provider: &str, login: &str) -> Re
             }
         }
         Plan::ChatGpt => {
+            if crate::env::chatgpt_sign_in_changed(root) {
+                return Err(Problem::plain(crate::env::CHATGPT_SIGN_IN_CHANGED));
+            }
             if !crate::env::saved_chatgpt_plan_store(root) {
                 return Err(Problem::plain("Sign in to your ChatGPT plan first."));
             }
@@ -968,7 +971,7 @@ mod tests {
         );
         assert_eq!(
             settings["CHATGPT_PLAN_HARNESS_URL"],
-            "http://agent-chatgpt-plan:4206"
+            "http://agent-chatgpt-plan:4216"
         );
         assert!(crate::env::MINTED.contains(&GATEWAY_TOKEN));
         assert!(crate::vault::is_secret(GATEWAY_TOKEN));

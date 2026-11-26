@@ -10,6 +10,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 - Confirming a character with an input method editor no longer submits a free-text answer to a
   Bot question.
+- **A Bot's drawing that drew nothing reads "Didn't draw an interface".** A Bot that asks to draw an
+  interface with nothing in it is told nothing was drawn, and its step read "Drew an interface" for
+  an interface nobody saw. Folded with other steps it reads "Draw an interface" beside "Didn't work".
 - **The management agent checks a release's chart signature before it touches anything.** With
   the chart's signature check on, the agent has Flux verify the chart a new version names before it
   records an install, stops the server, takes a backup or moves Flux. A chart that is unsigned or

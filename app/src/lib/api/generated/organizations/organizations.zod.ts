@@ -289,6 +289,12 @@ export const ListOrganizationMembersResponse = zod.object({
             .describe(
               "True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn't opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, and email is empty when none is known. An owner or an admin removes them by that id, as any member (removable says whether they can be). They can't be given another role here until they open OpenBot (assignableRoles is empty). Absent for everybody else.",
             ),
+          deactivated: zod
+            .boolean()
+            .optional()
+            .describe(
+              "True while this person's account is scheduled to be deleted (requestAccountDeletion): they can't use OpenBot, nothing runs for them, and the membership ends when the account is deleted, unless they cancel first. The server's verdict. False or absent for everybody else.",
+            ),
         })
         .describe("One member of an organization."),
     )
@@ -493,6 +499,12 @@ export const UpdateOrganizationMemberResponse = zod.object({
         .optional()
         .describe(
           "True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn't opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, and email is empty when none is known. An owner or an admin removes them by that id, as any member (removable says whether they can be). They can't be given another role here until they open OpenBot (assignableRoles is empty). Absent for everybody else.",
+        ),
+      deactivated: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True while this person's account is scheduled to be deleted (requestAccountDeletion): they can't use OpenBot, nothing runs for them, and the membership ends when the account is deleted, unless they cancel first. The server's verdict. False or absent for everybody else.",
         ),
     })
     .describe("One member of an organization."),
