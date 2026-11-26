@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  UNBIASED_SHUTDOWN_AT,
+  unbiasedShutdownNotice,
+} from "../../shared/unbiased-retirement";
 import { CheckForUpdates } from "./CheckForUpdates";
 import { cloudEnabled } from "./CloudSignIn";
 import { CopilotKitAccount } from "./CopilotKitAccount";
@@ -42,6 +46,7 @@ import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import { asProblem, Failure, InlineFailure, type Problem } from "./Problem";
 import {
   type HeldConfiguration,
+  heldUnbiasedConnection,
   type ModelChoice,
   ProviderPicker,
   recordedModel,
@@ -88,6 +93,7 @@ type AlreadyConfigured = {
   launch?: { harness: HarnessChoice | null } | null;
   installation?: { harness: HarnessChoice | null } | null;
   autoStart?: boolean;
+  activeUnbiased?: boolean;
   /** The local evaluation's checkpoint, when this installation has one. */
   localEval?: {
     stack: string;
@@ -695,9 +701,14 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           { root: found.trim() },
         ).catch(() => null);
         if (!active) return;
-        if (configured) {
-          setAlreadyHeld({ ...configured.values, saved: configured.saved });
-        }
+        const held = configured
+          ? {
+              ...configured.values,
+              saved: configured.saved,
+              activeUnbiased: configured.activeUnbiased,
+            }
+          : undefined;
+        if (held) setAlreadyHeld(held);
         /*
          * Whether the person has chosen this computer: OpenBot is installed on it, or a restart
          * for it is owed, or an earlier run's Install found Windows not ready. Then Windows is
@@ -737,8 +748,8 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           ? (configured.launch ?? configured.installation)
           : configured?.installation;
         const resumedModel =
-          configured?.localEval && installed
-            ? recordedModel({ ...configured.values, saved: configured.saved })
+          configured?.localEval && installed && held
+            ? recordedModel(held)
             : null;
         /*
          * Settings' Change on the AI model row stopped OpenBot to come here: open at the AI screen,
@@ -819,7 +830,14 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           return;
         // An interrupted run needs an explicit Start, with its saved setup still available.
         // Nor one asked to change the AI connection: the new choice is what starts it.
-        if (interrupted || configured.autoStart === false || changeAiConnection)
+        if (
+          interrupted ||
+          configured.autoStart === false ||
+          changeAiConnection ||
+          (held &&
+            heldUnbiasedConnection(held) &&
+            Date.now() >= UNBIASED_SHUTDOWN_AT)
+        )
           return;
         // Intelligence must report ready and licensed first, which only its screen asks.
         if (configured.localEval.connected) setLocalAutoStart(true);
@@ -1829,6 +1847,11 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
                 Retry
               </button>
             </div>
+          )}
+          {heldUnbiasedConnection(alreadyHeld) && (
+            <p className="lede" role="alert">
+              {unbiasedShutdownNotice()}
+            </p>
           )}
           {freshInstall || appBehind || (
             <LocalIntelligence

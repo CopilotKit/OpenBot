@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  isUnbiasedEndpoint,
+  unbiasedShutdownNotice,
+} from "../../shared/unbiased-retirement";
 import { EndpointMark } from "./EndpointMark";
 import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
@@ -55,6 +59,7 @@ export type SavedConfiguration = {
     | "compatible-endpoint"
     | "google-oauth"
     | "xai-oauth"
+    | "unbiased"
     | null;
   intelligenceApiKey?: boolean | null;
   modelApiKeys?: Partial<
@@ -66,6 +71,7 @@ export type SavedConfiguration = {
 };
 
 export type HeldConfiguration = {
+  activeUnbiased?: boolean;
   INTELLIGENCE_API_KEY?: string;
   INTELLIGENCE_API_URL?: string;
   INTELLIGENCE_GATEWAY_WS_URL?: string;
@@ -97,14 +103,6 @@ const endpointPresets: Record<
     keyUrl: "https://console.x.ai/",
     keyLink: "Get an xAI API key",
   },
-  // Unbiased AI's gateway speaks the OpenAI API under the `pareto` model. The sign-in on this row
-  // mints the key; the dashboard is where somebody makes one by hand.
-  unbiased: {
-    baseUrl: "https://api.unbiased.ai/v1",
-    model: "pareto",
-    keyUrl: "https://platform.unbiased.ai/dashboard/keys",
-    keyLink: "Get an Unbiased AI API key",
-  },
   // TrustedRouter's gateway speaks the OpenAI API and lists models from many providers under their
   // vendor's prefix, so the model is named the way its /models lists it.
   // https://trustedrouter.com/docs
@@ -121,8 +119,6 @@ const oauthExplanation: Record<string, string> = {
   google:
     "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
   xai: "Authorize OpenBot to use models available to your xAI account.",
-  unbiased:
-    "Sign in or create an Unbiased AI account in your browser and approve the code shown here. OpenBot receives an API key for Pareto and keeps it on this computer.",
 };
 
 /** Stop a plan's sign-in still waiting for the browser: Claude's, or ChatGPT's. */
@@ -152,6 +148,15 @@ function endpointProvider(baseUrl: string | undefined): string {
       ([, preset]) =>
         endpointIdentity(preset.baseUrl) === endpointIdentity(baseUrl),
     )?.[0] ?? "openai-compatible"
+  );
+}
+
+export function heldUnbiasedConnection(held: HeldConfiguration): boolean {
+  return (
+    held.activeUnbiased ??
+    (held.saved?.model === "unbiased" ||
+      isUnbiasedEndpoint(held.OPENAI_BASE_URL) ||
+      isUnbiasedEndpoint(held.OPENAI_CONTAINER_BASE_URL))
   );
 }
 
@@ -235,30 +240,35 @@ export function ProviderPicker({
    */
   onProviderChange?: () => void;
 }) {
+  const retiringConnection = heldUnbiasedConnection(held);
   const initialChoice = chosen ?? recordedModel(held);
+  const usableChoice =
+    initialChoice?.provider === "unbiased" ||
+    isUnbiasedEndpoint(initialChoice?.baseUrl) ||
+    isUnbiasedEndpoint(initialChoice?.containerBaseUrl)
+      ? null
+      : initialChoice;
   const [reuse, setReuse] = useState(
-    initialChoice?.saved
-      ? { provider: initialChoice.provider, login: initialChoice.login }
+    usableChoice?.saved
+      ? { provider: usableChoice.provider, login: usableChoice.login }
       : null,
   );
   const [rows, setRows] = useState<Provider[]>([]);
   const [open, setOpen] = useState<string | null>(
-    initialChoice?.provider === "openai-compatible"
-      ? endpointProvider(initialChoice.baseUrl)
-      : (initialChoice?.provider ?? null),
+    usableChoice?.provider === "openai-compatible"
+      ? endpointProvider(usableChoice.baseUrl)
+      : (usableChoice?.provider ?? null),
   );
-  const [login, setLogin] = useState<Login | null>(
-    initialChoice?.login ?? null,
-  );
-  const [apiKey, setApiKey] = useState(initialChoice?.apiKey ?? "");
-  const [baseUrl, setBaseUrl] = useState(initialChoice?.baseUrl ?? "");
+  const [login, setLogin] = useState<Login | null>(usableChoice?.login ?? null);
+  const [apiKey, setApiKey] = useState(usableChoice?.apiKey ?? "");
+  const [baseUrl, setBaseUrl] = useState(usableChoice?.baseUrl ?? "");
   const [containerBaseUrl, setContainerBaseUrl] = useState(
-    initialChoice?.containerBaseUrl ?? "",
+    usableChoice?.containerBaseUrl ?? "",
   );
-  const [model, setModel] = useState(initialChoice?.model ?? "");
+  const [model, setModel] = useState(usableChoice?.model ?? "");
   const [reuseEndpointKey, setReuseEndpointKey] = useState(
-    initialChoice?.provider === "openai-compatible" &&
-      initialChoice.saved === true,
+    usableChoice?.provider === "openai-compatible" &&
+      usableChoice.saved === true,
   );
   /*
    * The sign-in, mid-flight.
@@ -303,8 +313,8 @@ export function ProviderPicker({
   const planRun = useRef<{ run: number; provider: string } | null>(null);
   const [oauthCode, setOauthCode] = useState<string | null>(null);
   const [oauthSignedIn, setOauthSignedIn] = useState<string | null>(
-    initialChoice?.login === "oauth" && initialChoice.saved
-      ? initialChoice.provider
+    usableChoice?.login === "oauth" && usableChoice.saved
+      ? usableChoice.provider
       : null,
   );
 
@@ -360,15 +370,11 @@ export function ProviderPicker({
       } catch (error) {
         if (current()) setFailure(asProblem(error));
       }
-      // Nothing for a session the native side keeps for itself; the minted API key for a sign-in
-      // that produces one (Unbiased AI), held here the way a plan's token is and never shown.
-      const minted = await invoke<string | null>("finish_model_oauth", {
+      await invoke<string | null>("finish_model_oauth", {
         attemptId: authorization.attemptId,
       });
       if (current()) {
         continueAfterSignIn.current = true;
-        if (minted)
-          setTokens((previous) => ({ ...previous, [providerId]: minted }));
         setOauthSignedIn(providerId);
         setSignInUrl(null);
         setOauthCode(null);
@@ -469,7 +475,9 @@ export function ProviderPicker({
 
   useEffect(() => {
     invoke<Provider[]>("providers")
-      .then(setRows)
+      .then((providers) =>
+        setRows(providers.filter(({ id }) => id !== "unbiased")),
+      )
       .catch(() => undefined);
   }, []);
 
@@ -497,7 +505,7 @@ export function ProviderPicker({
         (reuse?.provider === row.id && reuse.login === "plan")
       : false;
   const savedApiKey =
-    row?.id === "openai" || row?.id === "anthropic"
+    row?.id === "anthropic" || (row?.id === "openai" && !retiringConnection)
       ? held.saved?.modelApiKeys?.[row.id] === true ||
         (reuse?.provider === row.id && reuse.login === "api-key")
       : false;
@@ -525,6 +533,8 @@ export function ProviderPicker({
      */
     (login === "endpoint" &&
       isHttpEndpointUrl(baseUrl) &&
+      !isUnbiasedEndpoint(baseUrl) &&
+      !isUnbiasedEndpoint(containerBaseUrl) &&
       containerBaseUrlIsValid &&
       model.trim().length > 0 &&
       (!preset || apiKey.trim().length > 0 || savedEndpointKey));
@@ -536,21 +546,6 @@ export function ProviderPicker({
     const trimmedBaseUrl = baseUrl.trim();
     const trimmedModel = model.trim();
     const trimmedContainerBaseUrl = containerBaseUrl.trim();
-    /*
-     * A sign-in that minted an API key for a named endpoint (Unbiased AI) is that endpoint's key, and
-     * it goes on exactly as a typed one does: the same address, the same model, the same credential
-     * shape. Nothing after this screen has to know how the key was obtained.
-     */
-    if (login === "oauth" && trimmedToken && preset) {
-      onChoose({
-        provider: "openai-compatible",
-        login: "endpoint",
-        apiKey: trimmedToken,
-        baseUrl: preset.baseUrl,
-        ...(trimmedModel ? { model: trimmedModel } : {}),
-      });
-      return;
-    }
     onChoose({
       provider: login === "endpoint" ? "openai-compatible" : row.id,
       login,
@@ -644,6 +639,18 @@ export function ProviderPicker({
         use an API key.
       </p>
 
+      {retiringConnection && (
+        <p className="lede" role="alert">
+          {unbiasedShutdownNotice()}
+        </p>
+      )}
+      {login === "endpoint" &&
+        (isUnbiasedEndpoint(baseUrl) ||
+          isUnbiasedEndpoint(containerBaseUrl)) && (
+          <p className="lede" role="alert">
+            Choose a different endpoint. Unbiased AI is retiring.
+          </p>
+        )}
       <fieldset className="picker providers">
         <legend className="sr-only">Model provider</legend>
         {/* Once one is chosen it stands alone, with Change to see them all again. */}
@@ -678,16 +685,19 @@ export function ProviderPicker({
                 // Fill from what is already on this machine, if anything.
                 const kept =
                   r.id === "openai"
-                    ? held.OPENAI_API_KEY
+                    ? retiringConnection
+                      ? undefined
+                      : held.OPENAI_API_KEY
                     : r.id === "anthropic"
                       ? held.ANTHROPIC_API_KEY
                       : undefined;
                 setApiKey(kept ?? "");
                 const nextPreset = endpointPresets[r.id];
                 const restoreEndpoint =
-                  r.id === "openai-compatible" ||
-                  (nextPreset &&
-                    endpointProvider(held.OPENAI_BASE_URL) === r.id);
+                  !retiringConnection &&
+                  (r.id === "openai-compatible" ||
+                    (nextPreset &&
+                      endpointProvider(held.OPENAI_BASE_URL) === r.id));
                 setReuseEndpointKey(
                   Boolean(restoreEndpoint) &&
                     held.saved?.modelApiKeys?.compatible === true,

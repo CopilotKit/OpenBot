@@ -35,6 +35,7 @@ import { ProgressRow } from "@/components/channels/progress-row";
 import {
   openComposerModelPicker,
   StoppedConnectionNotice,
+  UnbiasedConnectionNotice,
 } from "@/components/channels/stopped-connection-notice";
 import {
   seedMessage,
@@ -1185,7 +1186,7 @@ export function ChannelChat({
   const picksModel = useBotTakesModelChoice(botProfile);
   const models = useQuery({
     ...modelCatalogueQueryOptions(),
-    enabled: picksModel,
+    enabled: botProfile?.runsOnOpenBotModel === true,
   });
   const runModel = useConversationModel(
     channel.id,
@@ -2234,6 +2235,14 @@ export function ChannelChat({
                       "Couldn’t load voice chats. Try again in a moment.",
                     )}
                   </p>
+                )}
+                {botProfile?.runsOnOpenBotModel && channel.active && (
+                  <UnbiasedConnectionNotice
+                    catalogue={models.data}
+                    connection={
+                      runModel.stopped?.connection ?? runModel.value?.connection
+                    }
+                  />
                 )}
                 {/* The picked model stopped being offered: what this conversation uses now. */}
                 {runModel.notice && channel.active ? (

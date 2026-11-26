@@ -588,7 +588,6 @@ test("every provider connected hides Connect another AI", async () => {
       "anthropic",
       "google",
       "xai",
-      "unbiased",
       "trustedrouter",
       "openai-compatible",
     ] as const

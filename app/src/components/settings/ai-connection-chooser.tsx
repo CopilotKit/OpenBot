@@ -1,3 +1,4 @@
+import { isUnbiasedEndpoint } from "@openbot/shared/unbiased-retirement";
 import {
   IconAlertTriangleFilled,
   IconChevronRight,
@@ -127,7 +128,7 @@ import { queryClient } from "@/query-client";
  * TWO KINDS OF CONNECTION. `organization` is the AI every Bot in the organization runs on, which an
  * admin changes in Settings; inside OpenBot Desktop it may be a plan or a provider sign-in Desktop
  * holds. `personal` is a person's own AI on OpenBot Cloud: a key or an address for every provider,
- * and first the setup window's sign-in (a ChatGPT or Claude plan, a Google, xAI or Unbiased AI
+ * and first the setup window's sign-in (a ChatGPT or Claude plan, a Google or xAI
  * sign-in) wherever the server runs it itself (`signIns`). The server keeps that sign-in for the
  * person and renews it, so never a Desktop-held one there, even inside Desktop: the server runs
  * the person's Bots. Inside Desktop, Desktop only listens for a Claude or ChatGPT plan's redirect,
@@ -445,8 +446,6 @@ export function ChooseConnection({
    * before it took the port): its sign-in is finished by paste, as in a browser.
    */
   const [pasteBack, setPasteBack] = useState(false);
-  // The key an Unbiased AI sign-in in Desktop mints: held for the one request that sends it, never drawn.
-  const minted = useRef<string | null>(null);
   const attempt = useRef<{
     plan?: Plan;
     attemptId?: string;
@@ -513,7 +512,6 @@ export function ChooseConnection({
     setSignInCode("");
     setChatGptWay(firstChatGptWay);
     setPasteBack(false);
-    minted.current = null;
   }
   chooseLatest.current = choose;
 
@@ -556,6 +554,7 @@ export function ChooseConnection({
       ? usingSaved || typedKey.length > 0
       : login === "endpoint"
         ? isEndpointAddress(address) &&
+          !isUnbiasedEndpoint(address) &&
           typedModel.length > 0 &&
           (!preset || usingSaved || typedKey.length > 0)
         : login === "oauth"
@@ -580,34 +579,6 @@ export function ChooseConnection({
             ? { apiKey: typedKey }
             : {}),
       };
-    /*
-     * Unbiased AI's sign-in, run by the server: its key is kept for the person, for the provider's
-     * own address. A plan or a Google or xAI sign-in the server ran connects as itself, below.
-     */
-    if (
-      login === "oauth" &&
-      serverOwned &&
-      provider.id === "unbiased" &&
-      preset
-    )
-      return {
-        provider: provider.id,
-        login: "endpoint",
-        baseUrl: preset.baseUrl,
-        model: typedModel,
-        useSavedKey: true,
-      };
-    // Unbiased AI's sign-in ends in a key for its own address, sent exactly as a typed one is.
-    if (login === "oauth" && provider.id === "unbiased" && preset) {
-      if (!minted.current) return null;
-      return {
-        provider: provider.id,
-        login: "endpoint",
-        apiKey: minted.current,
-        baseUrl: preset.baseUrl,
-        model: typedModel,
-      };
-    }
     if (login === "oauth")
       return { provider: provider.id, login, model: typedModel };
     return { provider: provider.id, login };
@@ -746,7 +717,7 @@ export function ChooseConnection({
         await finishPlanSignIn(plan);
       } else {
         const begun = await beginProviderSignIn(
-          provider.id as "google" | "xai" | "unbiased",
+          provider.id as "google" | "xai",
         );
         if (!current()) {
           void cancelProviderSignIn(begun.attemptId).catch(() => {});
@@ -759,9 +730,8 @@ export function ChooseConnection({
           attemptId: begun.attemptId,
         });
         window.open(begun.url, "_blank", "noopener");
-        const finished = await finishProviderSignIn(begun.attemptId);
+        await finishProviderSignIn(begun.attemptId);
         if (!current()) return;
-        minted.current = finished?.apiKey ?? null;
       }
       if (!current()) return;
       attempt.current = null;
@@ -853,7 +823,6 @@ export function ChooseConnection({
       { input: body, desktop: inDesktop, onPhase: setPhase },
       {
         onSuccess: (connected) => {
-          minted.current = null;
           setApiKey("");
           onConnected(connected);
         },
@@ -1093,7 +1062,8 @@ export function ChooseConnection({
                 <FieldLabel htmlFor="ai-connection-address">Address</FieldLabel>
                 <Input
                   aria-invalid={
-                    baseUrl.trim().length > 0 && !isEndpointAddress(baseUrl)
+                    baseUrl.trim().length > 0 &&
+                    (!isEndpointAddress(baseUrl) || isUnbiasedEndpoint(baseUrl))
                   }
                   autoComplete="off"
                   disabled={busy}
@@ -1107,7 +1077,9 @@ export function ChooseConnection({
                   value={baseUrl}
                 />
                 <FieldDescription>
-                  The address of a server that speaks OpenAI's API.
+                  {isUnbiasedEndpoint(baseUrl)
+                    ? "Unbiased AI is shutting down. Choose a different endpoint."
+                    : "The address of a server that speaks OpenAI's API."}
                 </FieldDescription>
               </Field>
             ) : null}
@@ -1272,8 +1244,6 @@ const SIGN_IN_SAYS: Record<string, string> = {
   google:
     "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
   xai: "Authorize OpenBot to use models available to your xAI account.",
-  unbiased:
-    "Sign in or create an Unbiased AI account in your browser and approve the code shown here.",
 };
 
 /**

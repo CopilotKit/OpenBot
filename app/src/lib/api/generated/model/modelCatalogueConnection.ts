@@ -25,7 +25,7 @@ export interface ModelCatalogueConnection {
   ready: boolean;
   /** Why it can't run now. Null while ready. */
   problem: AiConnectionProblem | null;
-  /** The model a run on it uses when nobody picked one. Always one of models. */
+  /** The model a run on it uses when nobody picked one. One of models, or empty when this provider is retiring. */
   default: string;
   /** Newest first, narrowed to what an administrator allowed. */
   models: ModelOption[];

@@ -150,6 +150,28 @@ test("one connection: the picker is as before and the pick is sent without a con
   expect(saved).toEqual({ model: SONNET.id, effort: null });
 });
 
+test("a retired default's models are never shown even with an older catalogue", async () => {
+  const retired = connection({
+    id: "unbiased",
+    provider: "unbiased",
+    isDefault: true,
+    default: "pareto",
+    models: [{ id: "pareto", label: "Pareto" }],
+  });
+  const view = render(
+    <ModelPicker
+      catalogue={catalogueOf([retired, CLAUDE])}
+      onChange={() => {}}
+      value={{ model: "pareto", effort: null, connection: "unbiased" }}
+    />,
+  );
+  const { popup } = await open(view, /choose a model/i);
+  expect(within(popup).queryByText(/Pareto|Unbiased/)).toBeNull();
+  expect(
+    within(popup).getByRole("option", { name: /Claude Sonnet/ }),
+  ).toBeTruthy();
+});
+
 test("two connections: a rail with each one, the default first, opening on the one in use", async () => {
   const view = render(
     <ModelPicker

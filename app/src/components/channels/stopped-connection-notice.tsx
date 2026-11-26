@@ -1,11 +1,20 @@
+import {
+  UNBIASED_SHUTDOWN_AT,
+  unbiasedShutdownMessage,
+} from "@openbot/shared/unbiased-retirement";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PROVIDERS_ADDRESS, providerAddress } from "@/lib/ai-connection/paths";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
-import { connectionOf } from "@/lib/models/connections";
+import {
+  connectionOf,
+  isUnbiasedModelConnection,
+} from "@/lib/models/connections";
 import {
   conversationModelQueryOptions,
+  type ModelCatalogue,
   modelCatalogueQueryOptions,
 } from "@/lib/models/queries";
 import { cn } from "@/lib/utils";
@@ -80,7 +89,7 @@ export function StoppedConnectionNotice({
     { ...currentUserQueryOptions(), enabled: owner === "organization" },
     queryClient,
   ).data;
-  if (!stopped) return null;
+  if (!stopped || stopped.problem.code === "provider-retired") return null;
   const canFix =
     owner === "personal" ||
     (owner === "organization" && isOrganizationAdmin(me?.role));
@@ -108,6 +117,56 @@ export function StoppedConnectionNotice({
           Choose another model
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** A saved Unbiased connection needs a replacement even before a turn fails. */
+export function UnbiasedConnectionNotice({
+  catalogue,
+  connection,
+}: {
+  catalogue: ModelCatalogue | undefined;
+  connection?: string | null;
+}) {
+  const entry = connectionOf(catalogue, connection);
+  const retiring = isUnbiasedModelConnection(entry);
+  const me = useQuery(
+    {
+      ...currentUserQueryOptions(),
+      enabled: retiring && entry?.owner === "organization",
+    },
+    queryClient,
+  ).data;
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!retiring || Date.now() >= UNBIASED_SHUTDOWN_AT) return;
+    const timer = setTimeout(
+      () => setNow(Date.now()),
+      UNBIASED_SHUTDOWN_AT - Date.now(),
+    );
+    return () => clearTimeout(timer);
+  }, [retiring]);
+  if (!entry || !retiring) return null;
+  const canFix = entry.owner === "personal" || isOrganizationAdmin(me?.role);
+  const opening = unbiasedShutdownMessage(Math.max(now, Date.now()));
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 pb-2 text-sm"
+      role="status"
+    >
+      <span>
+        {opening}
+        {!canFix && " Ask an admin to change the AI connection."}
+      </span>
+      {canFix && (
+        <a
+          className={buttonVariants({ size: "sm", variant: "outline" })}
+          href={reconnectPath(entry.id, entry.owner)}
+        >
+          Choose a replacement
+        </a>
+      )}
     </div>
   );
 }

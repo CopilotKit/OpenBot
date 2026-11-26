@@ -7,8 +7,7 @@ import { invokeDesktop } from "@/lib/desktop/queries";
 
 /**
  * OpenBot Desktop's side of changing the AI connection in place (desktop_page.rs). A plan's or a
- * sign-in's credential stays with Desktop, which renews it: these commands never hand one to the
- * page, except the key an Unbiased AI sign-in mints, which goes straight on to the server.
+ * sign-in's credential stays with Desktop, which renews it.
  *
  * Each rejects with Desktop's own sentence, a string or a problem carrying `said`.
  */
@@ -100,9 +99,9 @@ export type ProviderSignIn = {
   userCode?: string | null;
 };
 
-/** Start a Google, xAI or Unbiased AI sign-in in the browser. */
+/** Start a Google or xAI sign-in in the browser. */
 export function beginProviderSignIn(
-  provider: "google" | "xai" | "unbiased",
+  provider: "google" | "xai",
 ): Promise<ProviderSignIn> {
   return desktop(
     "begin_provider_sign_in",
@@ -111,10 +110,7 @@ export function beginProviderSignIn(
   );
 }
 
-/**
- * Wait for the browser's approval. Unbiased AI's sign-in mints a key, handed back once for the page
- * to send straight to the server and drop.
- */
+/** Wait for the browser's approval. */
 export function finishProviderSignIn(
   attemptId: string,
 ): Promise<{ apiKey?: string } | null> {

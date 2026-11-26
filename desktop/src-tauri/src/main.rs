@@ -325,6 +325,7 @@ struct AlreadyConfigured {
     #[serde(skip_serializing_if = "Option::is_none")]
     installation: Option<preparation::Launch>,
     auto_start: bool,
+    active_unbiased: bool,
     /// Where the local evaluation has got to, if one was ever begun here. The checkpoint only:
     /// whether its stack is running is the CLI's to say.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4605,6 +4606,18 @@ impl ChosenModel {
     ) -> Result<openbot_env::ModelCredential, Problem> {
         let given = |value: Option<String>| value.unwrap_or_default().trim().to_string();
         let saved = self.saved.unwrap_or(false);
+        let settled = openbot_desktop_lib::ai_connection::Settled::read(root);
+        let retired_endpoint = self.provider == "unbiased"
+            || self.base_url.as_deref().is_some_and(unbiased_endpoint)
+            || self
+                .container_base_url
+                .as_deref()
+                .is_some_and(unbiased_endpoint);
+        // A previously installed endpoint can still start the app and show its conversations.
+        // The server refuses AI runs after the cutoff. A new connection cannot use this host.
+        if retired_endpoint && !saved && !saved_unbiased_connection(root, settled.as_ref()) {
+            return Err("Unbiased AI is shutting down. Choose a different AI provider.".into());
+        }
         /*
          * A KEY OR ADDRESS OPENBOT KEEPS. The connection was last changed in the app, where the key
          * went to OpenBot's server and never to this app, and the window resumes it as a saved one.
@@ -4613,9 +4626,7 @@ impl ChosenModel {
          * resolve below as ever.
          */
         if saved {
-            if let Some(kept) = openbot_desktop_lib::ai_connection::Settled::read(root)
-                .filter(|kept| kept.names(&self.provider, &self.login))
-            {
+            if let Some(kept) = settled.filter(|kept| kept.names(&self.provider, &self.login)) {
                 match self.login.as_str() {
                     "api-key" if self.provider == "openai" => {
                         return Ok(openbot_env::ModelCredential::OpenAi {
@@ -10909,6 +10920,56 @@ fn already_configured<R: tauri::Runtime>(
     configured
 }
 
+fn unbiased_host(host: &str) -> bool {
+    host.split(':').next().is_some_and(|name| {
+        name.trim_end_matches('.')
+            .eq_ignore_ascii_case("api.unbiased.ai")
+    })
+}
+
+fn unbiased_endpoint(address: &str) -> bool {
+    reqwest::Url::parse(address.trim())
+        .ok()
+        .as_ref()
+        .and_then(reqwest::Url::host_str)
+        .is_some_and(unbiased_host)
+}
+
+fn saved_unbiased_connection(
+    root: &Path,
+    settled: Option<&openbot_desktop_lib::ai_connection::Settled>,
+) -> bool {
+    if let Some(settled) = settled {
+        return settled.provider == "unbiased"
+            || settled.endpoint_host.as_deref().is_some_and(unbiased_host);
+    }
+    use openbot_desktop_lib::saved_intent::{ModelIntent, SavedIntent};
+    if SavedIntent::read(root)
+        .model
+        .is_some_and(|model| model != ModelIntent::CompatibleEndpoint)
+    {
+        return false;
+    }
+    let values = openbot_desktop_lib::vault::already_given_file_only(
+        &root.join(".env"),
+        &[
+            "BOT_PROVIDER",
+            "OPENAI_BASE_URL",
+            "OPENAI_CONTAINER_BASE_URL",
+        ],
+    );
+    values
+        .get("BOT_PROVIDER")
+        .is_none_or(|provider| provider.trim() == "openai")
+        && ["OPENAI_BASE_URL", "OPENAI_CONTAINER_BASE_URL"]
+            .into_iter()
+            .any(|key| {
+                values
+                    .get(key)
+                    .is_some_and(|address| unbiased_endpoint(address))
+            })
+}
+
 fn already_configured_for_root(root: String) -> AlreadyConfigured {
     let root = stack::root_from(&root);
     let env_file = root.join(".env");
@@ -10933,6 +10994,8 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
     );
 
     use openbot_desktop_lib::saved_intent::{Category, SavedIntent};
+    let settled = openbot_desktop_lib::ai_connection::Settled::read(&root);
+    let active_unbiased = saved_unbiased_connection(&root, settled.as_ref());
     let intent = SavedIntent::read(&root);
     let hint = |category, file_present| {
         (file_present || intent.categories.contains(&category)).then_some(true)
@@ -10964,6 +11027,7 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
         launch: preparation::launch(&root).filter(|_| local_eval.is_some()),
         installation: preparation::installation(&root),
         auto_start: true,
+        active_unbiased,
         local_eval,
         saved: SavedConfiguration {
             model_api_keys: SavedModelApiKeys {
@@ -11159,6 +11223,9 @@ async fn begin_model_oauth(
     root: String,
     provider: String,
 ) -> Result<openbot_desktop_lib::provider_oauth::Authorization, String> {
+    if provider == "unbiased" {
+        return Err("Unbiased AI is shutting down. Choose a different AI provider.".into());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::provider_oauth::begin(&stack::root_from(&root), &provider)
     })

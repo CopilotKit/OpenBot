@@ -1480,7 +1480,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 60_000);
 
   for (const engine of engines)
-    test(`inside OpenBot Desktop: the plan and Unbiased AI sign in through the server, in ${engine}`, async () => {
+    test(`inside OpenBot Desktop: a plan signs in through the server and Unbiased is absent, in ${engine}`, async () => {
       const server = new FakeServer("none", true);
       const page = await open(
         "/onboarding?step=ai",
@@ -1510,39 +1510,9 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         ).toBe(0);
         expect(server.finishes).toEqual([]);
         await chooser.getByRole("button", { name: "Back" }).click();
-        server.signIns = [];
-
-        await chooser.getByRole("button", { name: /^Unbiased AI/ }).click();
-        // Sign-in first, a key as the alternative.
-        expect(await chooser.getByRole("tab").allTextContents()).toEqual([
-          "Sign in",
-          "Use an API key",
-        ]);
-        await chooser
-          .getByRole("button", {
-            name: "Sign in with Unbiased AI",
-            exact: true,
-          })
-          .click();
-        await chooser.getByText("BCDF-GHJK").waitFor();
-        await chooser
-          .getByRole("link", { name: "Open the sign-in page" })
-          .waitFor();
-        await shoot(page, "sign-in-waiting", engine, "light", WIDE);
-        await chooser.getByText("Signed in to Unbiased AI.").waitFor();
-        expect(server.signIns).toEqual([{ provider: "unbiased" }]);
-        await chooser.getByRole("button", { name: "Connect" }).click();
-        await chooser.getByRole("status").waitFor();
-        expect(server.replaces).toEqual([
-          {
-            provider: "unbiased",
-            login: "endpoint",
-            baseUrl: "https://api.unbiased.ai/v1",
-            model: "pareto",
-            useSavedKey: true,
-          },
-        ]);
-        expect(await primary(page).isDisabled()).toBe(false);
+        expect(
+          await chooser.getByRole("button", { name: /^Unbiased AI/ }).count(),
+        ).toBe(0);
       } finally {
         await page.close();
       }
@@ -3055,17 +3025,6 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
             apiKey: "sk-typed-key",
           },
         ],
-        [
-          /^Unbiased AI/,
-          "Unbiased AI API key",
-          {
-            provider: "unbiased",
-            login: "endpoint",
-            baseUrl: "https://api.unbiased.ai/v1",
-            model: "pareto",
-            apiKey: "sk-typed-key",
-          },
-        ],
       ];
       for (const [row, label, body] of keys) {
         const server = new FakeServer("none", true);
@@ -3116,15 +3075,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               expect(await measured(page)).toEqual(FINE);
               await shoot(page, "step", engine, theme, window);
               const chooser = page.locator("[data-ai-chooser]");
-              await chooser
-                .getByRole("button", { name: /^Unbiased AI/ })
-                .click();
+              await chooser.getByRole("button", { name: /^xAI/ }).click();
               expect(await measured(page)).toEqual(FINE);
-              await shoot(page, "step-unbiased", engine, theme, window);
+              await shoot(page, "step-xai", engine, theme, window);
               await chooser
                 .getByRole("tab", { name: "Use an API key" })
                 .click();
-              await chooser.getByLabel("Unbiased AI API key").fill("ub-key");
+              await chooser.getByLabel("xAI API key").fill("xai-key");
               await chooser.getByRole("button", { name: "Connect" }).click();
               await chooser.getByRole("status").waitFor();
               expect(await measured(page)).toEqual(FINE);
@@ -3164,7 +3121,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
                 .click();
               await settings
                 .getByRole("dialog")
-                .getByRole("button", { name: /^Unbiased AI/ })
+                .getByRole("button", { name: /^xAI/ })
                 .waitFor();
               await shoot(settings, "settings-chooser", engine, theme, window);
               await settings.keyboard.press("Escape");

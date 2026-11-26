@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Unbiased AI stops serving models November 27 at noon EST. If you use it, choose a
+  replacement in **Settings → Providers**. In an older Desktop build, use **Change AI
+  connection** in the setup window. Your conversations and drafts stay available.
+
 ## 1.2.0
 
 **Before upgrading.**

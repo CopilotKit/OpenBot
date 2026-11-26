@@ -325,7 +325,6 @@ export async function invoke(command, args) {
         { id: "anthropic", name: "Anthropic", summary: "Sign in with a Claude Pro, Max, Team or Enterprise plan.", logins: ["plan", "api-key"], mark: "anthropic", caution: null },
         { id: "google", name: "Google Gemini", summary: "Use a Google AI Studio key or sign in for Gemini API access.", logins: ["endpoint", "oauth"], mark: "google-color", caution: null },
         { id: "xai", name: "xAI", summary: "Use an xAI API key or sign in to your xAI account.", logins: ["endpoint", "oauth"], mark: "xai", caution: null },
-        { id: "unbiased", name: "Unbiased AI", summary: "Sign in with Unbiased AI to use Pareto, or use an API key.", logins: ["oauth", "endpoint"], mark: "unbiased", caution: null },
         { id: "trustedrouter", name: "TrustedRouter", summary: "Use a TrustedRouter API key for models from many providers.", logins: ["endpoint"], mark: "trustedrouter", caution: null },
         { id: "openai-compatible", name: "Any OpenAI-compatible endpoint", summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.", logins: ["endpoint"], mark: null, caution: null },
       ];
@@ -1751,7 +1750,6 @@ const PROVIDERS = [
   "Anthropic",
   "Google Gemini",
   "xAI",
-  "Unbiased AI",
   "TrustedRouter",
   "Any OpenAI-compatible endpoint",
 ];

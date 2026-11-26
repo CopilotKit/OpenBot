@@ -32,6 +32,7 @@ import { markFor } from "@/lib/marks";
 import {
   canChoose,
   connectionOf,
+  isUnbiasedModelConnection,
   pickerGroups,
 } from "@/lib/models/connections";
 import {
@@ -194,14 +195,20 @@ export function ModelPicker({
   const groups = pickerGroups(catalogue);
   if (groups.length > 0) {
     // Several connections: the pick's own, and nothing selected while there is no default.
-    const on = value ? connectionOf(catalogue, value.connection) : undefined;
+    const picked = value
+      ? connectionOf(catalogue, value.connection)
+      : undefined;
+    const on = isUnbiasedModelConnection(picked) ? undefined : picked;
     // A stopped connection may list nothing: its pick is still named, by its id.
     const selected =
       on?.models.find((model) => model.id === value?.model) ??
       (on && !on.ready && value
         ? { id: value.model, label: value.model }
         : undefined);
-    const fallback = connectionOf(catalogue, null);
+    const defaultConnection = connectionOf(catalogue, null);
+    const fallback = isUnbiasedModelConnection(defaultConnection)
+      ? undefined
+      : defaultConnection;
     return (
       <Picker
         catalogue={catalogue}
@@ -219,7 +226,8 @@ export function ModelPicker({
       />
     );
   }
-  if (!value) return null;
+  if (!value || isUnbiasedModelConnection(connectionOf(catalogue, null)))
+    return null;
   const selected =
     catalogue.models.find((model) => model.id === value.model) ??
     catalogue.models.find((model) => model.id === catalogue.default);

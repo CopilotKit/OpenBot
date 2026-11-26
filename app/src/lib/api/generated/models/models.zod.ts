@@ -55,7 +55,9 @@ export const GetModelCatalogueResponse = zod
       ),
     default: zod
       .string()
-      .describe("What a run uses when nobody picked. Always one of models."),
+      .describe(
+        "What a run uses when nobody picked. One of models, or empty when the default provider is retiring.",
+      ),
     models: zod
       .array(
         zod
@@ -141,7 +143,7 @@ export const GetModelCatalogueResponse = zod
                     code: zod
                       .string()
                       .describe(
-                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.",
+                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. provider-retired: choose a replacement for a provider that is shutting down.",
                       ),
                     detail: zod
                       .string()
@@ -158,7 +160,7 @@ export const GetModelCatalogueResponse = zod
             default: zod
               .string()
               .describe(
-                "The model a run on it uses when nobody picked one. Always one of models.",
+                "The model a run on it uses when nobody picked one. One of models, or empty when this provider is retiring.",
               ),
             models: zod
               .array(
@@ -280,7 +282,7 @@ export const GetModelChoiceResponse = zod
                 code: zod
                   .string()
                   .describe(
-                    "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.",
+                    "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. provider-retired: choose a replacement for a provider that is shutting down.",
                   ),
                 detail: zod
                   .string()
@@ -441,7 +443,7 @@ export const ReplaceModelChoiceResponse = zod
                 code: zod
                   .string()
                   .describe(
-                    "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.",
+                    "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. provider-retired: choose a replacement for a provider that is shutting down.",
                   ),
                 detail: zod
                   .string()
@@ -1997,7 +1999,7 @@ export const ListAiConnectionsResponse = zod
                     code: zod
                       .string()
                       .describe(
-                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.",
+                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. provider-retired: choose a replacement for a provider that is shutting down.",
                       ),
                     detail: zod
                       .string()
@@ -2202,7 +2204,7 @@ export const ConnectAiConnectionResponse = zod
             code: zod
               .string()
               .describe(
-                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.",
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. provider-retired: choose a replacement for a provider that is shutting down.",
               ),
             detail: zod
               .string()
@@ -2365,7 +2367,7 @@ export const MakeAiConnectionDefaultResponse = zod
             code: zod
               .string()
               .describe(
-                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.",
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. provider-retired: choose a replacement for a provider that is shutting down.",
               ),
             detail: zod
               .string()
@@ -2757,7 +2759,7 @@ export const ListPersonalAiConnectionsResponse = zod
                     code: zod
                       .string()
                       .describe(
-                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.",
+                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. provider-retired: choose a replacement for a provider that is shutting down.",
                       ),
                     detail: zod
                       .string()
@@ -2974,7 +2976,7 @@ export const ConnectPersonalAiConnectionResponse = zod
             code: zod
               .string()
               .describe(
-                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.",
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. provider-retired: choose a replacement for a provider that is shutting down.",
               ),
             detail: zod
               .string()
@@ -3161,7 +3163,7 @@ export const MakePersonalAiConnectionDefaultResponse = zod
             code: zod
               .string()
               .describe(
-                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.",
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. provider-retired: choose a replacement for a provider that is shutting down.",
               ),
             detail: zod
               .string()

@@ -7,6 +7,7 @@ import {
   expect,
   mock,
   setSystemTime,
+  spyOn,
   test,
 } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -6686,6 +6687,52 @@ test("Stop that fails for OpenBot itself keeps OpenBot running", async () => {
   expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
 });
 
+test("Desktop can reopen a stopped installation after the Unbiased cutoff", async () => {
+  setupConnectedLocalStack(
+    "/tmp/retired-unbiased",
+    localStatus("ready", "valid"),
+  );
+  const original = invokeHandler;
+  invokeHandler = async (command, args) => {
+    const answer = await original(command, args);
+    if (command !== "already_configured") return answer;
+    return {
+      ...(answer as ReturnType<typeof savedOpenAiConfiguration>),
+      values: {
+        OPENAI_BASE_URL: "https://api.unbiased.ai/v1",
+        BOT_MODEL: "pareto",
+      },
+      saved: {
+        model: "compatible-endpoint",
+        modelApiKeys: { compatible: true },
+      },
+      activeUnbiased: true,
+    };
+  };
+  const clock = spyOn(Date, "now").mockReturnValue(
+    Date.parse("2026-11-27T17:00:00Z"),
+  );
+  try {
+    const view = await renderApp();
+    await view.findByText(/Unbiased AI has shut down/);
+    expect(
+      view.getByRole("button", { name: "Change AI connection" }),
+    ).toBeTruthy();
+    expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+      false,
+    );
+    await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+    await waitFor(() =>
+      expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+    );
+    expect(getStartStackPayload()).toMatchObject({
+      model: { provider: "openai-compatible", model: "pareto", saved: true },
+    });
+  } finally {
+    clock.mockRestore();
+  }
+});
+
 test("an interrupted shutdown restores saved setup for explicit recovery", async () => {
   const { root, notice } = useInterruptedShutdownSetup();
   const view = await renderApp();
@@ -7953,6 +8000,26 @@ function useSavedCompatibleEndpointSetup(
     return setupHandler(command, args);
   };
 }
+
+test("a saved Unbiased endpoint opens the replacement chooser after shutdown", async () => {
+  useSavedCompatibleEndpointSetup("https://API.UNBIASED.AI/v1/", "pareto");
+  const date = spyOn(Date, "now").mockReturnValue(
+    Date.parse("2026-11-27T17:00:00Z"),
+  );
+  try {
+    const view = await renderApp();
+    await reachAi(view);
+    expect(view.getByRole("alert").textContent).toContain(
+      "Unbiased AI has shut down",
+    );
+    expect(view.queryByLabelText("Base URL")).toBeNull();
+    expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+      false,
+    );
+  } finally {
+    date.mockRestore();
+  }
+});
 
 test.each([true, false])(
   "saved compatible endpoint reaches Start with scoped public fields (keyed=%s)",

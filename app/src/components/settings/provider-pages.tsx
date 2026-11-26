@@ -1,4 +1,8 @@
 import {
+  isUnbiasedHost,
+  unbiasedShutdownNotice,
+} from "@openbot/shared/unbiased-retirement";
+import {
   IconChevronRight,
   IconPlugConnectedX,
   IconSparkles,
@@ -100,6 +104,14 @@ function useProviders(scope: ConnectionScope) {
 /** A provider's name before its connection is read, from the address. */
 function nameFromAddress(id: string): string {
   return AI_PROVIDERS.find((provider) => provider.id === id)?.name ?? "AI";
+}
+
+function isRetiring(entry: AiConnectionEntry | undefined): boolean {
+  return (
+    entry?.provider === "unbiased" ||
+    isUnbiasedHost(entry?.endpointHost) ||
+    entry?.problem?.code === "provider-retired"
+  );
 }
 
 const LIST_FAILED = "Couldn't load your AI connections. Try again in a moment.";
@@ -231,6 +243,7 @@ function ProviderDetails({
 }) {
   const paths = useProviderPaths();
   const navigate = useNavigate();
+  const retiring = isRetiring(entry);
   const desktop = inDesktop && scope === "organization";
   const makeDefault = useMutation(
     makeDefaultAiConnectionMutationOptions(queryClient, scope),
@@ -239,17 +252,19 @@ function ProviderDetails({
     removeAiConnectionMutationOptions(queryClient, scope),
   );
   const others = list.connections.filter(
-    (other) => other.id !== entry.id && other.ready,
+    (other) => other.id !== entry.id && other.ready && !isRetiring(other),
   );
   /*
    * The one connection a removal would leave, which the server then makes the default itself. With
    * more left, the person chooses which takes over, from those that can run.
    */
   const left = list.connections.filter((other) => other.id !== entry.id);
-  const onlyOne = left.length === 1 ? left[0] : undefined;
+  const last = left.length === 1 ? left[0] : undefined;
+  const onlyOne = isRetiring(last) ? undefined : last;
   const choosing = entry.isDefault && !onlyOne && others.length > 0;
   // The default goes with others left, none of which can run: they stay, and none is the default.
-  const noneCanTakeOver = entry.isDefault && left.length > 1 && !choosing;
+  const noneCanTakeOver =
+    entry.isDefault && left.length > 0 && !onlyOne && !choosing;
   const [nextDefault, setNextDefault] = useState<string | null>(
     others[0]?.id ?? null,
   );
@@ -296,11 +311,11 @@ function ProviderDetails({
               : "Connected. Your next message runs on it. Anything already running finishes on the connection it started with."}
         </p>
       ) : null}
-      {entry.ready ? null : (
+      {retiring || !entry.ready ? (
         <p className="text-destructive text-sm" role="alert">
-          {entry.problem?.detail}
+          {retiring ? unbiasedShutdownNotice() : entry.problem?.detail}
         </p>
-      )}
+      ) : null}
       <PageSection title="Connection">
         <PageRows>
           {(described?.details ?? []).map((detail) => (
@@ -321,16 +336,20 @@ function ProviderDetails({
           <Item render={<Link {...paths.change(entry.id, scope)} />} size="sm">
             <ItemContent>
               <ItemTitle>
-                {entry.ready
-                  ? "Change"
-                  : isSignIn(entry.login)
-                    ? "Sign in again"
-                    : "Replace key"}
+                {retiring
+                  ? "Choose a replacement"
+                  : entry.ready
+                    ? "Change"
+                    : isSignIn(entry.login)
+                      ? "Sign in again"
+                      : "Replace key"}
               </ItemTitle>
               <ItemDescription>
-                {changesInPlace
-                  ? "Switch to another provider, plan or key. Runs that start after that use it."
-                  : "Sign in again, or use another key."}
+                {retiring && !changesInPlace
+                  ? "Connect another AI and make it the default if your Bots should use it."
+                  : changesInPlace
+                    ? "Switch to another provider, plan or key. Runs that start after that use it."
+                    : "Sign in again, or use another key."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -356,7 +375,7 @@ function ProviderDetails({
               </ItemContent>
               <ItemActions>
                 <Button
-                  disabled={busy || !entry.ready}
+                  disabled={busy || !entry.ready || retiring}
                   onClick={() => makeDefault.mutate({ entry, desktop })}
                   size="sm"
                   variant="outline"
@@ -543,6 +562,7 @@ export function ChangeProviderPage({
     (connection) => connection.id === id,
   );
   const changesInPlace = scope === "organization" && entry?.isDefault === true;
+  const retiring = isRetiring(entry);
   const current = useQuery({
     ...aiConnectionQueryOptions(),
     enabled: changesInPlace,
@@ -554,15 +574,17 @@ export function ChangeProviderPage({
     linkProps: paths.provider(id, scope),
   };
   const name = entry ? connectionName(entry) : nameFromAddress(id);
-  const title = !entry
-    ? `Change ${name}`
-    : changesInPlace
-      ? providers.organizationWide
-        ? "Change your organization's AI"
-        : "Change AI connection"
-      : entry.ready
-        ? `Change ${name}`
-        : `Reconnect ${name}`;
+  const title = retiring
+    ? "Choose a replacement for Unbiased AI"
+    : !entry
+      ? `Change ${name}`
+      : changesInPlace
+        ? providers.organizationWide
+          ? "Change your organization's AI"
+          : "Change AI connection"
+        : entry.ready
+          ? `Change ${name}`
+          : `Reconnect ${name}`;
   if (done)
     return (
       <PageShell
@@ -616,9 +638,13 @@ export function ChangeProviderPage({
                   signIns: list.signIns,
                   connected: list.connections,
                   owner: providers.owner,
-                  provider: entry.provider,
-                  login: entry.login,
-                  reconnecting: name,
+                  ...(retiring
+                    ? {}
+                    : {
+                        provider: entry.provider,
+                        login: entry.login,
+                        reconnecting: name,
+                      }),
                 }
           }
           onBack={() => void navigate(paths.provider(id, scope))}

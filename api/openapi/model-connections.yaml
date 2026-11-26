@@ -1859,7 +1859,7 @@ components:
             allowlist (on, with at least one model allowed).
         default:
           type: string
-          description: What a run uses when nobody picked. Always one of models.
+          description: What a run uses when nobody picked. One of models, or empty when the default provider is retiring.
         models:
           type: array
           description: Newest first.
@@ -1930,7 +1930,7 @@ components:
             - type: 'null'
         default:
           type: string
-          description: The model a run on it uses when nobody picked one. Always one of models.
+          description: The model a run on it uses when nobody picked one. One of models, or empty when this provider is retiring.
         models:
           type: array
           description: Newest first, narrowed to what an administrator allowed.
@@ -1946,14 +1946,15 @@ components:
       properties:
         code:
           type: string
-          x-extensible-enum: [sign-in-ended, key-refused, unreachable, no-key, no-default]
+          x-extensible-enum: [sign-in-ended, key-refused, unreachable, no-key, no-default, provider-retired]
           description: >-
             sign-in-ended: the provider stopped renewing the sign-in, so it
             has to be signed in to again. key-refused: the provider refuses
             its key. unreachable: its address doesn't answer. no-key: its key
             is no longer kept. no-default: several connections are connected
             and none is the default, so a run with no pick has nothing to use
-            until one is made default.
+            until one is made default. provider-retired: choose a replacement for
+            a provider that is shutting down.
         detail:
           type: string
           description: One sentence a person reads, saying what to do.
