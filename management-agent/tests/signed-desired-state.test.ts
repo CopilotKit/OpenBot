@@ -26,7 +26,7 @@ import {
   type DesiredState,
   releaseManifestDigest,
 } from "../../shared/management-contract";
-import { ManagementAgent } from "../src/agent";
+import { ManagementAgent, olderRelease } from "../src/agent";
 import { ManagementClient } from "../src/client";
 import { AgentConfig, type ReadyAgent } from "../src/config";
 import { CommandFailed, Kube } from "../src/kube";
@@ -479,6 +479,20 @@ describe("downgrades", () => {
     });
     return { cluster, accepted };
   }
+
+  test("older means an older release version; a main build's name is not one", () => {
+    // Release tags as published, release candidates, and the broken builds the kind test makes.
+    expect(olderRelease("v1.1.0", "v1.2.0")).toBe(true);
+    expect(olderRelease("v1.2.0-rc.3", "v1.2.0")).toBe(true);
+    expect(olderRelease("v1.9.0", "v1.10.0")).toBe(true);
+    expect(olderRelease("v1.2.0", "v1.1.0")).toBe(false);
+    expect(olderRelease("v1.2.0", "v1.2.0")).toBe(false);
+    expect(olderRelease("v1.1.1-rc.1-broken", "v1.1.1-rc.1")).toBe(false);
+    // A main build (main-<date>-<run>) has no release version to order by: its signed manifest's
+    // upgrade path decides, as for any move.
+    expect(olderRelease("main-20261119-219", "v1.2.0")).toBe(false);
+    expect(olderRelease("v1.2.0", "main-20261119-219")).toBe(false);
+  });
 
   test(
     "a signed release older than the accepted one is refused, logged and reported",

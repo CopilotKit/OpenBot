@@ -80,16 +80,17 @@ export const UPGRADES_NOT_SET_UP =
 
 export type Log = (message: string, fields?: Record<string, unknown>) => void;
 
+const RELEASE_VERSION =
+  /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
 /**
- * Whether release `to` is older than release `from`, by semantic version (a leading v allowed). A
- * version either side cannot be read as one counts as older, so it is refused.
+ * Whether release `to` is older than release `from`, by semantic version (a leading v allowed), as
+ * every published release is named. A build named otherwise (a main build, main-<date>-<run>) has no
+ * version to order by: then the signed release manifest's upgrade path decides, as for any move.
  */
 export function olderRelease(to: string, from: string) {
-  try {
-    return Bun.semver.order(to, from) < 0;
-  } catch {
-    return true;
-  }
+  if (!RELEASE_VERSION.test(to) || !RELEASE_VERSION.test(from)) return false;
+  return Bun.semver.order(to, from) < 0;
 }
 
 interface StatefulSet {
