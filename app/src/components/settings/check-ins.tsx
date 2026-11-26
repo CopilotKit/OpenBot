@@ -10,7 +10,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
-import { unavailableSaid, failureSaid } from "@/lib/load-failure";
+import { failureSaid, unavailableSaid } from "@/lib/load-failure";
 import { proactiveAllowedQueryOptions } from "@/lib/proactive";
 import {
   saveUserPreferencesMutationOptions,
@@ -19,23 +19,16 @@ import {
 import { queryClient } from "@/query-client";
 
 /**
- * The person's own switch for every one of their Bots' check-ins at once, under the Routines list
- * in Settings. Off stops every Bot's background checks for them before any model call; each Bot's
- * own check-in is kept, so turning this back on restores them as they were.
+ * The person's own switch for every one of their Bots' check-ins at once, the first section of
+ * Settings → Notifications. Off stops every Bot's background checks for them before any model
+ * call; each Bot's own check-in is kept, so turning this back on restores them as they were.
  *
  * When an admin turned check-ins off for this person, the switch is off and cannot be changed, and
  * says who turned it off. Their own choice is kept underneath for when the admin turns it back on.
  *
- * No section heading: the page is Routines, and a check-in is one kind of routine on it.
- *
- * `variant="row"` draws it as a row of its own; `variant="line"` draws one quiet right-aligned line,
- * for a page that keeps it under its list.
+ * Drawn as a row of its own under a "Check-ins" heading, like the page's other sections.
  */
-export function CheckInsSection({
-  variant = "row",
-}: {
-  variant?: "row" | "line";
-}) {
+export function CheckInsSection() {
   const preferences = useUserPreferences();
   const allowed = useQuery(proactiveAllowedQueryOptions());
   const save = useMutation(
@@ -52,37 +45,8 @@ export function CheckInsSection({
       {failureSaid(save.error)}
     </p>
   ) : null;
-  if (variant === "line") {
-    return (
-      <div>
-        {preferences.isPending ? null : preferences.error ? (
-          unavailableSaid(preferences.error) ? null : (
-            <p className="text-destructive text-sm" role="alert">
-              Couldn't load your check-ins. Try again in a moment.
-            </p>
-          )
-        ) : (
-          <div className="flex items-center justify-end gap-2">
-            <span className="text-muted-foreground text-sm">
-              Check-ins from all Bots
-              {byAdmin ? " · Turned off by your admin." : ""}
-            </span>
-            <Switch
-              aria-label="Check-ins for all your Bots"
-              checked={on}
-              disabled={byAdmin || save.isPending}
-              onCheckedChange={(next) =>
-                save.mutate({ proactive: next ? "on" : "off" })
-              }
-            />
-          </div>
-        )}
-        {failed}
-      </div>
-    );
-  }
   return (
-    <PageSection>
+    <PageSection title="Check-ins">
       {preferences.isPending ? null : preferences.error ? (
         // OpenBot saying why it isn't answering is said once, by the list above, for the whole page.
         unavailableSaid(preferences.error) ? null : (

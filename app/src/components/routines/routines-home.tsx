@@ -7,8 +7,6 @@ import {
 } from "@/components/layout/sidebar-toggle";
 import { BotGroupSection } from "@/components/routines/bot-group";
 import { RoutineBox } from "@/components/routines/routine-box";
-import { CheckInsSection } from "@/components/settings/check-ins";
-import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { loadFailure } from "@/lib/load-failure";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
@@ -26,7 +24,7 @@ const EXAMPLES = [
 
 /**
  * The Routines page: one box that makes a routine from a sentence, then every routine the person
- * has grouped by Bot, then the one switch for every Bot's check-ins.
+ * has grouped by Bot. The switch for every Bot's check-ins is in Settings → Notifications.
  *
  * Reads what `RoutinesList` reads (routines, goals, check-ins, and the shown and hidden Bots for
  * the groups), so each row opens and changes its own record the way it always did. It draws its
@@ -111,11 +109,6 @@ export function RoutinesHome() {
               <BotGroupSection group={group} key={group.botId} />
             ))
           )}
-        </div>
-
-        <Separator className="mt-10" />
-        <div className="mt-4">
-          <CheckInsSection variant="line" />
         </div>
       </PageColumn>
     </>

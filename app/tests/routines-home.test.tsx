@@ -19,7 +19,7 @@ import { answerScheduleLists, pathOf, ROUTINES_PATH } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * The Routines page: one box, then the routines grouped by Bot, then the one switch for check-ins.
+ * The Routines page: one box, then the routines grouped by Bot, then nothing else: the check-ins switch is in Settings → Notifications.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -214,13 +214,13 @@ test("a failed Bots read says so", async () => {
   );
 });
 
-test("the check-ins switch is drawn once, as the line", async () => {
+test("the Routines page has no check-ins switch: it lives in Settings → Notifications", async () => {
   serving({ shown: [bot("atlas", "Atlas")] });
   const view = draw();
-  await view.findByText("Check-ins from all Bots");
-  expect(
-    view.getAllByRole("switch", { name: "Check-ins for all your Bots" }),
-  ).toHaveLength(1);
-  // The row version's title is not drawn.
-  expect(view.queryByText("Check-ins from all your Bots")).toBeNull();
+  await view.findByRole("heading", { level: 1 });
+  // Long enough for the preferences read the switch used to wait on.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await settleReactWork();
+  expect(view.queryByRole("switch")).toBeNull();
+  expect(view.queryByText(/Check-ins from all/)).toBeNull();
 });
