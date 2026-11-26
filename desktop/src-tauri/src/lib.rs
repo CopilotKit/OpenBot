@@ -2,6 +2,7 @@
 pub mod acquire;
 pub mod ai_connection;
 pub mod app_update;
+pub mod chatgpt_sign_in;
 pub mod claude_sign_in;
 pub mod cli_release;
 pub mod client_version;

@@ -93,9 +93,12 @@ export function connectionRows(input: {
   byUrl?: PluginServer[];
   /** Server ids the person holds a connection for. */
   connected: ReadonlySet<string>;
+  /** Of those, the ones that need reconnecting (`needsReconnecting`). Absent reads as none. */
+  reconnect?: ReadonlySet<string>;
   links: LinkedAccount[];
   providers: IdentityProviders | undefined;
 }): ConnectionRow[] {
+  const state = connectionState(input);
   const identity = (["github", "slack"] as const).flatMap(
     (provider): ConnectionRow[] => {
       const link = input.links.find((entry) => entry.provider === provider);
@@ -142,7 +145,7 @@ export function connectionRows(input: {
         key: entry.key,
         title: entry.title,
         summary: entry.summary,
-        state: input.connected.has(entry.key) ? "connected" : "available",
+        state: state(entry.key),
         notConnected: !input.connected.has(entry.key),
         mark: { kind: "catalogue", key: entry.key },
       }),
@@ -160,7 +163,7 @@ export function connectionRows(input: {
             !input.connected.has(server.id) && appNeedsKey(server)
               ? `Needs a key from ${vendorNameOf(server.title)}`
               : server.summary,
-          state: input.connected.has(server.id) ? "connected" : "available",
+          state: state(server.id),
           notConnected: !input.connected.has(server.id),
           mark: { kind: "logo", logo: server.logo },
         }),
@@ -174,7 +177,7 @@ export function connectionRows(input: {
         mark: { kind: "logo", logo: server.logo },
       }),
     ),
-    ...(input.byUrl ?? []).map((server) => byUrlRow(server, input.connected)),
+    ...(input.byUrl ?? []).map((server) => byUrlRow(server, state)),
     ...identity,
   ];
   /*
@@ -183,6 +186,35 @@ export function connectionRows(input: {
    */
   const inUse = (row: ConnectionRow) => row.state !== "available";
   return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];
+}
+
+/**
+ * Whether one of the person's own connections needs reconnecting: a sign-in whose grant the vendor
+ * withdrew (`revoked`), or a key the app didn't take (a check that ran and came back with a failure).
+ * The tile says Reconnect for it, as a Bot's Apps row does, and never Connected.
+ */
+export function needsReconnecting(connection: {
+  revoked?: boolean;
+  verified?: boolean;
+  probe?: string | null;
+}): boolean {
+  return (
+    connection.revoked === true ||
+    (Boolean(connection.probe) && connection.verified === false)
+  );
+}
+
+/** Where one of the person's apps stands: connected, to reconnect, or not connected yet. */
+function connectionState(input: {
+  connected: ReadonlySet<string>;
+  reconnect?: ReadonlySet<string>;
+}): (id: string) => ConnectionState {
+  return (id) =>
+    !input.connected.has(id)
+      ? "available"
+      : input.reconnect?.has(id)
+        ? "needs_reconnect"
+        : "connected";
 }
 
 /**
@@ -209,6 +241,7 @@ export function personalConnectionRows(input: {
   brokered: PluginServer[];
   byUrl?: PluginServer[];
   connected: ReadonlySet<string>;
+  reconnect?: ReadonlySet<string>;
   links: LinkedAccount[];
   providers: IdentityProviders | undefined;
 }): ConnectionRow[] {
@@ -221,6 +254,7 @@ export function personalConnectionRows(input: {
     shared: [],
     byUrl: input.byUrl,
     connected: input.connected,
+    reconnect: input.reconnect,
     links: input.links,
     providers: input.providers,
   }).filter((row) => row.key !== "slack");
@@ -254,7 +288,11 @@ export function catalogueToAddRows(input: {
 
 function personalAppRow(
   entry: CatalogueItem,
-  input: { added: ReadonlySet<string>; connected: ReadonlySet<string> },
+  input: {
+    added: ReadonlySet<string>;
+    connected: ReadonlySet<string>;
+    reconnect?: ReadonlySet<string>;
+  },
 ): ConnectionRow {
   const base = {
     key: entry.key,
@@ -265,7 +303,7 @@ function personalAppRow(
   if (entry.auth === "user-oauth")
     return {
       ...base,
-      state: input.connected.has(entry.key) ? "connected" : "available",
+      state: connectionState(input)(entry.key),
       action: "connect",
       notConnected:
         input.added.has(entry.key) && !input.connected.has(entry.key),
@@ -338,7 +376,7 @@ export function directoryRows(input: {
  */
 function byUrlRow(
   server: PluginServer,
-  connected: ReadonlySet<string>,
+  state: (id: string) => ConnectionState,
 ): ConnectionRow {
   const host = hostOf(server.address ?? "");
   const base = {
@@ -347,11 +385,11 @@ function byUrlRow(
     mark: { kind: "logo", logo: server.logo } as const,
   };
   if (server.signIn) {
-    const yours = connected.has(server.id);
+    const yours = state(server.id) !== "available";
     return {
       ...base,
       summary: host,
-      state: yours ? "connected" : "available",
+      state: state(server.id),
       /*
        * No press-to-connect here, unlike a catalogue app: the tile opens the server's own page,
        * which offers Connect beside the switch that takes the server away again. A server added by

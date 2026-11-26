@@ -266,13 +266,54 @@ test("Gemini key: streamGenerateContent with the key, systemInstruction, thinkin
   }
 });
 
-test("Gemini sign-in: Chat Completions to the server's provider proxy with its local bearer", async () => {
+test("Gemini API key at Google's OpenAI-compatible address, as Desktop and Settings save it", async () => {
+  const provider = await fakeProvider(answer);
+  try {
+    // Desktop's Google Gemini row and Settings' key form: a named endpoint with its key
+    // (desktop/src-tauri/src/env.rs, ModelCredential::Compatible). Gemini takes an API key only.
+    const env = {
+      BOT_PROVIDER: "openai",
+      BOT_MODEL: "gemini-3.8-flash",
+      OPENAI_API_KEY: "AIza-test",
+      OPENAI_BASE_URL: `${provider.base}/v1beta/openai/`,
+    };
+    await withEngine({ env }, async (base) => {
+      const result = await run(
+        base,
+        conversation({
+          tools: [WEATHER_TOOL],
+          forwardedProps: {
+            openbotModel: { model: "gemini-3.8-flash", reasoningEffort: "low" },
+          },
+        }),
+      );
+      assert.equal(result.events.at(-1)!.type, "RUN_FINISHED");
+    });
+    const { path, headers, body } = provider.requests[0]!;
+    assert.equal(path, "/v1beta/openai/chat/completions");
+    assert.equal(headers.authorization, "Bearer AIza-test");
+    assert.equal(body.model, "gemini-3.8-flash");
+    assert.equal(body.reasoning_effort, "low");
+    assert.deepEqual(
+      (body.tools as { function: { name: string } }[]).map(
+        (tool) => tool.function.name,
+      ),
+      ["get_weather", "recall_earlier_results"],
+    );
+    for (const marker of MARKERS)
+      assert.ok(JSON.stringify(body).includes(marker), marker);
+  } finally {
+    await provider.close();
+  }
+});
+
+test("xAI sign-in: Chat Completions to the server's provider proxy with its local bearer", async () => {
   const provider = await fakeProvider(answer);
   try {
     // As Desktop configures it (desktop/src-tauri/src/env.rs, ModelCredential::ProviderOAuth).
     const env = {
       BOT_PROVIDER: "openai",
-      BOT_MODEL: "gemini-3.1-pro",
+      BOT_MODEL: "grok-4.7",
       OPENAI_API_KEY: "local-proxy-bearer",
       OPENAI_BASE_URL: `${provider.base}/api/model-provider/v1`,
     };
@@ -281,7 +322,7 @@ test("Gemini sign-in: Chat Completions to the server's provider proxy with its l
         base,
         conversation({
           forwardedProps: {
-            openbotModel: { model: "gemini-3.1-pro", reasoningEffort: "low" },
+            openbotModel: { model: "grok-4.7", reasoningEffort: "low" },
           },
         }),
       );
@@ -289,7 +330,7 @@ test("Gemini sign-in: Chat Completions to the server's provider proxy with its l
     const { path, headers, body } = provider.requests[0]!;
     assert.equal(path, "/api/model-provider/v1/chat/completions");
     assert.equal(headers.authorization, "Bearer local-proxy-bearer");
-    assert.equal(body.model, "gemini-3.1-pro");
+    assert.equal(body.model, "grok-4.7");
     assert.equal(body.reasoning_effort, "low");
   } finally {
     await provider.close();

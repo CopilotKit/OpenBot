@@ -81,6 +81,7 @@ import {
   AI_PROVIDERS,
   type AiProvider,
   ENDPOINT_PRESETS,
+  GOOGLE_SIGN_IN_ENDED,
   hostOf,
   isEndpointAddress,
   isSignIn,
@@ -88,6 +89,7 @@ import {
   personalLogins,
   providerById,
   sharedLogins,
+  signInRetired,
   signInWords,
 } from "@/lib/ai-connection/providers";
 import type {
@@ -127,7 +129,7 @@ import { queryClient } from "@/query-client";
  * TWO KINDS OF CONNECTION. `organization` is the AI every Bot in the organization runs on, which an
  * admin changes in Settings; inside OpenBot Desktop it may be a plan or a provider sign-in Desktop
  * holds. `personal` is a person's own AI on OpenBot Cloud: a key or an address for every provider,
- * and first the setup window's sign-in (a ChatGPT or Claude plan, a Google, xAI or Unbiased AI
+ * and first the setup window's sign-in (a ChatGPT or Claude plan, an xAI or Unbiased AI
  * sign-in) wherever the server runs it itself (`signIns`). The server keeps that sign-in for the
  * person and renews it, so never a Desktop-held one there, even inside Desktop: the server runs
  * the person's Bots. Inside Desktop, Desktop only listens for a Claude or ChatGPT plan's redirect,
@@ -156,6 +158,11 @@ export type ChooserMode =
         signIns: readonly AiConnectionProviderAnswer[];
         mine: AiConnection | null;
       };
+      /**
+       * Open on this provider's first way in, to fix the connection in use: a Google sign-in
+       * OpenBot no longer offers opens on Google Gemini's API key.
+       */
+      provider?: AiConnectionProviderAnswer;
     }
   | { kind: "personal"; signIns: readonly AiConnectionProviderAnswer[] }
   /**
@@ -373,6 +380,7 @@ const wait = (seconds: number) =>
 
 export function ChooseConnection({
   connection,
+  connectedHere = false,
   initialFocusProvider,
   mode,
   onBack,
@@ -385,6 +393,11 @@ export function ChooseConnection({
   mode: ChooserMode;
   /** Back from a chosen provider, or Cancel from the list. Absent: the list has no way back. */
   onBack?: () => void;
+  /**
+   * Something was connected from this list already, and the list is drawn again with it checked:
+   * leaving it is Done, since there is nothing to cancel.
+   */
+  connectedHere?: boolean;
   onConnected: (connected: ConnectedResult) => void;
 }) {
   const initialFocusRow = useRef<HTMLButtonElement>(null);
@@ -477,7 +490,10 @@ export function ChooseConnection({
   stopLatest.current = stopSignIn;
   useEffect(() => () => stopLatest.current(), []);
   // Reconnecting one connection: open on its provider, ready to sign in or take its key.
-  const opening = useRef(adding?.provider);
+  const opening = useRef(
+    adding?.provider ??
+      (mode.kind === "organization" ? mode.provider : undefined),
+  );
   const chooseLatest = useRef<(next: AiProvider | null) => void>(() => {});
   useEffect(() => {
     const id = opening.current;
@@ -548,6 +564,18 @@ export function ChooseConnection({
   const usingSaved = Boolean(savedKey && useSaved);
   const typedKey = apiKey.trim();
   const typedModel = model.trim();
+  /*
+   * A sign-in asks for no model, as a key or a plan doesn't: once connected, the conversation's
+   * model picker offers every model the provider lists for it. The connection still names one, the
+   * model a run uses when nobody picked: the one this sign-in already names where it is being
+   * signed in again, so an upgrade changes nothing, and otherwise the provider's usual one.
+   */
+  const signInModel = (
+    (provider && login === "oauth" ? ownModel(provider.id) : null) ??
+    kept?.model ??
+    preset?.model ??
+    ""
+  ).trim();
 
   const ready =
     !!provider &&
@@ -559,8 +587,24 @@ export function ChooseConnection({
           typedModel.length > 0 &&
           (!preset || usingSaved || typedKey.length > 0)
         : login === "oauth"
-          ? signedIn && typedModel.length > 0
+          ? signedIn && signInModel.length > 0
           : signedIn);
+
+  /**
+   * The model this provider's sign-in already names, in the list or as the connection in use.
+   * Unbiased AI's sign-in is kept as a key for its own address, so its address names it.
+   */
+  function ownModel(id: AiProvider["id"]): string | null {
+    const signedInBefore = (login: AiConnectionLogin | null) =>
+      login === "oauth" || (id === "unbiased" && login === "endpoint");
+    const listed = adding?.connected.find(
+      (entry) => entry.provider === id && signedInBefore(entry.login),
+    );
+    if (listed) return listed.model;
+    return connection?.provider === id && signedInBefore(connection.login)
+      ? connection.model
+      : null;
+  }
 
   function input(): AiConnectionInput | null {
     if (!provider || !login) return null;
@@ -582,7 +626,7 @@ export function ChooseConnection({
       };
     /*
      * Unbiased AI's sign-in, run by the server: its key is kept for the person, for the provider's
-     * own address. A plan or a Google or xAI sign-in the server ran connects as itself, below.
+     * own address. A plan or an xAI sign-in the server ran connects as itself, below.
      */
     if (
       login === "oauth" &&
@@ -594,7 +638,7 @@ export function ChooseConnection({
         provider: provider.id,
         login: "endpoint",
         baseUrl: preset.baseUrl,
-        model: typedModel,
+        model: signInModel,
         useSavedKey: true,
       };
     // Unbiased AI's sign-in ends in a key for its own address, sent exactly as a typed one is.
@@ -605,11 +649,11 @@ export function ChooseConnection({
         login: "endpoint",
         apiKey: minted.current,
         baseUrl: preset.baseUrl,
-        model: typedModel,
+        model: signInModel,
       };
     }
     if (login === "oauth")
-      return { provider: provider.id, login, model: typedModel };
+      return { provider: provider.id, login, model: signInModel };
     return { provider: provider.id, login };
   }
 
@@ -746,7 +790,7 @@ export function ChooseConnection({
         await finishPlanSignIn(plan);
       } else {
         const begun = await beginProviderSignIn(
-          provider.id as "google" | "xai" | "unbiased",
+          provider.id as "xai" | "unbiased",
         );
         if (!current()) {
           void cancelProviderSignIn(begun.attemptId).catch(() => {});
@@ -831,7 +875,7 @@ export function ChooseConnection({
   }
 
   /**
-   * Share the admin's own sign-in as it is, from the list: no sign-in again. A Google or xAI
+   * Share the admin's own sign-in as it is, from the list: no sign-in again. An xAI
    * sign-in runs on the model their own AI names, or the provider's usual one.
    */
   function shareMine(mine: AiConnection) {
@@ -997,7 +1041,9 @@ export function ChooseConnection({
                         className="size-4 text-destructive"
                       />
                       <span className="text-muted-foreground text-xs">
-                        Reconnect
+                        {signInRetired(entry)
+                          ? GOOGLE_SIGN_IN_ENDED.action
+                          : "Reconnect"}
                       </span>
                     </>
                   ) : entry ? (
@@ -1112,7 +1158,7 @@ export function ChooseConnection({
               </Field>
             ) : null}
 
-            {login === "endpoint" || login === "oauth" ? (
+            {login === "endpoint" ? (
               <Field>
                 <FieldLabel htmlFor="ai-connection-model">
                   Model name
@@ -1186,7 +1232,7 @@ export function ChooseConnection({
               type="button"
               variant="ghost"
             >
-              {provider ? "Back" : "Cancel"}
+              {provider ? "Back" : connectedHere ? "Done" : "Cancel"}
             </Button>
           ) : null}
           {provider ? (
@@ -1269,8 +1315,6 @@ const SIGN_IN_SAYS: Record<string, string> = {
     "Anthropic opens in your browser. Approve the request there, then paste the code it shows you.",
   openai:
     "OpenAI opens in your browser. It finishes on its own once you approve.",
-  google:
-    "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
   xai: "Authorize OpenBot to use models available to your xAI account.",
   unbiased:
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here.",
@@ -1356,11 +1400,7 @@ function SignInFields({
     chatGptServer &&
     (waiting ? waiting.method !== "device" : chatGptWay === "browser");
   const chatGptCode = chatGptServer && !chatGptInBrowser;
-  const signInName = chatGptServer
-    ? "ChatGPT"
-    : provider.id === "google"
-      ? "Google"
-      : provider.name;
+  const signInName = chatGptServer ? "ChatGPT" : provider.name;
   if (kept)
     return (
       <p className="flex items-center gap-2 text-sm">

@@ -39,6 +39,11 @@ export type AuthenticatedUser = {
    * one.
    */
   openbotVersion?: string | null;
+  /**
+   * The identity providers they have signed in through (getPerson's `providers`), such as "okta":
+   * where to send them to sign in again, for something that needs a recent sign-in.
+   */
+  providers?: string[];
 };
 
 /** Whether the gate holds: there is an onboarding to do and this person has not finished it. */
@@ -140,6 +145,7 @@ async function currentUser(
     role: knownRole(person.role),
     onboarding: person.onboarding,
     openbotVersion: answer.openbotVersion,
+    providers: person.providers ?? [],
   };
 }
 

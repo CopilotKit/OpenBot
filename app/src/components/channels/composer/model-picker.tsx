@@ -529,7 +529,7 @@ function Picker({
       >
         {rail ? (
           <fieldset className="col-start-1 row-span-2 row-start-1 m-0 flex min-h-0 min-w-0 flex-col items-center gap-1 overflow-y-auto border-y-0 border-r border-l-0 p-1.5">
-            <legend className="sr-only">Providers</legend>
+            <legend className="sr-only">AI providers</legend>
             {connections.map((connection) => {
               const shown = !searching && tab === connection.id;
               const name = connectionName(connection);

@@ -29,7 +29,7 @@ import {
 } from "./admin-settings-api";
 
 /**
- * Admin → Providers: an admin changes the organization's AI, disconnects it and connects another,
+ * Admin → AI providers: an admin changes the organization's AI, disconnects it and connects another,
  * with the same chooser Settings and Connect your AI use. On OpenBot Cloud it says which AI is the
  * organization's and which is the admin's own, and links to Settings → Your AI to change their own.
  * Somebody who isn't an admin never reaches it.
@@ -658,7 +658,7 @@ function section(page: Page, title: string) {
   });
 }
 
-describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
+describe.skipIf(!asked)("Admin → AI providers: the organization's AI", () => {
   for (const engine of engines)
     for (const theme of THEMES)
       for (const window of [WIDE, PHONE])
@@ -1089,11 +1089,11 @@ describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
 /**
  * On OpenBot Cloud an admin shares their own plan or provider sign-in as the organization's AI:
  * they sign in exactly as Connect your AI signs them in (the server runs it and keeps it for them),
- * or share the one they already have in one press. Providers then says whose it is, and says when
+ * or share the one they already have in one press. AI providers then says whose it is, and says when
  * it stopped working. Inside OpenBot Desktop the chooser keeps Desktop's own plan sign-ins.
  */
 describe.skipIf(!asked)(
-  "Admin → Providers: an admin's own sign-in, shared as the organization's AI",
+  "Admin → AI providers: an admin's own sign-in, shared as the organization's AI",
   () => {
     for (const engine of engines)
       for (const theme of THEMES)
@@ -1273,7 +1273,7 @@ describe.skipIf(!asked)(
     for (const engine of engines)
       for (const theme of THEMES)
         for (const window of [WIDE, PHONE])
-          test(`Providers says whose sign-in it is and when it stopped working, in ${engine}, ${theme}, ${window.width}`, async () => {
+          test(`AI providers says whose sign-in it is and when it stopped working, in ${engine}, ${theme}, ${window.width}`, async () => {
             const server = new FakeServer();
             server.connection = GetAiConnectionResponse.parse(
               spec.components.examples.AiConnectionSharedPlanExample?.value,
