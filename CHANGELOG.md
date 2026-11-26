@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **OpenBot's icon in the browser and on a phone.** The web app shows OpenBot's orb, the icon
+  OpenBot Desktop uses, in a browser's tab, on a phone's home screen when it is added there, and as
+  an installed app's icon. Added to an iPhone's home screen it used to show a grey square with a
+  letter in it, and a tab showed no icon at all.
+
 ## 1.2.0
 
 **Before upgrading.**
