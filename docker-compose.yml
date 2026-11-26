@@ -718,9 +718,10 @@ services:
       timeout: 5s
       retries: 5
 
-  # The TypeScript LangGraph engine, which new Bots run on. LangGraph.js behind AG-UI, with the
-  # same harness contract as the Python one above (the model per run, deployment and browser tools, a
-  # provider's refusal in its own words). Under no profile, so every edition's `up` starts it.
+  # The TypeScript LangGraph engine, which new Bots run on. LangGraph.js behind plain AG-UI: its
+  # instructions are the run's system messages, every tool call is handed back to the server, and
+  # the model per run is the one OpenBot extension it reads. Under no profile, so every edition's
+  # `up` starts it.
   agent-langgraph-ts:
     build:
       context: .
@@ -754,9 +755,8 @@ services:
       CLAUDE_PLAN_HARNESS_URL: ${CLAUDE_PLAN_HARNESS_URL:-}
       CHATGPT_PLAN_HARNESS_URL: ${CHATGPT_PLAN_HARNESS_URL:-}
       CHATGPT_PLAN_HARNESS_TOKEN: ${CHATGPT_PLAN_HARNESS_TOKEN:-}
-      # Where this Bot runs a tool: back through the deployment that granted it. See the managed Bot.
-      OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
-      AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
+      # No tool callback: this engine calls nothing back. Every OpenBot tool it calls ends its run
+      # for the server to answer, over plain AG-UI, as a Bot somebody connects does.
     extra_hosts:
       - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
     healthcheck:

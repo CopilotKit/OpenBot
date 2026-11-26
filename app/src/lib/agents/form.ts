@@ -16,7 +16,7 @@ export const agentFormSchema = z.object({
     .string()
     .trim()
     .min(1, "A description of what it does is required.")
-    .max(1000, "What it does must be 1000 characters or fewer."),
+    .max(5000, "What it does must be 5000 characters or fewer."),
   visibility: z.enum(["public", "private"]),
   /**
    * The AG-UI endpoint this coworker runs on. Empty means the Bot in the box.
@@ -47,7 +47,7 @@ export const agentFormSchema = z.object({
     .string()
     .trim()
     .min(1, "Instructions are required.")
-    .max(1000, "Instructions must be 1000 characters or fewer.")
+    .max(5000, "Instructions must be 5000 characters or fewer.")
     .optional(),
 });
 

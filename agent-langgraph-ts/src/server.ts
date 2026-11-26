@@ -47,7 +47,11 @@ async function readBody(request: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-export type ServerOptions = Omit<RunOptions, "emit" | "signal"> & { env?: Env };
+export type ServerOptions = Omit<RunOptions, "emit" | "signal"> & {
+  env?: Env;
+  /** For tests: the fetch that reads a ChatGPT plan's model list. */
+  fetch?: typeof fetch;
+};
 
 /**
  * The models a signed-in ChatGPT plan offers, from the plan's own harness, for the server's model
@@ -129,7 +133,7 @@ export function createEngine(options: ServerOptions = {}): Server {
       connection: "keep-alive",
       "x-accel-buffering": "no",
     });
-    // The caller going away stops the run: its model calls and its tool callbacks.
+    // The caller going away stops the run and its model calls.
     const controller = new AbortController();
     response.on("close", () => {
       if (!response.writableFinished) controller.abort();
