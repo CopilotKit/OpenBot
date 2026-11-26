@@ -74,7 +74,7 @@ export function RoutinesHome() {
       ) : null}
       <PageColumn bar={showToggle}>
         <div className="pt-4 pb-6 text-center">
-          <h1 className="font-semibold text-[1.6875rem] leading-tight tracking-tight">
+          <h1 className="font-semibold text-3xl leading-tight tracking-tight">
             <span className="block text-muted-foreground">Say it once.</span>{" "}
             Your Bots keep doing it.
           </h1>

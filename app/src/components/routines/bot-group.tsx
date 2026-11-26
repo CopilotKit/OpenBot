@@ -67,10 +67,7 @@ function RowLine({
         <span className="truncate">{rowName(row)}</span>
       </span>
       <span
-        className={cn(
-          "shrink-0 pl-7 text-[0.8125rem] sm:pl-0",
-          FACT_CLASS[fact.tone],
-        )}
+        className={cn("shrink-0 pl-7 text-sm sm:pl-0", FACT_CLASS[fact.tone])}
       >
         {fact.text}
       </span>
