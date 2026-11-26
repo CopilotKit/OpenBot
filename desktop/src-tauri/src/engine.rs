@@ -45,8 +45,9 @@ use serde::{Deserialize, Serialize};
 /// OpenBot's. The setup window then says the line on whichever screen the person is on, and OpenBot
 /// comes back to the front once that window is done with.
 ///
-/// `asks` when the step waits for the person's go-ahead in OpenBot's own window before it raises
-/// such a prompt (`install::GoAhead`). The window explains what comes next, with one button.
+/// `asks` when the step waits for the person's go-ahead in OpenBot's own window (`install::GoAhead`):
+/// before it raises such a prompt (`before_prompt`, with Continue), or after the person closed one
+/// (with Try again). The window explains what comes next, with one button.
 ///
 /// `said` is what the person reads, in plain words: what OpenBot is doing for them. `detail` is the
 /// same moment in the log's words, with the names a person never needs on screen (Podman, the
@@ -60,6 +61,10 @@ pub struct StepLine {
     /// The engine itself is being updated (`engine_versions`): the window asks nothing of it until
     /// the update is done. An engine being updated refuses what is asked of it.
     pub updating: bool,
+    /// With `asks`: the go-ahead is for the system's password prompt, which comes up only once the
+    /// person chooses Continue (`install::install_with_password`). Without it, an `asks` line is a
+    /// wait after a prompt the person closed, with Try again.
+    pub before_prompt: bool,
     pub detail: Option<String>,
 }
 
@@ -71,6 +76,7 @@ impl StepLine {
             elsewhere: false,
             asks: false,
             updating: false,
+            before_prompt: false,
             detail: None,
         }
     }
@@ -82,6 +88,7 @@ impl StepLine {
             elsewhere: true,
             asks: false,
             updating: false,
+            before_prompt: false,
             detail: None,
         }
     }
@@ -93,7 +100,17 @@ impl StepLine {
             elsewhere: false,
             asks: true,
             updating: false,
+            before_prompt: false,
             detail: None,
+        }
+    }
+
+    /// A line about a step that waits for the person's Continue in OpenBot's window before the
+    /// system's password prompt comes up: see `before_prompt`.
+    pub fn before_prompt(said: impl Into<String>) -> Self {
+        Self {
+            before_prompt: true,
+            ..Self::asks(said)
         }
     }
 

@@ -278,6 +278,10 @@ struct Progress {
     /// The step waits for the person's go-ahead in this window: see `install::GoAhead`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     asks: bool,
+    /// The go-ahead it waits for comes before the system's password prompt, which comes up only on
+    /// Continue: see `engine::StepLine::before_prompt`.
+    #[serde(rename = "beforePrompt", skip_serializing_if = "std::ops::Not::not")]
+    before_prompt: bool,
     /// The engine itself is being updated: see `engine::StepLine::updating`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     updating: bool,
@@ -976,6 +980,7 @@ fn report_line<R: tauri::Runtime>(
             downloads: None,
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         },
@@ -1194,6 +1199,7 @@ fn report_running_row<R: tauri::Runtime>(
         elsewhere,
         asks,
         updating,
+        before_prompt,
         detail: _,
     } = line;
     setup_phase(step);
@@ -1219,6 +1225,7 @@ fn report_running_row<R: tauri::Runtime>(
             downloads: None,
             elsewhere,
             asks,
+            before_prompt,
             updating,
             paused,
         },
@@ -1715,6 +1722,7 @@ fn report_running_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: line.elsewhere,
             asks: line.asks,
+            before_prompt: line.before_prompt,
             updating: line.updating,
             paused: false,
         },
@@ -1748,6 +1756,7 @@ fn report_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         },
@@ -6151,6 +6160,7 @@ impl QuitStatus {
             downloads: None,
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         };
