@@ -15,6 +15,7 @@ import {
   type ViteDevServer,
 } from "vite";
 import { APP_PREFIX } from "./workbench/appContract";
+import { workbenchEnvValues } from "./workbench/buildEnv";
 import { noConfigRestart } from "./workbench/noConfigRestart";
 import {
   APP_PID_FILE,
@@ -46,8 +47,9 @@ const ENV_NAMES = [
 
 // Vite may serialize `import.meta.env.*` define keys as static JSON in dev, so the four reads are
 // replaced in the source text instead. A page can override each one with `globalThis.__workbenchEnv`.
+// With no .env value, each starts as in a release installer (workbench/buildEnv.ts).
 function workbenchEnv(mode: string): Plugin {
-  const loaded = loadEnv(mode, desktopDir, "VITE_");
+  const loaded = workbenchEnvValues(loadEnv(mode, desktopDir, "VITE_"));
   return {
     name: "workbench-env",
     enforce: "pre",
