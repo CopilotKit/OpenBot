@@ -9,6 +9,7 @@ import {
 import type { ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { PendingDeletionGate } from "@/components/auth/pending-deletion-page";
+import { GroupChat } from "@/components/channels/group-chat";
 import { OrganizationSettingsPage } from "@/components/organizations/organization-settings-page";
 import { PeopleTypeahead } from "@/components/teams/people-typeahead";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -19,6 +20,9 @@ import { organizationKeys } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 import { Route as GeneralRoute } from "@/routes/_authed/settings/index";
 import { ME_PATH, meResponse } from "./accounts-api";
+import { approvalInboxResponse } from "./approvals-api";
+import { answerBotsList } from "./bots-api";
+import { answerGroupRead, type GroupFixture } from "./conversations-api";
 
 /**
  * Settings, General, with its Delete account section, as a page of its own for
@@ -97,9 +101,73 @@ const MEMBERS = [
 if (state === "pending")
   showPendingDeletion({ deleteAfter: "2026-12-09T10:00:00.000Z" });
 
+/**
+ * A conversation with a Bot that Dana shares with Sam, where Priya said something before she
+ * deleted her account: her line stays, with no sender.
+ */
+const GROUP = "channel_ghost";
+const GHOST_GROUP: GroupFixture = {
+  bots: [{ id: "research", name: "Research" }],
+  people: [
+    {
+      userId: "dana",
+      email: "dana@acme.test",
+      name: "Dana Whitfield",
+      creator: true,
+    },
+    {
+      userId: "sam",
+      email: "sam@acme.test",
+      name: "Sam Ortiz",
+      creator: false,
+    },
+  ],
+  messages: [
+    {
+      id: "g-1",
+      ownerUserId: "",
+      agentId: null,
+      text: "Can you pull last quarter's freight costs by lane?",
+      status: "completed",
+      createdAt: "2026-11-20T09:00:00.000Z",
+    },
+    {
+      id: "g-1:research",
+      ownerUserId: "",
+      agentId: "research",
+      text: "Here are last quarter's freight costs by lane. The Rotterdam lane rose 12%.",
+      status: "completed",
+      createdAt: "2026-11-20T09:00:30.000Z",
+    },
+    {
+      id: "g-2",
+      ownerUserId: "sam",
+      agentId: null,
+      text: "Thanks. Can you compare that with the quarter before?",
+      status: "completed",
+      createdAt: "2026-11-24T10:00:00.000Z",
+    },
+  ],
+};
+
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const path = new URL(String(input), location.origin).pathname;
   const method = (init?.method ?? "GET").toUpperCase();
+  if (state === "ghost") {
+    const answered =
+      answerGroupRead(input, init, GROUP, GHOST_GROUP) ??
+      answerBotsList(input, init, {
+        visible: [{ id: "research", name: "Research", avatarSeed: "research" }],
+      }) ??
+      approvalInboxResponse(path, {
+        enabled: true,
+        requests: [],
+        rules: [],
+        teamRules: [],
+        questions: [],
+      });
+    if (answered) return answered;
+  }
   if (path === ME_PATH)
     return meResponse({
       user: {
@@ -183,12 +251,19 @@ function Picker() {
   );
 }
 
+/** The conversation, as Dana reads it. */
+function Ghost() {
+  return <GroupChat channelId={GROUP} />;
+}
+
 const Page =
   state === "members"
     ? OrganizationSettingsPage
     : state === "picker"
       ? Picker
-      : General;
+      : state === "ghost"
+        ? Ghost
+        : General;
 const rootRoute = createRootRoute({
   component: () => (
     <div className="bg-background text-foreground">

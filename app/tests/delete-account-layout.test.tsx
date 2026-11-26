@@ -9,7 +9,8 @@ import { compile } from "tailwindcss";
  * Delete account section with the organizations that stand in the way, the dialog filled in, the
  * dialog asking to sign in again, and the page an account scheduled to be deleted shows. And such
  * a member as others see them: "Deactivated" beside their name in the organization's members and
- * in the box that picks somebody from it. Drawn from delete-account.fixture.tsx, styled by the
+ * in the box that picks somebody from it. And, once the account is gone, what they said in a
+ * conversation others are in, headed "Deleted user". Drawn from delete-account.fixture.tsx, styled by the
  * app's stylesheet. Nothing scrolls sideways, the dialog's buttons are all on screen, and the
  * blockers' buttons and the label sit inside their rows.
  *
@@ -42,6 +43,7 @@ const STATES = [
   "pending",
   "members",
   "picker",
+  "ghost",
 ] as const;
 
 async function bundle(): Promise<string> {
@@ -187,6 +189,11 @@ async function open(
     await style(page);
     return page;
   }
+  if (state === "ghost") {
+    await page.getByText("Deleted user", { exact: true }).waitFor();
+    await style(page);
+    return page;
+  }
   if (state === "picker") {
     await page.getByRole("combobox", { name: "Name or email" }).fill("a");
     await page.getByRole("option", { name: /Priya Raman/ }).waitFor();
@@ -278,6 +285,13 @@ describe.skipIf(!asked)("deleting your account, on screen", () => {
             if (state === "pending")
               for (const name of ["Cancel deletion", "Sign out"])
                 expect(await onScreen(page, name)).toBe(true);
+            // A deleted person's line is headed Deleted user, and nothing else names them.
+            if (state === "ghost") {
+              const text = await page.evaluate(() => document.body.innerText);
+              expect(text).toContain("Deleted user");
+              expect(text).not.toContain("Someone who left");
+              expect(text).not.toContain("deleted-user:");
+            }
             // The label is beside Priya's name, inside her row, and beside nobody else's.
             if (state === "members" || state === "picker") {
               const label = page.getByText("Deactivated", { exact: true });
