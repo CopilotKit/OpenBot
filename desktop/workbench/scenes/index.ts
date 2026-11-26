@@ -4,7 +4,8 @@ export const SCENES: readonly Scene[] = [
     id: "setup",
     title: "Setup",
     group: "Setup",
-    start: { hash: "", search: "" },
+    // A first run you can click through: sign in, the agreement, then setup (states.ts).
+    start: { hash: "#first-run", search: "" },
   },
   {
     id: "setup-status",

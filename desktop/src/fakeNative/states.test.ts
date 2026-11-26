@@ -98,3 +98,46 @@ test("a completed move includes the signed-in Cloud account", () => {
     },
   });
 });
+
+test("#first-run waits on the sign-in until the person opens the approval page", async () => {
+  const answer = stateAnswer({ hash: "#first-run", search: "" });
+  let settled: unknown = "waiting";
+  void Promise.resolve(answer("sign_in_to_copilotkit", { attempt: "a" })).then(
+    (value) => {
+      settled = value;
+    },
+  );
+  const page = answer("copilotkit_sign_in_page", { attempt: "a" }) as {
+    url: string;
+    userCode: string;
+  };
+  expect(page.userCode).toBe("WXYZ-2345");
+  await new Promise((done) => setTimeout(done, 20));
+  expect(settled).toBe("waiting");
+  answer("plugin:opener|open_url", { url: page.url });
+  await new Promise((done) => setTimeout(done, 1500));
+  expect(settled).toEqual({ signedIn: true });
+  expect(answer("copilotkit_sign_in_page", { attempt: "b" })).toBeNull();
+});
+
+test("#first-run asks for the terms until setup is given the version accepted", async () => {
+  const answer = stateAnswer({ hash: "#first-run", search: "" });
+  const terms = answer("local_eval_terms", { attempt: "t" }) as {
+    status: string;
+    accepted: boolean;
+    version: string;
+  };
+  expect(terms).toMatchObject({ status: "required", accepted: false });
+  const report = answer("set_up_local_eval", {
+    attempt: "s",
+    root: "/Users/you/OpenBot",
+    acceptedEulaVersion: terms.version,
+  });
+  expect(answer("local_eval_terms", { attempt: "t2" })).toMatchObject({
+    accepted: true,
+  });
+  expect(await report).toMatchObject({
+    outcome: "completed",
+    licence: "valid",
+  });
+}, 15_000);

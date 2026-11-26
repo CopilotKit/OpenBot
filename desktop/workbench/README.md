@@ -16,6 +16,12 @@ Change the viewport, zoom, OS, theme, host, role, skin and sidebar from the Wind
 Fit scales the window to its available space; a fixed zoom lets the stage scroll. Resizing and
 changing theme preserve the current interaction. Host, OS and session changes restart the frame.
 
+The Setup preset is a first run you can click through, with the same build settings as a release
+installer (OpenBot Cloud on). Pick OpenBot (Self-Contained) and press Install. Sign-in waits for
+the browser: press Open the sign-in page to stand in for approving it there. Then accept the
+agreement, and setup finishes after a few seconds. The fake for this is `#first-run` in
+`src/fakeNative/states.ts`.
+
 Select mode sets what the pointer does when Comment is off. Inspect outlines the element under the
 pointer, with its size and the gaps to its neighbours. Off draws nothing over the app, so you can
 just click through it. The workbench keeps your choice in this browser.

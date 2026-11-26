@@ -299,8 +299,67 @@ function createStates(where: Where): States {
   });
   const none = { openai: false, anthropic: false };
 
+  /*
+   * `#first-run`: a first run that can be clicked through, for the workbench's Setup view. The
+   * person is not signed in to CopilotKit and has not accepted the agreement. Sign-in waits until
+   * the person opens the approval page from the window (opening it stands in for approving it in
+   * the browser). The agreement waits for Accept. Then setup finishes after a few seconds.
+   */
+  const firstRun = where.hash === "#first-run";
+  const SIGN_IN_PAGE = {
+    url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
+    userCode: "WXYZ-2345",
+  };
+  let firstRunSignedIn = false;
+  let firstRunAccepted = false;
+  let approve: ((answer: { signedIn: boolean }) => void) | null = null;
+  const firstRunAnswer = (
+    command: string,
+    args: Record<string, unknown> | undefined,
+  ): unknown => {
+    switch (command) {
+      case "sign_in_to_copilotkit":
+        if (firstRunSignedIn) return { signedIn: true };
+        return new Promise((resolve) => {
+          approve = resolve;
+        });
+      case "copilotkit_sign_in_page":
+        return firstRunSignedIn ? null : SIGN_IN_PAGE;
+      case "plugin:opener|open_url":
+        if (args?.url === SIGN_IN_PAGE.url && approve) {
+          const signedIn = approve;
+          approve = null;
+          setTimeout(() => {
+            firstRunSignedIn = true;
+            signedIn({ signedIn: true });
+          }, 1000);
+        }
+        return null;
+      case "local_eval_terms":
+        return {
+          status: "required",
+          accepted: firstRunAccepted,
+          version: "developer-edition-2026-10-01-web",
+          url: "https://copilotkit.ai/legal/developer-edition",
+          organizationName: "Acme",
+        };
+      case "set_up_local_eval":
+        if (typeof args?.acceptedEulaVersion === "string")
+          firstRunAccepted = true;
+        return new Promise((resolve) =>
+          setTimeout(() => resolve(status("starting", "valid")), 5000),
+        );
+      default:
+        return undefined;
+    }
+  };
+
   const answer: FallbackAnswer = (command, args) => {
     const fake = globalThis.__fake;
+    if (firstRun) {
+      const found = firstRunAnswer(command, args);
+      if (found !== undefined) return found;
+    }
     if (throws && command === "app_update_offer")
       return {
         version: "1.3.0",
