@@ -58,6 +58,12 @@ const REJECTED = "invalid x-api-key";
 /** How the next `/run` goes. A fresh one per test. */
 type RunPlan =
   | { kind: "fails"; message: string }
+  /**
+   * The Bot's engine can't take the run (it isn't answering), as OpenBot's server ends one: the run
+   * starts and ends in a RUN_ERROR coded BOT_ENGINE_UNAVAILABLE, and the turn is kept as a refused
+   * turn (`listRefusedTurns`). The person's message reaches the thread, as it does.
+   */
+  | { kind: "engineRefused"; message: string }
   /** The Bot works (it says what it found, and reads an app) and then the run fails. */
   | { kind: "worksThenFails"; text: string; message: string }
   | { kind: "calls"; tool: string }
@@ -238,6 +244,37 @@ function run(input: RunAgentInput): Response {
     const events = [
       started,
       { type: "RUN_ERROR", message: plan.message, code: "agent_error" },
+    ];
+    record(input.threadId, events);
+    return sse(events);
+  }
+  if (plan.kind === "engineRefused") {
+    const asked = input.messages.findLast((message) => message.role === "user");
+    const at = asked ? input.messages.indexOf(asked) : -1;
+    refusedTurns.push({
+      id: `refused-${refusedTurns.length + 1}`,
+      botId: "failed-run-bot",
+      threadId: input.threadId,
+      afterMessageId: at > 0 ? (input.messages[at - 1]?.id ?? null) : null,
+      message: asked
+        ? {
+            id: asked.id,
+            text: typeof asked.content === "string" ? asked.content : "",
+          }
+        : null,
+      initiator: "person",
+      code: "BOT_ENGINE_UNAVAILABLE",
+      detail: plan.message,
+      model: null,
+      createdAt: new Date(Date.now() + refusedTurns.length).toISOString(),
+    });
+    const events = [
+      started,
+      {
+        type: "RUN_ERROR",
+        message: plan.message,
+        code: "BOT_ENGINE_UNAVAILABLE",
+      },
     ];
     record(input.threadId, events);
     return sse(events);
@@ -1054,6 +1091,98 @@ test("two turns refused in a row each keep their own notice, under their own mes
       MODEL_REFUSED,
     );
   }
+});
+
+/*
+ * FOUND IN TESTING. A Bot whose engine had stopped said so under the message, as the turn's last
+ * line. With the engine back the next message was answered, and that line went with the turn it
+ * belonged to: the message the engine never answered sat in the conversation with nothing under it,
+ * then and after every reload. The server keeps such a turn as a refused one, and the run's RUN_ERROR
+ * says so (BOT_ENGINE_UNAVAILABLE), so it stays under its message like any refusal.
+ */
+test("a turn refused because the Bot's engine isn't answering keeps its notice under its message, through the next turn and after a reload", async () => {
+  const ENGINE_DOWN =
+    "Tide Table Clerk can't run because OpenBot's LangGraph engine isn't answering. Try again in a moment, or ask an admin to check that it's running.";
+  const ASKED = "What is a spring tide, in one sentence?";
+  const AGAIN = "And again: what is a spring tide?";
+  const ANSWER = "A spring tide is an unusually large tide. Fair winds!";
+  const noticeUnder = (view: ReturnType<typeof open>, words: string) =>
+    within(
+      view
+        .getByText(words)
+        .closest("[data-slot=message-scroller-item]") as HTMLElement,
+    ).queryByTestId("transcript-stopped");
+
+  plans = [
+    { kind: "engineRefused", message: ENGINE_DOWN },
+    { kind: "answers", text: ANSWER },
+  ];
+  const live = open();
+  await send(live, ASKED);
+  await waitFor(() =>
+    expect(noticeUnder(live, ASKED)?.textContent).toBe(ENGINE_DOWN),
+  );
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+  // Refused, not failed: the message stays sent and the box is empty, as for any refusal.
+  await waitFor(() => expect(typed(live)).toBe(""));
+
+  // The server's record, read again after the live refusal, is in before the next turn.
+  await waitFor(() => expect(refusedTurns).toHaveLength(1));
+  await new Promise((settle) => setTimeout(settle, 50));
+
+  // The next turn is answered, and the refused one keeps its notice. Typed into the empty box.
+  const user = userEvent.setup({ document: live.container.ownerDocument });
+  await user.type(await live.findByRole("textbox", { name: "Message" }), AGAIN);
+  await user.click(await live.findByRole("button", { name: "Send message" }));
+  await live.findByText(ANSWER);
+  expect(noticeUnder(live, ASKED)?.textContent).toBe(ENGINE_DOWN);
+  expect(live.getAllByTestId("transcript-stopped")).toHaveLength(1);
+
+  // Reloaded: it comes back where it was, once.
+  cleanup();
+  queryClient.clear();
+  const back = open();
+  await settled(back, ANSWER);
+  await waitFor(() =>
+    expect(noticeUnder(back, ASKED)?.textContent).toBe(ENGINE_DOWN),
+  );
+  expect(back.getAllByTestId("transcript-stopped")).toHaveLength(1);
+  expect(back.getAllByText(ASKED)).toHaveLength(1);
+});
+
+/*
+ * The same refusal as the conversation's last turn, reloaded: drawn under its message from the
+ * server's record, and not a second time as how the last run ended.
+ */
+test("a conversation whose last turn the engine refused shows the notice once after a reload, under its message", async () => {
+  const ENGINE_DOWN =
+    "Tide Table Clerk can't run because OpenBot's LangGraph engine isn't answering. Try again in a moment, or ask an admin to check that it's running.";
+  const ASKED = "What is a neap tide, in one sentence?";
+  plans = [{ kind: "engineRefused", message: ENGINE_DOWN }];
+  const live = open();
+  await send(live, ASKED);
+  await live.findByTestId("transcript-stopped");
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+
+  cleanup();
+  queryClient.clear();
+  const back = open();
+  await settled(back, ASKED);
+  // The replay has to be all the way in before a second notice could be drawn from it.
+  await waitFor(() =>
+    expect(back.getAllByTestId("transcript-stopped")).toHaveLength(1),
+  );
+  await new Promise((settle) => setTimeout(settle, 100));
+  const shown = back.getAllByTestId("transcript-stopped");
+  expect(shown).toHaveLength(1);
+  expect(
+    (shown[0] as HTMLElement).closest("[data-slot=message-scroller-item]")
+      ?.textContent,
+  ).toContain(ASKED);
 });
 
 test("a turn that failed before it did anything hands the words back to send again", async () => {
