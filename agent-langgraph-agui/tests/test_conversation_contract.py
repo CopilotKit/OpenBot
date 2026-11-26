@@ -196,6 +196,49 @@ def test_the_role_and_tool_guidance_are_said_once_though_sent_twice(monkeypatch,
         assert stale not in last, f"the stale {stale} reached the next run"
 
 
+OPENER = "This is a conversation in OpenBot."
+
+
+def _user_turns(body: dict) -> str:
+    """Every user turn the provider request carries, as one string."""
+    return "\n".join(
+        json.dumps(message.get("content"))
+        for message in [*(body.get("messages") or []), *(body.get("input") or [])]
+        if isinstance(message, dict) and message.get("role") == "user"
+    )
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_the_servers_opener_is_a_system_message_not_a_user_turn(monkeypatch, environment):
+    """OpenBot opens every run with one constant system line, ahead of the role.
+
+    `openerMessage` in server/src/copilot.ts, with an `openbot-opener:<bot>` id. It is the server's
+    own, like the role, so it stays a system message: quoted as conversation data, it reached the
+    model as a user turn on every run. Once, on a fresh thread and on the next run.
+    """
+    first = conversation(run_id="contract-run-1")
+    first["messages"].insert(
+        0, {"id": f"openbot-opener:{BOT}", "role": "system", "content": OPENER}
+    )
+    second = json.loads(json.dumps(first))
+    second["runId"] = "contract-run-2"
+    second["messages"] += [
+        {"id": "a2", "role": "assistant", "content": "ok"},
+        {"id": "u3", "role": "user", "content": f"And now? {NEWER_QUESTION}"},
+    ]
+    with fake_provider() as (base, bodies):
+        with TestClient(_fresh_app(monkeypatch, environment, base)) as client:
+            _post(client, first)
+            _post(client, second)
+    assert len(bodies) == 2, "each run calls the model once"
+    for body in bodies:
+        assert OPENER not in _user_turns(body), "the opener reached the model as a user turn"
+        assert OPENER in _system_text(body), "the opener is not a system message"
+        assert json.dumps(body).count(OPENER) == 1
+        assert STANDING_ROLE in _system_text(body) and GRANTED_TOOLS in _system_text(body)
+        assert missing_from(body) == []
+
+
 APPROVED_RESULT = "CONTRACT_APPROVED_RESULT_9c1e"
 
 
