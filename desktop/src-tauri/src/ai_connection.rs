@@ -103,7 +103,7 @@ impl Plan {
     pub fn port(self) -> u16 {
         match self {
             Plan::Claude => 4212,
-            Plan::ChatGpt => 4206,
+            Plan::ChatGpt => 4216,
         }
     }
 
@@ -968,7 +968,7 @@ mod tests {
         );
         assert_eq!(
             settings["CHATGPT_PLAN_HARNESS_URL"],
-            "http://agent-chatgpt-plan:4206"
+            "http://agent-chatgpt-plan:4216"
         );
         assert!(crate::env::MINTED.contains(&GATEWAY_TOKEN));
         assert!(crate::vault::is_secret(GATEWAY_TOKEN));

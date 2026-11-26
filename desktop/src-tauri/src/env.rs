@@ -3222,7 +3222,7 @@ mod model_tests {
         );
         assert_eq!(
             env["CHATGPT_PLAN_HARNESS_URL"],
-            "http://agent-chatgpt-plan:4206"
+            "http://agent-chatgpt-plan:4216"
         );
 
         // The same Bot on an Anthropic key runs in its own container, on the gateway.

@@ -75,28 +75,28 @@ const PATIENCE_FOR_THE_LINK: Duration = Duration::from_secs(90);
 /// choice between accounts. Too short tells somebody who did nothing wrong that it did not work.
 const PATIENCE_FOR_THE_PERSON: Duration = Duration::from_secs(600);
 
-/// The published name of the image whose `langchain-openai` runs the ChatGPT sign-in.
+/// The published name of a ChatGPT plan's engine: OpenAI's own Agents SDK, served over AG-UI, on
+/// the plan's Sign in with ChatGPT token (`agent-openai-agents/`).
 ///
-/// The LangGraph harness, used as a tool rather than as a Bot: it is the image that already carries
-/// the vendor's own login. Every install pulls it, because a ChatGPT plan also runs it as its model
-/// service (`CHATGPT_PLAN_SERVICE`).
+/// The sign-in itself no longer runs in an image: Desktop runs it natively (`chatgpt_sign_in`).
+/// Kept under this name because Install, the release's image list and Start all reach the plan's
+/// engine image through it.
 ///
 /// A name, not a reference: see `SIGN_IN_IMAGE`.
-pub const CHATGPT_SIGN_IN_IMAGE: &str = "agent-langgraph-agui";
+pub const CHATGPT_SIGN_IN_IMAGE: &str = "agent-openai-agents";
 
-/// The Compose service that holds a signed-in ChatGPT plan's model transport.
+/// The Compose service that runs a signed-in ChatGPT plan's engine.
 ///
-/// The same image as the sign-in, run as a service beside the Bot. The Bot itself is the TypeScript
-/// LangGraph image, and LangChain's ChatGPT plan model exists only in Python, so the Bot sends its
-/// model calls here, and so do the server's own Bots on that plan. A service of its own behind its
-/// own profile, started only on a ChatGPT plan, at Start or alone when the plan is chosen in the
-/// app (`crate::ai_connection::Plan`), so every other installation runs one Bot image, not two.
+/// The OpenAI Agents SDK engine, which is the plan's Bot (`harness::speaking_for("openai")`) and,
+/// at the same address, the plan's model for the server's own Bots on that plan. A service of its
+/// own behind its own profile, started only on a ChatGPT plan, at Start or alone when the plan is
+/// chosen in the app (`crate::ai_connection::Plan`).
 pub const CHATGPT_PLAN_SERVICE: &str = "agent-chatgpt-plan";
 
-/// Where the Bot and the server reach that service: its name on the Compose network and the port
-/// its Dockerfile fixes. Written to `.env` as `CHATGPT_PLAN_HARNESS_URL` on every Start, so a plan
+/// Where the server reaches that service: its name on the Compose network and the port its
+/// Dockerfile fixes. Written to `.env` as `CHATGPT_PLAN_HARNESS_URL` on every Start, so a plan
 /// chosen in the app reaches it with no restart.
-pub const CHATGPT_PLAN_URL: &str = "http://agent-chatgpt-plan:4206";
+pub const CHATGPT_PLAN_URL: &str = "http://agent-chatgpt-plan:4216";
 
 /// Where the vendor's login persists what it gets.
 const CHATGPT_STORE: &str = "/root/.langchain/chatgpt-auth.json";

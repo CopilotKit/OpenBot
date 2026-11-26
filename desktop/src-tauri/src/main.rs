@@ -11068,29 +11068,10 @@ async fn begin_chatgpt_sign_in<R: tauri::Runtime>(
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
-    #[cfg(target_os = "linux")]
-    let service_app = app.clone();
-    // The sign-in's image downloads in its task, said to the window as Install says it.
-    let progress_app = app.clone();
-    let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        // Install pulls this image only for an installation already on a ChatGPT plan
-        // (`preparation::PLAN_IMAGES`): a first sign-in downloads it here, shown as Install shows it.
-        let (address, image) = prepared_sign_in_with(
-            &root,
-            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
-            |address, image| {
-                download_missing(&progress_app, address, std::slice::from_ref(image), || {
-                    Ok(())
-                })
-            },
-        )?;
-        #[cfg(target_os = "linux")]
-        {
-            let shell = service_app.state::<Shell>();
-            let _startup = shell.startup.lock().unwrap();
-            ensure_linux_podman_api(&shell, &address)?;
-        }
-        openbot_desktop_lib::plan::SigningInToChatGpt::begin(&address, &image)
+    // OpenAI's Sign in with ChatGPT plan usage, natively: PKCE, a 127.0.0.1 loopback and this
+    // computer's host id. No image and no container. See `chatgpt_sign_in`.
+    let url = tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::chatgpt_sign_in::begin(&root).map_err(Problem::plain)
     })
     .await
     .map_err(|error| {
@@ -11099,7 +11080,6 @@ async fn begin_chatgpt_sign_in<R: tauri::Runtime>(
             format!("the sign-in task did not run: {error}"),
         )
     })??;
-    *app.state::<Shell>().signing_in_to_chatgpt.lock().unwrap() = Some(signing);
     let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
     Ok(url)
 }
@@ -11112,14 +11092,8 @@ redemption, which is why there is no code field on that half of the screen.
 */
 #[tauri::command]
 async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String> {
-    let signing = app
-        .state::<Shell>()
-        .signing_in_to_chatgpt
-        .lock()
-        .unwrap()
-        .take()
-        .ok_or_else(|| "That sign-in is no longer running. Start it again.".to_string())?;
-    tauri::async_runtime::spawn_blocking(move || signing.finish())
+    let _ = app;
+    tauri::async_runtime::spawn_blocking(openbot_desktop_lib::chatgpt_sign_in::finish)
         .await
         .map_err(|error| format!("The sign-in did not finish: {error}"))?
 }
@@ -11132,7 +11106,7 @@ already stopped listening for. The browser tab gets OpenBot's page saying the si
 */
 #[tauri::command]
 async fn cancel_chatgpt_sign_in(app: tauri::AppHandle) -> Result<(), String> {
-    // Started but not yet waited on: dropping it removes its container.
+    // A sign-in from an earlier version, still holding its container: dropping it removes that.
     let held = app
         .state::<Shell>()
         .signing_in_to_chatgpt
@@ -11141,6 +11115,7 @@ async fn cancel_chatgpt_sign_in(app: tauri::AppHandle) -> Result<(), String> {
         .take();
     tauri::async_runtime::spawn_blocking(move || {
         drop(held);
+        openbot_desktop_lib::chatgpt_sign_in::cancel();
         openbot_desktop_lib::plan::cancel_chatgpt_sign_in();
     })
     .await
