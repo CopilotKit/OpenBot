@@ -26,8 +26,6 @@
   --font-medium: "Inter_500Medium";
   --font-semibold: "Inter_600SemiBold";
   --font-bold: "Inter_700Bold";
-  /* Italic is a face of its own too: a Bot's *emphasis*. */
-  --font-italic: "Inter_400Regular_Italic";
   --font-sans: "Inter_400Regular";
 }
 

@@ -602,12 +602,13 @@ async function drawn(page: Page) {
   };
 }
 
-/** Until the answer reads whole, or the time is up: what it last read as. */
+/** Wait for the full transcript. Replay can draw the answer before history adds the question. */
 async function settled(page: Page, timeoutMs = 10_000) {
   const until = Date.now() + timeoutMs;
   let last = await drawn(page);
   while (Date.now() < until) {
-    if (last.paragraphs.every((count) => count === 1)) return last;
+    if (last.question === 1 && last.paragraphs.every((count) => count === 1))
+      return last;
     await sleep(200);
     last = await drawn(page);
   }

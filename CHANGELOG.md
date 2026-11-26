@@ -501,6 +501,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **Bot replies in OpenBot Mobile show Markdown formatting.** Headings, lists, links, tables and
+  code blocks are easier to read on iOS and Android. This arrives with the next mobile app build.
 - **The phone app is now called OpenBot Mobile.** The docs and the API descriptions say so, and an
   OpenBot that needs a newer one says "This OpenBot needs OpenBot Mobile 1.2.0 or later. Update
   OpenBot, then try again." Nothing a client reads changed: the client is still `mobile` in

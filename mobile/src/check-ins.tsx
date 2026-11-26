@@ -10,6 +10,7 @@ import {
 import { sendConversationMessage } from "./api/generated/conversations/conversations";
 import { BotOrb, cn, Text } from "./components";
 import { taskLine } from "./tasks";
+import { webLink } from "./web-link";
 
 /*
  * What a Bot's check-in found, on the phone: the Needs you list a ping opens, and the same rows on
@@ -41,17 +42,6 @@ export async function startItem(item: CheckInItem) {
 /** Hide an item: off every list, and remembered for 30 days. */
 export async function hideItem(item: CheckInItem) {
   await dismissCheckInItem(ORGANIZATION_ID, item.id);
-}
-
-/** A link the phone may open: the web page the Bot read, never another app's scheme. */
-function webLink(link: string | null) {
-  if (!link) return null;
-  try {
-    const url = new URL(link);
-    return url.protocol === "https:" || url.protocol === "http:" ? url : null;
-  } catch {
-    return null;
-  }
 }
 
 /**

@@ -20,7 +20,6 @@ export { EmptyState } from "./empty-state";
 export { Icon } from "./icon";
 export { IconButton } from "./icon-button";
 export { KeyboardBar } from "./keyboard-bar";
-export { Markdown } from "./markdown";
 export {
   Message,
   MessageDay,

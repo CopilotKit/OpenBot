@@ -309,7 +309,9 @@ export default function Gallery() {
             <MessageDay label="Today, 11:45 AM" />
             <Message
               from="bot"
-              text="Your pizza analysis in San Francisco is complete!"
+              text={
+                "**Pizza shortlist**\n\n- North Beach for a classic slice\n- Mission District for sourdough"
+              }
             />
             <Message from="person" text="Sending…" pending />
             <MessageWorking seed="research" name="Research" label="Working…" />

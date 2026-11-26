@@ -40,8 +40,6 @@ export { default as IconRobot } from "@tabler/icons-react-native/IconRobot";
 export { default as IconSearch } from "@tabler/icons-react-native/IconSearch";
 export { default as IconSelector } from "@tabler/icons-react-native/IconSelector";
 export { default as IconSettings } from "@tabler/icons-react-native/IconSettings";
-export { default as IconSquare } from "@tabler/icons-react-native/IconSquare";
-export { default as IconSquareCheck } from "@tabler/icons-react-native/IconSquareCheck";
 export { default as IconTool } from "@tabler/icons-react-native/IconTool";
 export { default as IconUsersGroup } from "@tabler/icons-react-native/IconUsersGroup";
 export { default as IconX } from "@tabler/icons-react-native/IconX";
