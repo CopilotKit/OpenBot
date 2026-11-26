@@ -55,9 +55,19 @@ class Stand:
         self.requests: list[dict] = []
         self.refreshes: list[dict] = []
         self.bearers: list[str] = []
+        self.listing_bearers: list[str] = []
         app = FastAPI()
 
         self.unauthorized = False
+        # The account's model catalog, as `GET /v1/models` answers it; None answers 404.
+        self.listing: dict | None = None
+
+        @app.get("/v1/models")
+        async def listed_models(request: Request):
+            self.listing_bearers.append(request.headers.get("authorization", ""))
+            if self.listing is None:
+                return JSONResponse({"detail": "Not Found"}, status_code=404)
+            return self.listing
 
         @app.post("/v1/responses")
         async def responses(request: Request):
@@ -138,10 +148,12 @@ def engine(tmp_path, monkeypatch, stand):
     main.run_config.model_provider.client = AsyncOpenAI(
         api_key=main.plan_token, base_url=f"{stand.base}/v1", max_retries=0
     )
+    if hasattr(main, "PROVIDER"):
+        main.PROVIDER.listing.url = f"{stand.base}/v1/models"
     return main, record
 
 
-def _run(main) -> str:
+def _run(main, forwarded_props: dict | None = None) -> str:
     from fastapi.testclient import TestClient
 
     body = {
@@ -149,7 +161,7 @@ def _run(main) -> str:
         "runId": "r1",
         "state": {},
         "context": [],
-        "forwardedProps": {},
+        "forwardedProps": forwarded_props or {},
         "tools": [{
             "name": "lookup_order",
             "description": "Look an order up.",
@@ -260,3 +272,78 @@ def test_a_refused_token_asks_to_sign_in_again(engine, stand):
     error = _run_error(_run(main))
     assert stand.requests, "the model was asked"
     assert error.get("code") == "OPENBOT_MODEL_AUTH_REQUIRED"
+
+
+# The account's catalog as OpenAI lists it for the plan: two models for a picker, one hidden.
+LISTING = {"models": [
+    {"slug": "gpt-listed-a", "display_name": "Listed A", "visibility": "list", "priority": 1,
+     "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}],
+     "default_reasoning_level": "low"},
+    {"slug": "gpt-test", "display_name": "Configured", "visibility": "list", "priority": 2},
+    {"slug": "gpt-hidden", "display_name": "Hidden", "visibility": "hide"},
+]}
+
+
+def _picked(model: str, effort: str | None = None) -> dict:
+    choice = {"model": model}
+    if effort:
+        choice["reasoningEffort"] = effort
+    return {"openbotModel": choice}
+
+
+def test_the_model_picked_in_openbot_is_the_one_asked(engine, stand, caplog):
+    main, _ = engine
+    stand.listing = LISTING
+    with caplog.at_level("INFO", logger="agent-openai-agents"):
+        _run(main, _picked("gpt-listed-a", "high"))
+    sent = stand.requests[0]
+    assert sent["model"] == "gpt-listed-a"
+    assert sent["reasoning"]["effort"] == "high"
+    assert sent["store"] is False and sent["stream"] is True
+    assert stand.listing_bearers and stand.listing_bearers[0].startswith("Bearer ")
+    assert "model: gpt-listed-a (picked in OpenBot), effort high" in caplog.text
+
+
+def test_a_pick_the_account_does_not_list_falls_back_and_says_so(engine, stand, caplog):
+    main, _ = engine
+    stand.listing = LISTING
+    with caplog.at_level("INFO", logger="agent-openai-agents"):
+        _run(main, _picked("gpt-hidden", "high"))
+    sent = stand.requests[0]
+    assert sent["model"] == "gpt-test"
+    assert "effort" not in (sent.get("reasoning") or {})  # the pick's effort was for the pick
+    assert "model: gpt-test (configured; gpt-hidden is not offered)" in caplog.text
+
+
+def test_without_a_pick_the_configured_model_is_asked(engine, stand):
+    main, _ = engine
+    stand.listing = LISTING
+    _run(main)
+    assert stand.requests[0]["model"] == "gpt-test"
+
+
+def test_the_model_list_is_the_accounts_listed_models(engine, stand):
+    from fastapi.testclient import TestClient
+
+    main, _ = engine
+    stand.listing = LISTING
+    with TestClient(main.app) as client:
+        refused = client.get("/models")
+        listed = client.get("/models", headers={"x-openbot-agent-token": "server-token"})
+    assert refused.status_code == 401
+    assert listed.status_code == 200
+    assert listed.json() == {"object": "list", "data": [
+        {"id": "gpt-listed-a", "label": "Listed A", "efforts": ["low", "high"],
+         "default_effort": "low", "priority": 1},
+        {"id": "gpt-test", "label": "Configured", "priority": 2},
+    ]}
+
+
+def test_a_model_list_that_cannot_be_read_is_an_error_not_an_empty_list(engine, stand):
+    from fastapi.testclient import TestClient
+
+    main, _ = engine
+    with TestClient(main.app) as client:
+        response = client.get("/models", headers={"x-openbot-agent-token": "server-token"})
+    assert response.status_code == 502
+    assert stand.requests == []
