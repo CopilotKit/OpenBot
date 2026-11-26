@@ -11,6 +11,7 @@ import {
   Command,
   CommandResult,
   canonicalCommand,
+  canonicalDesiredState,
   ENROLLMENT_REFUSAL_CODES,
   EnrollmentGranted,
   EnrollmentPending,
@@ -26,8 +27,10 @@ import {
   readCommands,
   readDesiredState,
   releaseManifestDigest,
+  SIGNED_MESSAGE_MAX_BYTES,
   signCommand,
   signDesiredState,
+  signedMessageBytes,
   toBase64,
   type UnsignedCommand,
   type UnsignedDesiredState,
@@ -67,6 +70,12 @@ const MANIFEST = JSON.stringify({
     },
   },
 });
+const MANIFEST_SHA256 = await releaseManifestDigest(MANIFEST);
+/** The release manifest CopilotKit published for v1.2.0, byte for byte. */
+const PUBLISHED_MANIFEST = readFileSync(
+  join(import.meta.dir, "../fixtures/releases/published-v1.2.0.json"),
+  "utf8",
+);
 function desiredState(
   overrides: Partial<UnsignedDesiredState> = {},
 ): UnsignedDesiredState {
@@ -78,7 +87,7 @@ function desiredState(
     expiresAt: "2026-11-18T12:59:00Z",
     desired: {
       version: "v1.2.0",
-      releaseManifestSha256: "b".repeat(64),
+      releaseManifestSha256: MANIFEST_SHA256,
       releaseManifest: MANIFEST,
       charts: {
         openbot: {
@@ -271,7 +280,7 @@ describe("management contract", () => {
     );
     expect(await read(good)).toEqual({ ok: true, signed: good, newer: true });
 
-    // Tampered: another version, another chart, another image in the manifest.
+    // Tampered: another version, another chart, another manifest digest, the pause, the window.
     const another = desiredState().desired;
     for (const tampered of [
       { ...good, desired: { ...another!, version: "v9.9.9" } },
@@ -290,13 +299,7 @@ describe("management contract", () => {
       },
       {
         ...good,
-        desired: {
-          ...good.desired!,
-          releaseManifest: good.desired!.releaseManifest.replace(
-            "a".repeat(64),
-            "f".repeat(64),
-          ),
-        },
+        desired: { ...good.desired!, releaseManifestSha256: "f".repeat(64) },
       },
       { ...good, paused: true },
       { ...good, window: { weekday: 3, startUtc: "02:00", hours: 168 } },
@@ -305,6 +308,39 @@ describe("management contract", () => {
         ok: false,
         reason: "signature does not verify",
       });
+    // Another image in the manifest's text: the signature covers its digest, not its text, so the
+    // text no longer hashing to the signed digest is what refuses it.
+    expect(
+      await read({
+        ...good,
+        desired: {
+          ...good.desired!,
+          releaseManifest: good.desired!.releaseManifest.replace(
+            "a".repeat(64),
+            "f".repeat(64),
+          ),
+        },
+      }),
+    ).toEqual({
+      ok: false,
+      reason: "the release manifest does not match its signed digest",
+    });
+    // A manifest and the digest of it swapped in together still needs the signature over that
+    // digest, which only the command key makes.
+    const swapped = good.desired!.releaseManifest.replace(
+      "a".repeat(64),
+      "f".repeat(64),
+    );
+    expect(
+      await read({
+        ...good,
+        desired: {
+          ...good.desired!,
+          releaseManifest: swapped,
+          releaseManifestSha256: await releaseManifestDigest(swapped),
+        },
+      }),
+    ).toEqual({ ok: false, reason: "signature does not verify" });
     expect(
       await read(
         await signDesiredState(
@@ -421,6 +457,55 @@ describe("management contract", () => {
     expect(CommandResult.safeParse({ ...result, log: "..." }).success).toBe(
       false,
     );
+  });
+
+  test("a desired state carrying a published release manifest is signed within what a signer takes, and accepted", async () => {
+    const service = await keys();
+    // 1.2.0's manifest as published, and one sixteen times as long, as a later release's may grow.
+    const grown = JSON.parse(PUBLISHED_MANIFEST);
+    grown.notes = "x".repeat(16 * PUBLISHED_MANIFEST.length);
+    for (const releaseManifest of [PUBLISHED_MANIFEST, JSON.stringify(grown)]) {
+      const unsigned = desiredState({
+        counter: 3,
+        desired: {
+          ...desiredState().desired!,
+          version: JSON.parse(releaseManifest).version,
+          releaseManifest,
+          releaseManifestSha256: await releaseManifestDigest(releaseManifest),
+        },
+      });
+      expect(releaseManifest.length).toBeGreaterThan(SIGNED_MESSAGE_MAX_BYTES);
+      const message = new TextEncoder().encode(canonicalDesiredState(unsigned));
+      expect(message.length).toBeLessThanOrEqual(SIGNED_MESSAGE_MAX_BYTES);
+      expect(canonicalDesiredState(unsigned)).not.toContain('releaseManifest"');
+      const signed = await signDesiredState(unsigned, service.privateKey);
+      expect(
+        await readDesiredState([signed], {
+          publicKey: service.publicKey,
+          installId: INSTALL,
+          last: null,
+          now,
+        }),
+      ).toEqual({ ok: true, signed, newer: true });
+    }
+  });
+
+  test("a message longer than a signer takes is refused before it is signed", async () => {
+    const service = await keys();
+    expect(
+      signedMessageBytes("x".repeat(SIGNED_MESSAGE_MAX_BYTES)).length,
+    ).toBe(SIGNED_MESSAGE_MAX_BYTES);
+    expect(() =>
+      signedMessageBytes("x".repeat(SIGNED_MESSAGE_MAX_BYTES + 1)),
+    ).toThrow(
+      `the message to sign is 4097 bytes, over the 4096 a signer takes`,
+    );
+    await expect(
+      signCommand(
+        command({ args: { note: "x".repeat(SIGNED_MESSAGE_MAX_BYTES) } }),
+        service.privateKey,
+      ),
+    ).rejects.toThrow("over the 4096 a signer takes");
   });
 
   test("the release manifest digest is the SHA-256 of its exact bytes", async () => {
