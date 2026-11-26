@@ -200,6 +200,7 @@ test("a routine resolves to the id the server gave it", async () => {
     kind: "routine",
     id: "r1",
     when: "Weekdays at 09:00",
+    startedConversationId: null,
   });
 });
 
@@ -232,6 +233,7 @@ test("a goal resolves to its id, schedule and first run included", async () => {
     id: "g1",
     when: "Weekdays at 09:00",
     routineId: "r1",
+    startedConversationId: null,
   });
 });
 
@@ -239,7 +241,13 @@ test("a goal with no schedule has no routine and no words for when", async () =>
   stub();
   const { made, error } = await run(goalPlan("c1", { runNow: true }));
   expect(error).toBeUndefined();
-  expect(made).toEqual({ kind: "goal", id: "g1", when: "", routineId: null });
+  expect(made).toEqual({
+    kind: "goal",
+    id: "g1",
+    when: "",
+    routineId: null,
+    startedConversationId: null,
+  });
 });
 
 test("a check-in resolves to the id the server gave it", async () => {
@@ -250,7 +258,20 @@ test("a check-in resolves to the id the server gave it", async () => {
     kind: "check-in",
     id: "ci1",
     when: "Checks every 4 hours",
+    startedConversationId: null,
   });
+});
+
+test("what started its own conversation says which, so Undo can take it back", async () => {
+  stub();
+  for (const plan of [
+    goalPlan(NEW_CONVERSATION, { schedule: true }),
+    checkInPlan(NEW_CONVERSATION),
+  ]) {
+    const { made, error } = await run(plan);
+    expect(error).toBeUndefined();
+    expect(made).toMatchObject({ startedConversationId: "c9" });
+  }
 });
 
 test("a goal with a schedule: the goal, then a routine that names it", async () => {
@@ -607,7 +628,12 @@ describe("undoing what was made", () => {
 
   test("a routine: one DELETE of that routine", async () => {
     const calls = stub();
-    await undo({ kind: "routine", id: "r1", when: "Weekdays at 09:00" });
+    await undo({
+      kind: "routine",
+      id: "r1",
+      when: "Weekdays at 09:00",
+      startedConversationId: null,
+    });
     expect(methodsAndPaths(calls)).toEqual([
       "DELETE /api/v2/organizations/default/routines/r1",
     ]);
@@ -620,6 +646,7 @@ describe("undoing what was made", () => {
       id: "g1",
       when: "Weekdays at 09:00",
       routineId: "r1",
+      startedConversationId: null,
     });
     expect(methodsAndPaths(calls)).toEqual([
       "DELETE /api/v2/organizations/default/routines/r1",
@@ -629,7 +656,13 @@ describe("undoing what was made", () => {
 
   test("a goal with no routine: only the goal", async () => {
     const calls = stub();
-    await undo({ kind: "goal", id: "g1", when: "", routineId: null });
+    await undo({
+      kind: "goal",
+      id: "g1",
+      when: "",
+      routineId: null,
+      startedConversationId: null,
+    });
     expect(methodsAndPaths(calls)).toEqual([
       "DELETE /api/v2/organizations/default/goals/g1",
     ]);
@@ -637,9 +670,49 @@ describe("undoing what was made", () => {
 
   test("a check-in: one DELETE of that check-in", async () => {
     const calls = stub();
-    await undo({ kind: "check-in", id: "ci1", when: "Checks every hour" });
+    await undo({
+      kind: "check-in",
+      id: "ci1",
+      when: "Checks every hour",
+      startedConversationId: null,
+    });
     expect(methodsAndPaths(calls)).toEqual([
       "DELETE /api/v2/organizations/default/check-ins/ci1",
+    ]);
+  });
+
+  test("a conversation started for it is deleted last, after what posts in it", async () => {
+    const calls = stub();
+    await undo({
+      kind: "goal",
+      id: "g1",
+      when: "Weekdays at 09:00",
+      routineId: "r1",
+      startedConversationId: "c9",
+    });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/routines/r1",
+      "DELETE /api/v2/organizations/default/goals/g1",
+      `DELETE ${conversationPath("c9")}`,
+    ]);
+  });
+
+  test("a conversation that couldn't be deleted still leaves the routine undone", async () => {
+    const calls = stub({
+      [`DELETE ${conversationPath("c9")}`]: {
+        status: 500,
+        body: { error: "Down." },
+      },
+    });
+    await undo({
+      kind: "routine",
+      id: "r1",
+      when: "",
+      startedConversationId: "c9",
+    });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/routines/r1",
+      `DELETE ${conversationPath("c9")}`,
     ]);
   });
 
@@ -650,6 +723,7 @@ describe("undoing what was made", () => {
       id: "g1",
       when: "Weekdays at 09:00",
       routineId: "r1",
+      startedConversationId: null,
     });
     expect(keys).toHaveLength(2);
     for (const key of keys) expect(key).toBeTruthy();
@@ -664,7 +738,13 @@ describe("undoing what was made", () => {
       },
     });
     await expect(
-      undo({ kind: "goal", id: "g1", when: "", routineId: "r1" }),
+      undo({
+        kind: "goal",
+        id: "g1",
+        when: "",
+        routineId: "r1",
+        startedConversationId: "c9",
+      }),
     ).rejects.toThrow("No.");
     expect(methodsAndPaths(calls)).toEqual([
       "DELETE /api/v2/organizations/default/routines/r1",
@@ -677,12 +757,13 @@ describe("undoing what was made", () => {
       kind: "routine",
       id: "r1",
       when: "",
+      startedConversationId: null,
     });
     invalidated.length = 0;
     await options.onSettled?.(
       undefined,
       null,
-      { kind: "routine", id: "r1", when: "" },
+      { kind: "routine", id: "r1", when: "", startedConversationId: null },
       undefined,
       mutationContext(queryClient),
     );

@@ -223,6 +223,7 @@ describe("lineForMade", () => {
       kind: "routine",
       id: "r1",
       when: "Weekdays at 09:00",
+      startedConversationId: null,
     };
     expect(lineForMade(made, draft, "b1", "Ada")).toEqual({
       kind: "made",
@@ -237,6 +238,7 @@ describe("lineForMade", () => {
       kind: "check-in",
       id: "ci1",
       when: "Checks every 4 hours",
+      startedConversationId: null,
     };
     expect(lineForMade(made, tellDraft, "b1", "Ada")).toMatchObject({
       text: "Ada took “Inbox” · Checks every 4 hours",
@@ -249,6 +251,7 @@ describe("lineForMade", () => {
       id: "g1",
       when: "",
       routineId: null,
+      startedConversationId: null,
     };
     expect(lineForMade(made, draft, "b1", "Ada")).toMatchObject({
       text: "Ada took “Weekly numbers”",

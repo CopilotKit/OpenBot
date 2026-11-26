@@ -75,7 +75,12 @@ const made = (open: MadeRoutine): BoxLine => ({
 
 test("a routine that was made links to its page", async () => {
   const view = draw(
-    made({ kind: "routine", id: "r1", when: "Weekdays at 09:00" }),
+    made({
+      kind: "routine",
+      id: "r1",
+      when: "Weekdays at 09:00",
+      startedConversationId: null,
+    }),
   );
   const open = await view.findByRole("button", { name: "Open" });
   expect(open.getAttribute("href")).toBe("/routines/schedules/r1");
@@ -83,7 +88,13 @@ test("a routine that was made links to its page", async () => {
 
 test("a goal that was made links to its page", async () => {
   const view = draw(
-    made({ kind: "goal", id: "g1", when: "", routineId: null }),
+    made({
+      kind: "goal",
+      id: "g1",
+      when: "",
+      routineId: null,
+      startedConversationId: null,
+    }),
   );
   const open = await view.findByRole("button", { name: "Open" });
   expect(open.getAttribute("href")).toBe("/routines/goals/g1");
@@ -91,14 +102,24 @@ test("a goal that was made links to its page", async () => {
 
 test("a check-in that was made links to its page", async () => {
   const view = draw(
-    made({ kind: "check-in", id: "ci1", when: "Checks every hour" }),
+    made({
+      kind: "check-in",
+      id: "ci1",
+      when: "Checks every hour",
+      startedConversationId: null,
+    }),
   );
   const open = await view.findByRole("button", { name: "Open" });
   expect(open.getAttribute("href")).toBe("/routines/check-ins/ci1");
 });
 
 test("the Bot's name is drawn once, and the text is whole", async () => {
-  const line = made({ kind: "routine", id: "r1", when: "Weekdays at 09:00" });
+  const line = made({
+    kind: "routine",
+    id: "r1",
+    when: "Weekdays at 09:00",
+    startedConversationId: null,
+  });
   const view = draw(line);
   const status = await view.findByRole("status");
   const text = status.querySelector("p") as HTMLParagraphElement;
@@ -143,7 +164,9 @@ test("a removed line says so and has no action", async () => {
 });
 
 test("a made line offers Open and Undo", async () => {
-  const view = draw(made({ kind: "routine", id: "r1", when: "" }));
+  const view = draw(
+    made({ kind: "routine", id: "r1", when: "", startedConversationId: null }),
+  );
   await view.findByRole("button", { name: "Open" });
   const undo = await view.findByRole("button", { name: "Undo" });
   expect((undo as HTMLButtonElement).disabled).toBe(false);
@@ -186,11 +209,14 @@ test("a refusal with no fix and a maybe-made line are amber and offer nothing", 
 
 test("Undo calls onUndo once", async () => {
   let calls = 0;
-  const view = draw(made({ kind: "routine", id: "r1", when: "" }), {
-    onUndo: () => {
-      calls += 1;
+  const view = draw(
+    made({ kind: "routine", id: "r1", when: "", startedConversationId: null }),
+    {
+      onUndo: () => {
+        calls += 1;
+      },
     },
-  });
+  );
   const user = userEvent.setup({ document });
   await user.click(await view.findByRole("button", { name: "Undo" }));
   expect(calls).toBe(1);
@@ -198,12 +224,15 @@ test("Undo calls onUndo once", async () => {
 
 test("Undo is disabled while it is working", async () => {
   let calls = 0;
-  const view = draw(made({ kind: "routine", id: "r1", when: "" }), {
-    onUndo: () => {
-      calls += 1;
+  const view = draw(
+    made({ kind: "routine", id: "r1", when: "", startedConversationId: null }),
+    {
+      onUndo: () => {
+        calls += 1;
+      },
+      undoing: true,
     },
-    undoing: true,
-  });
+  );
   const undo = (await view.findByRole("button", {
     name: "Undo",
   })) as HTMLButtonElement;
@@ -215,7 +244,7 @@ test("Undo is disabled while it is working", async () => {
 
 test("no line has a Dismiss or a close button", async () => {
   const lines: BoxLine[] = [
-    made({ kind: "routine", id: "r1", when: "" }),
+    made({ kind: "routine", id: "r1", when: "", startedConversationId: null }),
     {
       kind: "finish",
       botId: "bot-1",

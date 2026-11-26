@@ -19,7 +19,6 @@ import {
   runRoutine,
   updateRoutine,
 } from "@/lib/api/generated/routines/routines";
-import { scheduleWords } from "./words";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { ClientError } from "@/lib/client";
@@ -40,6 +39,7 @@ import { NEW_CONVERSATION } from "./form";
 import { intervalLabel } from "./merged";
 import { type RoutinePlan, runGoalInstruction } from "./plan";
 import { routineKeys } from "./queries";
+import { scheduleWords } from "./words";
 
 /**
  * Writes against a person's own standing instructions.
@@ -103,7 +103,11 @@ export function readRoutineSentenceMutationOptions() {
  * for a goal that nothing starts on its own. A goal also names `routineId`, the routine that runs
  * it, when one was made.
  */
-export type MadeRoutine = { when: string } & (
+export type MadeRoutine = {
+  when: string;
+  /** The conversation started for it, which Undo takes back too; null when it posts in one already there. */
+  startedConversationId: string | null;
+} & (
   | { kind: "routine"; id: string }
   | { kind: "goal"; id: string; routineId: string | null }
   | { kind: "check-in"; id: string }
@@ -178,6 +182,11 @@ async function withConversation<T>(
   }
 }
 
+/** The conversation `withConversation` started, given what was asked for and what was used. */
+function startedFor(asked: string, used: string): string | null {
+  return asked === NEW_CONVERSATION ? used : null;
+}
+
 /** The lists a create or an undo changes, so each shows what is now there. */
 function settleMade(queryClient: QueryClient) {
   return () =>
@@ -221,6 +230,10 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
               kind: "routine",
               id: made.routine.id,
               when: scheduleWords(made.routine),
+              startedConversationId: startedFor(
+                routine.conversationId,
+                conversationId,
+              ),
             };
           },
         );
@@ -244,6 +257,10 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
               kind: "check-in",
               id: made.checkIn.id,
               when: `Checks ${intervalLabel(made.checkIn.intervalMinutes).toLowerCase()}`,
+              startedConversationId: startedFor(
+                checkIn.conversationId,
+                conversationId,
+              ),
             };
           },
         );
@@ -343,6 +360,10 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
             id,
             when: running?.when ?? "",
             routineId: running?.id ?? null,
+            startedConversationId: startedFor(
+              input.conversationId,
+              conversationId,
+            ),
           };
         },
       );
@@ -354,7 +375,7 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
 
 /**
  * Takes back what a create just made: the routine, or the goal and the routine that runs it, or the
- * check-in. A goal's routine goes first, so a goal is never left with a routine firing into it. It
+ * check-in, and then the conversation started for it. A goal's routine goes first, so a goal is never left with a routine firing into it. It
  * is the box's Undo, offered on the line under the box and nowhere later.
  */
 export function undoMadeMutationOptions(queryClient: QueryClient) {
@@ -365,18 +386,28 @@ export function undoMadeMutationOptions(queryClient: QueryClient) {
           await deleteRoutine(organizationId(), made.id, once(), {
             fallback: UNDO_FALLBACK,
           });
-          return;
+          break;
         case "goal":
           if (made.routineId)
             await deleteRoutine(organizationId(), made.routineId, once(), {
               fallback: UNDO_FALLBACK,
             });
           await deleteResponsibility(made.id);
-          return;
+          break;
         case "check-in":
           await removeProactiveSetting(made.id);
-          return;
+          break;
       }
+      // The conversation started for it goes too, last, once nothing posts in it. Best effort, as
+      // when a refused create takes one back: the routine is gone either way.
+      if (made.startedConversationId)
+        await deleteConversation(
+          organizationId(),
+          made.startedConversationId,
+          { "Idempotency-Key": idempotencyKey() },
+          undefined,
+          { fallback: "Couldn't remove the conversation." },
+        ).catch(() => undefined);
     },
     onSettled: settleMade(queryClient),
   });
