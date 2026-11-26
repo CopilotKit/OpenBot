@@ -197,6 +197,20 @@ export const getListAiConnectionsResponseMock = (): AiConnectionPage => ({
       connectedAt: "2026-11-20T09:00:00.000Z",
     },
     {
+      id: "xai",
+      provider: "xai",
+      login: "oauth",
+      model: "grok-4.7",
+      endpointHost: null,
+      isDefault: false,
+      ready: false,
+      problem: {
+        code: "sign-in-ended",
+        detail: "Your xAI sign-in ended. Sign in again to use it.",
+      },
+      connectedAt: "2026-11-21T09:00:00.000Z",
+    },
+    {
       id: "google",
       provider: "google",
       login: "oauth",
@@ -205,14 +219,15 @@ export const getListAiConnectionsResponseMock = (): AiConnectionPage => ({
       isDefault: false,
       ready: false,
       problem: {
-        code: "sign-in-ended",
-        detail: "Your Google sign-in ended. Sign in again to use it.",
+        code: "sign-in-retired",
+        detail:
+          "Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.",
       },
-      connectedAt: "2026-11-21T09:00:00.000Z",
+      connectedAt: "2026-11-22T09:00:00.000Z",
     },
   ],
   nextCursor: null,
-  signIns: ["openai", "anthropic", "google", "xai"],
+  signIns: ["openai", "anthropic", "xai"],
 });
 
 export const getConnectAiConnectionResponseMock = (): AiConnectionEntry => ({
@@ -281,6 +296,20 @@ export const getListPersonalAiConnectionsResponseMock =
         connectedAt: "2026-11-20T09:00:00.000Z",
       },
       {
+        id: "xai",
+        provider: "xai",
+        login: "oauth",
+        model: "grok-4.7",
+        endpointHost: null,
+        isDefault: false,
+        ready: false,
+        problem: {
+          code: "sign-in-ended",
+          detail: "Your xAI sign-in ended. Sign in again to use it.",
+        },
+        connectedAt: "2026-11-21T09:00:00.000Z",
+      },
+      {
         id: "google",
         provider: "google",
         login: "oauth",
@@ -289,14 +318,15 @@ export const getListPersonalAiConnectionsResponseMock =
         isDefault: false,
         ready: false,
         problem: {
-          code: "sign-in-ended",
-          detail: "Your Google sign-in ended. Sign in again to use it.",
+          code: "sign-in-retired",
+          detail:
+            "Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.",
         },
-        connectedAt: "2026-11-21T09:00:00.000Z",
+        connectedAt: "2026-11-22T09:00:00.000Z",
       },
     ],
     nextCursor: null,
-    signIns: ["openai", "anthropic", "google", "xai"],
+    signIns: ["openai", "anthropic", "xai"],
   });
 
 export const getConnectPersonalAiConnectionResponseMock =

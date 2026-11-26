@@ -15,6 +15,7 @@ import {
   answersTheModel,
   connectorName,
   ownToolAttempt,
+  ownToolFailedLabel,
   readToolName,
 } from "@openbot/shared/tool-name";
 import {
@@ -520,9 +521,11 @@ function detailsOf(step: ToolItem, folders: FolderNames): StepDetails {
       ...outcome,
       kind: "tool",
       // Beside "Blocked", what was tried: "Save a file", not "Saved a file", which did not happen.
+      // So too beside "Didn't work", for a step that then did not happen: "Draw an interface".
       label:
-        (refused ? ownToolAttempt(name) : null) ??
-        readToolName(name, outcome.pending).label,
+        (refused || (outcome.failed && ownToolFailedLabel(name))
+          ? ownToolAttempt(name)
+          : null) ?? readToolName(name, outcome.pending).label,
       ...(folderSubject ? { detail: folderSubject } : {}),
       pages: 0,
     };

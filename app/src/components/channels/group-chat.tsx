@@ -25,7 +25,7 @@ import {
   groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import {
   BotMarkdown,
   markdownComponents,
@@ -33,6 +33,7 @@ import {
   replyRemarkPlugins,
 } from "@/lib/markdown";
 import { newId } from "@/lib/new-id";
+import { DELETED_USER, isDeletedUser } from "@/lib/people/deleted-user";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
 import { Composer, toAgentOptions } from "./composer";
@@ -190,8 +191,11 @@ export function GroupChat({ channelId }: { channelId: string }) {
                   ? (names.get(message.agentId) ?? "A Bot no longer here")
                   : message.ownerUserId === me?.id
                     ? "You"
-                    : // Only the people still in it are named: someone taken out is no longer the reader's to see.
-                      people.get(message.ownerUserId) || "Someone who left"
+                    : // A message whose sender deleted their account stays, with no sender: a deleted user's.
+                      !message.ownerUserId || isDeletedUser(message.ownerUserId)
+                      ? DELETED_USER
+                      : // Only the people still in it are named: someone taken out is no longer the reader's to see.
+                        people.get(message.ownerUserId) || "Someone who left"
               }
               answeredBy={
                 message.answeredBy

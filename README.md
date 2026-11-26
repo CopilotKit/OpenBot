@@ -535,6 +535,7 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | `server`                 | 3001                       | Hono API, CopilotKit runtime, auth, policy, audit, plugins, components, coworkers, and channels. |
 | `agent-computer`         | 4100                       | Chromium plus `/workspace` and browser profile.                                                  |
 | `agent-langgraph-agui`   | 4201 host / 4206 container | The managed Bot: the LangGraph harness the team edition's Risk Analyst runs on.                  |
+| `agent-langgraph-ts`     | 4215                       | The TypeScript LangGraph engine new Bots run on. Compose runs it in every edition.               |
 | `agent-harness`          | 4202 to 4214, per framework | The agent framework picked in OpenBot Desktop setup, behind the `harness` Compose profile.       |
 | `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per person, and one per Isolated Bot.                           |
 | PostgreSQL               | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |

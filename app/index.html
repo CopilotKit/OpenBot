@@ -32,6 +32,21 @@
         const skin = saved === "openmuse" ? "openfuse" : saved;
         if (skin && skin !== "openbot") document.documentElement.dataset.skin = skin;
       } catch {}
+      try {
+        // Opened by OpenBot Desktop's setup, which faded out to the window's ground and marked the
+        // address once (lib/desktop/from-setup.ts): the first paint fades up from that ground. The
+        // mark comes off the address at once, so a reload or a copied link never fades. Not with
+        // reduced motion.
+        if (window.location.hash === "#from-setup") {
+          window.history.replaceState(
+            window.history.state,
+            "",
+            window.location.pathname + window.location.search,
+          );
+          if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+            document.documentElement.dataset.fromSetup = "";
+        }
+      } catch {}
     </script>
   </head>
   <body>

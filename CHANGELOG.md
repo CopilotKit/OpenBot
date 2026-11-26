@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **OpenBot Desktop on a Mac asks for your password only after you choose Continue.** When OpenBot
+  installs the software it runs on, a card says your Mac will ask for your password and why, and
+  macOS's prompt comes up only once you choose Continue. Before, the prompt came up by itself a
+  moment after a line in OpenBot's window, and on a new Mac it covered the browser's sign-in page
+  before anybody had read why it was there.
+- **OpenBot Cloud's account menu offers the desktop app.** Get the desktop app, in the menu under
+  your name, opens the download page for Mac and Windows in a new tab. It shows only on OpenBot
+  Cloud in a browser, not in OpenBot Desktop and not on an OpenBot a company runs itself.
+- **A Bot's drawing that drew nothing reads "Didn't draw an interface".** A Bot that asks to draw an
+  interface with nothing in it is told nothing was drawn, and its step read "Drew an interface" for
+  an interface nobody saw. Folded with other steps it reads "Draw an interface" beside "Didn't work".
 - **The management agent checks a release's chart signature before it touches anything.** With
   the chart's signature check on, the agent has Flux verify the chart a new version names before it
   records an install, stops the server, takes a backup or moves Flux. A chart that is unsigned or
