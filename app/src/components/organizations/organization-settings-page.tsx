@@ -48,6 +48,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin, type KnownRole } from "@/lib/auth/roles";
+import { failureSaid } from "@/lib/load-failure";
 import {
   changeMemberRoleMutationOptions,
   deleteOrganizationMutationOptions,
@@ -89,7 +90,6 @@ import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { PersonAvatar } from "./person-avatar";
 import { SentInvitationsSection } from "./sent-invitations-section";
-import { failureSaid } from "@/lib/load-failure";
 
 /** The API's cap on an organization's name, so the field stops where the server does. */
 const MAX_NAME_LENGTH = 100;
@@ -753,22 +753,27 @@ function RemoveMemberDialog({
 }
 
 /**
- * Asks before the person leaves, and leaves. They are then working in another of their
- * organizations, from home, as after a switch.
+ * Asks before the person leaves, and leaves. Leaving the one they work in, they are then working in
+ * another of their organizations, at `returnTo` (home unless said), as after a switch. `onLeft`
+ * hears it done, for a screen that lists what leaving changes (deleting an account).
  */
-function LeaveOrganizationDialog({
+export function LeaveOrganizationDialog({
+  onLeft,
   onOpenChange,
   open,
   organization,
+  returnTo = "/",
 }: {
+  onLeft?: () => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
-  organization: OrganizationSummary;
+  organization: Pick<OrganizationSummary, "id" | "name">;
+  returnTo?: string;
 }) {
   const navigate = useNavigate();
   const leave = useMutation(
     leaveOrganizationMutationOptions(queryClient, async () => {
-      await navigate({ to: "/" });
+      await navigate({ to: returnTo });
     }),
   );
   const { reset } = leave;
@@ -800,7 +805,10 @@ function LeaveOrganizationDialog({
             disabled={leave.isPending}
             onClick={() =>
               leave.mutate(organization.id, {
-                onSuccess: () => onOpenChange(false),
+                onSuccess: () => {
+                  onOpenChange(false);
+                  onLeft?.();
+                },
               })
             }
             size="sm"
