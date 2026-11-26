@@ -1,9 +1,12 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { QueryClient } from "@tanstack/react-query";
+import { viewerTimeZone } from "../src/components/routines/routine-page";
 import { NEW_CONVERSATION } from "../src/lib/routines/form";
 import {
   createFromPlanMutationOptions,
+  type MadeRoutine,
   SavedButRefused,
+  undoMadeMutationOptions,
 } from "../src/lib/routines/mutations";
 import type { RoutinePlan } from "../src/lib/routines/plan";
 import { CONVERSATIONS_PATH, conversationPath } from "./conversations-api";
@@ -13,20 +16,29 @@ const NEW = conversationPath("c9");
 
 const realFetch = globalThis.fetch;
 
+/** The zone the server says a routine it made is read in. It is the reader's own unless a test says so. */
+let answerZone = viewerTimeZone();
+
 afterEach(() => {
   globalThis.fetch = realFetch;
+  answerZone = viewerTimeZone();
 });
+
+/** The Idempotency-Key of every request the stub saw, in order. */
+let keys: (string | null)[] = [];
 
 type Call = [method: string, path: string, body: unknown];
 
 /** Records every request and answers like the server, unless `refuse` names a request to refuse. */
 function stub(refuse: Record<string, { status: number; body: unknown }> = {}) {
   const calls: Call[] = [];
+  keys = [];
   globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     const path = String(url);
     const sent =
       init?.body === undefined ? undefined : JSON.parse(String(init.body));
+    keys.push(new Headers(init?.headers).get("Idempotency-Key"));
     calls.push([method, path, sent]);
     const refusal = refuse[`${method} ${path}`];
     const [status, body] = refusal
@@ -34,11 +46,20 @@ function stub(refuse: Record<string, { status: number; body: unknown }> = {}) {
       : method === "POST" && path === "/api/v2/organizations/default/goals"
         ? [200, { goal: { id: "g1", title: "Ship it" } }]
         : method === "POST" && path === "/api/v2/organizations/default/routines"
-          ? [200, { routine: { id: "r1" } }]
+          ? [
+              200,
+              {
+                routine: {
+                  id: "r1",
+                  schedule: "Weekdays at 09:00",
+                  timezone: answerZone,
+                },
+              },
+            ]
           : method === "POST" &&
               path ===
                 "/api/v2/organizations/default/check-ins?refuseExisting=true"
-            ? [200, { checkIn: { id: "ci1" } }]
+            ? [200, { checkIn: { id: "ci1", intervalMinutes: 240 } }]
             : method === "POST" && path === CONVERSATIONS_PATH
               ? // Starting a conversation answers 201 with the conversation it made.
                 [
@@ -175,7 +196,29 @@ test("a routine resolves to the id the server gave it", async () => {
     },
   });
   expect(error).toBeUndefined();
-  expect(made).toEqual({ kind: "routine", id: "r1" });
+  expect(made).toEqual({
+    kind: "routine",
+    id: "r1",
+    when: "Weekdays at 09:00",
+  });
+});
+
+test("a routine in another time zone than the reader's says the zone", async () => {
+  answerZone = "Pacific/Kiritimati";
+  stub();
+  const { made } = await run({
+    kind: "routine",
+    routine: {
+      botId: "a1",
+      conversationId: "c1",
+      instruction: "Send the digest",
+      cron,
+      timezone: answerZone,
+    },
+  });
+  expect(made).toMatchObject({
+    when: "Weekdays at 09:00 · Pacific/Kiritimati",
+  });
 });
 
 test("a goal resolves to its id, schedule and first run included", async () => {
@@ -184,14 +227,30 @@ test("a goal resolves to its id, schedule and first run included", async () => {
     goalPlan("c1", { schedule: true, runNow: true }),
   );
   expect(error).toBeUndefined();
-  expect(made).toEqual({ kind: "goal", id: "g1" });
+  expect(made).toEqual({
+    kind: "goal",
+    id: "g1",
+    when: "Weekdays at 09:00",
+    routineId: "r1",
+  });
+});
+
+test("a goal with no schedule has no routine and no words for when", async () => {
+  stub();
+  const { made, error } = await run(goalPlan("c1", { runNow: true }));
+  expect(error).toBeUndefined();
+  expect(made).toEqual({ kind: "goal", id: "g1", when: "", routineId: null });
 });
 
 test("a check-in resolves to the id the server gave it", async () => {
   stub();
   const { made, error } = await run(checkInPlan("c1"));
   expect(error).toBeUndefined();
-  expect(made).toEqual({ kind: "check-in", id: "ci1" });
+  expect(made).toEqual({
+    kind: "check-in",
+    id: "ci1",
+    when: "Checks every 4 hours",
+  });
 });
 
 test("a goal with a schedule: the goal, then a routine that names it", async () => {
@@ -537,3 +596,101 @@ for (const kind of ["routine", "goal", "check-in"] as const) {
     });
   }
 }
+
+describe("undoing what was made", () => {
+  async function undo(made: MadeRoutine) {
+    const { queryClient, invalidated } = fakeQueryClient();
+    const options = undoMadeMutationOptions(queryClient);
+    await options.mutationFn?.(made, mutationContext(queryClient));
+    return { options, queryClient, invalidated };
+  }
+
+  test("a routine: one DELETE of that routine", async () => {
+    const calls = stub();
+    await undo({ kind: "routine", id: "r1", when: "Weekdays at 09:00" });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/routines/r1",
+    ]);
+  });
+
+  test("a goal with the routine that runs it: the routine first, then the goal", async () => {
+    const calls = stub();
+    await undo({
+      kind: "goal",
+      id: "g1",
+      when: "Weekdays at 09:00",
+      routineId: "r1",
+    });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/routines/r1",
+      "DELETE /api/v2/organizations/default/goals/g1",
+    ]);
+  });
+
+  test("a goal with no routine: only the goal", async () => {
+    const calls = stub();
+    await undo({ kind: "goal", id: "g1", when: "", routineId: null });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/goals/g1",
+    ]);
+  });
+
+  test("a check-in: one DELETE of that check-in", async () => {
+    const calls = stub();
+    await undo({ kind: "check-in", id: "ci1", when: "Checks every hour" });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/check-ins/ci1",
+    ]);
+  });
+
+  test("every delete carries its own Idempotency-Key", async () => {
+    stub();
+    await undo({
+      kind: "goal",
+      id: "g1",
+      when: "Weekdays at 09:00",
+      routineId: "r1",
+    });
+    expect(keys).toHaveLength(2);
+    for (const key of keys) expect(key).toBeTruthy();
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  test("a refused delete of the routine leaves the goal alone and says what the server said", async () => {
+    const calls = stub({
+      "DELETE /api/v2/organizations/default/routines/r1": {
+        status: 400,
+        body: { error: "No." },
+      },
+    });
+    await expect(
+      undo({ kind: "goal", id: "g1", when: "", routineId: "r1" }),
+    ).rejects.toThrow("No.");
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/routines/r1",
+    ]);
+  });
+
+  test("onSettled refreshes the same lists a create does", async () => {
+    stub();
+    const { options, queryClient, invalidated } = await undo({
+      kind: "routine",
+      id: "r1",
+      when: "",
+    });
+    invalidated.length = 0;
+    await options.onSettled?.(
+      undefined,
+      null,
+      { kind: "routine", id: "r1", when: "" },
+      undefined,
+      mutationContext(queryClient),
+    );
+    expect(invalidated).toEqual([
+      { queryKey: ["routines"] },
+      { queryKey: ["responsibilities"] },
+      { queryKey: ["proactive", "settings"] },
+      { queryKey: ["channels"] },
+    ]);
+  });
+});

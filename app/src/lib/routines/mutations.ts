@@ -19,11 +19,16 @@ import {
   runRoutine,
   updateRoutine,
 } from "@/lib/api/generated/routines/routines";
+import { scheduleWords } from "@/components/routines/routine-page";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { ClientError } from "@/lib/client";
 import { unavailableSaid } from "@/lib/load-failure";
-import { createProactiveSetting, proactiveKeys } from "@/lib/proactive";
+import {
+  createProactiveSetting,
+  proactiveKeys,
+  removeProactiveSetting,
+} from "@/lib/proactive";
 import {
   createResponsibility,
   deleteResponsibility,
@@ -32,6 +37,7 @@ import {
   responsibilityKeys,
 } from "@/lib/responsibilities";
 import { NEW_CONVERSATION } from "./form";
+import { intervalLabel } from "./merged";
 import { type RoutinePlan, runGoalInstruction } from "./plan";
 import { routineKeys } from "./queries";
 
@@ -64,6 +70,9 @@ export type RoutineInput = Omit<CreateRoutineRequest, "goalId" | "timezone"> & {
  */
 const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
+/** What a person reads when the box could not take back what it made and the server said nothing of its own. */
+const UNDO_FALLBACK = "Couldn't remove that. Try again.";
+
 /** What a person reads when a routine could not be made and the server said nothing of its own. */
 const CREATE_FALLBACK = "Couldn't set up that routine. Try again.";
 
@@ -82,16 +91,23 @@ export function readRoutineSentenceMutationOptions() {
   return mutationOptions({
     mutationFn: (variables: RoutineSentence): Promise<RoutineReading> =>
       readRoutineSentence(organizationId(), variables, once(), {
-        fallback: "Couldn't read that. Try again, or use the form.",
+        fallback: "Couldn't read that. Try again.",
       }),
   });
 }
 
-/** What a create made: the kind of thing and its id, for a screen that wants to show or open it. */
-export type MadeRoutine = {
-  kind: "routine" | "goal" | "check-in";
-  id: string;
-};
+/**
+ * What a create made, for a screen that wants to show, open or take it back: the kind of thing, its
+ * id, and `when` it starts in the words a row says it, read from what the server made (a schedule
+ * with its time zone where that isn't the reader's, or how often a check-in looks). `when` is empty
+ * for a goal that nothing starts on its own. A goal also names `routineId`, the routine that runs
+ * it, when one was made.
+ */
+export type MadeRoutine = { when: string } & (
+  | { kind: "routine"; id: string }
+  | { kind: "goal"; id: string; routineId: string | null }
+  | { kind: "check-in"; id: string }
+);
 
 /** A write was saved or may have been saved: the screen must not offer to create it again. */
 export class SavedButRefused extends Error {}
@@ -162,6 +178,17 @@ async function withConversation<T>(
   }
 }
 
+/** The lists a create or an undo changes, so each shows what is now there. */
+function settleMade(queryClient: QueryClient) {
+  return () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: routineKeys.all }),
+      queryClient.invalidateQueries({ queryKey: responsibilityKeys.all }),
+      queryClient.invalidateQueries({ queryKey: proactiveKeys.settings }),
+      queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+    ]);
+}
+
 /**
  * Carries out what the form's answers made, in one mutation.
  *
@@ -190,7 +217,11 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
           async (conversationId, saved) => {
             const made = await createRoutine({ ...routine, conversationId });
             saved();
-            return { kind: "routine", id: made.routine.id };
+            return {
+              kind: "routine",
+              id: made.routine.id,
+              when: scheduleWords(made.routine),
+            };
           },
         );
       }
@@ -209,7 +240,11 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
               { refuseExisting: true },
             );
             saved();
-            return { kind: "check-in", id: made.checkIn.id };
+            return {
+              kind: "check-in",
+              id: made.checkIn.id,
+              when: `Checks ${intervalLabel(made.checkIn.intervalMinutes).toLowerCase()}`,
+            };
           },
         );
       }
@@ -225,10 +260,11 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
             conversationId,
           });
           const { id } = goal;
+          let running: { id: string; when: string } | null = null;
 
           if (schedule) {
             try {
-              await createRoutine({
+              const { routine } = await createRoutine({
                 botId: input.botId,
                 conversationId,
                 goalId: id,
@@ -240,6 +276,7 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
                   ? { title: goal.title }
                   : {}),
               });
+              running = { id: routine.id, when: scheduleWords(routine) };
             } catch (error) {
               /*
                * Only a 4xx is the server saying no. A 5xx, a timeout or a dropped connection
@@ -301,18 +338,47 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
               );
             }
           }
-          return { kind: "goal", id };
+          return {
+            kind: "goal",
+            id,
+            when: running?.when ?? "",
+            routineId: running?.id ?? null,
+          };
         },
       );
     },
     // onSettled, not onSuccess: a goal kept, paused, after a refusal still has to show on the list.
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: routineKeys.all }),
-        queryClient.invalidateQueries({ queryKey: responsibilityKeys.all }),
-        queryClient.invalidateQueries({ queryKey: proactiveKeys.settings }),
-        queryClient.invalidateQueries({ queryKey: channelKeys.all }),
-      ]),
+    onSettled: settleMade(queryClient),
+  });
+}
+
+/**
+ * Takes back what a create just made: the routine, or the goal and the routine that runs it, or the
+ * check-in. A goal's routine goes first, so a goal is never left with a routine firing into it. It
+ * is the box's Undo, offered on the line under the box and nowhere later.
+ */
+export function undoMadeMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (made: MadeRoutine): Promise<void> => {
+      switch (made.kind) {
+        case "routine":
+          await deleteRoutine(organizationId(), made.id, once(), {
+            fallback: UNDO_FALLBACK,
+          });
+          return;
+        case "goal":
+          if (made.routineId)
+            await deleteRoutine(organizationId(), made.routineId, once(), {
+              fallback: UNDO_FALLBACK,
+            });
+          await deleteResponsibility(made.id);
+          return;
+        case "check-in":
+          await removeProactiveSetting(made.id);
+          return;
+      }
+    },
+    onSettled: settleMade(queryClient),
   });
 }
 
