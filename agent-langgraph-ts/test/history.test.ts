@@ -1,6 +1,7 @@
 /**
  * The thread as the model is shown it: no dangling tool call ever reaches a provider, and the
- * thread's system messages are the system prompt (every one of them, in order: hand-back.test.ts).
+ * server's instruction rows are the system prompt (in order: hand-back.test.ts; every other system
+ * row is quoted conversation: request-shape.test.ts).
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -134,8 +135,12 @@ test("A context entry that repeats a system message is said once", async () => {
       content: memory,
     });
     await withEngine({ env }, (base) => run(base, input));
-    const system = JSON.stringify(provider.requests[0]!.body.system);
-    assert.equal(system.split("MEMORY_MARKER").length - 1, 1);
+    const { body } = provider.requests[0]!;
+    assert.ok(!JSON.stringify(body.system).includes("MEMORY_MARKER"));
+    assert.equal(
+      JSON.stringify(body.messages).split("MEMORY_MARKER").length - 1,
+      1,
+    );
   } finally {
     await provider.close();
   }
