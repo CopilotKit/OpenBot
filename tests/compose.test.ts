@@ -812,7 +812,7 @@ test("passes the selected Anthropic provider and model into the picked harness",
 
 test("mounts the ChatGPT token store directory into the ChatGPT plan's engine", () => {
   const config = runEveryProfileConfig({
-    CHATGPT_PLAN_IMAGE: "openbot-agent-langgraph-agui:test",
+    CHATGPT_PLAN_IMAGE: "openbot-agent-openai-agents:test",
   });
 
   expect(config.services["agent-chatgpt-plan"].environment).toMatchObject({
@@ -1521,9 +1521,9 @@ const desktopGateway = {
   MODEL_GATEWAY_ANTHROPIC_URL:
     "http://server:3001/api/model-provider/anthropic",
   CLAUDE_PLAN_HARNESS_URL: "http://agent-claude-plan:4212",
-  CHATGPT_PLAN_HARNESS_URL: "http://agent-chatgpt-plan:4206",
+  CHATGPT_PLAN_HARNESS_URL: "http://agent-chatgpt-plan:4216",
   CLAUDE_PLAN_IMAGE: "openbot-agent-claude-sdk:test",
-  CHATGPT_PLAN_IMAGE: "openbot-agent-langgraph-agui:test",
+  CHATGPT_PLAN_IMAGE: "openbot-agent-openai-agents:test",
   // The person's own keys and plan token, which the server reads only to import the connection.
   OPENAI_API_KEY: "sentinel-openai-key",
   ANTHROPIC_API_KEY: "sentinel-anthropic-key",
@@ -1604,7 +1604,7 @@ test("runs a ChatGPT plan on its own engine, with the store the engine renews mo
   const plan = config.services["agent-chatgpt-plan"];
   expect(plan).toBeDefined();
   expect(plan.profiles).toEqual(["chatgpt-plan", "harness"]);
-  expect(plan.image).toBe("openbot-agent-langgraph-agui:test");
+  expect(plan.image).toBe("openbot-agent-openai-agents:test");
   expect(plan.environment).toMatchObject({
     CHATGPT_AUTH_FILE: "/root/.langchain/chatgpt-auth.json",
   });
@@ -1617,7 +1617,7 @@ test("runs a ChatGPT plan on its own engine, with the store the engine renews mo
   );
   expect(plan.ports ?? []).toEqual([]);
   expect(JSON.stringify(plan.healthcheck?.test)).toContain(
-    "127.0.0.1:4206/health",
+    "127.0.0.1:4216/health",
   );
 });
 
@@ -1632,7 +1632,7 @@ test("gives the server the gateway token, both plan engines, the connection and 
   expect(config.services.server.environment).toMatchObject({
     MODEL_GATEWAY_TOKEN: "sentinel-gateway-token",
     CLAUDE_PLAN_HARNESS_URL: "http://agent-claude-plan:4212",
-    CHATGPT_PLAN_HARNESS_URL: "http://agent-chatgpt-plan:4206",
+    CHATGPT_PLAN_HARNESS_URL: "http://agent-chatgpt-plan:4216",
     OPENBOT_AI_CONNECTION: '{"provider":"anthropic","login":"plan"}',
     OPENBOT_AI_CONNECTION_CHOSEN_AT: "2026-11-17T23:00:00Z",
     // Inside the sign-in folder the server already mounts.
@@ -1659,7 +1659,7 @@ test("tells every engine where the model gateway is, and the TypeScript engine w
   for (const service of ["agent-harness", "agent-langgraph-ts"]) {
     expect(config.services[service].environment).toMatchObject({
       CLAUDE_PLAN_HARNESS_URL: "http://agent-claude-plan:4212",
-      CHATGPT_PLAN_HARNESS_URL: "http://agent-chatgpt-plan:4206",
+      CHATGPT_PLAN_HARNESS_URL: "http://agent-chatgpt-plan:4216",
       OPENAI_API_KEY: "sentinel-gateway-token",
       ANTHROPIC_API_KEY: "sentinel-gateway-token",
     });

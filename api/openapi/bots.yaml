@@ -1896,8 +1896,9 @@ components:
             that runs inside OpenBot on OpenBot's own LangGraph (TypeScript)
             engine, which is what the New Bot sheet sends. The deployment
             decides what each run uses: a Claude plan keeps the Claude Agent
-            SDK engine, and an administrator may switch new Bots back to the
-            built-in agent.
+            SDK engine, a ChatGPT plan signed in on OpenBot Desktop the
+            OpenAI Agents SDK engine, and an administrator may switch new Bots
+            back to the built-in agent.
           enum:
             - ''
             - crewai
@@ -1910,6 +1911,7 @@ components:
             - pydantic-ai
             - microsoft-agent-framework
             - claude-agent-sdk
+            - openai-agents-sdk
             - strands
             - ag2
             - langroid
