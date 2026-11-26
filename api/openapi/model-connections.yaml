@@ -473,7 +473,7 @@ paths:
         Recorded on the audit trail, never with a key. Only an administrator
         of the organization may change it, and not where whoever runs OpenBot
         sets the provider. On OpenBot Cloud an administrator may also share
-        their own plan (openai, anthropic) or provider sign-in (google, xai)
+        their own plan (openai, anthropic) or provider sign-in (xai)
         as the organization's AI: send that login once they have signed in to
         the provider through OpenBot (startPersonalAiSignIn) and the sign-in
         is kept for them. Bots across the organization then run on that
@@ -684,7 +684,7 @@ paths:
         person's next run uses it, ahead of the organization's. The key is
         encrypted and kept for the person alone, never in the organization's
         vault, and never sent back. A plan (openai, anthropic) or a provider
-        sign-in (google, xai) is accepted only once the person has signed in
+        sign-in (xai) is accepted only once the person has signed in
         to that provider through OpenBot (startPersonalAiSignIn) and the
         sign-in was approved: the server keeps that sign-in for them alone
         and renews it itself. Without one it is refused, since the server
@@ -836,9 +836,10 @@ paths:
         provider handed OpenBot is kept for the person alone, never sent to
         the browser: an Unbiased AI key as a saved key (connect with
         useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login
-        plan), or a Google or xAI sign-in (connect with login oauth). The
+        plan), or an xAI sign-in (connect with login oauth). The
         server renews a sign-in that expires itself. Only the person
-        themselves may sign in, and only where available is true.
+        themselves may sign in, and only where available is true. Google
+        is refused: Gemini connects with an API key only.
       security:
         - webSession: []
         - appOAuth: [personal-ai-connection:write]
@@ -1946,14 +1947,18 @@ components:
       properties:
         code:
           type: string
-          x-extensible-enum: [sign-in-ended, key-refused, unreachable, no-key, no-default]
+          x-extensible-enum: [sign-in-ended, key-refused, unreachable, no-key, no-default, sign-in-retired]
           description: >-
             sign-in-ended: the provider stopped renewing the sign-in, so it
             has to be signed in to again. key-refused: the provider refuses
             its key. unreachable: its address doesn't answer. no-key: its key
             is no longer kept. no-default: several connections are connected
             and none is the default, so a run with no pick has nothing to use
-            until one is made default.
+            until one is made default. sign-in-retired: OpenBot no longer
+            offers this provider's sign-in (a Google sign-in for Gemini), so
+            it can't run, and signing in again isn't offered. Saving a key on
+            the same connection fixes it: its id stays, so every Bot that used
+            it runs on the key with nothing else to change.
         detail:
           type: string
           description: One sentence a person reads, saying what to do.
@@ -2146,7 +2151,9 @@ components:
         ChatGPT plan (openai, anthropic). api-key: a key from the provider
         (openai, anthropic). endpoint: an address and, where it asks for one,
         a key (google, xai, unbiased, trustedrouter, openai-compatible).
-        oauth: the person's Google or xAI sign-in (google, xai).
+        oauth: the person's xAI sign-in (xai). A Google sign-in (google,
+        oauth) saved before Gemini took an API key only is still listed,
+        with the problem sign-in-retired, and is never accepted again.
       enum: [plan, api-key, endpoint, oauth]
     AiConnectionSaved:
       type: object
@@ -2260,9 +2267,10 @@ components:
       additionalProperties: false
       description: >-
         The connection to switch to. openai and anthropic take plan or
-        api-key; google and xai take endpoint or oauth; unbiased,
+        api-key; xai takes endpoint or oauth; google, unbiased,
         trustedrouter and openai-compatible take endpoint. Any other pair is
-        refused.
+        refused: google with oauth is refused with the words of the problem
+        sign-in-retired.
       required: [provider, login]
       properties:
         provider:
@@ -2334,7 +2342,7 @@ components:
           description: >-
             The providers the server can sign the person in to itself
             (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan
-            (anthropic), Google and xAI sign-ins, and Unbiased AI, each where
+            (anthropic), an xAI sign-in, and Unbiased AI, each where
             this server is set up for it. Each still connects with a key or an
             address too, and every provider not listed connects only that way.
           items:
@@ -2757,7 +2765,19 @@ components:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
-                detail: Google Gemini doesn't take a plan. Pick an API key or a sign-in.
+                detail: xAI doesn't take a plan. Pick an API key or a sign-in.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            googleSignInRetired:
+              summary: A Google sign-in for Gemini, which OpenBot no longer offers.
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
@@ -2877,7 +2897,7 @@ components:
                 type: https://open.bot/errors/ai-connection-refused
                 title: OpenBot couldn't use that connection.
                 status: 422
-                detail: Sign in to Google first, then try again.
+                detail: Sign in to xAI first, then try again.
                 code: AI_CONNECTION_SIGN_IN_MISSING
                 category: validation
                 retryable: false
@@ -3267,7 +3287,7 @@ components:
         problem: null
         connectedAt: '2026-11-23T09:00:00.000Z'
     AiConnectionPageExample:
-      summary: A Claude plan as the default, and a Google sign-in that ended.
+      summary: A Claude plan as the default, an xAI sign-in that ended, and a Google sign-in OpenBot no longer offers.
       value:
         connections:
           - id: anthropic
@@ -3279,6 +3299,17 @@ components:
             ready: true
             problem: null
             connectedAt: '2026-11-20T09:00:00.000Z'
+          - id: xai
+            provider: xai
+            login: oauth
+            model: grok-4.7
+            endpointHost: null
+            isDefault: false
+            ready: false
+            problem:
+              code: sign-in-ended
+              detail: Your xAI sign-in ended. Sign in again to use it.
+            connectedAt: '2026-11-21T09:00:00.000Z'
           - id: google
             provider: google
             login: oauth
@@ -3287,11 +3318,11 @@ components:
             isDefault: false
             ready: false
             problem:
-              code: sign-in-ended
-              detail: Your Google sign-in ended. Sign in again to use it.
-            connectedAt: '2026-11-21T09:00:00.000Z'
+              code: sign-in-retired
+              detail: Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.
+            connectedAt: '2026-11-22T09:00:00.000Z'
         nextCursor: null
-        signIns: [openai, anthropic, google, xai]
+        signIns: [openai, anthropic, xai]
     AiConnectionPageNoDefaultExample:
       summary: Two connections left after an older app disconnected the default, neither the default.
       value:

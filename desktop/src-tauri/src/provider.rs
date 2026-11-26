@@ -94,10 +94,14 @@ pub fn catalogue() -> Vec<Provider> {
         Provider {
             id: "google".into(),
             name: "Google Gemini".into(),
-            summary: "Use a Google AI Studio key or sign in for Gemini API access.".into(),
-            logins: vec![Login::Endpoint, Login::Oauth],
-            // The colour G: it is also the mark on this row's "Sign in with" button, and Google's
-            // sign-in guidelines allow only the standard colour G there.
+            summary: "Use a Google AI Studio key for the Gemini API.".into(),
+            /*
+             * An API key only. The sign-in ran everyone's calls on one shared Google Cloud
+             * project's quota, which refused most of them, and Google's own SDK takes no sign-in on
+             * the Gemini API. A sign-in saved before this is refused at Start, and the screen asks
+             * for a key in its place.
+             */
+            logins: vec![Login::Endpoint],
             mark: Some("google-color".into()),
             caution: None,
         },
@@ -221,6 +225,20 @@ mod tests {
             .expect("unbiased is not offered");
         assert_eq!(unbiased.logins, vec![Login::Oauth, Login::Endpoint]);
         assert_eq!(unbiased.name, "Unbiased AI");
+    }
+
+    /// Gemini takes an API key only: its row offers no sign-in.
+    #[test]
+    fn google_asks_only_for_a_key() {
+        let google = catalogue()
+            .into_iter()
+            .find(|p| p.id == "google")
+            .expect("google is not offered");
+        assert_eq!(google.logins, vec![Login::Endpoint]);
+        assert_eq!(
+            google.summary,
+            "Use a Google AI Studio key for the Gemini API."
+        );
     }
 
     /// TrustedRouter has no sign-in, so its row asks for an API key and nothing else.

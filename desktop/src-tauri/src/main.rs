@@ -4629,7 +4629,14 @@ impl ChosenModel {
             }
         }
         match (self.provider.as_str(), self.login.as_str()) {
-            ("google" | "xai", "oauth") => {
+            /*
+             * A Google sign-in saved before Gemini took an API key only. Refused here, so Start
+             * never hands the server a Google sign-in, and the window says what to do instead.
+             */
+            ("google", "oauth") => Err(Problem::plain(
+                openbot_desktop_lib::provider_oauth::GOOGLE_SIGN_IN_ENDED,
+            )),
+            ("xai", "oauth") => {
                 let saved = openbot_desktop_lib::provider_oauth::read(root, &self.provider)
                     .map_err(Problem::plain)?;
                 let model = given(self.model);
@@ -13695,7 +13702,7 @@ pub(crate) async fn cancel_plan_sign_in_now(
     }
 }
 
-/// Start a Google, xAI or Unbiased AI sign-in, sending the browser to it.
+/// Start an xAI or Unbiased AI sign-in, sending the browser to it. Google's is refused.
 pub(crate) async fn begin_provider_sign_in_now(
     app: tauri::AppHandle,
     provider: String,
@@ -18002,34 +18009,58 @@ mod tests {
     fn oauth_start_reads_private_session_without_contacting_unstarted_proxy() {
         let root = temp_root("oauth-start");
         std::fs::create_dir_all(root.join(".openbot")).unwrap();
-        for provider in ["google", "xai"] {
-            let path = root.join(openbot_desktop_lib::provider_oauth::FILE);
-            let record = serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":provider,"clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","proxyToken":"synthetic-proxy"});
-            std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
-            let choice = ChosenModel {
-                provider: provider.into(),
-                login: "oauth".into(),
-                api_key: None,
-                base_url: None,
-                container_base_url: None,
-                model: Some("chosen-model".into()),
-                token: None,
-                saved: Some(true),
-            };
-            let credential = start_stack_credential_with(&root, choice, |_, _| {
-                panic!("OAuth must not resolve an API key")
-            })
-            .unwrap();
-            assert_eq!(
-                credential,
-                openbot_env::ModelCredential::ProviderOAuth {
-                    provider: provider.into(),
-                    path: path.to_string_lossy().into_owned(),
-                    proxy_token: "synthetic-proxy".into(),
-                    model: "chosen-model".into()
-                }
-            );
+        let path = root.join(openbot_desktop_lib::provider_oauth::FILE);
+        let record = serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":"xai","clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","proxyToken":"synthetic-proxy"});
+        std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+        let credential = start_stack_credential_with(&root, oauth_choice("xai"), |_, _| {
+            panic!("OAuth must not resolve an API key")
+        })
+        .unwrap();
+        assert_eq!(
+            credential,
+            openbot_env::ModelCredential::ProviderOAuth {
+                provider: "xai".into(),
+                path: path.to_string_lossy().into_owned(),
+                proxy_token: "synthetic-proxy".into(),
+                model: "chosen-model".into()
+            }
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn oauth_choice(provider: &str) -> ChosenModel {
+        ChosenModel {
+            provider: provider.into(),
+            login: "oauth".into(),
+            api_key: None,
+            base_url: None,
+            container_base_url: None,
+            model: Some("chosen-model".into()),
+            token: None,
+            saved: Some(true),
         }
+    }
+
+    /// A Google sign-in saved before Gemini took an API key only: Start refuses it in the words
+    /// the window shows, even with its session still on disk, and never hands it to the server.
+    #[test]
+    fn a_saved_google_sign_in_is_refused_at_start() {
+        let root = temp_root("oauth-start-google");
+        std::fs::create_dir_all(root.join(".openbot")).unwrap();
+        let record = serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":"google","clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","quotaProject":"synthetic-project","proxyToken":"synthetic-proxy"});
+        std::fs::write(
+            root.join(openbot_desktop_lib::provider_oauth::FILE),
+            serde_json::to_vec(&record).unwrap(),
+        )
+        .unwrap();
+        let refused = start_stack_credential_with(&root, oauth_choice("google"), |_, _| {
+            panic!("a Google sign-in must not resolve an API key")
+        })
+        .unwrap_err();
+        assert_eq!(
+            refused.said,
+            "Google sign-in for Gemini has ended. Add a Gemini API key to keep your Bots running on Gemini."
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
