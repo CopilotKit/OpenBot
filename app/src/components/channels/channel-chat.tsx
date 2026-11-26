@@ -104,6 +104,7 @@ import {
   withStoredAnswers,
 } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
+import { watchSnapshotRemovals } from "@/lib/copilot/snapshot-removed";
 import {
   asksToCarryOn,
   failedRunReason,
@@ -321,19 +322,31 @@ export function channelHistoryNotice({
  * browser steps a run asked for, its arguments cut short, so a message whose calls the store holds
  * every one of, and more of, takes the stored calls.
  *
+ * NOR DOES WHAT A RUN'S OWN SNAPSHOT TOOK AWAY COME BACK (`removed`, `snapshot-removed.ts`). A store
+ * a beat behind holds a run as it stood part way through, and a message its snapshot then removed is
+ * not missing from the screen: it is gone. Added as missing, an answer streamed under one id and
+ * handed back in the snapshot under another sat over a cut-off copy of itself.
+ *
  * Exported for its tests.
  */
 export function mergeStoredMessages(
   local: Message[],
   stored: Message[],
-  /**
-   * Reading back a run whose live stream broke (`broken-stream.ts`): the store's copy of what that
-   * stream drew is the whole of it. Only then does a longer stored reply win when the screen's is not
-   * its beginning, and a stored message with more of a step's calls take the place of the one drawn.
-   * Otherwise a stored reply that is the start of the screen's leaves the screen's copy standing: a
-   * store a beat behind holds an older version of a message this tab is still writing.
-   */
-  { readBack = false }: { readBack?: boolean } = {},
+  {
+    readBack = false,
+    removed,
+  }: {
+    /**
+     * Reading back a run whose live stream broke (`broken-stream.ts`): the store's copy of what that
+     * stream drew is the whole of it. Only then does a longer stored reply win when the screen's is
+     * not its beginning, and a stored message with more of a step's calls take the place of the one
+     * drawn. Otherwise a stored reply that is the start of the screen's leaves the screen's copy
+     * standing: a store a beat behind holds an older version of a message this tab is still writing.
+     */
+    readBack?: boolean;
+    /** The messages a run made and its own snapshot removed: never added back from the store. */
+    removed?: ReadonlySet<string>;
+  } = {},
 ): Message[] {
   const localIds = new Set(local.map((message) => message.id));
   /*
@@ -392,7 +405,7 @@ export function mergeStoredMessages(
       }
       if ((readBack || held === message.id) && !storedFor.has(held))
         storedFor.set(held, message);
-    } else {
+    } else if (!removed?.has(message.id)) {
       pending.push(message);
     }
   }
@@ -710,6 +723,15 @@ export function ChannelChat({
    */
   const agentRef = useRef(agent);
   agentRef.current = agent;
+  /**
+   * What a run's own snapshot took away in this conversation, kept across the agent `useAgent`
+   * swaps in, so no read of the store adds it back (`snapshot-removed.ts`).
+   */
+  const snapshotRemoved = useRef(new Set<string>());
+  useEffect(
+    () => watchSnapshotRemovals(agent, snapshotRemoved.current),
+    [agent],
+  );
   const voiceArchive = useVoiceArchive(channel.id);
   const [voiceContextNotice, setVoiceContextNotice] = useState<string | null>(
     null,
@@ -793,7 +815,7 @@ export function ChannelChat({
   });
 
   // Join the gateway socket, restore durable history, then release the first-message gate.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `joins` is the join asked for again when OpenBot answers again.
+  // `joins` is the join asked for again when OpenBot answers again.
   useEffect(() => {
     if (!isReady) return;
     let current = true;
@@ -935,6 +957,7 @@ export function ChannelChat({
           const messages = mergeStoredMessages(
             withCurrentA2uiVersions(agent.messages),
             stored.messages,
+            { removed: snapshotRemoved.current },
           );
           if (messages !== agent.messages) agent.setMessages(messages);
         }
@@ -1090,6 +1113,7 @@ export function ChannelChat({
           const messages = mergeStoredMessages(
             withCurrentA2uiVersions(current.messages),
             stored.messages,
+            { removed: snapshotRemoved.current },
           );
           if (messages === current.messages) continue;
           current.setMessages(messages);
@@ -1403,6 +1427,7 @@ export function ChannelChat({
       if (stored.availability !== "ready") continue;
       const merged = mergeStoredMessages(target.messages, stored.messages, {
         readBack: true,
+        removed: snapshotRemoved.current,
       });
       if (merged !== target.messages) target.setMessages(merged);
       const drawn = merged.filter(
