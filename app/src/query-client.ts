@@ -11,6 +11,10 @@ import {
   type QueryObserverOptions,
 } from "@tanstack/react-query";
 import {
+  pendingDeletionRefusal,
+  showPendingDeletion,
+} from "@/lib/account-deletion/pending";
+import {
   HELD_OUT_NOW,
   heldOutBySso,
   holdOut,
@@ -20,22 +24,24 @@ import {
   holdReadsWhileConnectionLost,
   retryWhileConnectionLost,
 } from "@/lib/desktop/connection-lost";
+import { askAgainAfterMs } from "@/lib/load-failure";
 import {
   currentOrganizationId,
   onOrganizationChange,
 } from "@/lib/organizations/current";
-import { askAgainAfterMs } from "@/lib/load-failure";
 import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 import { refusedInOrganization } from "@/lib/organizations/left";
 import { askWhetherStillMember } from "@/lib/organizations/queries";
 
 /**
  * What is the same whichever organization the person works in: the list of their organizations,
- * and what the deployment can do. Everything else is an organization's own.
+ * what the deployment can do, and deleting their account, which is theirs, not an organization's.
+ * Everything else is an organization's own.
  */
 const EVERY_ORGANIZATION: ReadonlySet<unknown> = new Set([
   "organizations",
   "deployment",
+  "account-deletion",
 ]);
 
 /** Whether a query's answer belongs to the organization it was asked in. */
@@ -149,6 +155,7 @@ class OpenBotQueryClient extends QueryClient {
           if (
             inNoOrganization(error) ||
             heldOutBySso(error) ||
+            pendingDeletionRefusal(error) ||
             refusedInOrganization(error) ||
             askAgainAfterMs(error) !== undefined
           )
@@ -170,6 +177,14 @@ class OpenBotQueryClient extends QueryClient {
 function holdOutWhenRefusedForIt(error: unknown): void {
   if (!heldOutBySso(error)) return;
   holdOut(error instanceof Error ? error.message : HELD_OUT_NOW);
+}
+
+/**
+ * A refusal because the person's account is scheduled to be deleted, from any read or write while
+ * the app is open: the app gives way to the pending page at once (lib/account-deletion/pending.ts).
+ */
+function showPendingWhenRefusedForIt(error: unknown): void {
+  if (pendingDeletionRefusal(error)) showPendingDeletion();
 }
 
 /** Any read in the cache, as its events hand it over. */
@@ -231,6 +246,7 @@ export const queryClient = new OpenBotQueryClient({
   queryCache: new QueryCache({
     onError: (error, query) => {
       holdOutWhenRefusedForIt(error);
+      showPendingWhenRefusedForIt(error);
       askAgainWhenTold(error, query);
       askWhetherStillMemberWhenRefused(error, query.queryKey);
     },
@@ -238,6 +254,7 @@ export const queryClient = new OpenBotQueryClient({
   mutationCache: new MutationCache({
     onError: (error) => {
       holdOutWhenRefusedForIt(error);
+      showPendingWhenRefusedForIt(error);
       askWhetherStillMemberWhenRefused(error, undefined);
     },
   }),
