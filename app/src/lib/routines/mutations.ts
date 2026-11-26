@@ -6,12 +6,15 @@ import {
 } from "@/lib/api/generated/conversations/conversations";
 import type {
   CreateRoutineRequest,
+  RoutineReading,
+  RoutineSentence,
   UpdateRoutineRequest,
 } from "@/lib/api/generated/model";
 import {
   createRoutine as createRoutineRequest,
   deleteRoutine,
   pauseRoutine,
+  readRoutineSentence,
   resumeRoutine,
   runRoutine,
   updateRoutine,
@@ -68,6 +71,19 @@ const CREATE_FALLBACK = "Couldn't set up that routine. Try again.";
 function createRoutine(body: CreateRoutineRequest) {
   return createRoutineRequest(organizationId(), body, once(), {
     fallback: CREATE_FALLBACK,
+  });
+}
+
+/**
+ * Read a sentence as New routine's answers, for the Routines page's box. It writes nothing, so it
+ * invalidates nothing; each call is its own request with its own key.
+ */
+export function readRoutineSentenceMutationOptions() {
+  return mutationOptions({
+    mutationFn: (variables: RoutineSentence): Promise<RoutineReading> =>
+      readRoutineSentence(organizationId(), variables, once(), {
+        fallback: "Couldn't read that. Try again, or use the form.",
+      }),
   });
 }
 
