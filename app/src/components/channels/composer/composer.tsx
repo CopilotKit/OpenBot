@@ -161,6 +161,11 @@ const MAX_HEIGHT_PX = 220;
  * Two 24px lines: the compact composer's message box opens two lines tall and grows from there.
  */
 const COMPACT_MIN_HEIGHT_PX = 48;
+/**
+ * One 24px line: a one-line box opens at this height. Given to PromptArea itself, whose own
+ * minimum (80px) is an inline style no class can beat.
+ */
+const ONE_LINE_HEIGHT_PX = 24;
 const COMPACT_MAX_HEIGHT_PX = 160;
 
 export type ComposerProps = {
@@ -340,6 +345,11 @@ export type ComposerProps = {
    * show that it is working (Routines). A conversation has Stop, so it leaves this off.
    */
   spinsWhileSending?: boolean;
+  /**
+   * True draws the words and the controls in one row, so the empty box is one line tall and grows
+   * as the words wrap (Routines). Only the full-size box has it; a compact box keeps its two rows.
+   */
+  oneLine?: boolean;
 };
 
 /**
@@ -421,6 +431,7 @@ export function Composer({
   placeholder: emptyPlaceholder = "Ask anything",
   dictates = true,
   spinsWhileSending = false,
+  oneLine = false,
   className,
   editorClassName,
   compact = false,
@@ -2047,57 +2058,62 @@ export function Composer({
         >
           {filePicker}
 
-          <div className="grow pb-2">
-            <AttachmentStrip
-              files={files}
-              images={images}
-              onRemove={discardAttachment}
-            />
-            <div data-slot="composer-input">
-              <PromptArea
-                aria-label="Message"
-                autoGrow
-                className={inputClassName}
-                disabled={disabled}
-                maxHeight={MAX_HEIGHT_PX}
-                onChange={handleChange}
-                onImagePaste={canAttach ? stagePastedImage : undefined}
-                onSubmit={submitDraft}
-                placeholder={placeholder}
-                ref={promptAreaRef}
-                triggers={triggers}
-                value={value}
+          {/* One row for a one-line box: the words grow to the left of the controls. Otherwise
+              this wrapper draws nothing, and the controls sit in their own row under the words. */}
+          <div className={oneLine ? "flex items-end gap-2" : "contents"}>
+            <div className={oneLine ? "min-w-0 grow py-0.5" : "grow pb-2"}>
+              <AttachmentStrip
+                files={files}
+                images={images}
+                onRemove={discardAttachment}
               />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between">
-            {attachmentsEnabled ? (
-              <Button
-                aria-label="Attach a file"
-                className="size-7 rounded-full p-0"
-                data-slot="composer-attach"
-                disabled={disabled}
-                onClick={() => fileInputRef.current?.click()}
-                type="button"
-                variant="ghost"
-              >
-                <IconPlus className="size-4" />
-              </Button>
-            ) : (
-              <div />
-            )}
-
-            <div className="flex items-center gap-1">
-              {modelPicker}
-              {dictates ? (
-                <DictationButton
-                  dictation={dictation}
-                  disabled={disabled || voiceCall?.active === true}
-                  onStarted={focusForDictation}
+              <div data-slot="composer-input">
+                <PromptArea
+                  aria-label="Message"
+                  autoGrow
+                  className={inputClassName}
+                  disabled={disabled}
+                  maxHeight={MAX_HEIGHT_PX}
+                  minHeight={oneLine ? ONE_LINE_HEIGHT_PX : undefined}
+                  onChange={handleChange}
+                  onImagePaste={canAttach ? stagePastedImage : undefined}
+                  onSubmit={submitDraft}
+                  placeholder={placeholder}
+                  ref={promptAreaRef}
+                  triggers={triggers}
+                  value={value}
                 />
-              ) : null}
-              {primaryAction}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              {attachmentsEnabled ? (
+                <Button
+                  aria-label="Attach a file"
+                  className="size-7 rounded-full p-0"
+                  data-slot="composer-attach"
+                  disabled={disabled}
+                  onClick={() => fileInputRef.current?.click()}
+                  type="button"
+                  variant="ghost"
+                >
+                  <IconPlus className="size-4" />
+                </Button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex items-center gap-1">
+                {modelPicker}
+                {dictates ? (
+                  <DictationButton
+                    dictation={dictation}
+                    disabled={disabled || voiceCall?.active === true}
+                    onStarted={focusForDictation}
+                  />
+                ) : null}
+                {primaryAction}
+              </div>
             </div>
           </div>
         </DictationSurface>
