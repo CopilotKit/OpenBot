@@ -4371,7 +4371,14 @@ fn ensure_linux_podman_api(shell: &Shell, address: &engine::Address) -> Result<(
         .podman_api
         .lock()
         .unwrap()
-        .ensure(&address.pin()?, &stack::default_root())
+        .ensure(&address.pin()?, &stack::default_root())?;
+    // A Podman OpenBot did not install never went through the prompt that delegates the cgroup
+    // controllers the backend's rootless node needs. Asked for here, once, only when missing.
+    // Rootful Podman runs its containers under root's own cgroups and needs none of this.
+    if address.engine == engine::Engine::Podman && engine::rootless_socket().is_some() {
+        openbot_desktop_lib::cgroup_delegation::ensure()?;
+    }
+    Ok(())
 }
 
 /// Who the server container runs as on Linux, given who owns the deployment folder.
@@ -27250,6 +27257,16 @@ fn main() {
             std::fs::create_dir_all(&bin).unwrap();
             Self::write_binary_under(&bin, binary, scenario);
             Self::write_binary_under(&bin, "bun", "runtime");
+            // Start on rootless Linux Podman asks `pkexec` to delegate cgroup controllers when the
+            // host lacks them (`cgroup_delegation`). A test must never raise a real password
+            // prompt, so this one answers "granted" and does nothing.
+            #[cfg(target_os = "linux")]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let pkexec = bin.join("pkexec");
+                std::fs::write(&pkexec, "#!/bin/sh\nexit 0\n").unwrap();
+                std::fs::set_permissions(&pkexec, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
             let mut path = std::ffi::OsString::from(bin.clone());
             if inherit_path {
                 if let Some(previous) = previous.as_ref().filter(|previous| !previous.is_empty()) {
