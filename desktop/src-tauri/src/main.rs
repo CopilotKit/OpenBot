@@ -4476,30 +4476,6 @@ async fn deployment_ready<R: tauri::Runtime>(
     Ok(())
 }
 
-/// The reference for an image the shell runs directly, rather than through Compose.
-///
-/// Require completed local installation before starting an authentication container.
-///
-/// With the sign-in's own image made present by `present`. Install pulls a plan's image only for an
-/// installation already on that plan (`preparation::PLAN_IMAGES`), so the ChatGPT plan's sign-in
-/// downloads it when it is missing (`download_missing`). The Claude plan's needs no image.
-fn prepared_sign_in_with(
-    root: &Path,
-    published: &str,
-    present: impl FnOnce(&engine::Address, &String) -> Result<(), Problem>,
-) -> Result<(engine::Address, String), Problem> {
-    let status = engine::detect_saved(preparation::saved_engine(root));
-    let address = status
-        .address
-        .filter(|_| status.responding)
-        .ok_or_else(|| preparation::required(status.detail))?
-        .pin()?;
-    preparation::require(root, None, &address)?;
-    let image = sign_in_reference(root, published, deployment::reference)?;
-    present(&address, &image)?;
-    Ok((address, image))
-}
-
 /**
 Download the images of `images` the engine at `address` does not have, showing the download on the
 `images` row exactly as Install shows it (`report_downloads`), and saying the row done after.
@@ -4559,6 +4535,7 @@ fn download_missing<R: tauri::Runtime>(
     Ok(())
 }
 
+#[cfg(test)]
 fn sign_in_reference(
     root: &Path,
     published: &str,
@@ -24511,6 +24488,7 @@ fn main() {
             "agent-langgraph-ts",
             "agent-langgraph-agui",
             "agent-claude-sdk",
+            "agent-openai-agents",
         ] {
             images.images.insert(
                 name.into(),
@@ -24577,8 +24555,9 @@ fn main() {
             }
             "chatgpt-plan" => {
                 model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                // The TypeScript Bot in its own container, and the plan's own engine beside it.
-                ("compose --profile harness --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-harness agent-chatgpt-plan", Some("agent-langgraph-ts"))
+                // The plan's own engine is the OpenAI Agents SDK Bot the plan picked, as for a Claude
+                // plan: no container of the Bot's own.
+                ("compose --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-chatgpt-plan", Some("agent-openai-agents"))
             }
             "claude-plan" | "claude-plan-switched" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
@@ -24588,7 +24567,7 @@ fn main() {
             }
             "chatgpt-plan-switched" => {
                 model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-harness agent-chatgpt-plan", Some("agent-langgraph-ts"))
+                ("compose --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-chatgpt-plan", Some("agent-openai-agents"))
             }
             _ => panic!("unknown test case"),
         };
@@ -24599,7 +24578,7 @@ fn main() {
          */
         let switched_to = match case {
             "claude-plan-switched" => Some("localhost/agent-claude-sdk@sha256:00"),
-            "chatgpt-plan-switched" => Some("localhost/agent-langgraph-agui@sha256:00"),
+            "chatgpt-plan-switched" => Some("localhost/agent-openai-agents@sha256:00"),
             _ => None,
         };
         if let Some(image) = switched_to {
@@ -24957,126 +24936,6 @@ fn main() {
             return;
         }
         harness_start_ipc_case("claude-plan");
-    }
-
-    /*
-     * A sign-in to a ChatGPT plan on an installation that installed without that plan's image: the
-     * sign-in runs in that image, so it downloads it first, showing the download as Install shows
-     * it, and then starts the sign-in's container from it. Before, it refused the sign-in as an
-     * unfinished install. The fixture engine refuses the container itself, so the flow stops there,
-     * before any browser would open.
-     */
-    fn plan_sign_in_ipc_case(command: &str, published: &str) {
-        let root = temp_root("openbot-plan-sign-in-ipc");
-        write_installed_deployment(&root);
-        let mut images: deployment::Images =
-            serde_json::from_str(&std::fs::read_to_string(deployment::images_path(&root)).unwrap())
-                .unwrap();
-        images.images.insert(
-            published.into(),
-            deployment::Image {
-                reference: format!("localhost/{published}@sha256:00"),
-            },
-        );
-        std::fs::write(
-            deployment::images_path(&root),
-            serde_json::to_string(&images).unwrap(),
-        )
-        .unwrap();
-        preparation::record(&root, None, vec!["fixture-image".into()]).unwrap();
-        let image = format!("localhost/{published}@sha256:00");
-        let path = SerializedPath::set_only_with("docker", "harness");
-        let record = root.join("commands.log");
-        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
-        std::env::set_var("OPENBOT_TEST_ENGINE_MISSING_IMAGE", &image);
-        let app = tauri::test::mock_builder()
-            .manage(Shell::default())
-            .invoke_handler(tauri::generate_handler![begin_chatgpt_sign_in])
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .unwrap();
-        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
-        {
-            use tauri::Listener;
-            let told = told.clone();
-            app.listen_any("setup:progress", move |event| {
-                told.lock()
-                    .unwrap()
-                    .push(serde_json::from_str(event.payload()).unwrap());
-            });
-        }
-        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .unwrap();
-        let answer = tauri::test::get_ipc_response(
-            &window,
-            tauri::webview::InvokeRequest {
-                cmd: command.into(),
-                callback: tauri::ipc::CallbackFn(0),
-                error: tauri::ipc::CallbackFn(1),
-                url: if cfg!(any(windows, target_os = "android")) {
-                    "http://tauri.localhost"
-                } else {
-                    "tauri://localhost"
-                }
-                .parse()
-                .unwrap(),
-                body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "root": root })),
-                headers: Default::default(),
-                invoke_key: tauri::test::INVOKE_KEY.into(),
-            },
-        );
-        let commands = std::fs::read_to_string(&record).unwrap_or_default();
-        let problem = answer.expect_err("the fixture engine refuses the sign-in's container");
-        assert_ne!(
-            problem["said"].as_str(),
-            Some(preparation::REQUIRED),
-            "{command}: refused as an unfinished install: {problem:?}\n{commands}"
-        );
-        let pulled_at = commands
-            .find(&format!("\tpull {image}"))
-            .unwrap_or_else(|| panic!("{command}: {image} was not pulled:\n{commands}"));
-        let ran_at = commands
-            .lines()
-            .position(|line| line.contains("\trun ") && line.contains(&image))
-            .map(|line| {
-                commands
-                    .lines()
-                    .take(line)
-                    .map(|l| l.len() + 1)
-                    .sum::<usize>()
-            })
-            .unwrap_or_else(|| panic!("{command}: the sign-in never ran {image}:\n{commands}"));
-        assert!(
-            pulled_at < ran_at,
-            "{command}: ran before the pull:\n{commands}"
-        );
-        let told = told.lock().unwrap();
-        assert!(
-            told.iter().any(|row| row["step"] == "images"
-                && row["running"] == true
-                && row["downloads"].is_object()),
-            "{command}: no download was shown: {told:?}"
-        );
-        assert!(
-            told.iter()
-                .any(|row| row["step"] == "images" && row["running"] == false && row["ok"] == true),
-            "{command}: the download never finished on screen: {told:?}"
-        );
-        drop(path);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_first_chatgpt_plan_sign_in_downloads_its_image() {
-        if crate::test_support::isolated_process(
-            "tests::a_first_chatgpt_plan_sign_in_downloads_its_image",
-        ) {
-            return;
-        }
-        plan_sign_in_ipc_case(
-            "begin_chatgpt_sign_in",
-            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
-        );
     }
 
     #[test]
