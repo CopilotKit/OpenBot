@@ -46,9 +46,10 @@ export const AI_PROVIDERS: AiProvider[] = [
   {
     id: "google",
     name: "Google Gemini",
-    summary: "Use a Google AI Studio key or sign in for Gemini API access.",
+    summary: "Use a Google AI Studio key for the Gemini API.",
     keySummary: "Use a Google AI Studio key for the Gemini API.",
-    logins: ["endpoint", "oauth"],
+    // An API key only: a Google sign-in saved before reads `sign-in-retired` (GOOGLE_SIGN_IN_ENDED).
+    logins: ["endpoint"],
     mark: "google-color",
   },
   {
@@ -137,8 +138,9 @@ export function loginsHere(
 /**
  * The ways in for a person's own AI: the provider's sign-in first where the server runs it itself
  * (`signIns`), then the provider's key or address. The sign-in is the one the setup window offers
- * for that provider: a ChatGPT or Claude plan (`plan`), or a Google, xAI or Unbiased AI sign-in
- * (`oauth`). The server keeps it for the person and renews it, so it is never one OpenBot Desktop
+ * for that provider: a ChatGPT or Claude plan (`plan`), or an xAI or Unbiased AI sign-in
+ * (`oauth`). A provider with no sign-in here (Google Gemini) is offered its key alone, whatever
+ * an older server lists. The server keeps it for the person and renews it, so it is never one OpenBot Desktop
  * holds, even inside Desktop: the server runs the person's Bots.
  */
 export function personalLogins(
@@ -153,15 +155,31 @@ export function personalLogins(
 
 /**
  * The providers whose sign-in an admin on OpenBot Cloud may share as the organization's AI: a
- * ChatGPT or Claude plan, or a Google or xAI sign-in (replaceAiConnection with `plan` or `oauth`).
- * Unbiased AI's sign-in ends in a key kept for the person alone, so it is never shared.
+ * ChatGPT or Claude plan, or an xAI sign-in (replaceAiConnection with `plan` or `oauth`). Unbiased
+ * AI's sign-in ends in a key kept for the person alone, so it is never shared.
  */
 const SHAREABLE: readonly AiConnectionProvider[] = [
   "openai",
   "anthropic",
-  "google",
   "xai",
 ];
+
+/**
+ * A Google sign-in for Gemini saved before Gemini took an API key only: listed with its problem
+ * `sign-in-retired`, and fixed by saving a Gemini API key on the same connection.
+ */
+export const GOOGLE_SIGN_IN_ENDED = {
+  title: "Google sign-in for Gemini has ended",
+  body: "Add a Gemini API key to keep your Bots running on Gemini.",
+  action: "Add a Gemini API key",
+} as const;
+
+/** Whether a connection's problem is a retired Google sign-in (GOOGLE_SIGN_IN_ENDED). */
+export function signInRetired(
+  connection: { problem?: { code: string } | null } | null | undefined,
+): boolean {
+  return connection?.problem?.code === "sign-in-retired";
+}
 
 /**
  * The ways in for the organization's AI on OpenBot Cloud in a plain browser: the admin's own

@@ -4,8 +4,8 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    io::Read,
+    net::TcpStream,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -20,7 +20,13 @@ mod credential_lock;
 pub const FILE: &str = ".openbot/model-oauth.json";
 const XAI_CLIENT: &str = "b1a00492-073a-47ea-816f-4c329264a828";
 const XAI_SCOPE: &str = "openid profile email offline_access grok-cli:access api:access";
-const GOOGLE_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
+/*
+ * Gemini takes an API key only. Its sign-in ran every person's calls on one shared Google Cloud
+ * project's quota, which refused most of them, and Google's own SDK takes no sign-in on the Gemini
+ * API. What a Google sign-in left on this computer is refused, in these words, wherever it is used.
+ */
+pub const GOOGLE_SIGN_IN_ENDED: &str =
+    "Google sign-in for Gemini has ended. Add a Gemini API key to keep your Bots running on Gemini.";
 /*
  * Unbiased AI's partner sign-in: an RFC 8628 device authorization against its platform, which mints an
  * API key for its OpenAI-compatible gateway exactly once and keeps no copy (Unbiased AI's partner
@@ -42,14 +48,10 @@ pub struct Credentials {
     pub session_id: String,
     pub provider: String,
     pub client_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_secret: Option<String>,
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at: u64,
     pub scope: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub quota_project: Option<String>,
     pub proxy_token: String,
 }
 
@@ -68,15 +70,6 @@ struct Flow {
     pending: Mutex<Option<Pending>>,
 }
 enum Pending {
-    Google {
-        listener: TcpListener,
-        verifier: String,
-        state: String,
-        redirect: String,
-        client_id: String,
-        client_secret: Option<String>,
-        project: String,
-    },
     Xai {
         client_id: String,
         device_code: String,
@@ -107,15 +100,6 @@ pub(crate) fn pkce_challenge(verifier: &str) -> String {
 }
 fn configured(name: &str) -> Option<String> {
     let embedded = match name {
-        "OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID" => {
-            option_env!("OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID")
-        }
-        "OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET" => {
-            option_env!("OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET")
-        }
-        "OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT" => {
-            option_env!("OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT")
-        }
         "OPENBOT_XAI_MODEL_OAUTH_CLIENT_ID" => option_env!("OPENBOT_XAI_MODEL_OAUTH_CLIENT_ID"),
         "OPENBOT_UNBIASED_OAUTH_CLIENT_ID" => option_env!("OPENBOT_UNBIASED_OAUTH_CLIENT_ID"),
         _ => None,
@@ -173,51 +157,13 @@ fn reserve(root: &Path) -> Arc<Flow> {
     flow
 }
 pub fn begin(root: &Path, provider: &str) -> Result<Authorization, String> {
+    // Said before reserving, so asking for it never cancels a sign-in already waiting.
+    if provider == "google" {
+        return Err(GOOGLE_SIGN_IN_ENDED.into());
+    }
     // Reserve before blocking network work so a late response cannot replace a newer sign-in.
     let flow = reserve(root);
     let (pending, url, user_code) = match provider {
-        "google" => {
-            let client_id = configured("OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID").ok_or("Google sign-in needs this OpenBot build's registered desktop OAuth client. Use an API key until it is configured.")?;
-            let project = configured("OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT").ok_or(
-                "Google sign-in needs a Google Cloud quota project with the Gemini API enabled.",
-            )?;
-            let client_secret = configured("OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET");
-            let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
-            listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-            let redirect = format!(
-                "http://127.0.0.1:{}/oauth/callback",
-                listener.local_addr().map_err(|e| e.to_string())?.port()
-            );
-            let verifier = random();
-            let state = random();
-            let challenge = pkce_challenge(&verifier);
-            let mut url =
-                reqwest::Url::parse("https://accounts.google.com/o/oauth2/v2/auth").unwrap();
-            url.query_pairs_mut().extend_pairs([
-                ("client_id", client_id.as_str()),
-                ("redirect_uri", redirect.as_str()),
-                ("response_type", "code"),
-                ("scope", GOOGLE_SCOPE),
-                ("access_type", "offline"),
-                ("prompt", "consent"),
-                ("state", state.as_str()),
-                ("code_challenge", challenge.as_str()),
-                ("code_challenge_method", "S256"),
-            ]);
-            (
-                Pending::Google {
-                    listener,
-                    verifier,
-                    state,
-                    redirect,
-                    client_id,
-                    client_secret,
-                    project,
-                },
-                url.to_string(),
-                None,
-            )
-        }
         "xai" => {
             let client_id = configured("OPENBOT_XAI_MODEL_OAUTH_CLIENT_ID")
                 .unwrap_or_else(|| XAI_CLIENT.into());
@@ -492,7 +438,7 @@ fn finish_unbiased(
     }
 }
 
-/// Finish the sign-in. Google and xAI leave a refreshable session in the private credential file
+/// Finish the sign-in. xAI leaves a refreshable session in the private credential file
 /// and answer nothing; Unbiased AI answers the API key it minted, which the window carries on exactly
 /// as a typed endpoint key.
 pub fn finish(id: &str) -> Result<Option<String>, String> {
@@ -554,38 +500,8 @@ pub(crate) fn read_callback_request(
     }
 }
 
-fn receive_callback(stream: &mut TcpStream, state: &str) -> Result<Option<String>, String> {
-    let request =
-        read_callback_request(stream, Duration::from_secs(2)).map_err(|error| error.to_string())?;
-    let path = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or("");
-    let parsed = reqwest::Url::parse(&format!("http://localhost{path}"))
-        .map_err(|_| "Invalid sign-in callback.")?;
-    let query: std::collections::HashMap<_, _> = parsed.query_pairs().into_owned().collect();
-    if parsed.path() != "/oauth/callback" || query.get("state").map(String::as_str) != Some(state) {
-        let _ = stream.write_all(
-            b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nInvalid sign-in callback.",
-        );
-        return Ok(None);
-    }
-    if let Some(error) = query.get("error") {
-        let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nSign-in was not approved. Return to OpenBot.");
-        return Err(format!("Google sign-in was not approved: {error}"));
-    }
-    let code = query
-        .get("code")
-        .filter(|v| !v.is_empty())
-        .cloned()
-        .ok_or("Google did not return an authorization code.")?;
-    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nReturn to OpenBot to finish signing in.").map_err(|e| e.to_string())?;
-    Ok(Some(code))
-}
-
 fn finish_flow(flow: &Flow, pending: Pending) -> Result<Option<String>, String> {
-    let (provider, client_id, client_secret, project, scope, tokens) = match pending {
+    let (provider, client_id, scope, tokens) = match pending {
         Pending::Unbiased {
             platform,
             client_id,
@@ -595,59 +511,6 @@ fn finish_flow(flow: &Flow, pending: Pending) -> Result<Option<String>, String> 
         } => {
             return finish_unbiased(flow, &platform, &client_id, &device_code, interval, expires)
                 .map(Some)
-        }
-        Pending::Google {
-            listener,
-            verifier,
-            state,
-            redirect,
-            client_id,
-            client_secret,
-            project,
-        } => {
-            let deadline = Instant::now() + Duration::from_secs(600);
-            let code = loop {
-                check(flow)?;
-                if Instant::now() >= deadline {
-                    return Err("Google sign-in timed out. Try signing in again.".into());
-                }
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        if let Some(code) = receive_callback(&mut stream, &state)? {
-                            break code;
-                        }
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        wait(flow, Duration::from_millis(100))?
-                    }
-                    Err(error) => return Err(error.to_string()),
-                }
-            };
-            let mut form = vec![
-                ("client_id", client_id.as_str()),
-                ("code", code.as_str()),
-                ("code_verifier", verifier.as_str()),
-                ("redirect_uri", redirect.as_str()),
-                ("grant_type", "authorization_code"),
-            ];
-            if let Some(secret) = &client_secret {
-                form.push(("client_secret", secret));
-            }
-            let tokens = response_json(
-                http()?
-                    .post("https://oauth2.googleapis.com/token")
-                    .form(&form)
-                    .send()
-                    .map_err(|e| e.to_string())?,
-            )?;
-            (
-                "google",
-                client_id,
-                client_secret,
-                Some(project),
-                GOOGLE_SCOPE,
-                tokens,
-            )
         }
         Pending::Xai {
             client_id,
@@ -694,20 +557,17 @@ fn finish_flow(flow: &Flow, pending: Pending) -> Result<Option<String>, String> 
                     }
                 }
             };
-            ("xai", client_id, None, None, XAI_SCOPE, tokens)
+            ("xai", client_id, XAI_SCOPE, tokens)
         }
     };
     check(flow)?;
-    let credentials =
-        credentials_from_tokens(provider, client_id, client_secret, project, scope, &tokens)?;
+    let credentials = credentials_from_tokens(provider, client_id, scope, &tokens)?;
     write(&flow.root, &credentials, || check(flow))?;
     Ok(None)
 }
 fn credentials_from_tokens(
     provider: &str,
     client_id: String,
-    client_secret: Option<String>,
-    quota_project: Option<String>,
     scope: &str,
     tokens: &serde_json::Value,
 ) -> Result<Credentials, String> {
@@ -726,7 +586,6 @@ fn credentials_from_tokens(
         session_id: random(),
         provider: provider.into(),
         client_id,
-        client_secret,
         access_token: required(tokens, "access_token")?,
         refresh_token: required(tokens, "refresh_token")?,
         expires_at: now.saturating_add(duration.saturating_mul(1000)),
@@ -735,7 +594,6 @@ fn credentials_from_tokens(
             .and_then(|v| v.as_str())
             .unwrap_or(scope)
             .into(),
-        quota_project,
         proxy_token: random(),
     })
 }
@@ -752,6 +610,71 @@ pub fn read(root: &Path, provider: &str) -> Result<Credentials, String> {
         return Err("The saved sign-in does not match this provider. Sign in again.".into());
     }
     Ok(saved)
+}
+
+/**
+Delete the Google sign-in for Gemini this computer still keeps: the saved sign-in file, and any copy
+of it a write that never finished left beside it. Run at every launch, so a Google sign-in saved before
+Gemini took an API key only is gone from disk. The saved choice stays, so the AI screen still says
+what to do instead.
+
+Only a file that is positively a Google sign-in goes: an xAI sign-in, a file that can't be read or
+isn't one, a link, and anything over the size a sign-in has are left as they are. Takes the same lock
+as a sign-in's own write. Answers how many files went.
+*/
+pub fn forget_google_sign_in(root: &Path) -> Result<usize, String> {
+    let saved = root.join(FILE);
+    let directory = saved.parent().unwrap();
+    let Ok(metadata) = std::fs::symlink_metadata(directory) else {
+        return Ok(0);
+    };
+    if !metadata.is_dir() {
+        return Ok(0);
+    }
+    let file_name = saved.file_name().unwrap().to_owned();
+    let candidates: Vec<PathBuf> = std::fs::read_dir(directory)
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name().is_some_and(|name| {
+                name == file_name.as_os_str() || name.to_string_lossy().ends_with(".tmp")
+            })
+        })
+        .filter(|path| holds_google_sign_in(path))
+        .collect();
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+    let _lock = credential_lock::acquire(&saved)
+        .map_err(|error| format!("Could not lock the provider sign-in: {error}"))?;
+    let mut forgotten = 0;
+    for path in candidates {
+        // Read again under the lock: an xAI sign-in written meanwhile stays.
+        if holds_google_sign_in(&path) {
+            std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+            forgotten += 1;
+        }
+    }
+    Ok(forgotten)
+}
+
+/// A plain file, no bigger than a sign-in, that is a Google sign-in's tokens.
+fn holds_google_sign_in(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() > 64 * 1024 {
+        return false;
+    }
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    value.get("provider").and_then(|v| v.as_str()) == Some("google")
+        && (value.get("accessToken").is_some() || value.get("refreshToken").is_some())
 }
 fn write(
     root: &Path,
@@ -809,6 +732,7 @@ fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{io::Write, net::TcpListener};
     #[test]
     fn xai_verification_url_rejects_unsafe_or_foreign_destinations() {
         for url in [
@@ -1395,7 +1319,10 @@ mod tests {
         let (sender, receiver) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             sender
-                .send(receive_callback(&mut stream, "expected"))
+                .send(
+                    read_callback_request(&mut stream, Duration::from_secs(2))
+                        .map_err(|error| error.to_string()),
+                )
                 .unwrap();
         });
         let early = receiver.recv_timeout(Duration::from_millis(100));
@@ -1409,12 +1336,23 @@ mod tests {
                 .recv_timeout(Duration::from_secs(3))
                 .unwrap()
                 .unwrap(),
-            Some("synthetic".into())
+            "GET /oauth/callback?state=expected&code=synthetic HTTP/1.1\r\n"
         );
-        let mut response = String::new();
-        browser.read_to_string(&mut response).unwrap();
-        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
         worker.join().unwrap();
+    }
+
+    /// Gemini takes an API key only: asking to sign in to Google says so, in the words the window
+    /// shows, and never touches a sign-in to another provider that is still waiting.
+    #[test]
+    fn google_sign_in_is_refused_without_cancelling_another() {
+        let _slot = ACTIVE_SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        let root = crate::test_support::temp_root("oauth-google-ended");
+        let waiting = reserve(&root);
+        let refused = begin(&root, "google").err();
+        assert_eq!(refused.as_deref(), Some(GOOGLE_SIGN_IN_ENDED));
+        assert!(check(&waiting).is_ok(), "the Google refusal cancelled it");
+        assert_eq!(active().lock().unwrap().as_ref().unwrap().id, waiting.id);
+        cancel(&waiting.id);
     }
 
     #[test]
@@ -1430,14 +1368,9 @@ mod tests {
     #[test]
     fn tokens_require_refresh_and_expiry() {
         let missing = serde_json::json!({"access_token":"synthetic", "expires_in":3600});
-        assert!(
-            credentials_from_tokens("xai", "client".into(), None, None, XAI_SCOPE, &missing)
-                .is_err()
-        );
+        assert!(credentials_from_tokens("xai", "client".into(), XAI_SCOPE, &missing).is_err());
         let complete = serde_json::json!({"access_token":"synthetic", "refresh_token":"synthetic-refresh", "expires_in":3600});
-        let saved =
-            credentials_from_tokens("xai", "client".into(), None, None, XAI_SCOPE, &complete)
-                .unwrap();
+        let saved = credentials_from_tokens("xai", "client".into(), XAI_SCOPE, &complete).unwrap();
         assert_eq!(saved.provider, "xai");
         assert!(saved.expires_at > 0);
         assert_ne!(saved.proxy_token, saved.access_token);
@@ -1446,18 +1379,9 @@ mod tests {
     fn xai_tokens_accept_documented_missing_expiry() {
         let tokens =
             serde_json::json!({"access_token":"synthetic", "refresh_token":"synthetic-refresh"});
-        assert!(
-            credentials_from_tokens("xai", "client".into(), None, None, XAI_SCOPE, &tokens).is_ok()
-        );
-        assert!(credentials_from_tokens(
-            "google",
-            "client".into(),
-            None,
-            Some("project".into()),
-            GOOGLE_SCOPE,
-            &tokens
-        )
-        .is_err());
+        assert!(credentials_from_tokens("xai", "client".into(), XAI_SCOPE, &tokens).is_ok());
+        // Only xAI documents leaving the expiry out; any other provider has to say it.
+        assert!(credentials_from_tokens("other", "client".into(), XAI_SCOPE, &tokens).is_err());
     }
     #[test]
     fn late_begin_cannot_cancel_newer_authorization() {
@@ -1505,8 +1429,7 @@ mod tests {
     fn persisted_credentials_remain_provider_bound() {
         let root = crate::test_support::temp_root("provider-oauth");
         let tokens = serde_json::json!({"access_token":"synthetic", "refresh_token":"synthetic-refresh", "expires_in":3600});
-        let saved = credentials_from_tokens("xai", "client".into(), None, None, XAI_SCOPE, &tokens)
-            .unwrap();
+        let saved = credentials_from_tokens("xai", "client".into(), XAI_SCOPE, &tokens).unwrap();
         write(&root, &saved, || Ok(())).unwrap();
         assert_eq!(read(&root, "xai").unwrap().session_id, saved.session_id);
         assert!(read(&root, "google").is_err());
@@ -1699,12 +1622,10 @@ mod tests {
     fn credential_replacement_waits_for_existing_rotation_owner() {
         let root = crate::test_support::temp_root("provider-oauth-replacement");
         let tokens = serde_json::json!({"access_token":"synthetic", "refresh_token":"synthetic-refresh", "expires_in":3600});
-        let old = credentials_from_tokens("xai", "client".into(), None, None, XAI_SCOPE, &tokens)
-            .unwrap();
+        let old = credentials_from_tokens("xai", "client".into(), XAI_SCOPE, &tokens).unwrap();
         write(&root, &old, || Ok(())).unwrap();
         let lock = credential_lock::acquire(&root.join(FILE)).unwrap();
-        let new = credentials_from_tokens("xai", "client".into(), None, None, XAI_SCOPE, &tokens)
-            .unwrap();
+        let new = credentials_from_tokens("xai", "client".into(), XAI_SCOPE, &tokens).unwrap();
         let newer_session = new.session_id.clone();
         let other_root = root.clone();
         let (send, receive) = std::sync::mpsc::channel();
@@ -1739,8 +1660,7 @@ mod tests {
             .unwrap();
         }
         let tokens = serde_json::json!({"access_token":"synthetic", "refresh_token":"synthetic-refresh", "expires_in":3600});
-        let saved = credentials_from_tokens("xai", "client".into(), None, None, XAI_SCOPE, &tokens)
-            .unwrap();
+        let saved = credentials_from_tokens("xai", "client".into(), XAI_SCOPE, &tokens).unwrap();
         let result = write(&root, &saved, || Ok(()));
         assert!(
             result.is_ok(),
@@ -1754,8 +1674,7 @@ mod tests {
     fn canceled_sign_in_cannot_replace_current_credentials() {
         let root = crate::test_support::temp_root("provider-oauth-canceled");
         let tokens = serde_json::json!({"access_token":"synthetic", "refresh_token":"synthetic-refresh", "expires_in":3600});
-        let saved = credentials_from_tokens("xai", "client".into(), None, None, XAI_SCOPE, &tokens)
-            .unwrap();
+        let saved = credentials_from_tokens("xai", "client".into(), XAI_SCOPE, &tokens).unwrap();
         write(&root, &saved, || Ok(())).unwrap();
         let mut replacement = saved.clone();
         replacement.session_id = "canceled".into();

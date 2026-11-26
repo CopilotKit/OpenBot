@@ -15,6 +15,8 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
+import { failureSaid } from "@/lib/load-failure";
+import { DEACTIVATED } from "@/lib/organizations/words";
 import { completionOf, matchIn } from "@/lib/teams/people-search";
 import {
   type OrganizationPerson,
@@ -22,7 +24,6 @@ import {
   peopleSearchText,
 } from "@/lib/teams/queries";
 import { cn } from "@/lib/utils";
-import { failureSaid } from "@/lib/load-failure";
 
 /** How long typing rests before the server is asked: short enough to feel like every keystroke. */
 const DEBOUNCE_MS = 120;
@@ -331,6 +332,7 @@ export function PeopleTypeahead({
                     aria-label={[
                       one.name ?? one.email,
                       one.name ? one.email : null,
+                      one.deactivated ? DEACTIVATED.toLowerCase() : null,
                       why?.toLowerCase() ?? null,
                     ]
                       .filter(Boolean)
@@ -355,8 +357,23 @@ export function PeopleTypeahead({
                   >
                     <PersonAvatar person={one} />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">
-                        <Matched text={one.name ?? one.email} typed={typed} />
+                      <p className="flex min-w-0 items-baseline gap-1.5 font-medium">
+                        <span className="truncate">
+                          <Matched text={one.name ?? one.email} typed={typed} />
+                        </span>
+                        {/* Their account is to be deleted, as the members list says beside their name. */}
+                        {one.deactivated ? (
+                          <span
+                            className={cn(
+                              "shrink-0 font-normal text-xs",
+                              highlighted
+                                ? "text-accent-foreground/70"
+                                : "text-muted-foreground",
+                            )}
+                          >
+                            {DEACTIVATED}
+                          </span>
+                        ) : null}
                       </p>
                       {one.name ? (
                         <p

@@ -10,6 +10,6 @@ export interface AccountDeletionBlocker {
   organizationId: string;
   /** The organization's name, as its members see it. */
   organizationName: string;
-  /** only_owner: the person is its only owner, so they make another member an owner or delete the organization. owner_must_leave: it has other owners, so the person leaves it. A later OpenBot may add a reason; read one you don't know as having to leave it. */
+  /** only_owner: the person is its only owner, so they make another member an owner or delete the organization. owner_must_leave: it has other owners, so the person leaves it. only_admin: it has no owner and the person is its only admin, so they make another member an admin. A later OpenBot may add a reason; read one you don't know as having to leave it. */
   reason: string;
 }

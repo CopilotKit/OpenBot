@@ -1779,9 +1779,9 @@ components:
     BotRoleDescription:
       type: string
       minLength: 1
-      maxLength: 1000
+      maxLength: 5000
       description: >-
-        What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint
+        What it does, 1 to 5000 characters once trimmed. A Bot with no endpoint
         runs on these words.
     BotEndpoint:
       type: string
@@ -1806,9 +1806,9 @@ components:
     BotInstructions:
       type: string
       minLength: 1
-      maxLength: 1000
+      maxLength: 5000
       description: >-
-        New instructions for the starter Bot, 1 to 1000 characters once
+        New instructions for the starter Bot, 1 to 5000 characters once
         trimmed. Absent leaves them as they are; every other Bot ignores them.
     BotFields:
       type: object

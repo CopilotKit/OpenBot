@@ -1,6 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { PROVIDERS_ADDRESS, providerAddress } from "@/lib/ai-connection/paths";
+import {
+  PROVIDERS_ADDRESS,
+  providerAddress,
+  providerChangeAddress,
+} from "@/lib/ai-connection/paths";
+import {
+  GOOGLE_SIGN_IN_ENDED,
+  signInRetired,
+} from "@/lib/ai-connection/providers";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { connectionOf } from "@/lib/models/connections";
@@ -81,6 +89,8 @@ export function StoppedConnectionNotice({
     queryClient,
   ).data;
   if (!stopped) return null;
+  // A Google sign-in OpenBot no longer offers: the way on opens Google Gemini's API key directly.
+  const retired = signInRetired(stopped);
   const canFix =
     owner === "personal" ||
     (owner === "organization" && isOrganizationAdmin(me?.role));
@@ -97,11 +107,17 @@ export function StoppedConnectionNotice({
             className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
             href={
               stopped.connection
-                ? reconnectPath(stopped.connection, owner)
+                ? retired
+                  ? providerChangeAddress(stopped.connection, owner)
+                  : reconnectPath(stopped.connection, owner)
                 : chooseDefaultPath()
             }
           >
-            {stopped.connection ? "Reconnect" : "Choose a default"}
+            {stopped.connection
+              ? retired
+                ? GOOGLE_SIGN_IN_ENDED.action
+                : "Reconnect"
+              : "Choose a default"}
           </a>
         ) : null}
         <Button onClick={onChooseModel} size="sm" variant="outline">

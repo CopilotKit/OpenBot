@@ -116,6 +116,21 @@ const PHASES: [Phase, string][] = [
   ["start", "Opening OpenBot"],
 ];
 
+/**
+ * The rows as a first run's Finishing setup says them. There OpenBot opens only on Open OpenBot,
+ * once it is up, so its last row is "Starting OpenBot", which is not that screen's heading.
+ */
+export function firstRunRows(sequence: LocalSequence): LocalSequence {
+  return {
+    ...sequence,
+    steps: sequence.steps.map((row) =>
+      row.step === "Opening OpenBot"
+        ? { ...row, step: "Starting OpenBot" }
+        : row,
+    ),
+  };
+}
+
 /** The readiness sentence for one CLI answer or failure category. */
 function said(intelligence: LocalReport | LocalFailure): string {
   return localReadiness({

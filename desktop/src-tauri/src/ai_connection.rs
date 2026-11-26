@@ -332,7 +332,7 @@ The settings Start writes that depend on the installation folder: the plan engin
 release's manifest; when the setup window's AI screen last saved a choice; and the files the server
 reads, at the paths the Compose file mounts.
 
-`OPENBOT_MODEL_OAUTH_FILE` names where a Google or xAI sign-in is kept whether or not one is the
+`OPENBOT_MODEL_OAUTH_FILE` names where an xAI sign-in is kept whether or not one is the
 connection now, so one made in the app reaches the server with no restart.
 */
 pub fn start_settings(root: &Path) -> BTreeMap<String, String> {

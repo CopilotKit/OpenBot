@@ -19,7 +19,12 @@ import { engineTooSmallSaid } from "./localReadiness";
 import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import { InlineFailure, type Problem } from "./Problem";
 import { Sections, SetupRail } from "./Sections";
-import { type Progress, SetupProgress, StatusLine } from "./SetupProgress";
+import {
+  type GoAhead,
+  type Progress,
+  SetupProgress,
+  StatusLine,
+} from "./SetupProgress";
 import { Command } from "./WindowsBlocker";
 
 type Seen =
@@ -146,11 +151,11 @@ export function CopilotKitAccount({
    */
   engine?: string | null;
   /**
-   * Install, behind this step, waits for the person's go-ahead before macOS asks for their
-   * password to install Podman: its line, from `goAheadNow`. Once signed in, the step explains and
-   * offers Continue.
+   * Install, behind this step, waits on the person around macOS's password prompt: for Continue
+   * before it comes up, or for Try again after they closed it. From `goAheadNow`, said in its own
+   * card on whatever this step shows.
    */
-  goAhead?: string | null;
+  goAhead?: GoAhead | null;
   /**
    * On a Mac whose own Podman OpenBot can't use, Install behind this step waits for the person's
    * yes before it pauses theirs: its line, from `pauseOfferNow`, said with the button that says yes.
@@ -387,8 +392,8 @@ export function CopilotKitAccount({
   const appsFailed = seen.at === "apps-failed";
   const refused = seen.at === "unsupported-engine" ? seen : null;
   const waitingForEngine = seen.at === "waiting-for-engine";
-  // The person closed macOS's password prompt: said in a card of its own, with Try again, on
-  // whatever this step shows. Install asks again by itself meanwhile.
+  // macOS's password prompt: Continue before it comes up, or Try again once the person closed it,
+  // in a card of its own on whatever this step shows.
   const asking = goAhead !== null;
   /*
    * Not known yet whether the person is signed in: the CLI is checking a sign-in it may already
@@ -499,10 +504,9 @@ export function CopilotKitAccount({
       )}
       {/* The agreement waits on the engine. While it does, this says what Install is doing to bring
           it up, as Install's own row says it. While Docker Desktop starts or a password prompt is
-          coming or up, it says what the person may have to do in that window, whatever the step
-          is at. Nobody is asked to click before a prompt: a closed one has its card, with Try
-          again. */}
-      {asking && <PodmanGoAhead asking={goAhead} />}
+          up, it says what the person may have to do in that window, whatever the step is at. The
+          password prompt comes only on Continue in its card, and a closed one has Try again. */}
+      {goAhead && <PodmanGoAhead goAhead={goAhead} />}
       {pauseOffer && <PausePodman key={pauseOffer} offer={pauseOffer} />}
       {/* Not while setup's failure is shown: the install that brings the engine up has stopped,
           and a spinner saying it is coming waited forever under it. Its Try again starts it. */}

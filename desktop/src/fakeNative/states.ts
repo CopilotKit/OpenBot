@@ -16,6 +16,7 @@ type States = {
   finishSetUp: () => void;
   finishInstall: () => void;
   finishUpdate: () => void;
+  finishStart: () => void;
 };
 
 type MoveApp = {
@@ -139,6 +140,8 @@ function createStates(where: Where): States {
   // unfinished install, as start_stack does, and the window installs before it starts again.
   // Offline here, so that install fails and the window says so.
   const imageListGone = where.hash === "#image-list-gone";
+  // A relaunch whose saved connection is a Google sign-in for Gemini, which Gemini no longer takes.
+  const googleSignInEnded = where.hash === "#google-sign-in-ended";
   // Found running by the launch is a relaunch too: an installation set up and started before.
   const relaunch =
     where.hash === "#start" ||
@@ -148,6 +151,7 @@ function createStates(where: Where): States {
     runningTooOld ||
     launcherAhead ||
     imageListGone ||
+    googleSignInEnded ||
     Boolean(move);
   const MOVE_PREVIEW = {
     counts: [
@@ -297,6 +301,11 @@ function createStates(where: Where): States {
   const setUp = new Promise<ReturnType<typeof status>>((resolve) => {
     finishSetUp = resolve;
   });
+  // OpenBot's own start, which stays running until `__fake.finishStart` brings OpenBot up.
+  let finishStart: (value: null) => void = () => {};
+  const started = new Promise<null>((resolve) => {
+    finishStart = resolve;
+  });
   const none = { openai: false, anthropic: false };
 
   /*
@@ -424,12 +433,18 @@ function createStates(where: Where): States {
       case "already_configured":
         return relaunch
           ? {
-              values: {},
-              saved: {
-                modelApiKeys: { openai: true, anthropic: false },
-                modelSessions: none,
-                model: "open-ai-api-key",
-              },
+              values: googleSignInEnded ? { BOT_MODEL: "gemini-3-pro" } : {},
+              saved: googleSignInEnded
+                ? {
+                    modelApiKeys: none,
+                    modelSessions: { ...none, google: true },
+                    model: "google-oauth",
+                  }
+                : {
+                    modelApiKeys: { openai: true, anthropic: false },
+                    modelSessions: none,
+                    model: "open-ai-api-key",
+                  },
               launch: { harness: { id: "langgraph" } },
               localEval: {
                 stack: "local-abc123",
@@ -466,7 +481,8 @@ function createStates(where: Where): States {
           !localTooOld &&
           !runningTooOld &&
           !launcherAhead &&
-          !imageListGone
+          !imageListGone &&
+          !googleSignInEnded
           ? { from: "1.0.0", to: "1.0.1" }
           : null;
       case "upgrade_and_start":
@@ -519,9 +535,8 @@ function createStates(where: Where): States {
           {
             id: "google",
             name: "Google Gemini",
-            summary:
-              "Use a Google AI Studio key or sign in for Gemini API access.",
-            logins: ["endpoint", "oauth"],
+            summary: "Use a Google AI Studio key for the Gemini API.",
+            logins: ["endpoint"],
             mark: "google-color",
             caution: null,
           },
@@ -663,7 +678,8 @@ function createStates(where: Where): States {
         if (where.search === "?started" && !fake?.up)
           return status("stopped", "valid");
         return status("ready", "valid");
-      // OpenBot's own start, the step's last row: it stays there for the test to look at.
+      // OpenBot's own start, the step's last row: it stays there for the test to look at, until
+      // `__fake.finishStart`.
       // Running, when the window is about to find it needs a newer app. Refused, when the release
       // laid out needs a newer launcher contract than this app speaks.
       case "start_stack":
@@ -681,7 +697,7 @@ function createStates(where: Where): States {
               "OpenBot v1.3.0 needs launcherApi 2; this app is v1.1.1 and speaks launcherApi 1",
             kind: "app-too-old",
           } satisfies Problem;
-        return localTooOld ? null : new Promise(() => {});
+        return localTooOld ? null : started;
       // The Status window (`#status`): everything running, or, at `?stopped#status`, all of it
       // stopped as Stop leaves it, the software OpenBot runs on still running. At
       // `?updating#status`, stopped by an update of OpenBot. At `?started#status`, stopped until
@@ -731,6 +747,7 @@ function createStates(where: Where): States {
     finishInstall: () => finishInstall(null),
     finishUpdate: () =>
       finishUpdate({ from: "1.1.3", to: "1.2.0", moved: true }),
+    finishStart: () => finishStart(null),
   };
 }
 
@@ -757,5 +774,6 @@ export function installStates(): void {
   fake.finishSetUp = states.finishSetUp;
   fake.finishInstall = states.finishInstall;
   fake.finishUpdate = states.finishUpdate;
+  fake.finishStart = states.finishStart;
   fake.download ??= null;
 }

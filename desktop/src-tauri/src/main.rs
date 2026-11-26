@@ -278,6 +278,10 @@ struct Progress {
     /// The step waits for the person's go-ahead in this window: see `install::GoAhead`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     asks: bool,
+    /// The go-ahead it waits for comes before the system's password prompt, which comes up only on
+    /// Continue: see `engine::StepLine::before_prompt`.
+    #[serde(rename = "beforePrompt", skip_serializing_if = "std::ops::Not::not")]
+    before_prompt: bool,
     /// The engine itself is being updated: see `engine::StepLine::updating`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     updating: bool,
@@ -976,6 +980,7 @@ fn report_line<R: tauri::Runtime>(
             downloads: None,
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         },
@@ -1194,6 +1199,7 @@ fn report_running_row<R: tauri::Runtime>(
         elsewhere,
         asks,
         updating,
+        before_prompt,
         detail: _,
     } = line;
     setup_phase(step);
@@ -1219,6 +1225,7 @@ fn report_running_row<R: tauri::Runtime>(
             downloads: None,
             elsewhere,
             asks,
+            before_prompt,
             updating,
             paused,
         },
@@ -1669,13 +1676,14 @@ fn on_podman_at_stop(shell: &Shell, root: &Path) -> bool {
     owned.or_else(|| preparation::saved_engine(root)) == Some(engine::Engine::Podman)
 }
 
-/// The person chose Try again after closing the password prompt, so Install asks again now rather
-/// than after its short wait. See `install::GoAhead`. False when nothing was waiting for it.
+/// The person chose Continue before the password prompt, which lets it come up, or Try again after
+/// closing it, so Install asks again now rather than after its short wait. See `install::GoAhead`.
+/// False when nothing was waiting for it.
 #[tauri::command]
 fn allow_podman_install() -> bool {
     let waiting = install::allow_podman_install();
     log::info!(
-        "[install] Try again to install Podman{}",
+        "[install] go-ahead (Continue or Try again) to install Podman{}",
         if waiting {
             ""
         } else {
@@ -1715,6 +1723,7 @@ fn report_running_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: line.elsewhere,
             asks: line.asks,
+            before_prompt: line.before_prompt,
             updating: line.updating,
             paused: false,
         },
@@ -1748,6 +1757,7 @@ fn report_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         },
@@ -4619,7 +4629,14 @@ impl ChosenModel {
             }
         }
         match (self.provider.as_str(), self.login.as_str()) {
-            ("google" | "xai", "oauth") => {
+            /*
+             * A Google sign-in saved before Gemini took an API key only. Refused here, so Start
+             * never hands the server a Google sign-in, and the window says what to do instead.
+             */
+            ("google", "oauth") => Err(Problem::plain(
+                openbot_desktop_lib::provider_oauth::GOOGLE_SIGN_IN_ENDED,
+            )),
+            ("xai", "oauth") => {
                 let saved = openbot_desktop_lib::provider_oauth::read(root, &self.provider)
                     .map_err(Problem::plain)?;
                 let model = given(self.model);
@@ -6151,6 +6168,7 @@ impl QuitStatus {
             downloads: None,
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         };
@@ -6575,6 +6593,21 @@ fn machine_home_fallback_line(root: &Path, profile: Option<&str>) -> String {
         .and_then(win::drive_of)
         .unwrap_or_else(|| "C:".to_string());
     format!("{install} can't hold OpenBot's storage, so it's on {profile}.")
+}
+
+/// At every launch, delete the Google sign-in for Gemini an earlier version saved in the install
+/// folder `root` (`provider_oauth::forget_google_sign_in`). The saved choice stays, so the AI screen
+/// and Start still say to add a Gemini API key. Logged; a launch never stops over it.
+fn forget_google_sign_in_at_launch(root: &Path) {
+    match openbot_desktop_lib::provider_oauth::forget_google_sign_in(root) {
+        Ok(0) => {}
+        Ok(count) => {
+            log::info!("[launch] deleted the saved Google sign-in for Gemini ({count} file(s))")
+        }
+        Err(error) => {
+            log::warn!("[launch] could not delete the saved Google sign-in for Gemini: {error}")
+        }
+    }
 }
 
 /// On Windows, put the Podman machine's disk in the install folder `root`, or in the user profile
@@ -13684,7 +13717,7 @@ pub(crate) async fn cancel_plan_sign_in_now(
     }
 }
 
-/// Start a Google, xAI or Unbiased AI sign-in, sending the browser to it.
+/// Start an xAI or Unbiased AI sign-in, sending the browser to it. Google's is refused.
 pub(crate) async fn begin_provider_sign_in_now(
     app: tauri::AppHandle,
     provider: String,
@@ -15189,6 +15222,9 @@ fn main() {
             );
             // On Windows, the Podman machine's disk goes in the install folder.
             use_machine_home(&selected_root_or_default(app.handle()));
+            if !connected {
+                forget_google_sign_in_at_launch(&selected_root_or_default(app.handle()));
+            }
 
             remember_setup_url(app.handle())?;
             // After the setup page's address is known, which the notice is shown at.
@@ -17991,35 +18027,120 @@ mod tests {
     fn oauth_start_reads_private_session_without_contacting_unstarted_proxy() {
         let root = temp_root("oauth-start");
         std::fs::create_dir_all(root.join(".openbot")).unwrap();
-        for provider in ["google", "xai"] {
-            let path = root.join(openbot_desktop_lib::provider_oauth::FILE);
-            let record = serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":provider,"clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","proxyToken":"synthetic-proxy"});
-            std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
-            let choice = ChosenModel {
-                provider: provider.into(),
-                login: "oauth".into(),
-                api_key: None,
-                base_url: None,
-                container_base_url: None,
-                model: Some("chosen-model".into()),
-                token: None,
-                saved: Some(true),
-            };
-            let credential = start_stack_credential_with(&root, choice, |_, _| {
-                panic!("OAuth must not resolve an API key")
-            })
-            .unwrap();
-            assert_eq!(
-                credential,
-                openbot_env::ModelCredential::ProviderOAuth {
-                    provider: provider.into(),
-                    path: path.to_string_lossy().into_owned(),
-                    proxy_token: "synthetic-proxy".into(),
-                    model: "chosen-model".into()
-                }
-            );
-        }
+        let path = root.join(openbot_desktop_lib::provider_oauth::FILE);
+        let record = serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":"xai","clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","proxyToken":"synthetic-proxy"});
+        std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+        let credential = start_stack_credential_with(&root, oauth_choice("xai"), |_, _| {
+            panic!("OAuth must not resolve an API key")
+        })
+        .unwrap();
+        assert_eq!(
+            credential,
+            openbot_env::ModelCredential::ProviderOAuth {
+                provider: "xai".into(),
+                path: path.to_string_lossy().into_owned(),
+                proxy_token: "synthetic-proxy".into(),
+                model: "chosen-model".into()
+            }
+        );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn oauth_choice(provider: &str) -> ChosenModel {
+        ChosenModel {
+            provider: provider.into(),
+            login: "oauth".into(),
+            api_key: None,
+            base_url: None,
+            container_base_url: None,
+            model: Some("chosen-model".into()),
+            token: None,
+            saved: Some(true),
+        }
+    }
+
+    /// A Google sign-in saved before Gemini took an API key only: Start refuses it in the words
+    /// the window shows, even with its session still on disk, and never hands it to the server.
+    #[test]
+    fn a_saved_google_sign_in_is_refused_at_start() {
+        let root = temp_root("oauth-start-google");
+        std::fs::create_dir_all(root.join(".openbot")).unwrap();
+        let record = serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":"google","clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","quotaProject":"synthetic-project","proxyToken":"synthetic-proxy"});
+        std::fs::write(
+            root.join(openbot_desktop_lib::provider_oauth::FILE),
+            serde_json::to_vec(&record).unwrap(),
+        )
+        .unwrap();
+        let refused = start_stack_credential_with(&root, oauth_choice("google"), |_, _| {
+            panic!("a Google sign-in must not resolve an API key")
+        })
+        .unwrap_err();
+        assert_eq!(
+            refused.said,
+            "Google sign-in for Gemini has ended. Add a Gemini API key to keep your Bots running on Gemini."
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A launch deletes the Google sign-in for Gemini an earlier version saved, and a copy a write
+    /// left half-done beside it, and leaves an xAI sign-in and anything it can't tell is Google's.
+    /// The saved Google choice stays: Start still says to add a Gemini API key.
+    #[test]
+    fn a_launch_deletes_a_saved_google_sign_in_and_keeps_an_xai_one() {
+        let session = |provider: &str| serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":provider,"clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","quotaProject":"synthetic-project","proxyToken":"synthetic-proxy"});
+        let google = temp_root("launch-forgets-google");
+        let xai = temp_root("launch-keeps-xai");
+        for (root, provider) in [(&google, "google"), (&xai, "xai")] {
+            std::fs::create_dir_all(root.join(".openbot")).unwrap();
+            std::fs::write(
+                root.join(openbot_desktop_lib::provider_oauth::FILE),
+                serde_json::to_vec(&session(provider)).unwrap(),
+            )
+            .unwrap();
+        }
+        let half_written = google.join(".openbot/model-oauth.json.synthetic.tmp");
+        std::fs::write(
+            &half_written,
+            serde_json::to_vec(&session("google")).unwrap(),
+        )
+        .unwrap();
+        let unreadable = google.join(".openbot/other.tmp");
+        std::fs::write(&unreadable, b"not a sign-in").unwrap();
+
+        forget_google_sign_in_at_launch(&google);
+        forget_google_sign_in_at_launch(&xai);
+
+        assert!(!google
+            .join(openbot_desktop_lib::provider_oauth::FILE)
+            .exists());
+        assert!(!half_written.exists());
+        assert!(unreadable.exists());
+        assert_eq!(
+            openbot_desktop_lib::provider_oauth::read(&xai, "xai")
+                .unwrap()
+                .proxy_token,
+            "synthetic-proxy"
+        );
+        let refused = start_stack_credential_with(&google, oauth_choice("google"), |_, _| {
+            panic!("a Google sign-in must not resolve an API key")
+        })
+        .unwrap_err();
+        assert_eq!(
+            refused.said,
+            "Google sign-in for Gemini has ended. Add a Gemini API key to keep your Bots running on Gemini."
+        );
+        // And launch runs it, in setup, for the installation this computer runs.
+        let main = include_str!("main.rs");
+        let setup = &main[main.find(".setup(move |app| {\n").unwrap()..];
+        let setup = &setup[..setup.find("\n        })\n").unwrap()];
+        assert!(
+            setup.contains(
+                "if !connected {\n                forget_google_sign_in_at_launch(&selected_root_or_default(app.handle()));\n            }"
+            ),
+            "launch does not delete a saved Google sign-in"
+        );
+        std::fs::remove_dir_all(google).unwrap();
+        std::fs::remove_dir_all(xai).unwrap();
     }
 
     #[test]

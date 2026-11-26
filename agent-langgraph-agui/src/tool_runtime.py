@@ -476,19 +476,44 @@ def model_messages(messages):
     Only here, at the model's door, is a system row that is not the server's own relabelled. The
     graph state keeps it as it arrived, so the snapshot the Bot returns gives the thread back as
     the server sent it.
+
+    A context entry that repeats a system message in the thread is not said again. OpenBot sends a
+    Bot's standing role and its tool guidance both as system messages and as the reserved context
+    entries "OpenBot standing role" and "OpenBot granted tools guidance", with the same text, and
+    its quoted personal memory both ways too, so that an agent reading only one still sees them.
+    Here the thread carries them, so the model is told each once, in the place the thread gives it.
     """
+    thread = convert_to_messages(messages)
+    said = {
+        _text(message.content).strip()
+        for message in thread
+        if isinstance(message, SystemMessage)
+    }
     return [
         *[
             SystemMessage(content=f"{entry.description}\n{entry.value}")
             for entry in current_tools().context
+            if str(entry.value).strip() not in said
         ],
         *[
             _as_conversation(message)
             if isinstance(message, SystemMessage) and not is_server_instruction(message)
             else message
-            for message in convert_to_messages(messages)
+            for message in thread
         ],
     ]
+
+
+def _text(content) -> str:
+    """A message's words, whether its content is a string or a list of parts."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "") if isinstance(part, dict) and part.get("type") == "text" else ""
+            for part in content
+        )
+    return ""
 
 
 def bind_tools(model):

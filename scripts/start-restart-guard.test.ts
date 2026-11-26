@@ -220,6 +220,8 @@ if [[ "$args" == *"compose up -d --build"* ]]; then printf '%s' "$COMPUTER_LOOPB
 if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
 # What docker-compose.yml would read for the server's way to the Intelligence gateway, kept too.
 if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then printf 'proxy=%s browser=%s container=%s' "\${OPENBOT_GATEWAY_PROXY-unset}" "\${OPENBOT_BROWSER_GATEWAY_WS_URL-unset}" "\${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL-unset}" > "$DOCKER_LOG.gateway"; fi
+# And what it would read for the server's way to the TypeScript LangGraph engine.
+if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then printf '%s' "\${LANGGRAPH_TS_AG_UI_URL-unset}" > "$DOCKER_LOG.engine"; fi
 # What Compose calls this checkout's project, and the services its file defines.
 if [[ "$args" == "compose config" ]]; then printf 'name: fixture-project\\nservices: {}\\n'; fi
 # A routine worker's container, left by a start from when the worker was a Compose service.
@@ -295,6 +297,9 @@ exit 0
     const gatewaySettings = await Bun.file(`${dockerLogPath}.gateway`)
       .text()
       .catch(() => undefined);
+    const engineSetting = await Bun.file(`${dockerLogPath}.engine`)
+      .text()
+      .catch(() => undefined);
     const envFile = await Bun.file(join(directory, ".env")).text();
     return {
       exitCode,
@@ -306,6 +311,7 @@ exit 0
       loopbackRelays,
       serverEnvironment,
       gatewaySettings,
+      engineSetting,
       envFile,
     };
   } finally {
@@ -483,7 +489,8 @@ describe("start.sh and the browser's way to an Intelligence gateway on this mach
     });
     // And the computers still relay that port, so a recording made in a Bot's browser saves.
     expect(result.loopbackRelays).toContain("14401=host.docker.internal:14401");
-  });
+    // The first `docker compose config` on a CI runner takes six to seven seconds, past bun's five.
+  }, 30_000);
 
   test.each([
     ["in .env", { settings: { OPENBOT_PUBLIC_URL: "http://127.0.0.1:3010" } }],
@@ -952,6 +959,67 @@ describe("start.sh and the managed Bot", () => {
     expect(result.exitCode).toBe(1);
     expect(result.curlLog).toContain("http://127.0.0.1:4201/health");
     expect(result.stdout).toContain("agent-langgraph-agui never became ready");
+    expect(result.stdout).not.toContain("Ready. http://localhost:3010");
+  });
+});
+
+describe("start.sh and the TypeScript LangGraph engine", () => {
+  /**
+   * Every Bot runs on agent-langgraph-ts, and the server refuses a Bot whose engine it cannot reach
+   * rather than run it on its built-in agent. So every edition starts the engine, waits for it on
+   * its own port, and tells the server where it is. The personal edition still skips the managed
+   * Bot, whose Personal Assistant runs in the server.
+   */
+  test.each([
+    [
+      "the team edition",
+      {},
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui agent-langgraph-ts tool=",
+    ],
+    [
+      "the personal edition",
+      { OPENBOT_EDITION: "personal", OPENBOT_ONE_COMPUTER_EACH: "false" },
+      "compose up -d --build postgres agent-computer agent-langgraph-ts tool=",
+    ],
+  ])(
+    "%s starts it and points the server at it",
+    async (edition, settings, up) => {
+      const result = await runStart({
+        settings,
+        omitFromEnv:
+          edition === "the personal edition" ? ["MANAGED_AGENT_AG_UI_URL"] : [],
+      });
+
+      expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+      expect(result.dockerLog).toContain(up);
+      expect(result.curlLog).toContain("http://127.0.0.1:4215/health");
+      expect(result.stdout).toContain("agent-langgraph-ts ready");
+      // What Compose reads for the server's `LANGGRAPH_TS_AG_UI_URL`, and the file it is handed.
+      expect(result.engineSetting).toBe("http://127.0.0.1:4215/");
+      expect(
+        serverSetting(result.serverEnvironment, "LANGGRAPH_TS_AG_UI_URL"),
+      ).toBe("http://127.0.0.1:4215/");
+      if (edition === "the personal edition") {
+        expect(result.dockerLog).not.toContain("agent-langgraph-agui");
+        expect(result.curlLog).not.toContain(":4201/health");
+      }
+    },
+  );
+
+  test("the personal edition stops if the engine never answers", async () => {
+    const result = await runStart({
+      settings: {
+        OPENBOT_EDITION: "personal",
+        OPENBOT_ONE_COMPUTER_EACH: "false",
+      },
+      omitFromEnv: ["MANAGED_AGENT_AG_UI_URL"],
+      unavailableHealthPorts: [4215],
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("agent-langgraph-ts never became ready");
     expect(result.stdout).not.toContain("Ready. http://localhost:3010");
   });
 });

@@ -30,6 +30,7 @@ type ProgressEvent = {
   running?: boolean;
   elsewhere?: boolean;
   asks?: boolean;
+  beforePrompt?: boolean;
   updating?: boolean;
   downloadBytes?: number;
   downloads?: {
@@ -697,6 +698,27 @@ async function expectHandover(timeout?: number) {
   expect(invokeCalls.some((call) => call.command === "ask_the_bot")).toBe(
     false,
   );
+}
+
+/**
+ * A first run's Finishing setup, once OpenBot is up: it stays, saying OpenBot is ready, and the
+ * window hands over only on Open OpenBot.
+ */
+async function openFromFinishing(
+  view: Awaited<ReturnType<typeof renderApp>>,
+  timeout?: number,
+) {
+  const open = await view.findByRole(
+    "button",
+    { name: "Open OpenBot" },
+    { timeout },
+  );
+  expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(
+    false,
+  );
+  expect(view.getByRole("heading", { name: "Finishing setup" })).toBeTruthy();
+  await userEvent.click(open);
+  await expectHandover();
 }
 
 /** The first screen's Install, which with a CLI installs OpenBot and local Intelligence. */
@@ -2658,22 +2680,27 @@ test("the account step opens the CopilotKit sign-in at once, without waiting for
 });
 
 // What Install says as it downloads the software OpenBot runs on, before macOS asks for the
-// password, and after a prompt the person closed (`install::podman_downloading`,
-// `podman_install_said`, `podman_declined`).
+// password, while the prompt is up, and after a prompt the person closed
+// (`install::podman_downloading`, `podman_before_prompt`, `podman_install_said`, `podman_declined`).
 const DOWNLOADING_SOFTWARE = "Downloading the software OpenBot runs on.";
+const PODMAN_BEFORE_PROMPT =
+  "OpenBot needs to install the software it runs on. Choose Continue, then enter your Mac password when your Mac asks for it.";
 const PODMAN_PROMPTING =
   "Your Mac will ask for your password so OpenBot can install what it needs to run.";
 const PODMAN_DECLINED =
   "OpenBot needs your password to install what it needs to run. It asks again in a moment, or choose Try again.";
 
 /**
- * David's direction for 1.0.1: no Continue before macOS asks for the password. #1385 put one
- * there; an install step informs the person and moves forward. Install says what is coming and
- * why, and the prompt comes by itself (`install::install_with_password`). A prompt closed without a
- * password is said plainly, with Try again, and Install asks again by itself.
+ * The 1.2.0 Mac run: Podman's package was in while the person signed in, Install said "Your Mac
+ * will ask for your password..." on OpenBot's window, which sat behind the browser, and 2.5 s later
+ * macOS's prompt came up over the browser's sign-in page. The person met a bare password request.
+ * macOS's prompt comes from the system and comes up over every window, so a line and a pause cannot
+ * make sure the person read why. Install now waits for Continue (`install::install_with_password`):
+ * the Account step says what comes next and why in a card, and only Continue lets the prompt come.
+ * A prompt closed without a password is said plainly, with Try again, and Install asks again.
  */
-test("macOS's password prompt is explained and comes without a click, and a closed one is asked again", async () => {
-  setupRootConfiguration("/tmp/local-eval-podman-no-gate", async () =>
+test("macOS's password prompt waits for Continue in the window, and a closed one is asked again", async () => {
+  setupRootConfiguration("/tmp/local-eval-podman-continue", async () =>
     emptyConfiguration(),
   );
   const browser = deferred<{ signedIn: boolean }>();
@@ -2687,8 +2714,11 @@ test("macOS's password prompt is explained and comes without a click, and a clos
   const view = await renderApp();
   await installLocal(view);
   await view.findByText("Checking your OpenBot account…");
+  const allowed = () =>
+    invokeCalls.filter((call) => call.command === "allow_podman_install");
 
-  // Downloaded while the person signs in, then said before the prompt, with nothing to click.
+  // Downloaded while the person signs in. Then Install waits for Continue: the card says what comes
+  // next and why, on the step the person is on, and the background row says what it waits for.
   await emitProgress({
     step: "install-engine",
     ok: true,
@@ -2699,19 +2729,41 @@ test("macOS's password prompt is explained and comes without a click, and a clos
     step: "install-engine",
     ok: true,
     running: true,
+    asks: true,
+    beforePrompt: true,
+    detail: PODMAN_BEFORE_PROMPT,
+  });
+  const before = await view.findByRole("region", {
+    name: "Your Mac will ask for your password",
+  });
+  expect(before.textContent).toContain(PODMAN_BEFORE_PROMPT);
+  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+  expectBehind(view, 1, "Waiting for you to choose Continue.", {
+    waiting: true,
+  });
+  // Still there once signed in, and nothing lets the prompt come but Continue.
+  await act(async () => browser.resolve({ signedIn: true }));
+  await view.findByRole("heading", { name: "Setting up this computer" });
+  expect(
+    view.getByRole("region", { name: "Your Mac will ask for your password" }),
+  ).toBeTruthy();
+  expect(allowed()).toHaveLength(0);
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  expect(allowed()).toHaveLength(1);
+
+  // The prompt is up: the card goes, and the row says what the prompt is for.
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
     elsewhere: true,
     detail: PODMAN_PROMPTING,
   });
+  expect(
+    view.queryByRole("region", { name: "Your Mac will ask for your password" }),
+  ).toBeNull();
   expectBehind(view, 1, PODMAN_PROMPTING);
-  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
-  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
-  await act(async () => browser.resolve({ signedIn: true }));
-  await view.findByRole("heading", { name: "Setting up this computer" });
-  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
-  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
-  const allowed = () =>
-    invokeCalls.filter((call) => call.command === "allow_podman_install");
-  expect(allowed()).toHaveLength(0);
 
   // The person closed the prompt: said plainly, not as a failure, with Try again.
   await emitProgress({
@@ -2726,10 +2778,11 @@ test("macOS's password prompt is explained and comes without a click, and a clos
   });
   expect(card.textContent).toContain(PODMAN_DECLINED);
   expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
   await userEvent.click(view.getByRole("button", { name: "Try again" }));
-  expect(allowed()).toHaveLength(1);
+  expect(allowed()).toHaveLength(2);
 
-  // Asked again: the card goes, and the line before the prompt is back.
+  // Asked again: the card goes, and the line about the prompt is back.
   await emitProgress({
     step: "install-engine",
     ok: true,
@@ -3114,6 +3167,7 @@ const NATIVE = {
   looking: "Looking for the software OpenBot runs on.",
   downloading: DOWNLOADING_SOFTWARE,
   declined: PODMAN_DECLINED,
+  beforePrompt: PODMAN_BEFORE_PROMPT,
   prompting: PODMAN_PROMPTING,
   installingWindows: "Installing the software OpenBot runs on.",
   // The row of a finished install keeps Install's own words: never shown, and checked here.
@@ -3199,11 +3253,17 @@ async function walkFirstRun(platform: "macOS" | "Windows"): Promise<Beat[]> {
   await running("install-engine", NATIVE.downloading);
   seen("signing in, downloading");
   if (platform === "macOS") {
-    // Said before macOS asks for the password, with nothing to click, then asked.
-    await running("install-engine", NATIVE.prompting, { elsewhere: true });
+    // Said before macOS asks for the password, with Continue, which lets the prompt come.
+    await running("install-engine", NATIVE.beforePrompt, {
+      asks: true,
+      beforePrompt: true,
+    });
     seen("signing in, before the password prompt");
     await act(async () => browser.resolve({ signedIn: true }));
     await view.findByRole("heading", { name: "Setting up this computer" });
+    seen("signed in, before the password prompt");
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    await running("install-engine", NATIVE.prompting, { elsewhere: true });
     seen("password prompt");
     // Closed without a password: said, with Try again, and asked again.
     await running("install-engine", NATIVE.declined, { asks: true });
@@ -3290,7 +3350,7 @@ async function walkFirstRun(platform: "macOS" | "Windows"): Promise<Beat[]> {
   seen("AI, installed");
 
   await chooseOpenAi(view);
-  await expectHandover();
+  await openFromFinishing(view);
   seen("start");
   return beats;
 }
@@ -3315,7 +3375,10 @@ for (const platform of ["macOS", "Windows"] as const) {
       "signing in, downloading": `Step 1 of 4 | ${NATIVE.downloading}`,
       ...(mac
         ? {
-            "signing in, before the password prompt": `Step 1 of 4 | ${NATIVE.prompting}`,
+            "signing in, before the password prompt":
+              "Step 1 of 4 · Waiting for you | Waiting for you to choose Continue.",
+            "signed in, before the password prompt":
+              "Step 1 of 4 · Waiting for you | Waiting for you to choose Continue.",
             "password prompt": `Step 1 of 4 | ${NATIVE.prompting}`,
             "password prompt closed":
               "Step 1 of 4 · Waiting for you | Waiting for your password.",
@@ -3830,7 +3893,7 @@ test("the local sequence starts when installation completes and survives the pro
   expectPlain(view);
 });
 
-test("Continue during setup shows Finishing setup, which starts and opens OpenBot by itself", async () => {
+test("Continue during setup shows Finishing setup, which starts OpenBot and opens it on Open OpenBot", async () => {
   setupRootConfiguration("/tmp/local-eval-auto", async () =>
     emptyConfiguration(),
   );
@@ -3864,7 +3927,7 @@ test("Continue during setup shows Finishing setup, which starts and opens OpenBo
   expect(sections.closest(".sheet")).toBeNull();
   expectPlain(view);
   await act(async () => setUp.resolve(localStatus("starting", "valid")));
-  await expectHandover();
+  await openFromFinishing(view);
   expect(localSequence()).toEqual([
     "set_up_local_eval",
     "connect_local_eval",
@@ -3983,6 +4046,107 @@ test("Finishing setup has a usage-data checkbox, checked by default, that turns 
   ]);
 });
 
+/*
+ * Seen on a clean Mac's first install: Finishing setup, which holds the usage-data checkbox, was on
+ * screen for about 10 seconds before OpenBot opened by itself, too short to read the choice or
+ * untick it. It stays now, saying OpenBot is ready, until the person presses Open OpenBot, and the
+ * choice in effect is the one the box shows then.
+ */
+test("Finishing setup stays once OpenBot is up, and opens it only on Open OpenBot, with the usage-data choice unticked first kept off", async () => {
+  setupRootConfiguration("/tmp/local-eval-open-when-ready", async () =>
+    emptyConfiguration(),
+  );
+  let shared = true;
+  const setUp = deferred<unknown>();
+  withLocalCli({
+    set_up_local_eval: () => setUp.promise,
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+    "plugin:openbot-desktop|usage_data": () => ({
+      shared,
+      offByEnvironment: false,
+    }),
+    "plugin:openbot-desktop|set_usage_data": (args: { share: boolean }) => {
+      shared = args.share;
+      return { shared, offByEnvironment: false };
+    },
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await chooseOpenAi(view);
+  await view.findByRole("heading", { name: "Finishing setup" });
+  // While the work runs it says it is setting up, and no longer that OpenBot starts by itself.
+  expect(view.container.querySelector(".lede")?.textContent).toBe(
+    "OpenBot is setting up on this computer. This can take a few minutes.",
+  );
+  expect(view.queryByRole("button", { name: "Open OpenBot" })).toBeNull();
+  await act(async () => setUp.resolve(localStatus("starting", "valid")));
+  await view.findByRole("button", { name: "Open OpenBot" });
+  await waitFor(() =>
+    expect(localSequence()).toEqual([
+      "set_up_local_eval",
+      "connect_local_eval",
+      "run_local_eval",
+      "start_stack",
+    ]),
+  );
+  // Given time, it still waits: the screen, its choice and its steps, all done.
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 300)));
+  expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(
+    false,
+  );
+  expect(view.getByRole("heading", { name: "Finishing setup" })).toBeTruthy();
+  expect(
+    view.queryByRole("heading", { name: "OpenBot is running" }),
+  ).toBeNull();
+  expect(view.container.querySelector(".lede")?.textContent).toBe(
+    "OpenBot is ready on this computer.",
+  );
+  expect(view.queryByRole("progressbar")).toBeNull();
+  expect(view.container.querySelector(".step-spinner")).toBeNull();
+  expect(view.queryByText(/You can't cancel this last step/)).toBeNull();
+  expect(buttons(view)).toEqual(["Open OpenBot"]);
+  const box = view.getByRole("checkbox", {
+    name: /^Help make OpenBot better by sharing diagnostics/,
+  }) as HTMLInputElement;
+  const footer = view.container.querySelector<HTMLElement>(
+    ".finishing-layout > .setup-footer",
+  );
+  // The choice comes first, then the button: read before OpenBot opens.
+  const open = view.getByRole("button", { name: "Open OpenBot" });
+  expect(footer?.contains(box)).toBe(true);
+  expect(footer?.contains(open)).toBe(true);
+  expect(
+    box.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(box.checked).toBe(true);
+  expectPlain(view);
+
+  // Unticked on this screen, then Open OpenBot: off is what is kept.
+  await userEvent.click(box);
+  await waitFor(() => expect(box.checked).toBe(false));
+  await userEvent.click(open);
+  await expectHandover();
+  expect(shared).toBe(false);
+  const commands = invokeCalls.map((call) => call.command);
+  expect(
+    commands.lastIndexOf("plugin:openbot-desktop|set_usage_data"),
+  ).toBeLessThan(commands.indexOf("show_openbot"));
+  expect(
+    invokeCalls.filter(
+      (call) => call.command === "plugin:openbot-desktop|set_usage_data",
+    ),
+  ).toEqual([
+    {
+      command: "plugin:openbot-desktop|set_usage_data",
+      args: { share: false },
+    },
+  ]);
+  expect(
+    invokeCalls.filter((call) => call.command === "start_stack"),
+  ).toHaveLength(1);
+});
+
 function intelligenceCalls() {
   return invokeCalls.filter((call) =>
     ["offer_local_intelligence", "open_local_intelligence"].includes(
@@ -4004,7 +4168,7 @@ test("a first local run offers the backend dashboard to the app page and opens O
   const view = await renderApp();
   await installLocal(view);
   await chooseOpenAi(view);
-  await expectHandover();
+  await openFromFinishing(view);
   // The app page may offer the dashboard once local mode has a recorded stack.
   expect(intelligenceCalls()).toEqual([
     {
@@ -4036,7 +4200,7 @@ test("Continue after Intelligence is already ready starts OpenBot with the AI ju
   );
   await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
   await chooseOpenAi(view);
-  await expectHandover();
+  await openFromFinishing(view);
   expect(getStartStackPayload()).toMatchObject({
     model: { provider: "openai", login: "api-key", apiKey: "model-test-key" },
   });
@@ -4091,7 +4255,7 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
         .map((tick) => tick.closest("p")?.textContent ?? ""),
     ).toContainEqual(expect.stringContaining("Signed in to Anthropic.")),
   );
-  await expectHandover(4000);
+  await openFromFinishing(view, 4000);
   expect(getStartStackPayload()).toMatchObject({
     model: {
       provider: "anthropic",
@@ -4113,7 +4277,7 @@ test("a development double mount runs each local step and opens OpenBot once", a
   const view = await renderApp(true);
   await installLocal(view);
   await chooseOpenAi(view);
-  await expectHandover();
+  await openFromFinishing(view);
   expect(localSequence()).toEqual([
     "set_up_local_eval",
     "connect_local_eval",
@@ -4139,7 +4303,7 @@ test("Continue after Intelligence is ready starts OpenBot with the chosen model"
   expect(view.queryByRole("alert", { name: "Setup" })).toBeNull();
   expect(localSequence()).not.toContain("start_stack");
   await chooseOpenAi(view);
-  await expectHandover();
+  await openFromFinishing(view);
   expect(getStartStackPayload()).toMatchObject({
     model: { provider: "openai" },
   });
@@ -4227,11 +4391,11 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
     false,
   );
   await userEvent.click(view.getByRole("button", { name: "Retry" }));
-  await expectHandover();
+  await openFromFinishing(view);
   expect(setups).toBe(2);
 });
 
-test("a recorded, connected stack that never launched starts by itself and opens OpenBot", async () => {
+test("a recorded, connected stack that never launched starts by itself and opens OpenBot on Open OpenBot", async () => {
   setupRootConfiguration("/tmp/local-eval-recorded", async () => ({
     ...savedOpenAiConfiguration(),
     saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
@@ -4246,9 +4410,9 @@ test("a recorded, connected stack that never launched starts by itself and opens
   withLocalCli({
     run_local_eval: localStatus("ready", "valid"),
   });
-  await renderApp();
-  // Never launched, so this is a first run: it hands over as soon as Start succeeds.
-  await expectHandover();
+  const view = await renderApp();
+  // Never launched, so this is a first run: Finishing setup waits for Open OpenBot.
+  await openFromFinishing(view);
   expect(localSequence()).toEqual([
     "run_local_eval",
     "start_stack",
@@ -5267,7 +5431,9 @@ test("relaunch upgrades an older installation to this app's release as part of S
     moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
   );
   await view.findByRole("heading", { name: "OpenBot is running" });
+  // An update over an installation finishes by itself: only a first run waits for Open OpenBot.
   await expectHandover();
+  expect(view.queryByRole("button", { name: "Open OpenBot" })).toBeNull();
   const sequence = invokeCalls
     .map((call) => call.command)
     .filter((command) =>
@@ -6350,7 +6516,7 @@ test("a provider sign-in can be tried again on the AI step without installing ag
     view.getByRole("button", { name: "Sign in with OpenAI" }),
   );
   // Signed in, so on by itself after a second showing the tick, and OpenBot opens once started.
-  await expectHandover(4000);
+  await openFromFinishing(view, 4000);
   expect(signIns).toBe(2);
   expect(installationCalls()).toHaveLength(1);
   expect(getStartStackPayload().model).toMatchObject({
@@ -6532,7 +6698,7 @@ test("an installation an earlier app connected to hosted Intelligence starts at 
   ]);
   await userEvent.click(view.getByRole("radio", { name: /OpenAI/ }));
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
-  await expectHandover();
+  await openFromFinishing(view);
   expect(localSequence()).toEqual([
     "set_up_local_eval",
     "connect_local_eval",
@@ -6576,7 +6742,7 @@ test("Start asks for the Bot the install put in when the folder's release lacked
   ]);
   await userEvent.click(view.getByRole("radio", { name: /OpenAI/ }));
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
-  await expectHandover();
+  await openFromFinishing(view);
   expect(getStartStackPayload()).toEqual({
     root,
     ...LOCAL_ADDRESSES,
@@ -7363,7 +7529,7 @@ test("setup records only model categories and opens OpenBot when telemetry is un
     },
   });
   // Continue starts OpenBot, and it opens even though no event could be recorded.
-  await expectHandover();
+  await openFromFinishing(view);
   const serialized = JSON.stringify(setupEvents());
   for (const privateValue of [
     privateUrl,
@@ -7490,7 +7656,7 @@ test("leftover database is offered as a fresh start that carries on into Start",
   );
   expect(starts).toBe(1);
   await act(async () => reset.resolve());
-  await expectHandover();
+  await openFromFinishing(view);
   expect(starts).toBe(2);
   expect(installationCalls()).toHaveLength(1);
 });
@@ -7618,8 +7784,9 @@ test("leftover data is a choice the Start step waits on, on its page under its r
   expect(
     content.contains(view.getByRole("button", { name: "Start fresh" })),
   ).toBe(true);
+  // A first run's last row: OpenBot opens on Open OpenBot, once it has started.
   const opening = within(
-    view.getByRole("listitem", { name: "Opening OpenBot" }),
+    view.getByRole("listitem", { name: "Starting OpenBot" }),
   );
   expect(opening.queryByText("Failed")).toBeNull();
   expect(opening.queryByText("OpenBot did not start.")).toBeNull();
@@ -8899,7 +9066,7 @@ test("a finishing Start failure offers its real problem and troubleshooting acti
     }),
   );
   await userEvent.click(view.getByRole("button", { name: "Retry" }));
-  await expectHandover();
+  await openFromFinishing(view);
   expect(starts).toBe(2);
 });
 

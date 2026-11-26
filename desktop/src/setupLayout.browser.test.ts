@@ -2376,6 +2376,116 @@ describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
 });
 
 /*
+ * Seen on a clean Mac's first install: Finishing setup, with its usage-data checkbox, was on screen
+ * for about 10 seconds before OpenBot opened by itself, too short to read the choice or untick it.
+ * Once OpenBot is up it stays now, saying OpenBot is ready, with Open OpenBot under the choice, in
+ * view at both window sizes, light and dark. `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of it.
+ */
+describe.skipIf(!asked)("Finishing setup once OpenBot is ready", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const)
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`at ${width}x${height} (${colorScheme}), waits for Open OpenBot under the choice, which an untick before it keeps`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        try {
+          await toTheAiStep(page);
+          await page.getByText("Anthropic", { exact: true }).click();
+          await page
+            .getByRole("tab", { name: "Use an API key", exact: true })
+            .click();
+          await page
+            .getByLabel("Anthropic API key", { exact: true })
+            .fill("a-key-for-this-test");
+          await page
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Finishing setup" })
+            .waitFor();
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { __fake: { finishSetUp: () => void } }
+            ).__fake.finishSetUp(),
+          );
+          await page.locator(".cannot-cancel").waitFor();
+          const working = await page.locator(".lede").textContent();
+          expect(working).toBe(
+            "OpenBot is setting up on this computer. This can take a few minutes.",
+          );
+          await settled(page);
+          const before = await page.getByRole("checkbox").boundingBox();
+          // OpenBot comes up: the screen stays, and says so.
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { __fake: { finishStart: () => void } }
+            ).__fake.finishStart(),
+          );
+          const open = page.getByRole("button", {
+            name: "Open OpenBot",
+            exact: true,
+          });
+          await open.waitFor();
+          await settled(page);
+          await page.waitForTimeout(400);
+          const shots = process.env.OPENBOT_APP_SHOTS;
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/finishing-setup-ready-${width}x${height}-${colorScheme}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}.png`,
+            });
+          const calls = () =>
+            page.evaluate(
+              () =>
+                (globalThis as unknown as { __fake: { calls: string[] } })
+                  .__fake.calls,
+            );
+          expect(await calls()).not.toContain("show_openbot");
+          expect(await page.locator(".lede").textContent()).toBe(
+            "OpenBot is ready on this computer.",
+          );
+          expect(await page.locator(".cannot-cancel").count()).toBe(0);
+          expect(await page.locator(".step-spinner").count()).toBe(0);
+          // The choice, then the button, both in the window as it is, nothing to scroll to.
+          const box = await page.getByRole("checkbox").boundingBox();
+          const button = await open.boundingBox();
+          expect(box).not.toBeNull();
+          expect(button).not.toBeNull();
+          // The button arriving never moves the choice a click may be aimed at.
+          expect(box).toEqual(before);
+          expect(button?.y ?? 0).toBeGreaterThan(box?.y ?? 0);
+          expect((button?.y ?? 0) + (button?.height ?? 0)).toBeLessThanOrEqual(
+            height,
+          );
+          expect(
+            await page.evaluate(
+              () =>
+                document.documentElement.scrollWidth <=
+                document.documentElement.clientWidth,
+            ),
+          ).toBe(true);
+
+          // Untick, then Open OpenBot: the untick is saved before OpenBot opens.
+          await page.getByRole("checkbox").click();
+          await page.waitForTimeout(200);
+          await open.click();
+          await page.waitForTimeout(400);
+          const made = await calls();
+          const untick = made.lastIndexOf(
+            "plugin:openbot-desktop|set_usage_data",
+          );
+          expect(untick).toBeGreaterThan(-1);
+          expect(made.indexOf("show_openbot")).toBeGreaterThan(untick);
+        } finally {
+          await page.close();
+        }
+      }, 40_000);
+});
+
+/*
  * Seen on a Mac's first install: on Finishing setup, "Connecting OpenBot" stopped with "Setup
  * stopped partway through with an error. Retry. If it stops again, copy the logs below.", and the
  * card had nothing below it but Retry. The logs it names are in the card now, and in view.
@@ -5828,6 +5938,36 @@ describe.skipIf(!asked)("approved layout: install", () => {
             .waitFor();
           await check();
           await shot("unpack");
+          // Before macOS's password prompt: why, and Continue, in reach at every size. The prompt
+          // comes only on Continue.
+          await emit({
+            step: "install-engine",
+            ok: true,
+            running: true,
+            asks: true,
+            beforePrompt: true,
+            detail:
+              "OpenBot needs to install the software it runs on. Choose Continue, then enter your Mac password when your Mac asks for it.",
+          });
+          await page
+            .getByRole("region", {
+              name: "Your Mac will ask for your password",
+            })
+            .waitFor();
+          await check();
+          await reach("Continue");
+          await shot("before-prompt");
+          await page
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+          expect(
+            await page.evaluate(
+              () =>
+                globalThis
+                  .__workbench!.calls()
+                  .filter((c) => c.command === "allow_podman_install").length,
+            ),
+          ).toBe(1);
           const asking =
             "OpenBot needs your password to install what it needs to run. Try again to open the password prompt.";
           await emit({
@@ -5853,7 +5993,7 @@ describe.skipIf(!asked)("approved layout: install", () => {
                   .__workbench!.calls()
                   .filter((c) => c.command === "allow_podman_install").length,
             ),
-          ).toBe(1);
+          ).toBe(2);
           await emit({
             step: "install-engine",
             ok: true,
@@ -6862,6 +7002,71 @@ function bundledPolicy(): { text: string; directives: Map<string, string[]> } {
   }
   return { text, directives };
 }
+
+/*
+ * Gemini takes an API key only. An installation whose saved connection is a Google sign-in opens on
+ * the AI step, never Start: the step says the sign-in ended, and its one button opens Google
+ * Gemini's API key, with no way to sign in to Google left on the row. In light and dark, wide and
+ * at the window's smallest, the notice and its button are whole and in view.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each.
+ */
+describe.skipIf(!asked)("a saved Google sign-in for Gemini", () => {
+  for (const colorScheme of ["light", "dark"] as const)
+    for (const [width, height] of [
+      [1000, 760],
+      [760, 640],
+    ] as const)
+      test(`at ${width}x${height} (${colorScheme}), says it ended, and its button opens Gemini's API key`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        const shot = (name: string) =>
+          shots
+            ? page.screenshot({
+                path: `${shots}/google-sign-in-ended-${name}-${colorScheme}-${width}.png`,
+              })
+            : Promise.resolve();
+        try {
+          await open(page, "#google-sign-in-ended");
+          const notice = page.locator(".blocker", {
+            hasText: "Google sign-in for Gemini has ended",
+          });
+          await notice.waitFor();
+          await page.waitForTimeout(300);
+          await shot("notice");
+          expect(await notice.textContent()).toContain(
+            "Add a Gemini API key to keep your Bots running on Gemini.",
+          );
+          const add = page.getByRole("button", {
+            name: "Add a Gemini API key",
+            exact: true,
+          });
+          const box = await add.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+          expect(box!.y + box!.height).toBeLessThanOrEqual(height);
+          // Nothing started: the saved sign-in is never handed to Start.
+          expect(await calls(page)).not.toContain("start_stack");
+          await add.click();
+          await page
+            .getByLabel("Google Gemini API key", { exact: true })
+            .waitFor();
+          await page.waitForTimeout(300);
+          await shot("key");
+          expect(await notice.count()).toBe(0);
+          expect(
+            await page
+              .getByRole("tab", { name: "Sign in", exact: true })
+              .count(),
+          ).toBe(0);
+        } finally {
+          await page.close();
+        }
+      });
+});
 
 describe("the bundled window's Content Security Policy", () => {
   test("loads only the window's own files, its images, the IPC and the booking calendar", () => {
