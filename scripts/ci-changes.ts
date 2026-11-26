@@ -134,6 +134,7 @@ const pythonHarness = matcher(
 export const PYTHON_HARNESSES = [
   "agent-crewai",
   "agent-claude-sdk",
+  "agent-openai-agents",
   "agent-langgraph-agui",
   "agent-llamaindex",
   "agent-agno",

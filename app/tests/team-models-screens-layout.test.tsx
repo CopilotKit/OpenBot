@@ -26,7 +26,7 @@ import { marksPlugin } from "./marks-plugin";
  *
  * An admin opens a team in Admin, picks one model in the Models dialog, saves, and reads the
  * model's name on the row; then lets the team use everything the organization allows again. A
- * member opens the same team in the app and reads the row, with nothing to press. Admin, Providers
+ * member opens the same team in the app and reads the row, with nothing to press. Admin, AI providers
  * names the teams with a list of their own, each a link to its team. Every step in light and dark,
  * in a wide window and at a phone's width: the page never scrolls sideways, every control is whole
  * inside the window, a row's words are never under its actions, and a dialog fits the window.
@@ -892,7 +892,7 @@ describe.skipIf(!asked)("a team's models", () => {
           }
         }, 60_000);
 
-        test(`Admin, Providers names the teams with their own list, in ${tag}`, async () => {
+        test(`Admin, AI providers names the teams with their own list, in ${tag}`, async () => {
           const world = new World("admin", {
             team_sales: ["openai/gpt-6-sol"],
             team_success: ["openai/gpt-5.6-terra"],

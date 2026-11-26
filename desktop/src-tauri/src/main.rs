@@ -99,11 +99,6 @@ struct Shell {
     install_token: Mutex<Option<(PathBuf, Option<String>)>>,
     /// A verified down allows a following Stop/Quit to be an idempotent no-op.
     stopped_container_root: Mutex<Option<PathBuf>>,
-    /// A ChatGPT sign-in waiting for the browser redirect to complete it.
-    ///
-    /// Held across two commands because a person leaves and approves in the middle of it. The
-    /// callback finishes it. A Claude plan's sign-in keeps its own (`claude_sign_in`).
-    signing_in_to_chatgpt: Mutex<Option<openbot_desktop_lib::plan::SigningInToChatGpt>>,
     /// The configured setup destination, resolved using Tauri's build mode and platform.
     /// WebView2's current URL can still be about:blank during startup; it is never a setup source.
     setup_url: Mutex<Option<String>>,
@@ -317,6 +312,9 @@ struct SavedConfiguration {
     model_api_keys: SavedModelApiKeys,
     model_sessions: SavedModelSessions,
     model: Option<openbot_desktop_lib::saved_intent::ModelIntent>,
+    /// A ChatGPT sign-in an earlier version saved, which has to be done again
+    /// (`env::chatgpt_sign_in_changed`). The window says so above the sign-in.
+    chatgpt_sign_in_changed: bool,
 }
 
 #[derive(Serialize)]
@@ -1919,7 +1917,9 @@ fn record_setup_event<R: tauri::Runtime>(app: tauri::AppHandle<R>, event: serde_
     if let Ok(
         event @ (telemetry::EventData::StepViewed { .. }
         | telemetry::EventData::HarnessChosen { .. }
-        | telemetry::EventData::ModelChosen { .. }),
+        | telemetry::EventData::ModelChosen { .. }
+        | telemetry::EventData::BusinessOpened { .. }
+        | telemetry::EventData::BusinessBooked { .. }),
     ) = serde_json::from_value(event)
     {
         desktop_telemetry::record(&app, event);
@@ -4478,30 +4478,6 @@ async fn deployment_ready<R: tauri::Runtime>(
     Ok(())
 }
 
-/// The reference for an image the shell runs directly, rather than through Compose.
-///
-/// Require completed local installation before starting an authentication container.
-///
-/// With the sign-in's own image made present by `present`. Install pulls a plan's image only for an
-/// installation already on that plan (`preparation::PLAN_IMAGES`), so the ChatGPT plan's sign-in
-/// downloads it when it is missing (`download_missing`). The Claude plan's needs no image.
-fn prepared_sign_in_with(
-    root: &Path,
-    published: &str,
-    present: impl FnOnce(&engine::Address, &String) -> Result<(), Problem>,
-) -> Result<(engine::Address, String), Problem> {
-    let status = engine::detect_saved(preparation::saved_engine(root));
-    let address = status
-        .address
-        .filter(|_| status.responding)
-        .ok_or_else(|| preparation::required(status.detail))?
-        .pin()?;
-    preparation::require(root, None, &address)?;
-    let image = sign_in_reference(root, published, deployment::reference)?;
-    present(&address, &image)?;
-    Ok((address, image))
-}
-
 /**
 Download the images of `images` the engine at `address` does not have, showing the download on the
 `images` row exactly as Install shows it (`report_downloads`), and saying the row done after.
@@ -4561,6 +4537,7 @@ fn download_missing<R: tauri::Runtime>(
     Ok(())
 }
 
+#[cfg(test)]
 fn sign_in_reference(
     root: &Path,
     published: &str,
@@ -4709,6 +4686,10 @@ impl ChosenModel {
                 };
                 if store.is_empty() {
                     return Err("That ChatGPT plan was not signed in to.".into());
+                }
+                // A sign-in an earlier version saved, through Codex: the plan's engine can't use it.
+                if !openbot_env::is_sign_in_with_chatgpt_record(&store) {
+                    return Err(openbot_env::CHATGPT_SIGN_IN_CHANGED.into());
                 }
                 Ok(openbot_env::ModelCredential::ChatGptPlan { store })
             }
@@ -6006,8 +5987,8 @@ fn quit_cleanup<P>(shell: &Shell, mut progress: P) -> Stopped
 where
     P: FnMut(QuitStep, QuitStepState),
 {
-    // A ChatGPT sign-in left waiting would keep its container, and the callback port, after Quit.
-    openbot_desktop_lib::plan::release_chatgpt_callback_port();
+    // A ChatGPT sign-in left waiting would keep its loopback port after Quit.
+    openbot_desktop_lib::chatgpt_sign_in::cancel();
     let engine = engine_at_stop(shell, &cleanup_root(shell, &stack::default_root()));
     let on_podman = on_podman_at_stop(shell, &cleanup_root(shell, &stack::default_root()));
     let (down, intelligence) = healed_once_before(
@@ -11118,6 +11099,7 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
                 xai: hint(Category::XaiOauth, false),
             },
             model: intent.model,
+            chatgpt_sign_in_changed: openbot_env::chatgpt_sign_in_changed(&root),
         },
         values,
     }
@@ -11198,29 +11180,10 @@ async fn begin_chatgpt_sign_in<R: tauri::Runtime>(
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
-    #[cfg(target_os = "linux")]
-    let service_app = app.clone();
-    // The sign-in's image downloads in its task, said to the window as Install says it.
-    let progress_app = app.clone();
-    let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        // Install pulls this image only for an installation already on a ChatGPT plan
-        // (`preparation::PLAN_IMAGES`): a first sign-in downloads it here, shown as Install shows it.
-        let (address, image) = prepared_sign_in_with(
-            &root,
-            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
-            |address, image| {
-                download_missing(&progress_app, address, std::slice::from_ref(image), || {
-                    Ok(())
-                })
-            },
-        )?;
-        #[cfg(target_os = "linux")]
-        {
-            let shell = service_app.state::<Shell>();
-            let _startup = shell.startup.lock().unwrap();
-            ensure_linux_podman_api(&shell, &address)?;
-        }
-        openbot_desktop_lib::plan::SigningInToChatGpt::begin(&address, &image)
+    // OpenAI's Sign in with ChatGPT plan usage, natively: PKCE, a 127.0.0.1 loopback and this
+    // computer's host id. No image and no container. See `chatgpt_sign_in`.
+    let url = tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::chatgpt_sign_in::begin(&root).map_err(Problem::plain)
     })
     .await
     .map_err(|error| {
@@ -11229,7 +11192,6 @@ async fn begin_chatgpt_sign_in<R: tauri::Runtime>(
             format!("the sign-in task did not run: {error}"),
         )
     })??;
-    *app.state::<Shell>().signing_in_to_chatgpt.lock().unwrap() = Some(signing);
     let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
     Ok(url)
 }
@@ -11242,14 +11204,8 @@ redemption, which is why there is no code field on that half of the screen.
 */
 #[tauri::command]
 async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String> {
-    let signing = app
-        .state::<Shell>()
-        .signing_in_to_chatgpt
-        .lock()
-        .unwrap()
-        .take()
-        .ok_or_else(|| "That sign-in is no longer running. Start it again.".to_string())?;
-    tauri::async_runtime::spawn_blocking(move || signing.finish())
+    let _ = app;
+    tauri::async_runtime::spawn_blocking(openbot_desktop_lib::chatgpt_sign_in::finish)
         .await
         .map_err(|error| format!("The sign-in did not finish: {error}"))?
 }
@@ -11262,19 +11218,10 @@ already stopped listening for. The browser tab gets OpenBot's page saying the si
 */
 #[tauri::command]
 async fn cancel_chatgpt_sign_in(app: tauri::AppHandle) -> Result<(), String> {
-    // Started but not yet waited on: dropping it removes its container.
-    let held = app
-        .state::<Shell>()
-        .signing_in_to_chatgpt
-        .lock()
-        .unwrap()
-        .take();
-    tauri::async_runtime::spawn_blocking(move || {
-        drop(held);
-        openbot_desktop_lib::plan::cancel_chatgpt_sign_in();
-    })
-    .await
-    .map_err(|error| format!("The sign-in did not stop: {error}"))
+    let _ = app;
+    tauri::async_runtime::spawn_blocking(openbot_desktop_lib::chatgpt_sign_in::cancel)
+        .await
+        .map_err(|error| format!("The sign-in did not stop: {error}"))
 }
 
 /// The model screen's rows. Independent of the Bot, and required to stay that way: no harness is
@@ -12638,6 +12585,16 @@ fn match_window_size<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::
                 if maximized {
                     let _ = window.maximize();
                 }
+            } else {
+                // First launch: enough width for onboarding's desktop layout, capped to the
+                // screen's work area. Later launches restore the person's own dimensions above.
+                let room = screen_room(&window);
+                let (width, height) = window_size::setup_size(
+                    (1120.0, 860.0),
+                    room.map(|(area, _)| (area.size.width, area.size.height)),
+                    room.map_or(0.0, |(_, frame)| frame),
+                );
+                resize_in_place(&window, width, height);
             }
         }
     }
@@ -17680,7 +17637,7 @@ mod tests {
         std::fs::create_dir_all(root.join(".langchain")).unwrap();
         std::fs::write(
             root.join(openbot_env::CHATGPT_STORE_FILE),
-            "{\"refresh_token\":\"stored\"}\n",
+            "{\"client_id\":\"oaiapp_stored\",\"access_token\":\"stored-access\",\"refresh_token\":\"stored\",\"scopes\":[\"chatgpt.tokens.use.direct\"]}\n",
         )
         .unwrap();
 
@@ -17861,7 +17818,7 @@ mod tests {
         persist_endpoint_fixture(
             &root,
             &openbot_env::ModelCredential::ChatGptPlan {
-                store: r#"{"refresh_token":"synthetic-refresh"}"#.into(),
+                store: r#"{"client_id":"oaiapp_synthetic","access_token":"synthetic-access","refresh_token":"synthetic-refresh","scopes":["chatgpt.tokens.use.direct"]}"#.into(),
             },
         );
         assert_eq!(saved(&root), (Some(true), Some(false), Some(false)));
@@ -17879,6 +17836,34 @@ mod tests {
             },
         );
         assert_eq!(saved(&root), (Some(false), Some(false), Some(true)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An installation an earlier version signed in to ChatGPT through Codex: its saved sign-in is
+    /// not offered, the window is told to say the sign-in changed, and a Start on it says the same
+    /// thing, never the stack coming up with a Bot that cannot answer.
+    #[test]
+    fn an_earlier_versions_chatgpt_sign_in_is_asked_for_again() {
+        let root = temp_root("openbot-chatgpt-sign-in-changed");
+        std::fs::create_dir_all(&root).unwrap();
+        persist_endpoint_fixture(
+            &root,
+            &openbot_env::ModelCredential::ChatGptPlan {
+                store: r#"{"access_token":"a.b.c","refresh_token":"codex-refresh","id_token":"i","account_id":"acct"}"#.into(),
+            },
+        );
+        let saved = already_configured_for_root(root.to_string_lossy().into_owned()).saved;
+        assert_eq!(saved.model_sessions.openai, Some(false));
+        assert!(saved.chatgpt_sign_in_changed);
+        let chosen: ChosenModel = serde_json::from_value(serde_json::json!({
+            "provider": "openai", "login": "plan", "saved": true
+        }))
+        .unwrap();
+        let said = chosen
+            .into_credential(&root)
+            .err()
+            .map(|problem| problem.said);
+        assert_eq!(said.as_deref(), Some(openbot_env::CHATGPT_SIGN_IN_CHANGED));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -24989,6 +24974,7 @@ fn main() {
             "agent-langgraph-ts",
             "agent-langgraph-agui",
             "agent-claude-sdk",
+            "agent-openai-agents",
         ] {
             images.images.insert(
                 name.into(),
@@ -25054,9 +25040,10 @@ fn main() {
                 )
             }
             "chatgpt-plan" => {
-                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                // The TypeScript Bot in its own container, and the plan's own engine beside it.
-                ("compose --profile harness --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-harness agent-chatgpt-plan", Some("agent-langgraph-ts"))
+                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"client_id\":\"oaiapp_synthetic\",\"access_token\":\"synthetic-access\",\"refresh_token\":\"synthetic-plan\",\"scopes\":[\"chatgpt.tokens.use.direct\"]}"});
+                // The plan's own engine is the OpenAI Agents SDK Bot the plan picked, as for a Claude
+                // plan: no container of the Bot's own.
+                ("compose --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-chatgpt-plan", Some("agent-openai-agents"))
             }
             "claude-plan" | "claude-plan-switched" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
@@ -25065,8 +25052,8 @@ fn main() {
                 ("compose --profile claude-plan up -d --no-build --pull never postgres agent-computer server agent-claude-plan", Some("agent-claude-sdk"))
             }
             "chatgpt-plan-switched" => {
-                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-harness agent-chatgpt-plan", Some("agent-langgraph-ts"))
+                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"client_id\":\"oaiapp_synthetic\",\"access_token\":\"synthetic-access\",\"refresh_token\":\"synthetic-plan\",\"scopes\":[\"chatgpt.tokens.use.direct\"]}"});
+                ("compose --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-chatgpt-plan", Some("agent-openai-agents"))
             }
             _ => panic!("unknown test case"),
         };
@@ -25077,7 +25064,7 @@ fn main() {
          */
         let switched_to = match case {
             "claude-plan-switched" => Some("localhost/agent-claude-sdk@sha256:00"),
-            "chatgpt-plan-switched" => Some("localhost/agent-langgraph-agui@sha256:00"),
+            "chatgpt-plan-switched" => Some("localhost/agent-openai-agents@sha256:00"),
             _ => None,
         };
         if let Some(image) = switched_to {
@@ -25435,126 +25422,6 @@ fn main() {
             return;
         }
         harness_start_ipc_case("claude-plan");
-    }
-
-    /*
-     * A sign-in to a ChatGPT plan on an installation that installed without that plan's image: the
-     * sign-in runs in that image, so it downloads it first, showing the download as Install shows
-     * it, and then starts the sign-in's container from it. Before, it refused the sign-in as an
-     * unfinished install. The fixture engine refuses the container itself, so the flow stops there,
-     * before any browser would open.
-     */
-    fn plan_sign_in_ipc_case(command: &str, published: &str) {
-        let root = temp_root("openbot-plan-sign-in-ipc");
-        write_installed_deployment(&root);
-        let mut images: deployment::Images =
-            serde_json::from_str(&std::fs::read_to_string(deployment::images_path(&root)).unwrap())
-                .unwrap();
-        images.images.insert(
-            published.into(),
-            deployment::Image {
-                reference: format!("localhost/{published}@sha256:00"),
-            },
-        );
-        std::fs::write(
-            deployment::images_path(&root),
-            serde_json::to_string(&images).unwrap(),
-        )
-        .unwrap();
-        preparation::record(&root, None, vec!["fixture-image".into()]).unwrap();
-        let image = format!("localhost/{published}@sha256:00");
-        let path = SerializedPath::set_only_with("docker", "harness");
-        let record = root.join("commands.log");
-        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
-        std::env::set_var("OPENBOT_TEST_ENGINE_MISSING_IMAGE", &image);
-        let app = tauri::test::mock_builder()
-            .manage(Shell::default())
-            .invoke_handler(tauri::generate_handler![begin_chatgpt_sign_in])
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .unwrap();
-        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
-        {
-            use tauri::Listener;
-            let told = told.clone();
-            app.listen_any("setup:progress", move |event| {
-                told.lock()
-                    .unwrap()
-                    .push(serde_json::from_str(event.payload()).unwrap());
-            });
-        }
-        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .unwrap();
-        let answer = tauri::test::get_ipc_response(
-            &window,
-            tauri::webview::InvokeRequest {
-                cmd: command.into(),
-                callback: tauri::ipc::CallbackFn(0),
-                error: tauri::ipc::CallbackFn(1),
-                url: if cfg!(any(windows, target_os = "android")) {
-                    "http://tauri.localhost"
-                } else {
-                    "tauri://localhost"
-                }
-                .parse()
-                .unwrap(),
-                body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "root": root })),
-                headers: Default::default(),
-                invoke_key: tauri::test::INVOKE_KEY.into(),
-            },
-        );
-        let commands = std::fs::read_to_string(&record).unwrap_or_default();
-        let problem = answer.expect_err("the fixture engine refuses the sign-in's container");
-        assert_ne!(
-            problem["said"].as_str(),
-            Some(preparation::REQUIRED),
-            "{command}: refused as an unfinished install: {problem:?}\n{commands}"
-        );
-        let pulled_at = commands
-            .find(&format!("\tpull {image}"))
-            .unwrap_or_else(|| panic!("{command}: {image} was not pulled:\n{commands}"));
-        let ran_at = commands
-            .lines()
-            .position(|line| line.contains("\trun ") && line.contains(&image))
-            .map(|line| {
-                commands
-                    .lines()
-                    .take(line)
-                    .map(|l| l.len() + 1)
-                    .sum::<usize>()
-            })
-            .unwrap_or_else(|| panic!("{command}: the sign-in never ran {image}:\n{commands}"));
-        assert!(
-            pulled_at < ran_at,
-            "{command}: ran before the pull:\n{commands}"
-        );
-        let told = told.lock().unwrap();
-        assert!(
-            told.iter().any(|row| row["step"] == "images"
-                && row["running"] == true
-                && row["downloads"].is_object()),
-            "{command}: no download was shown: {told:?}"
-        );
-        assert!(
-            told.iter()
-                .any(|row| row["step"] == "images" && row["running"] == false && row["ok"] == true),
-            "{command}: the download never finished on screen: {told:?}"
-        );
-        drop(path);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_first_chatgpt_plan_sign_in_downloads_its_image() {
-        if crate::test_support::isolated_process(
-            "tests::a_first_chatgpt_plan_sign_in_downloads_its_image",
-        ) {
-            return;
-        }
-        plan_sign_in_ipc_case(
-            "begin_chatgpt_sign_in",
-            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
-        );
     }
 
     #[test]

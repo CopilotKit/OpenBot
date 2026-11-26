@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  askRunEnding,
   askRunLiveness,
   type RunLiveness,
   watchQuietRun,
@@ -235,4 +236,96 @@ test("an answer about a run that spoke while the runtime was being asked is not 
   await later(10);
   expect(settled).toBeUndefined();
   watch.stop();
+});
+
+/*
+ * FOUND ON OPENBOT CLOUD, in a phone's web view. The phone slept through the end of a long answer,
+ * and woke with the watch's time long up: the server was asked at once, before the socket could
+ * connect again and bring the rest, and the turn ended as if the Bot had stopped.
+ */
+test("a page shown again starts the quiet over, and an answer about the time it slept is not taken", async () => {
+  let wake: () => void = () => {};
+  let release: (answer: RunLiveness) => void = () => {};
+  let asked = 0;
+  let settled: string | undefined;
+  const watch = watchQuietRun({
+    quietMs: 40,
+    onWake: (woke) => {
+      wake = woke;
+      return () => {
+        wake = () => {};
+      };
+    },
+    ask: () => {
+      asked += 1;
+      return new Promise<RunLiveness>((resolve) => {
+        release = resolve;
+      });
+    },
+  });
+  void watch.over.then((outcome) => {
+    settled = outcome;
+  });
+  // Shown again before the quiet ran out: it starts over, so nothing is asked yet.
+  await later(30);
+  wake();
+  await later(25);
+  expect(asked).toBe(0);
+  // Asked once the quiet runs out, and shown again while the answer is on its way.
+  await later(40);
+  expect(asked).toBe(1);
+  wake();
+  release("over");
+  await later(10);
+  expect(settled).toBeUndefined();
+  // The next quiet asks again, and that answer is taken.
+  await later(60);
+  expect(asked).toBe(2);
+  release("over");
+  expect(await watch.over).toBe("over");
+});
+
+test("how a run ended is read from the server, and only a run that finished counts as finished", async () => {
+  const RUN =
+    "/api/v2/organizations/default/conversations/channel_1/runs/run-7";
+  const ended = (outcome: string | null) =>
+    Response.json({
+      run: {
+        id: "run-7",
+        outcome,
+        endedAt: outcome ? "2026-11-25T18:16:00.000Z" : null,
+      },
+    });
+  const asked = server(async () => ended("succeeded"));
+  expect(await askRunEnding("channel_1", "run-7")).toBe("finished");
+  // Asked through the API's getConversationRun, a read.
+  expect(asked[0]?.path).toBe(RUN);
+  expect(asked[0]?.method).toBe("GET");
+
+  for (const outcome of ["failed", "cancelled", "interrupted"]) {
+    server(async () => ended(outcome));
+    expect(await askRunEnding("channel_1", "run-7")).toBe("stopped");
+  }
+  // A word this app doesn't know yet says nothing it can act on.
+  server(async () => ended("paused"));
+  expect(await askRunEnding("channel_1", "run-7")).toBe("unknown");
+
+  // Kept no ending yet: asked once more, and the second answer stands.
+  const answers = [ended(null), ended("succeeded")];
+  const twice = server(async () => answers.shift() ?? ended(null));
+  expect(await askRunEnding("channel_1", "run-7", { retryMs: 5 })).toBe(
+    "finished",
+  );
+  expect(twice).toHaveLength(2);
+  // Not found twice, as from a server that keeps no endings: it can't say.
+  server(async () => problem(404, "CONVERSATION_RUN_NOT_FOUND"));
+  expect(await askRunEnding("channel_1", "run-7", { retryMs: 5 })).toBe(
+    "unknown",
+  );
+  server(async () => problem(502, "SERVER_ERROR"));
+  expect(await askRunEnding("channel_1", "run-7")).toBe("unknown");
+  server(() => new Promise<Response>(() => {}));
+  expect(await askRunEnding("channel_1", "run-7", { answerMs: 40 })).toBe(
+    "unknown",
+  );
 });

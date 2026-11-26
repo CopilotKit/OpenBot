@@ -31,7 +31,7 @@ import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
 /*
- * Admin, Providers and Permissions: the pages Enterprise controls was split into. The server is
+ * Admin, AI providers and Permissions: the pages Enterprise controls was split into. The server is
  * faked at the fetch boundary with the API's answers for the settings, the switches and model
  * usage, and the model catalogue's view of every model listed; the writes are the API's own. Marks resolve as the app
  * resolves them, from the files vendored in `shared/marks`.
@@ -327,7 +327,7 @@ test("Usage says how each model is known, and why one is missing, never the serv
   expect(view.queryByText(/· unknown$/)).toBeNull();
 });
 
-test("Providers names what actually serves the models, with a vendor's mark only where one is vendored", async () => {
+test("AI providers names what actually serves the models, with a vendor's mark only where one is vendored", async () => {
   const cases: [ModelSource, string, string | null][] = [
     ["openai", "OpenAI", "OpenAI"],
     ["anthropic", "Anthropic", "Anthropic"],

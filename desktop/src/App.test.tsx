@@ -111,6 +111,8 @@ mock.module("./Mark", () => ({
   ),
 }));
 
+// Load after the Mark mock: BusinessBooker uses marks that Vite loads with import.meta.glob.
+const { forgetBusinessOpened } = await import("./BusinessBooker");
 const { App } = await import("./App");
 // No page replaces this one here, so the running screen comes once the window was sent to OpenBot.
 // The test of the handover itself holds it as the app does.
@@ -147,6 +149,8 @@ beforeAll(() =>
 afterEach(() => {
   // Unmounting can still call (a running local step is cancelled), so clear the record after it.
   cleanup();
+  // A new window: no OpenBot for Business booker has come on screen in it yet.
+  forgetBusinessOpened();
   setSystemTime();
   // What the window keeps between launches (`thisComputer.ts`) is one test's own.
   localStorage.clear();
@@ -243,6 +247,21 @@ function expectStandardSheet(heading: HTMLElement) {
   expect(beside.length).toBeLessThanOrEqual(1);
   if (beside[0]) expect(beside[0].nextElementSibling).toBe(sheet);
   expect(sheet?.querySelector(".lede, [role=status]")).not.toBeNull();
+}
+
+/** Shutdown's one heading is in the progress sidebar, beside the current task's inset pane. */
+function expectShutdownSheet(heading: HTMLElement) {
+  const rail = heading.closest("aside.rail.quit-rail");
+  expect(rail).not.toBeNull();
+  expect(rail?.parentElement?.tagName).toBe("MAIN");
+  expect(rail?.parentElement?.classList.contains("with-progress-rail")).toBe(
+    true,
+  );
+  const sheet = rail?.nextElementSibling;
+  expect(sheet?.matches(".sheet.connection-sheet.quit-layout")).toBe(true);
+  expect(sheet?.querySelector("h1")).toBeNull();
+  expect(sheet?.querySelector(".quit-current")).not.toBeNull();
+  expect(rail?.parentElement?.children).toHaveLength(2);
 }
 
 const running = (step: string) => ({
@@ -919,9 +938,18 @@ test("picking OpenBot for Business shows its way, what it adds and Book a demo, 
     surface?.firstElementChild?.classList.contains("booking-calendar"),
   ).toBe(true);
   expect(calendar.style.height).toBe("700px");
-  // Keep main's booking attribution alongside the full-height fitting assertions.
+  // Tagged as booked from inside the app, on the first screen, which Calendly keeps on the booking.
   expect(src.searchParams.get("utm_source")).toBe("openbot_app");
   expect(src.searchParams.get("utm_medium")).toBe("in_app");
+  expect(src.searchParams.get("utm_content")).toBe("welcome");
+  // Counted as opened from the first screen: by its place, and nothing else.
+  expect(
+    setupEvents().filter((event) =>
+      String((event as { event?: { kind?: string } }).event?.kind).startsWith(
+        "business_",
+      ),
+    ),
+  ).toEqual([{ event: { kind: "business_opened", place: "welcome" } }]);
   // Calendly says it is there: the spinner goes.
   await act(async () => {
     window.dispatchEvent(
@@ -957,6 +985,76 @@ test("picking OpenBot for Business shows its way, what it adds and Book a demo, 
   expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   expect(view.queryByTitle("Booking calendar")).toBeNull();
   expect(localCliCalls()).toEqual([]);
+});
+
+/*
+ * A call booked on the first screen used to say nothing: the booker didn't listen for Calendly's
+ * booking at all. It is counted from its place, once for the opening however often
+ * OpenBot for Business is picked again, and only for a booking Calendly itself says, from its own
+ * origin and this frame. The once is per page of the setup window: coming back to setup from OpenBot
+ * loads it again.
+ */
+test("a call booked on the first screen is counted as booked from there, and opening it again is not counted again", async () => {
+  setupRootConfiguration("/tmp/business-booker-booked", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    connection: THIS_COMPUTER,
+    record_setup_event: null,
+  });
+  const view = await renderApp();
+  const business = () => view.getByRole("radio", { name: /^Cloud/ });
+  const businessEvents = () =>
+    setupEvents().filter((event) =>
+      String((event as { event?: { kind?: string } }).event?.kind).startsWith(
+        "business_",
+      ),
+    );
+  await userEvent.click(business());
+  await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
+  const calendar = view.getByTitle("Booking calendar") as HTMLIFrameElement;
+  const scheduled = (origin: string) =>
+    act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin,
+          source: calendar.contentWindow,
+          data: { event: "calendly.event_scheduled", payload: {} },
+        }),
+      );
+    });
+
+  await scheduled("https://example.com");
+  // Calendly's origin, but not this calendar's frame: not a booking either.
+  await act(async () => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "https://calendly.com",
+        source: window,
+        data: { event: "calendly.event_scheduled", payload: {} },
+      }),
+    );
+  });
+  expect(businessEvents()).toEqual([
+    { event: { kind: "business_opened", place: "welcome" } },
+  ]);
+  await scheduled("https://calendly.com");
+  expect(businessEvents()).toEqual([
+    { event: { kind: "business_opened", place: "welcome" } },
+    { event: { kind: "business_booked", place: "welcome" } },
+  ]);
+
+  // Away and back: the same launch, so the opening is not said twice.
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  );
+  await userEvent.click(business());
+  await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
+  expect(view.getByTitle("Booking calendar")).toBeTruthy();
+  expect(businessEvents()).toEqual([
+    { event: { kind: "business_opened", place: "welcome" } },
+    { event: { kind: "business_booked", place: "welcome" } },
+  ]);
 });
 
 test("a calendar that can't load gives way to Book a demo, which opens the OpenBot for Business page in the browser", async () => {
@@ -1437,6 +1535,42 @@ test("Cancel while the browser is waited on stops the sign-in and gives the form
   );
   expect(view.queryByRole("alert")).toBeNull();
   expect(document.activeElement).toBe(field);
+});
+
+test("Cloud startup keeps one sidebar and inset pane while checking and opening", async () => {
+  const connection = deferred<{
+    mode: string;
+    address: string;
+    signedIn: boolean;
+  }>();
+  const opening = deferred<void>();
+  const strays = connectedShell({
+    connection: connection.promise,
+    show_connected: opening.promise,
+  });
+  const view = await renderApp();
+  const status = view.getByRole("status");
+  expect(status.textContent).toBe("Checking your saved setup…");
+  const pane = status.closest(".sheet.launch-layout");
+  expect(pane).not.toBeNull();
+  const sidebar = pane?.previousElementSibling;
+  expect(sidebar?.matches("aside.rail")).toBe(true);
+  expect(sidebar?.querySelector("h1")?.textContent).toBe(
+    "Getting OpenBot ready",
+  );
+  expect(pane?.closest("main")?.children).toHaveLength(2);
+  await act(async () =>
+    connection.resolve({
+      mode: "connected",
+      address: "https://api.open.bot",
+      signedIn: true,
+    }),
+  );
+  expect(view.getByRole("status").textContent).toBe("Opening OpenBot…");
+  expect(view.getByRole("status").closest(".sheet")).toBe(pane);
+  expect(view.queryAllByRole("button")).toEqual([]);
+  expect(strays).toEqual([]);
+  await act(async () => opening.resolve());
 });
 
 test("a launch that is connected and signed in opens OpenBot and asks nothing of this computer", async () => {
@@ -4250,7 +4384,7 @@ test("Quit shows Shutting down with each part's row as it starts and ends", asyn
 
   await emitQuit({ seq: 2, steps: [running("stop-openbot")] });
   const heading = view.getByRole("heading", { name: "Shutting down OpenBot" });
-  expectStandardSheet(heading);
+  expectShutdownSheet(heading);
   expect(
     rowStatus(view, "Stopping OpenBot").getByText("In progress"),
   ).toBeTruthy();
@@ -4308,7 +4442,7 @@ test("a window sent to the Shutting down page catches up, then follows the rows"
   const heading = await view.findByRole("heading", {
     name: "Shutting down OpenBot",
   });
-  expectStandardSheet(heading);
+  expectShutdownSheet(heading);
   await waitFor(() =>
     expect(
       rowStatus(view, "Stopping OpenBot").getByText("Complete"),

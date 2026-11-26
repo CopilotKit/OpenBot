@@ -270,18 +270,24 @@ function Setup() {
     );
   }
   return (
-    <main>
-      <div className="sheet connection-sheet">
-        <h1>Getting OpenBot ready</h1>
-        {launch.at === "opening" ? (
-          <StatusLine>Opening OpenBot…</StatusLine>
-        ) : (
-          <p className="lede" role="status">
-            Checking your saved setup…
-          </p>
-        )}
-      </div>
-    </main>
+    <SetupPage
+      heading="Getting OpenBot ready"
+      className="launch-layout"
+      rail={
+        <aside className="rail" aria-label="Startup">
+          <Lockup />
+          <h1 className="rail-title">Getting OpenBot ready</h1>
+        </aside>
+      }
+    >
+      {launch.at === "opening" ? (
+        <StatusLine>Opening OpenBot…</StatusLine>
+      ) : (
+        <p className="lede" role="status">
+          Checking your saved setup…
+        </p>
+      )}
+    </SetupPage>
   );
 }
 

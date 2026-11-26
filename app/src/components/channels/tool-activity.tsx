@@ -1,6 +1,7 @@
 import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import {
+  readAnotherAccountPrompt,
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
@@ -256,7 +257,15 @@ function cardApp(item: ToolItem): string | null {
     : item.toolCall.function.name === SHOW_APP_ACCESS_TOOL
       ? readConnectPrompt(answer)
       : null;
-  return prompt ? `${prompt.agentId ?? ""}\u0000${prompt.serverId}` : null;
+  if (prompt) return `${prompt.agentId ?? ""}\u0000${prompt.serverId}`;
+  // The card for one more account is a question of its own, kept apart from the app's own card.
+  const another =
+    item.toolCall.function.name === SHOW_APP_ACCESS_TOOL
+      ? readAnotherAccountPrompt(answer)
+      : null;
+  return another
+    ? `another\u0000${another.agentId ?? ""}\u0000${another.serverId}`
+    : null;
 }
 
 /**
@@ -949,6 +958,7 @@ export function ToolActivity({
       <ToolLine
         bare
         icon={<IconStack kinds={kinds} />}
+        openKey={group.id}
         label={
           running && working
             ? working === 1

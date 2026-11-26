@@ -323,7 +323,8 @@ mod tests {
         for failure in ["first-store", "later-store", "plan-file", "metadata"] {
             let (root, secrets, legacy) = fixture(failure);
             let credential = ModelCredential::ChatGptPlan {
-                store: "{\"refresh_token\":\"synthetic-plan\"}".into(),
+                // A Sign in with ChatGPT credential record (`crate::chatgpt_sign_in`).
+                store: r#"{"client_id":"oaiapp_synthetic","access_token":"synthetic-access","refresh_token":"synthetic-plan","scopes":["chatgpt.tokens.use.direct"]}"#.into(),
             };
             if failure == "plan-file" {
                 std::fs::write(root.join(".langchain"), "synthetic blocker").unwrap();

@@ -32,9 +32,11 @@ import {
   BUSINESS_URL,
   type BusinessFeatureIcon,
   bookingCalendarSrc,
+  type DesktopBusinessPlace,
 } from "../../shared/openbot-for-business";
 import { CloudMarks } from "./CloudMarks";
 import { ExternalLink } from "./ExternalLink";
+import { recordSetupEvent } from "./telemetry";
 
 /** The same icons the app's OpenBot for Business dialog draws each feature with. */
 const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
@@ -84,13 +86,20 @@ export function BusinessBooker({
   way,
   head,
   layout = "page",
+  place = "welcome",
 }: {
   /** The picked way: its line, and for Self-Hosted the clouds it runs on. */
   way?: BusinessWay;
   /** The page's heading, shown with the features and not over the booking step. */
   head?: ReactNode;
   layout?: "page" | "card";
+  place?: DesktopBusinessPlace;
 }) {
+  useEffect(() => {
+    if (opened.has(place)) return;
+    opened.add(place);
+    recordSetupEvent({ kind: "business_opened", place });
+  }, [place]);
   const [booking, setBooking] = useState(false);
   const bookButton = useRef<HTMLButtonElement>(null);
   const backToFeatures = useRef(false);
@@ -99,10 +108,11 @@ export function BusinessBooker({
     backToFeatures.current = false;
     bookButton.current?.focus();
   }, [booking]);
-  if (layout === "card") return <StackedBooker />;
+  if (layout === "card") return <StackedBooker place={place} />;
   if (booking) {
     return (
       <BookADemo
+        place={place}
         page
         onBack={() => {
           backToFeatures.current = true;
@@ -161,10 +171,12 @@ export function BusinessBooker({
  * focuses the heading as it shows.
  */
 function BookADemo({
+  place,
   page = false,
   onBack,
   heading,
 }: {
+  place: DesktopBusinessPlace;
   page?: boolean;
   onBack?: () => void;
   heading?: Ref<HTMLHeadingElement>;
@@ -195,7 +207,12 @@ function BookADemo({
       </ExternalLink>
     </div>
   ) : (
-    <BookingCalendar fit={page} onFailed={() => setFailed(true)} />
+    <BookingCalendar
+      place={place}
+      fit={page}
+      onFailed={() => setFailed(true)}
+      onBooked={() => recordSetupEvent({ kind: "business_booked", place })}
+    />
   );
   return (
     <section
@@ -236,7 +253,7 @@ function BookADemo({
  * the window, and the card scrolls to it. Book a demo under the first line takes the person there:
  * its heading comes to the top of the card and takes the focus, and the calendar follows it.
  */
-function StackedBooker() {
+function StackedBooker({ place }: { place: DesktopBusinessPlace }) {
   const booking = useRef<HTMLHeadingElement>(null);
   const toBooking = () => {
     const heading = booking.current;
@@ -273,9 +290,20 @@ function StackedBooker() {
         </section>
       ))}
       <p className="business-more">{BUSINESS_FEATURES_MORE}</p>
-      <BookADemo heading={booking} />
+      <BookADemo heading={booking} place={place} />
     </section>
   );
+}
+
+/**
+ * The places whose booker came on screen since the setup window's page loaded: `business_opened` is
+ * said once each. Coming back to setup from OpenBot loads the page again, which starts it afresh.
+ */
+const opened = new Set<DesktopBusinessPlace>();
+
+/** For tests: a new window, where no booker has come on screen yet. */
+export function forgetBusinessOpened() {
+  opened.clear();
 }
 
 /** The height Calendly's embed instructions give an inline calendar, until it reports its own. */
@@ -345,18 +373,22 @@ type CalendlyMessage = {
  * fitted into the available page surface at its full reported height, including the day's times.
  */
 function BookingCalendar({
+  place,
+  onBooked,
   fit = false,
   onFailed,
 }: {
   /** Fill the reserved page surface; card embeds retain Calendly’s reported height. */
   fit?: boolean;
+  place: DesktopBusinessPlace;
+  onBooked: () => void;
   onFailed: () => void;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState(0);
   const [src] = useState(() =>
-    bookingCalendarSrc(window.location.host, windowColors()),
+    bookingCalendarSrc(window.location.host, place, windowColors()),
   );
   const [ready, setReady] = useState(false);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
@@ -373,6 +405,8 @@ function BookingCalendar({
   const scale = fit && room > 0 ? Math.min(1, room / height) : 1;
   const failed = useRef(onFailed);
   failed.current = onFailed;
+  const booked = useRef(onBooked);
+  booked.current = onBooked;
 
   useEffect(() => {
     if (!navigator.onLine) {
@@ -399,6 +433,8 @@ function BookingCalendar({
       } else if (message.event === "calendly.event_type_viewed") {
         heard = true;
         setReady(true);
+      } else if (message.event === "calendly.event_scheduled") {
+        booked.current();
       }
     };
     window.addEventListener("message", onMessage);

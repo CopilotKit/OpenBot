@@ -354,6 +354,8 @@ paths:
   /api/v2/people/me/invitations/{invitationId}: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}' }
   /api/v2/people/me/invitations/{invitationId}/accept: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}~1accept' }
   /api/v2/people/me/invitations/{invitationId}/decline: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}~1decline' }
+  /api/v2/people/me/account-deletion: { $ref: './accounts.yaml#/paths/~1api~1v2~1people~1me~1account-deletion' }
+  /api/v2/people/me/account-deletion/cancel: { $ref: './accounts.yaml#/paths/~1api~1v2~1people~1me~1account-deletion~1cancel' }
   /api/v2/organizations/{organizationId}/teams: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams' }
   /api/v2/organizations/{organizationId}/teams/{teamId}: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}' }
   /api/v2/organizations/{organizationId}/teams/{teamId}/members: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1members' }
@@ -532,6 +534,7 @@ paths:
   /api/v2/organizations/{organizationId}/imports/{importId}/parts/{partNumber}: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1parts~1{partNumber}' }
   /api/v2/organizations/{organizationId}/imports/{importId}/apply: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1apply' }
   /api/v2/organizations/{organizationId}/imports/{importId}/verification: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1verification' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/runs/{runId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1runs~1{runId}' }
 components:
   securitySchemes:
     webSession:
@@ -1185,7 +1188,10 @@ components:
       description: >-
         The caller holds no role in this organization, or the organization
         requires signing in through the company's identity provider and the
-        caller hasn't (SSO_REQUIRED).
+        caller hasn't (SSO_REQUIRED). Or the caller's account is scheduled to
+        be deleted (ACCOUNT_PENDING_DELETION), which every operation but
+        getAccountDeletion and cancelAccountDeletion answers until the
+        deletion is cancelled.
       headers:
         X-Request-Id:
           $ref: '#/components/headers/RequestId'
@@ -1212,6 +1218,17 @@ components:
                 status: 403
                 detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
                 code: SSO_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            accountPendingDeletion:
+              value:
+                type: https://open.bot/errors/account-pending-deletion
+                title: Your account is being deleted.
+                status: 403
+                detail: Your account is scheduled to be deleted. Cancel the deletion to use OpenBot again.
+                code: ACCOUNT_PENDING_DELETION
                 category: permission
                 retryable: false
                 requestId: req_example

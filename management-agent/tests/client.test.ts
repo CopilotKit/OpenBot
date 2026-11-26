@@ -46,7 +46,10 @@ describe("management client", () => {
     const client = new ManagementClient(url, { ...pki.client, ca: pki.ca });
     const reply = await client.heartbeat(heartbeat());
     expect(service.heartbeats).toHaveLength(1);
-    expect(reply.commands).toHaveLength(1);
+    // The command, and the signed desired state every reply carries.
+    expect(
+      reply.commands.map((entry) => (entry as { kind: string }).kind),
+    ).toEqual(["pause", "desired-state"]);
     await client.result({
       commandId: "c1",
       ok: true,

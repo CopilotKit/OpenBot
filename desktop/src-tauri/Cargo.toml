@@ -1,6 +1,6 @@
 [package]
 name = "openbot-desktop"
-version = "1.1.3"
+version = "1.2.0"
 description = "OpenBot Desktop"
 edition = "2021"
 rust-version = "1.90"
@@ -96,6 +96,11 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Verifying the ChatGPT sign-in's ID token (RS256) against OpenAI's published keys. The version
+# rustls already builds. See `chatgpt_sign_in.rs`.
+ring = "0.17"
+# This computer's Sign in with ChatGPT host id, a UUIDv4. The version Tauri already builds.
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

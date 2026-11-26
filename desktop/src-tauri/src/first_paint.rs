@@ -889,7 +889,8 @@ mod tests {
         assert!(main.contains("Color(0xe9, 0xee, 0xf4, 0xff)"));
         assert!(main.contains("Color(0x07, 0x0d, 0x14, 0xff)"));
         // The words the setup page uses while OpenBot gets ready.
-        assert!(include_str!("../../src/App.tsx").contains(&format!("<h1>{HEADING}</h1>")));
+        assert!(include_str!("../../src/App.tsx")
+            .contains(&format!("<h1 className=\"rail-title\">{HEADING}</h1>")));
         assert_eq!(LINE, "This can take a minute.");
         // Box H's window, 1000 by 838 at 100%: the page beside the 320px sidebar, 10px in from
         // the other edges; its heading 76px down, on the sidebar title's line, and 49px in (its

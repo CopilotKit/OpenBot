@@ -418,7 +418,9 @@ jobs:
   # device pixels to one, told to the computer at that size and drawn as sharp, with a click on it
   # still landing where it is seen. And a conversation with a Bot started from under it in the
   # Bots panel. And a Bot's table of links, downloaded as Markdown and as CSV with its links, and
-  # looking exactly as Streamdown's own table. In the image, as above: WebKit's
+  # looking exactly as Streamdown's own table. And a conversation's row in the Conversations and
+  # Bots panels saying Working for as long as its Bot works, through a read of every query and
+  # while a task it handed out works on. In the image, as above: WebKit's
   # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
   #
   # The files run side by side, like the Chromium list's, but eight at a time rather than a worker
@@ -451,7 +453,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
-            bun test --parallel=8 app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/settings-tool-cards-core.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx app/tests/people-lists.test.tsx app/tests/organization-moving.test.tsx app/tests/organization-removed.test.tsx app/tests/organization-held-reload.test.tsx app/tests/organization-unavailable-pages.test.tsx app/tests/organization-held-actions.test.tsx app/tests/organization-unavailable-admin-pages.test.tsx app/tests/organization-held-recovery.test.tsx app/tests/bot-screen-sharp.test.tsx app/tests/bots-panel-start-conversation.test.tsx app/tests/table-export-browser.test.tsx app/tests/organization-unavailable-chat.test.tsx app/tests/moved-apps-reconnect.test.tsx app/tests/composer-keeps-draft-browser.test.tsx app/tests/conversation-reply-toolbar-layout.test.tsx
+            bun test --parallel=8 app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/settings-tool-cards-core.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/sign-in-reconnect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx app/tests/people-lists.test.tsx app/tests/organization-moving.test.tsx app/tests/organization-removed.test.tsx app/tests/organization-held-reload.test.tsx app/tests/organization-unavailable-pages.test.tsx app/tests/organization-held-actions.test.tsx app/tests/organization-unavailable-admin-pages.test.tsx app/tests/organization-held-recovery.test.tsx app/tests/bot-screen-sharp.test.tsx app/tests/bots-panel-start-conversation.test.tsx app/tests/table-export-browser.test.tsx app/tests/organization-unavailable-chat.test.tsx app/tests/moved-apps-reconnect.test.tsx app/tests/composer-keeps-draft-browser.test.tsx app/tests/conversation-reply-toolbar-layout.test.tsx app/tests/roster-working.test.tsx
       # Connect your AI's sign-in code, copied with one press and read back from WebKit's clipboard.
       # Only that test: the rest of the file runs in Chromium in the job above.
       - run: |
@@ -679,6 +681,7 @@ jobs:
         harness:
           - agent-crewai
           - agent-claude-sdk
+          - agent-openai-agents
           - agent-langgraph-agui
           - agent-llamaindex
           - agent-agno

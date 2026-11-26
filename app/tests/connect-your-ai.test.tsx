@@ -6,15 +6,19 @@ import { compile } from "tailwindcss";
 import { parse } from "yaml";
 import type {
   AiConnection,
+  AiConnectionEntry,
   AiConnectionProvider,
   PersonalAiConnection,
 } from "@/lib/api/generated/model";
 import {
+  ConnectPersonalAiConnectionBody,
+  ConnectPersonalAiConnectionResponse,
   FinishPersonalAiSignInBody,
   FinishPersonalAiSignInResponse,
   GetAiConnectionResponse,
   GetPersonalAiConnectionResponse,
   GetPersonalAiSignInResponse,
+  ListPersonalAiConnectionsResponse,
   ReplacePersonalAiConnectionBody,
   StartPersonalAiSignInBody,
   StartPersonalAiSignInResponse,
@@ -77,6 +81,7 @@ const ORGANIZATION = "/api/v2/organizations/default";
 const ME = `${ORGANIZATION}/people/me`;
 const PERSONAL = `${ME}/ai-connection`;
 const SIGN_INS = `${PERSONAL}/sign-ins`;
+const CONNECTIONS = `${ME}/ai-connections`;
 
 const WIDE = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
@@ -304,6 +309,32 @@ function signInStatus(
   });
 }
 
+/** One of the person's own connections, as their list answers it. */
+function connectedEntry(
+  provider: AiConnectionProvider,
+  login: AiConnectionEntry["login"],
+  model: string | null,
+  isDefault: boolean,
+): AiConnectionEntry {
+  return ListPersonalAiConnectionsResponse.parse({
+    connections: [
+      {
+        id: provider,
+        provider,
+        login,
+        model,
+        endpointHost: null,
+        isDefault,
+        ready: true,
+        problem: null,
+        connectedAt: "2026-11-25T09:00:00.000Z",
+      },
+    ],
+    signIns: [],
+    nextCursor: null,
+  }).connections[0] as AiConnectionEntry;
+}
+
 /**
  * The organization's own AI, as an admin reads it, agreeing with what the person's answer says of
  * it: none on OpenBot Cloud until one is set.
@@ -349,6 +380,13 @@ class FakeServer {
   active = "default";
   onboarding: { step: number; completedAt: string | null };
   replaces: unknown[] = [];
+  /**
+   * The person's own connections, several at once (listPersonalAiConnections), or null for a
+   * server from before them, which answers the list 404 as these tests' first server did.
+   */
+  list: AiConnectionEntry[] | null = null;
+  /** Every body connectPersonalAiConnection was sent, as checked. */
+  connects: unknown[] = [];
   removes = 0;
   completes = 0;
   signIns: unknown[] = [];
@@ -424,6 +462,62 @@ class FakeServer {
     if (url.pathname === "/api/auth/sign-out") {
       this.signOuts += 1;
       return { status: 200, json: { success: true } };
+    }
+    if (path === CONNECTIONS && this.list && method === "GET")
+      return {
+        status: 200,
+        json: ListPersonalAiConnectionsResponse.parse({
+          connections: this.list,
+          signIns: this.personal.signIns,
+          nextCursor: null,
+        }),
+      };
+    if (path === CONNECTIONS && this.list && method === "POST") {
+      expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
+        0,
+      );
+      const body = request.postDataJSON() as Record<string, unknown>;
+      this.connects.push(body);
+      const input = ConnectPersonalAiConnectionBody.parse(body);
+      for (const key of Object.keys(body))
+        expect(Object.keys(input)).toContain(key);
+      if (input.apiKey === BAD_KEY) return { status: 422, json: REFUSED };
+      // One per provider, a provider connected again replaced; the first one the default.
+      const before = this.list.find((one) => one.provider === input.provider);
+      const host = input.baseUrl ? new URL(input.baseUrl).host : null;
+      const entry = ConnectPersonalAiConnectionResponse.parse({
+        id: input.provider,
+        provider: input.provider,
+        login: input.login,
+        model: input.model ?? null,
+        endpointHost: host,
+        isDefault: before?.isDefault ?? this.list.length === 0,
+        ready: true,
+        problem: null,
+        connectedAt: "2026-11-25T10:00:00.000Z",
+      }) as AiConnectionEntry;
+      this.list = [
+        ...this.list.filter((one) => one.provider !== input.provider),
+        entry,
+      ];
+      const first = this.list.find((one) => one.isDefault) ?? entry;
+      this.personal = GetPersonalAiConnectionResponse.parse({
+        ...this.personal,
+        connection: {
+          provider: first.provider,
+          login: first.login,
+          model: first.model,
+          endpointHost: first.endpointHost,
+          keySet: true,
+          ready: true,
+          source: "stored",
+          editable: true,
+          saved: [],
+          changedAt: first.connectedAt,
+        },
+        uses: "personal",
+      }) as PersonalAiConnection;
+      return { status: 201, json: entry };
     }
     if (path === PERSONAL && method === "GET")
       return { status: 200, json: this.personal };
@@ -1077,6 +1171,173 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await page.close();
       }
     }, 90_000);
+
+  for (const engine of engines)
+    test(`several connections: each one goes back to the list with a check, and one is enough to go on, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      server.list = [];
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        await page.getByText("Connect one or more").waitFor();
+        expect(await primary(page).isDisabled()).toBe(true);
+        const chooser = page.locator("[data-ai-chooser]");
+        const connected = chooser.getByRole("img", { name: "Connected" });
+        expect(await connected.count()).toBe(0);
+
+        // A key the provider refuses says why and connects nothing.
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
+        const key = chooser.getByLabel("Anthropic API key");
+        await key.fill(BAD_KEY);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        await chooser.getByRole("alert").waitFor();
+        expect(await primary(page).isDisabled()).toBe(true);
+
+        // A good one: back to the list, Anthropic checked, and the way on open.
+        await key.fill(GOOD_KEY);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        const anthropic = chooser.getByRole("button", { name: /^Anthropic/ });
+        await anthropic.getByRole("img", { name: "Connected" }).waitFor();
+        expect(await anthropic.textContent()).toContain(
+          "Uses your Anthropic API key.",
+        );
+        expect(
+          await anthropic.evaluate((row) => row === document.activeElement),
+        ).toBe(true);
+        // One connection: no Default to tell it apart.
+        expect(await anthropic.textContent()).not.toContain("Default");
+        expect(await chooser.textContent()).not.toContain(GOOD_KEY);
+        expect(
+          await page
+            .getByRole("status")
+            .filter({ hasText: "Anthropic is connected." })
+            .count(),
+        ).toBe(1);
+        expect(await primary(page).isDisabled()).toBe(false);
+        // Every other provider is still there to choose.
+        expect(
+          await chooser.getByRole("button", { name: /^OpenAI/ }).count(),
+        ).toBe(1);
+
+        // A second, by xAI's sign-in, the server's as before: back to the list again.
+        await chooser.getByRole("button", { name: /^xAI/ }).click();
+        await chooser
+          .getByRole("button", { name: "Sign in with xAI", exact: true })
+          .click();
+        await chooser.getByText("Signed in to xAI.").waitFor();
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        const xai = chooser.getByRole("button", { name: /^xAI/ });
+        await xai.getByRole("img", { name: "Connected" }).waitFor();
+        expect(await connected.count()).toBe(2);
+        // The first stays the default, and says so now that there are two.
+        expect(await anthropic.textContent()).toContain("Default");
+        expect(await xai.textContent()).not.toContain("Default");
+        await page
+          .getByRole("status")
+          .filter({ hasText: "xAI is connected." })
+          .waitFor();
+        // Connected beside each other: never the one connection's replace.
+        expect(server.connects).toEqual([
+          { provider: "anthropic", login: "api-key", apiKey: BAD_KEY },
+          { provider: "anthropic", login: "api-key", apiKey: GOOD_KEY },
+          { provider: "xai", login: "oauth", model: "grok-4.7" },
+        ]);
+        expect(server.replaces).toEqual([]);
+        expect(await measured(page)).toEqual(FINE);
+        await shoot(page, "several", engine, "light", WIDE);
+
+        // Choosing a connected one opens it again, on its own way in, to replace it.
+        await anthropic.click();
+        await chooser.getByLabel("Anthropic API key").waitFor();
+        await chooser.getByRole("button", { name: "Back" }).click();
+        await anthropic.getByRole("img", { name: "Connected" }).waitFor();
+
+        await primary(page).click();
+        await page.waitForURL((url) => url.pathname !== "/onboarding");
+        expect(server.completes).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`a failed connections refresh preserves the key form in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      server.list = [];
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
+        const key = chooser.getByLabel("Anthropic API key");
+        await key.fill(GOOD_KEY);
+
+        await page.route(
+          (url) => url.pathname === CONNECTIONS,
+          (route) => route.fulfill({ status: 503, json: {} }),
+        );
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              window.addEventListener(
+                "ai-connections-refreshed",
+                () => resolve(),
+                { once: true },
+              );
+              window.dispatchEvent(new Event("refresh-ai-connections"));
+            }),
+        );
+
+        expect(await key.inputValue({ timeout: 2_000 })).toBe(GOOD_KEY);
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`several connections on a phone keep the list and the way out in reach, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      server.list = [];
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "dark",
+        PHONE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
+        await chooser.getByLabel("Anthropic API key").fill(GOOD_KEY);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        await chooser
+          .getByRole("button", { name: /^Anthropic/ })
+          .getByRole("img", { name: "Connected" })
+          .waitFor();
+        expect(await measured(page)).toEqual(FINE);
+        await shoot(page, "several", engine, "dark", PHONE);
+        expect(
+          await page.getByRole("button", { name: "Sign out" }).count(),
+        ).toBe(1);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
 
   for (const engine of engines)
     test(`a person whose organization has an AI goes straight in, in ${engine}`, async () => {
@@ -2665,9 +2926,12 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           .click();
         await chooser.getByText("MQ7T-WD4X").waitFor();
         await chooser.getByText("Signed in to xAI.").waitFor();
-        expect(await chooser.getByLabel("Model name").inputValue()).toBe(
-          "grok-4.7",
-        );
+        /*
+         * Nothing to type: a sign-in asks for no model, as a key or a plan doesn't. The picker
+         * offers what xAI lists for it; the connection names xAI's usual one for runs nobody picked.
+         */
+        expect(await chooser.getByLabel("Model name").count()).toBe(0);
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
         await chooser.getByRole("button", { name: "Connect" }).click();
         const connected = chooser.getByRole("status");
         await connected.waitFor();
@@ -2710,6 +2974,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           0,
         );
         await chooser.getByText("Signed in to Google Gemini.").waitFor();
+        expect(await chooser.getByLabel("Model name").count()).toBe(0);
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
         expect(google.signIns).toEqual([{ provider: "google" }]);
         expect(google.finishes).toEqual([]);
         expect(google.opened[0]).toStartWith(
@@ -2726,6 +2992,129 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         );
       } finally {
         await second.close();
+      }
+    }, 90_000);
+
+  /*
+   * Settings → AI providers → Connect another AI, as it was reported on 1.2.0: xAI's sign-in asked for
+   * a model name typed in raw, and once connected the page went on to xAI's own page. Now nothing is
+   * typed, and Connect goes back to the list with xAI checked, as onboarding's Connect your AI does.
+   */
+  for (const engine of engines)
+    for (const theme of THEMES)
+      for (const window of [WIDE, PHONE])
+        test(`Settings' Connect another AI signs in to xAI with nothing to type, and goes back to its list with xAI checked, in ${engine}, ${theme}, ${window.width}`, async () => {
+          // Their organization has an AI, so the app doesn't hold them at Connect your AI.
+          const server = new FakeServer("organization", true);
+          server.list = [connectedEntry("anthropic", "api-key", null, true)];
+          const page = await open(
+            "/settings/providers/new?owner=personal",
+            server,
+            engine,
+            theme,
+            window,
+          );
+          try {
+            await heading(page, "Connect another AI");
+            const chooser = page.locator("[data-ai-chooser]");
+            await chooser.getByRole("button", { name: /^xAI/ }).click();
+            await chooser
+              .getByRole("button", { name: "Sign in with xAI", exact: true })
+              .click();
+            await chooser.getByText("Signed in to xAI.").waitFor();
+            await shoot(page, "settings-xai-signed-in", engine, theme, window);
+            expect(await measured(page)).toEqual(FINE);
+            // Read now, said after Connect, so both screens are seen whatever they hold.
+            const fields = await chooser.getByRole("textbox").count();
+
+            await chooser.getByRole("button", { name: "Connect" }).click();
+            const xai = chooser.getByRole("button", { name: /^xAI/ });
+            const checked = xai.getByRole("img", { name: "Connected" });
+            // Wherever Connect leads, it is seen first, then held to where it should lead.
+            await checked
+              .or(page.getByText(/Pick one of its models in a conversation/))
+              .waitFor();
+            await shoot(page, "settings-xai-connected", engine, theme, window);
+            // Nothing to type: no model name, no field at all.
+            expect(fields).toBe(0);
+            expect(new URL(page.url()).pathname).toBe(
+              "/settings/providers/new",
+            );
+            expect(await checked.count()).toBe(1);
+            expect(await xai.textContent()).toContain(
+              "Signed in with your xAI account.",
+            );
+            // Two now: the first stays the default, and says so.
+            expect(
+              await chooser
+                .getByRole("button", { name: /^Anthropic/ })
+                .textContent(),
+            ).toContain("Default");
+            expect(
+              await page
+                .getByRole("status")
+                .filter({ hasText: "xAI is connected." })
+                .count(),
+            ).toBe(1);
+            expect(await measured(page)).toEqual(FINE);
+            expect(server.connects).toEqual([
+              { provider: "xai", login: "oauth", model: "grok-4.7" },
+            ]);
+
+            // Nothing to cancel: Done goes back to AI providers, xAI listed there.
+            expect(
+              await chooser.getByRole("button", { name: "Cancel" }).count(),
+            ).toBe(0);
+            await chooser.getByRole("button", { name: "Done" }).click();
+            await page.waitForURL(
+              (url) => url.pathname === "/settings/providers",
+            );
+            await page.getByRole("link", { name: /^xAI/ }).waitFor();
+            await shoot(page, "settings-providers", engine, theme, window);
+          } finally {
+            await page.close();
+          }
+        }, 90_000);
+
+  for (const engine of engines)
+    test(`signing in again to a sign-in that names its own model keeps that model, in ${engine}`, async () => {
+      const server = new FakeServer("organization", true);
+      server.list = [
+        connectedEntry("anthropic", "api-key", null, true),
+        {
+          ...connectedEntry("xai", "oauth", "grok-4.3", false),
+          ready: false,
+          problem: {
+            code: "sign-in-ended",
+            detail: "Your xAI sign-in ended. Sign in again.",
+          },
+        },
+      ];
+      const page = await open(
+        "/settings/providers/xai/change?owner=personal",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser
+          .getByRole("button", { name: "Sign in with xAI", exact: true })
+          .click();
+        await chooser.getByText("Signed in to xAI.").waitFor();
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        // Changing one still goes back to its own page, where the person started.
+        await page.waitForURL(
+          (url) => url.pathname === "/settings/providers/xai",
+        );
+        // The model it named before, not xAI's usual one: an upgrade changes nothing it runs on.
+        expect(server.connects).toEqual([
+          { provider: "xai", login: "oauth", model: "grok-4.3" },
+        ]);
+      } finally {
+        await page.close();
       }
     }, 90_000);
 

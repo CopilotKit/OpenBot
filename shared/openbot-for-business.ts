@@ -23,6 +23,30 @@ export const BOOKING_CALENDAR_URL =
 /** Where the calendar is served from, and the only origin its messages are read from. */
 export const BOOKING_CALENDAR_ORIGIN = new URL(BOOKING_CALENDAR_URL).origin;
 
+/**
+ * Every place OpenBot for Business's calendar is embedded from, as the booking's `utm_content`, so
+ * a call booked inside OpenBot says which screen it came from. In the web app: the account menu's
+ * entry (`account_menu`, in every skin), the home page's Meet OpenBot for Business (`home`), an
+ * Admin page that applies only to a team (`admin`), a Bot's line about a computer of its own
+ * (`computer_line`), the self-hosting bar's Book a call (`self_host_banner`), OpenBot Cloud's
+ * sign-in screen (`sign_in`) and onboarding's Book a demo step (`onboarding`). On Desktop: the
+ * first screen (`welcome`) and Move to Cloud (`move_to_cloud`).
+ */
+export type BusinessPlace = AppBusinessPlace | DesktopBusinessPlace;
+
+/** The web app's places, which open the OpenBot for Business dialog or onboarding's step. */
+export type AppBusinessPlace =
+  | "account_menu"
+  | "home"
+  | "admin"
+  | "computer_line"
+  | "self_host_banner"
+  | "sign_in"
+  | "onboarding";
+
+/** Desktop's setup window's places, which draw its own booker (`BusinessBooker`). */
+export type DesktopBusinessPlace = "welcome" | "move_to_cloud";
+
 /** Colours for the calendar, as Calendly takes them: six hex digits, no `#`. */
 export type BookingCalendarColors = {
   background: string;
@@ -41,12 +65,14 @@ export type BookingCalendarColors = {
  * `hide_gdpr_banner` drops Calendly's cookie banner, which otherwise sits over the calendar inside
  * the step.
  * `utm_source=openbot_app` and `utm_medium=in_app` say the call was booked from inside OpenBot,
- * the web app or Desktop. Calendly keeps an embed address's UTM tags on the booking, so without them
- * a booking made here counts as a direct one.
+ * the web app or Desktop, and `utm_content` the screen it was booked from ({@link BusinessPlace}).
+ * Calendly keeps an embed address's UTM tags on the booking, so without them a booking made here
+ * counts as a direct one.
  * Colours are the app's own, where they could be read.
  */
 export function bookingCalendarSrc(
   host: string,
+  place: BusinessPlace,
   colors?: BookingCalendarColors,
 ): string {
   const url = new URL(BOOKING_CALENDAR_URL);
@@ -56,6 +82,7 @@ export function bookingCalendarSrc(
   url.searchParams.set("hide_gdpr_banner", "1");
   url.searchParams.set("utm_source", "openbot_app");
   url.searchParams.set("utm_medium", "in_app");
+  url.searchParams.set("utm_content", place);
   if (colors) {
     url.searchParams.set("background_color", colors.background);
     url.searchParams.set("text_color", colors.text);

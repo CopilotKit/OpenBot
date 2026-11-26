@@ -379,7 +379,29 @@ function createStates(where: Where): States {
                 connected: true,
               },
             }
-          : { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
+          : where.hash === "#chatgpt-changed"
+            ? {
+                values: {},
+                saved: {
+                  modelApiKeys: none,
+                  modelSessions: none,
+                  model: "chat-gpt-plan",
+                  chatgptSignInChanged: true,
+                },
+              }
+            : where.hash === "#chatgpt-saved"
+              ? {
+                  values: {},
+                  saved: {
+                    modelApiKeys: none,
+                    modelSessions: { openai: true, anthropic: false },
+                    model: "chat-gpt-plan",
+                  },
+                }
+              : {
+                  values: {},
+                  saved: { modelApiKeys: none, modelSessions: none },
+                };
       case "upgrade_due":
         return relaunch &&
           !localTooOld &&

@@ -49,11 +49,11 @@ const OPENBOT_FOR_BUSINESS = "https://open.bot/business";
 /**
  * The calendar Book a demo embeds: the OpenBot for Business event on Calendly, as an inline embed
  * for this page's host, without the event's details or Calendly's cookie banner, and tagged as
- * booked from inside the app (Calendly keeps the tags on the booking). No colours here: the test
- * DOM has no canvas to read the app's tokens from.
+ * booked from inside the app, on onboarding's step (Calendly keeps the tags on the booking). No
+ * colours here: the test DOM has no canvas to read the app's tokens from.
  */
 const BOOKING_CALENDAR =
-  "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business?embed_domain=localhost%3A3010&embed_type=Inline&hide_event_type_details=1&hide_gdpr_banner=1&utm_source=openbot_app&utm_medium=in_app";
+  "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business?embed_domain=localhost%3A3010&embed_type=Inline&hide_event_type_details=1&hide_gdpr_banner=1&utm_source=openbot_app&utm_medium=in_app&utm_content=onboarding";
 
 /**
  * Where somebody is in onboarding lives in the address: `?step=<id>`. A reload stays on the step,

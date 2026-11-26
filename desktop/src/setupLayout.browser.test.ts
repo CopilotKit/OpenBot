@@ -77,6 +77,7 @@ type Browser = {
   newPage(options: {
     viewport: { width: number; height: number };
     colorScheme?: "light" | "dark";
+    userAgent?: string;
   }): Promise<Page>;
   close(): Promise<void>;
 };
@@ -1346,7 +1347,35 @@ describe.skipIf(!asked)("approved layout: Cloud hosting narrow", () => {
       };
       try {
         await routeCalendar(page);
+        // Settling the startup animation does not mean the saved connection has answered.
+        // Hold it until that state is drawn, as on a busy native shell.
+        await page.addInitScript(`
+          let control;
+          Object.defineProperty(globalThis, "__workbench", {
+            configurable: true,
+            get: () => control,
+            set: (next) => {
+              control = next;
+              next.setAnswer("connection", { mode: "never" });
+            },
+          });
+        `);
         await open(page, "", cloudBuilt);
+        await page
+          .getByText("Checking your saved setup…", { exact: true })
+          .waitFor();
+        await settled(page);
+        expect(await page.locator(".hosting input").count()).toBe(0);
+        await page.evaluate(() =>
+          globalThis.__workbench!.setAnswer("connection", {
+            mode: "value",
+            value: null,
+          }),
+        );
+        await page
+          .getByRole("heading", { name: "Set up OpenBot", exact: true })
+          .waitFor();
+        await page.getByRole("radio", { name: /^OpenBot Cloud/ }).waitFor();
         await settled(page);
         expect(
           await page.evaluate(() =>
@@ -1395,16 +1424,28 @@ describe.skipIf(!asked)("approved layout: Cloud hosting narrow", () => {
 });
 
 describe.skipIf(!asked)("the first screen while its downloads run", () => {
-  for (const [width, height] of [
+  const platforms = [
+    {
+      platform: "macos",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    },
+    { platform: "linux", userAgent: "Mozilla/5.0 (X11; Linux x86_64)" },
+  ];
+  const sizes = [
     [1000, 800],
     [1000, 760],
     [720, 560],
-  ] as const) {
+  ] as const;
+  const windows = sizes.flatMap(([width, height]) =>
+    platforms.map((platform) => ({ width, height, ...platform })),
+  );
+  for (const { width, height, platform, userAgent } of windows) {
     for (const colorScheme of ["light", "dark"] as const)
-      test(`at ${width}x${height}, downloads stay in the sidebar foot and Install holds its place (${colorScheme})`, async () => {
+      test(`at ${width}x${height}, downloads stay in the sidebar foot and Install holds its place (${platform}, ${colorScheme})`, async () => {
         const page = await browser.newPage({
           viewport: { width, height },
           colorScheme,
+          userAgent,
         });
         try {
           await open(page);
@@ -1488,7 +1529,7 @@ describe.skipIf(!asked)("the first screen while its downloads run", () => {
             seen.push([state, await usage()]);
             if (state === "downloading" && process.env.OPENBOT_APP_SHOTS)
               await page.screenshot({
-                path: `${process.env.OPENBOT_APP_SHOTS}/welcome-download-${width}x${height}-${colorScheme}.png`,
+                path: `${process.env.OPENBOT_APP_SHOTS}/welcome-download-${width}x${height}-${platform}-${colorScheme}.png`,
               });
           }
           const first = seen[0]?.[1];
@@ -1529,7 +1570,7 @@ describe.skipIf(!asked)("the first screen while its downloads run", () => {
           }
           if (process.env.OPENBOT_APP_SHOTS)
             await page.screenshot({
-              path: `${process.env.OPENBOT_APP_SHOTS}/welcome-move-${width}x${height}-${colorScheme}.png`,
+              path: `${process.env.OPENBOT_APP_SHOTS}/welcome-move-${width}x${height}-${platform}-${colorScheme}.png`,
             });
           await move.click();
           await page
@@ -1999,6 +2040,79 @@ describe.skipIf(!asked)("Connect your AI with every provider", () => {
         // At the end of the body, the last provider is whole and no further content remains.
         expect(now.goesOn).toBe(false);
         expect(now.tiles[now.tiles.length - 1]?.shown).toBe(true);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+});
+
+/*
+ * A ChatGPT plan signed in to by an earlier version went through Codex's sign-in, which a ChatGPT
+ * plan's engine (the OpenAI Agents SDK, on OpenAI's Sign in with ChatGPT) can't use. The AI step
+ * says so above the one button that fixes it, and the saved sign-in is not offered. A saved sign-in
+ * from Sign in with ChatGPT is, and the step names the Bot it runs on.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each, light and dark.
+ */
+describe.skipIf(!asked)("Connect your AI on a ChatGPT plan", () => {
+  for (const colorScheme of ["light", "dark"] as const) {
+    test(`an earlier version's ChatGPT sign-in is asked for again, with one press (${colorScheme})`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 800 },
+        colorScheme,
+      });
+      try {
+        // The plan it was on stays chosen, so the step opens on it. The screenshot is taken before
+        // anything is asserted, so a run against an earlier window keeps one too.
+        await toTheAiStep(page, "#chatgpt-changed");
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/chatgpt-sign-in-changed-${colorScheme}.png`,
+          });
+        await page
+          .getByText(
+            "ChatGPT's sign-in has changed. Sign in to ChatGPT again to keep using your plan.",
+          )
+          .waitFor({ state: "visible" });
+        // One press: the sign-in itself. Nothing offers the saved one, and nothing says it will be
+        // checked at Start.
+        expect(
+          await page
+            .getByRole("button", { name: "Sign in with OpenAI" })
+            .count(),
+        ).toBe(1);
+        expect(
+          await page
+            .getByRole("button", { name: "Use a saved ChatGPT sign-in" })
+            .count(),
+        ).toBe(0);
+        expect(
+          await page.getByText("will be checked when you start").count(),
+        ).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+
+    test(`a saved ChatGPT sign-in runs on the OpenAI Agents SDK (${colorScheme})`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 800 },
+        colorScheme,
+      });
+      try {
+        await toTheAiStep(page, "#chatgpt-saved");
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/chatgpt-saved-sign-in-${colorScheme}.png`,
+          });
+        await page.getByText("Your Bot will use OpenAI Agents SDK.").waitFor();
+        expect(
+          await page
+            .getByText("ChatGPT's sign-in has changed", { exact: false })
+            .count(),
+        ).toBe(0);
       } finally {
         await page.close();
       }
@@ -2817,7 +2931,8 @@ describe.skipIf(!asked)("approved layout: shutdown Progress rail", () => {
         const check = async (operation: string, count: number) => {
           const seen = await page.evaluate(() => {
             const sheet = document.querySelector<HTMLElement>(".quit-layout")!;
-            const rail = sheet.querySelector<HTMLElement>(".quit-rail")!;
+            const rail =
+              document.querySelector<HTMLElement>("main > .quit-rail")!;
             const current = sheet.querySelector<HTMLElement>(".quit-current")!;
             const body = sheet.querySelector<HTMLElement>(".setup-body")!;
             const footer = sheet.querySelector<HTMLElement>(".setup-footer")!;
@@ -2838,9 +2953,13 @@ describe.skipIf(!asked)("approved layout: shutdown Progress rail", () => {
               ),
               columns:
                 r.right <= c.left && r.left >= 0 && c.right <= innerWidth,
+              insetPanel:
+                sheet.getBoundingClientRect().top >= 9 &&
+                sheet.getBoundingClientRect().right <= innerWidth - 9 &&
+                getComputedStyle(sheet).borderTopWidth === "1px" &&
+                Number.parseFloat(getComputedStyle(sheet).borderRadius) > 0,
               footerFits: b.bottom <= f.top + 1 && f.bottom <= innerHeight,
-              headingTop: sheet.querySelector("h1")!.getBoundingClientRect()
-                .top,
+              headingTop: rail.querySelector("h1")!.getBoundingClientRect().top,
               footerTop: f.top,
               stages: rail.querySelectorAll(".step").length,
               operation: current.querySelector(".journey-said")?.textContent,
@@ -2858,6 +2977,7 @@ describe.skipIf(!asked)("approved layout: shutdown Progress rail", () => {
           expect(seen.pageFits).toBe(true);
           expect(seen.horizontal).toBe(false);
           expect(seen.columns).toBe(true);
+          expect(seen.insetPanel).toBe(true);
           expect(seen.footerFits).toBe(true);
           if (headingTop === undefined) headingTop = seen.headingTop;
           else expect(seen.headingTop).toBe(headingTop);
@@ -2959,7 +3079,8 @@ describe.skipIf(!asked)("approved layout: shutdown Progress rail", () => {
           ).toBe(1);
           const failed = await page.evaluate(() => {
             const sheet = document.querySelector<HTMLElement>(".quit-layout")!;
-            const rail = sheet.querySelector<HTMLElement>(".quit-rail")!;
+            const rail =
+              document.querySelector<HTMLElement>("main > .quit-rail")!;
             const detail = rail.querySelector<HTMLElement>(
               ".step:has(.mark.bad) .detail",
             )!;
@@ -3008,6 +3129,11 @@ function updateScreen(page: Page) {
         : null;
     };
     return {
+      insetPanel:
+        sheet.getBoundingClientRect().top >= 9 &&
+        sheet.getBoundingClientRect().right <= innerWidth - 9 &&
+        getComputedStyle(sheet).borderTopWidth === "1px" &&
+        Number.parseFloat(getComputedStyle(sheet).borderRadius) > 0,
       heading: heading?.textContent,
       headingBox: box(heading),
       rightHeadings: sheet.querySelectorAll("h1").length,
@@ -3062,6 +3188,7 @@ describe.skipIf(!asked)("approved layout: update Progress rail", () => {
             .waitFor();
           const seen = await updateScreen(page);
           expect(seen.heading).toBe("Updating OpenBot");
+          expect(seen.insetPanel).toBe(true);
           expect(seen.sidebars).toBe(1);
           expect(seen.pageHeadings).toBe(1);
           expect(seen.rightHeadings).toBe(0);
@@ -6847,4 +6974,83 @@ describe.skipIf(!asked)("the window under its Content Security Policy", () => {
       await page.close();
     }
   });
+});
+
+/** Hold both startup phases so a one-frame legacy card cannot hide between them. */
+describe.skipIf(!asked)("Cloud startup panel", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const)
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`${width}x${height} ${colorScheme}: checking and opening retain the inset panel`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        try {
+          await page.addInitScript(`
+            let control;
+            Object.defineProperty(globalThis, "__workbench", {
+              configurable: true,
+              get: () => control,
+              set: (next) => {
+                control = next;
+                next.setAnswer("connection", { mode: "never" });
+                next.setAnswer("show_connected", { mode: "never" });
+              },
+            });
+          `);
+          await open(page);
+          await page
+            .getByText("Checking your saved setup…", { exact: true })
+            .waitFor();
+          const geometry = () =>
+            page.evaluate(() => {
+              const pane = document.querySelector<HTMLElement>(
+                "main > .rail + .launch-layout",
+              )!;
+              const box = pane.getBoundingClientRect();
+              return {
+                top: box.top,
+                left: box.left,
+                right: box.right,
+                bottom: box.bottom,
+                inset:
+                  box.top >= 9 &&
+                  box.right <= innerWidth - 9 &&
+                  getComputedStyle(pane).borderTopWidth === "1px" &&
+                  Number.parseFloat(getComputedStyle(pane).borderRadius) > 0,
+                fits:
+                  document.documentElement.scrollHeight <= innerHeight &&
+                  document.documentElement.scrollWidth <= innerWidth,
+                headings: document.querySelectorAll("h1").length,
+              };
+            });
+          await settled(page);
+          const checking = await geometry();
+          expect(checking.inset).toBe(true);
+          expect(checking.fits).toBe(true);
+          expect(checking.headings).toBe(1);
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("connection", {
+              mode: "value",
+              value: {
+                mode: "connected",
+                address: "https://api.open.bot",
+                signedIn: true,
+              },
+            }),
+          );
+          await page.getByText("Opening OpenBot…", { exact: true }).waitFor();
+          await settled(page);
+          expect(await geometry()).toEqual(checking);
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/cloud-startup-${width}x${height}-${colorScheme}.png`,
+            });
+        } finally {
+          await page.close();
+        }
+      });
 });

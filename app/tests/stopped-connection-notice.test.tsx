@@ -193,7 +193,7 @@ test("a member on the organization's connection gets no Reconnect", async () => 
   ).toBeTruthy();
 });
 
-test("an admin on the organization's connection gets Reconnect to its page in Settings → Providers", async () => {
+test("an admin on the organization's connection gets Reconnect to its page in Settings → AI providers", async () => {
   serve({ owner: "organization", role: "admin", stopped: true });
   const view = render(
     <StoppedConnectionNotice channelId={CHANNEL} onChooseModel={() => {}} />,

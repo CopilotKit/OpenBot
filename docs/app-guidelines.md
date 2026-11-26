@@ -54,6 +54,7 @@ copy, and the copies are written, never edited:
 | `desktop/src/styles.css`, `desktop/src-tauri/src/connected/sign_in.rs` (OpenBot Desktop's setup window and sign-in page) | CSS custom properties, the tokens each uses |
 | `desktop/src-tauri/src/first_paint.rs` (the window's color before the page draws) | RGB |
 | `mobile/src/scheme.ts` (the phone app) | Hex, since React Native draws no `oklch()` |
+| `app/public/manifest.webmanifest` (the web app on a phone's home screen or installed) | Hex, the light `background` only |
 
 To change a color: change it in `tokens/src/scheme.ts`, run `bun run tokens:generate`, and commit
 the scheme with every copy it rewrites. A copy inside a hand-written file sits between two marker
@@ -200,8 +201,10 @@ screens read `src/scheme.ts`. No other file in `mobile/` has a color value in it
 
 ## The web app and OpenBot Desktop
 
-Beyond the color scheme above, no product guidelines yet. How a screen is laid out, worded, and
-reads and writes its data is already written down, in the skills under `.claude/skills/`:
+Beyond the color scheme above, no product guidelines yet. What the design system is built on, and
+the rules for changing a token or a primitive or building from a design, are in
+[design-system.md](design-system.md). How a screen is laid out, worded, and reads and writes its
+data is already written down, in the skills under `.claude/skills/`:
 
 - `openbot-screen-layout`: the default layout of a screen.
 - `openbot-copy`: the words and the voice of anything a person reads.

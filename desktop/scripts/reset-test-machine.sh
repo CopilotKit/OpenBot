@@ -149,7 +149,8 @@ fi
 # Only this file: the same folder keeps the records of your other stacks.
 gone "$CLI_CONFIG/local/eula-acceptance.json"
 
-for engine in "${engines[@]}"; do
+# macOS ships Bash 3.2, where an empty array is unset under `set -u`.
+for engine in ${engines[@]+"${engines[@]}"}; do
   say "Removing OpenBot's containers, volumes and networks on $engine"
   ids="" vols="" nets=""
   for project in "${PROJECTS[@]}"; do
@@ -210,6 +211,6 @@ say "Done. Open OpenBot from /Applications to start from the beginning."
 # Docker Desktop keeps serving the folder it last mounted, so a reinstall into the recreated
 # ~/OpenBot can fail with "bind source path does not exist" until Docker looks again. A new
 # person's machine never had the folder, so restarting Docker Desktop is what makes this fresh.
-if ((${#engines[@]})); then
+if [[ -n "${engines[*]-}" ]]; then
   echo "    Restart Docker Desktop before reinstalling, or the first Start can fail with \"bind source path does not exist\"."
 fi

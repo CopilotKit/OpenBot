@@ -73,7 +73,13 @@ export function useCarryOn({
   ready: boolean | null;
   blockedWhenAsked: boolean;
   app: string;
-}): { carried: boolean; inHand: boolean; offer: (() => void) | null } {
+}): {
+  carried: boolean;
+  inHand: boolean;
+  offer: (() => void) | null;
+  /** This card saw its app out of reach, here, so ready now is a change. */
+  sawBlocked: boolean;
+} {
   const conversation = useConversation();
   const ask = conversation?.ask ?? null;
   const group = conversation?.carryOn ?? ALONE;
@@ -118,6 +124,7 @@ export function useCarryOn({
   const carried = toolCallId ? hasCarriedOn(toolCallId) : false;
   return {
     carried,
+    sawBlocked,
     inHand: joins,
     offer:
       joins && ready === true && !carried && group.view(key).offer
