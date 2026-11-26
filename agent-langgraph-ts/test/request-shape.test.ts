@@ -238,7 +238,7 @@ function untrustedConversation(tools: unknown[] = []) {
   const input = conversation({
     tools,
     context: [
-      // The server sends memory both ways; a context copy is no more an instruction than the row.
+      // A context entry, as the server sends memory, is no more an instruction than a row.
       {
         description: "OpenBot personal memory",
         value: UNTRUSTED.memory.content,

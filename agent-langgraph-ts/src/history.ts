@@ -213,13 +213,14 @@ export function isInstruction(message: Pick<Message, "id">): boolean {
 
 /**
  * Context entries that carry data and never instructions: a Bot's personal memory, which the server
- * quotes as untrusted records and sends as a system row too.
+ * quotes as untrusted records and sends as this context entry alone.
  */
 const DATA_CONTEXT = new Set(["OpenBot personal memory"]);
 
 /**
- * The row the server sends a Bot's personal memory in: the person's role, its records already
- * quoted as untrusted data. Said with their next turn, like a quoted row, so turns still alternate.
+ * The row a stored thread or an older server may still carry a Bot's personal memory in, in the
+ * person's role, its records already quoted as untrusted data. Said with their next turn, like a
+ * quoted row, so turns still alternate.
  */
 const MEMORY_ROW_ID = "openbot:personal-memory";
 
@@ -260,9 +261,9 @@ function joined(first: HumanMessage, second: HumanMessage): HumanMessage {
  * A quoted row is said at the start of the person's next turn, never between a call and its result,
  * which every provider refuses, and never as a turn of its own beside theirs, which some refuse.
  * One after their last turn is added to the end of it, or is a turn of its own after a result.
- * A context entry that only repeats a row is not said twice: OpenBot sends a Bot's quoted personal
- * memory both ways, so that an agent reading only one of them still sees it. Memory sent only as
- * context is quoted the same way.
+ * OpenBot sends a Bot's quoted personal memory as the context entry `OpenBot personal memory`
+ * alone, and it is quoted the same way, at the start of the person's next turn. A context entry
+ * that only repeats a row a thread still carries is not said twice.
  */
 export function modelMessages(
   thread: readonly Message[],

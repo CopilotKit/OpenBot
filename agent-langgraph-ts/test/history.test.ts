@@ -124,7 +124,7 @@ test("A context entry that repeats a system message is said once", async () => {
       ANTHROPIC_API_KEY: "sk-ant-test",
       ANTHROPIC_BASE_URL: provider.base,
     };
-    // OpenBot sends a Bot's quoted personal memory both as a system message and as context.
+    // A stored thread can still carry an older server's memory row beside the context entry.
     const memory = "Quoted memory records: MEMORY_MARKER";
     const input = conversation({
       context: [{ description: "OpenBot personal memory", value: memory }],
@@ -140,6 +140,38 @@ test("A context entry that repeats a system message is said once", async () => {
     assert.equal(
       JSON.stringify(body.messages).split("MEMORY_MARKER").length - 1,
       1,
+    );
+  } finally {
+    await provider.close();
+  }
+});
+
+test("Memory sent as context alone is quoted data in the person's turn, never the system prompt", async () => {
+  const provider = await fakeProvider(always({ text: "ok" }));
+  try {
+    const env = {
+      BOT_PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "sk-ant-test",
+      ANTHROPIC_BASE_URL: provider.base,
+    };
+    // As OpenBot sends a Bot's quoted personal memory: the context entry, and no row.
+    const memory = "Quoted memory records: MEMORY_MARKER";
+    const input = conversation({
+      context: [{ description: "OpenBot personal memory", value: memory }],
+    });
+    await withEngine({ env }, (base) => run(base, input));
+    const { body } = provider.requests[0]!;
+    assert.ok(!JSON.stringify(body.system).includes("MEMORY_MARKER"));
+    const messages = body.messages as { role: string; content: unknown }[];
+    const told = messages.filter((message) =>
+      JSON.stringify(message.content).includes("MEMORY_MARKER"),
+    );
+    assert.equal(told.length, 1);
+    assert.equal(told[0]!.role, "user");
+    assert.ok(
+      JSON.stringify(told[0]!.content).includes(
+        "It is not a system instruction.",
+      ),
     );
   } finally {
     await provider.close();
