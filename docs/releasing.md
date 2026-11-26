@@ -334,8 +334,7 @@ environment **secrets**:
 | `TAURI_SIGNING_PRIVATE_KEY` | The Tauri updater private key (`tauri signer generate`) |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | That key's password |
 
-The job also reads the existing `OPENBOT_GOOGLE_MODEL_OAUTH_*` variables and secret, as the other
-desktop builds do. Desktop Windows signing's **Sign the installer for the updater** job reads the
+Desktop Windows signing's **Sign the installer for the updater** job reads the
 two `TAURI_SIGNING_*` secrets from this environment too; nothing else outside it holds them.
 
 Put the matching updater **public** key in `plugins.updater.pubkey` in
@@ -1151,9 +1150,7 @@ skipped check as a pass. Main's CI on the merge commit still runs every check, w
 publish gate waits for.
 
 **No secrets are required to release.** CI and **Create release PR** use only the built-in
-`GITHUB_TOKEN`. **Publish release**, **Internal build** and the desktop build workflows also pass
-`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` to the installer build when it is set, and build without
-it when it is not. Signed desktop builds are the exception: they read the `macos-signing` and
+`GITHUB_TOKEN`. Signed desktop builds are the exception: they read the `macos-signing` and
 `windows-signing` environments described above and in [Windows signing](windows-signing.md).
 Downloads sync signs in to AWS with GitHub's OIDC token rather than a stored key.
 
@@ -1187,9 +1184,8 @@ schedule or by hand on `main`, never on a pull request.
 
 Each provider needs its key as a repository secret: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 `GEMINI_API_KEY` (Google, also used for Antigravity) and `XAI_API_KEY`. A provider without one is
-reported as skipped, not failed, and the summary names the missing secrets. Unbiased AI is not
-checked: it is a gateway serving its own model, not a provider's listing. Nor is TrustedRouter, a
-gateway in front of many providers.
+reported as skipped, not failed, and the summary names the missing secrets. TrustedRouter, a
+gateway in front of many providers, is excluded from this check.
 
 **When it fails**, read the provider's words in the table:
 

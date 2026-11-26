@@ -22,10 +22,7 @@ export function connectionName(connection: {
   endpointHost?: string | null;
 }): string {
   const { provider, login, endpointHost } = connection;
-  const name =
-    provider === "unbiased"
-      ? "Unbiased AI"
-      : (providerById(provider)?.name ?? provider);
+  const name = providerById(provider)?.name ?? provider;
   if (login === "plan" || login === "oauth")
     return signInWords(provider, login);
   if (provider === "openai-compatible") return endpointHost ?? name;
@@ -70,8 +67,7 @@ export function describeConnection(
 ): AiConnectionWords | null {
   const { provider: id, login, model, endpointHost, sharedSignIn } = connection;
   if (!id || !login) return null;
-  const provider =
-    id === "unbiased" ? "Unbiased AI" : (providerById(id)?.name ?? id);
+  const provider = providerById(id)?.name ?? id;
   const your = owner === "organization" ? "your organization's" : "your";
   let signIn: string;
   let said: string;

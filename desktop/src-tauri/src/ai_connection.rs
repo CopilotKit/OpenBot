@@ -103,7 +103,7 @@ impl Plan {
     pub fn port(self) -> u16 {
         match self {
             Plan::Claude => 4212,
-            Plan::ChatGpt => 4206,
+            Plan::ChatGpt => 4216,
         }
     }
 
@@ -252,7 +252,6 @@ fn endpoint_provider(base_url: &str) -> &'static str {
     match host.as_deref() {
         Some("generativelanguage.googleapis.com") => "google",
         Some("api.x.ai") => "xai",
-        Some("api.unbiased.ai") => "unbiased",
         Some("api.trustedrouter.com") => "trustedrouter",
         _ => "openai-compatible",
     }
@@ -332,7 +331,7 @@ The settings Start writes that depend on the installation folder: the plan engin
 release's manifest; when the setup window's AI screen last saved a choice; and the files the server
 reads, at the paths the Compose file mounts.
 
-`OPENBOT_MODEL_OAUTH_FILE` names where a Google or xAI sign-in is kept whether or not one is the
+`OPENBOT_MODEL_OAUTH_FILE` names where an xAI sign-in is kept whether or not one is the
 connection now, so one made in the app reaches the server with no restart.
 */
 pub fn start_settings(root: &Path) -> BTreeMap<String, String> {
@@ -439,6 +438,9 @@ pub fn prepare(engine: &Address, root: &Path, provider: &str, login: &str) -> Re
             }
         }
         Plan::ChatGpt => {
+            if crate::env::chatgpt_sign_in_changed(root) {
+                return Err(Problem::plain(crate::env::CHATGPT_SIGN_IN_CHANGED));
+            }
             if !crate::env::saved_chatgpt_plan_store(root) {
                 return Err(Problem::plain("Sign in to your ChatGPT plan first."));
             }
@@ -635,7 +637,7 @@ pub struct AiConnection {
     /// The model named on the setup screen. Only an address or a provider sign-in names one; with a
     /// key or a plan the server picks the provider's own.
     pub model: Option<String>,
-    /// The host of a custom address, for the page to tell Gemini, xAI, Unbiased AI and TrustedRouter
+    /// The host of a custom address, for the page to tell Gemini, xAI and TrustedRouter
     /// apart from a person's own server. Only the host: an address can carry a password or a key.
     pub endpoint_host: Option<String>,
 }
@@ -968,7 +970,7 @@ mod tests {
         );
         assert_eq!(
             settings["CHATGPT_PLAN_HARNESS_URL"],
-            "http://agent-chatgpt-plan:4206"
+            "http://agent-chatgpt-plan:4216"
         );
         assert!(crate::env::MINTED.contains(&GATEWAY_TOKEN));
         assert!(crate::vault::is_secret(GATEWAY_TOKEN));

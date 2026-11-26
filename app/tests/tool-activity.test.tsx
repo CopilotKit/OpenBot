@@ -362,6 +362,31 @@ test("a refusal and a failure each count as an issue on the folded line", () => 
   expect(view.getByText("Didn't work")).toBeDefined();
 });
 
+test("a drawing that drew nothing says what was tried, beside Didn't work", () => {
+  const nothing = JSON.stringify({
+    status: "error",
+    applied: 0,
+    calls: 0,
+    rejected: [],
+    reason:
+      "operations must be a JSON array of A2UI operation objects; nothing was rendered",
+  });
+  const drew = JSON.stringify({
+    status: "rendered",
+    applied: 2,
+    calls: 0,
+    rejected: [],
+  });
+  const steps = [
+    call("a", "render_ui", { operations: [], target: "chat" }, nothing),
+    call("b", "render_ui", { operations: [{}], target: "chat" }, drew),
+  ].map(stepDetails);
+  expect(steps.map((step) => [step.label, step.failed])).toEqual([
+    ["Draw an interface", true],
+    ["Drew an interface", false],
+  ]);
+});
+
 test("the computer asking the Bot to look again after a handback never reaches the transcript", () => {
   // The turn as it ran: the first page it opened was turned away, it looked, and opened it again.
   const refusal = JSON.stringify({

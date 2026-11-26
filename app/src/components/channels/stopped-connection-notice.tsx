@@ -1,20 +1,19 @@
-import {
-  UNBIASED_SHUTDOWN_AT,
-  unbiasedShutdownMessage,
-} from "@openbot/shared/unbiased-retirement";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { PROVIDERS_ADDRESS, providerAddress } from "@/lib/ai-connection/paths";
+import {
+  PROVIDERS_ADDRESS,
+  providerAddress,
+  providerChangeAddress,
+} from "@/lib/ai-connection/paths";
+import {
+  GOOGLE_SIGN_IN_ENDED,
+  signInRetired,
+} from "@/lib/ai-connection/providers";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
-import {
-  connectionOf,
-  isUnbiasedModelConnection,
-} from "@/lib/models/connections";
+import { connectionOf } from "@/lib/models/connections";
 import {
   conversationModelQueryOptions,
-  type ModelCatalogue,
   modelCatalogueQueryOptions,
 } from "@/lib/models/queries";
 import { cn } from "@/lib/utils";
@@ -89,7 +88,9 @@ export function StoppedConnectionNotice({
     { ...currentUserQueryOptions(), enabled: owner === "organization" },
     queryClient,
   ).data;
-  if (!stopped || stopped.problem.code === "provider-retired") return null;
+  if (!stopped) return null;
+  // A Google sign-in OpenBot no longer offers: the way on opens Google Gemini's API key directly.
+  const retired = signInRetired(stopped);
   const canFix =
     owner === "personal" ||
     (owner === "organization" && isOrganizationAdmin(me?.role));
@@ -106,67 +107,23 @@ export function StoppedConnectionNotice({
             className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
             href={
               stopped.connection
-                ? reconnectPath(stopped.connection, owner)
+                ? retired
+                  ? providerChangeAddress(stopped.connection, owner)
+                  : reconnectPath(stopped.connection, owner)
                 : chooseDefaultPath()
             }
           >
-            {stopped.connection ? "Reconnect" : "Choose a default"}
+            {stopped.connection
+              ? retired
+                ? GOOGLE_SIGN_IN_ENDED.action
+                : "Reconnect"
+              : "Choose a default"}
           </a>
         ) : null}
         <Button onClick={onChooseModel} size="sm" variant="outline">
           Choose another model
         </Button>
       </div>
-    </div>
-  );
-}
-
-/** A saved Unbiased connection needs a replacement even before a turn fails. */
-export function UnbiasedConnectionNotice({
-  catalogue,
-  connection,
-}: {
-  catalogue: ModelCatalogue | undefined;
-  connection?: string | null;
-}) {
-  const entry = connectionOf(catalogue, connection);
-  const retiring = isUnbiasedModelConnection(entry);
-  const me = useQuery(
-    {
-      ...currentUserQueryOptions(),
-      enabled: retiring && entry?.owner === "organization",
-    },
-    queryClient,
-  ).data;
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (!retiring || Date.now() >= UNBIASED_SHUTDOWN_AT) return;
-    const timer = setTimeout(
-      () => setNow(Date.now()),
-      UNBIASED_SHUTDOWN_AT - Date.now(),
-    );
-    return () => clearTimeout(timer);
-  }, [retiring]);
-  if (!entry || !retiring) return null;
-  const canFix = entry.owner === "personal" || isOrganizationAdmin(me?.role);
-  const opening = unbiasedShutdownMessage(Math.max(now, Date.now()));
-  return (
-    <div
-      className="flex flex-wrap items-center gap-2 pb-2 text-sm"
-      role="status"
-    >
-      <span>
-        {opening}
-        {!canFix && " Ask an admin to change the AI connection."}
-      </span>
-      {canFix && (
-        <a
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-          href={reconnectPath(entry.id, entry.owner)}
-        >
-          Choose a replacement
-        </a>
-      )}
     </div>
   );
 }

@@ -1,8 +1,5 @@
 import {
-  isUnbiasedHost,
-  unbiasedShutdownNotice,
-} from "@openbot/shared/unbiased-retirement";
-import {
+  IconAlertTriangle,
   IconChevronRight,
   IconPlugConnectedX,
   IconSparkles,
@@ -46,8 +43,10 @@ import {
 } from "@/lib/ai-connection/paths";
 import {
   AI_PROVIDERS,
+  GOOGLE_SIGN_IN_ENDED,
   isSignIn,
   providerById,
+  signInRetired,
 } from "@/lib/ai-connection/providers";
 import {
   type AiConnectionEntry,
@@ -109,14 +108,6 @@ function useProviders(scope: ConnectionScope) {
 /** A provider's name before its connection is read, from the address. */
 function nameFromAddress(id: string): string {
   return AI_PROVIDERS.find((provider) => provider.id === id)?.name ?? "AI";
-}
-
-function isRetiring(entry: AiConnectionEntry | undefined): boolean {
-  return (
-    entry?.provider === "unbiased" ||
-    isUnbiasedHost(entry?.endpointHost) ||
-    entry?.problem?.code === "provider-retired"
-  );
 }
 
 const LIST_FAILED = "Couldn't load your AI connections. Try again in a moment.";
@@ -248,7 +239,6 @@ function ProviderDetails({
 }) {
   const paths = useProviderPaths();
   const navigate = useNavigate();
-  const retiring = isRetiring(entry);
   const desktop = inDesktop && scope === "organization";
   const makeDefault = useMutation(
     makeDefaultAiConnectionMutationOptions(queryClient, scope),
@@ -257,19 +247,17 @@ function ProviderDetails({
     removeAiConnectionMutationOptions(queryClient, scope),
   );
   const others = list.connections.filter(
-    (other) => other.id !== entry.id && other.ready && !isRetiring(other),
+    (other) => other.id !== entry.id && other.ready,
   );
   /*
    * The one connection a removal would leave, which the server then makes the default itself. With
    * more left, the person chooses which takes over, from those that can run.
    */
   const left = list.connections.filter((other) => other.id !== entry.id);
-  const last = left.length === 1 ? left[0] : undefined;
-  const onlyOne = isRetiring(last) ? undefined : last;
+  const onlyOne = left.length === 1 ? left[0] : undefined;
   const choosing = entry.isDefault && !onlyOne && others.length > 0;
   // The default goes with others left, none of which can run: they stay, and none is the default.
-  const noneCanTakeOver =
-    entry.isDefault && left.length > 0 && !onlyOne && !choosing;
+  const noneCanTakeOver = entry.isDefault && left.length > 1 && !choosing;
   const [nextDefault, setNextDefault] = useState<string | null>(
     others[0]?.id ?? null,
   );
@@ -280,6 +268,7 @@ function ProviderDetails({
   const busy = makeDefault.isPending || remove.isPending;
   const name = connectionName(entry);
   const described = describeConnection(entry, owner);
+  const retired = signInRetired(entry);
 
   /**
    * After a removal, back to the list. A person whose runs now have no AI, where one is required, is
@@ -316,15 +305,44 @@ function ProviderDetails({
               : "Connected. Your next message runs on it. Anything already running finishes on the connection it started with."}
         </p>
       ) : null}
-      {retiring || !entry.ready ? (
+      {retired ? (
+        /*
+         * A Google sign-in OpenBot no longer offers: what happened, and the one way on, which opens
+         * Google Gemini's API key on this same connection.
+         */
+        <PageRows>
+          <Item role="alert" size="sm">
+            <ItemMedia variant="icon">
+              <IconAlertTriangle className="text-destructive" />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{GOOGLE_SIGN_IN_ENDED.title}</ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                {GOOGLE_SIGN_IN_ENDED.body}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Button
+                render={(props) => (
+                  <Link {...paths.change(entry.id, scope)} {...props} />
+                )}
+                size="sm"
+              >
+                {GOOGLE_SIGN_IN_ENDED.action}
+              </Button>
+            </ItemActions>
+          </Item>
+        </PageRows>
+      ) : entry.ready ? null : (
         <p className="text-destructive text-sm" role="alert">
-          {retiring ? unbiasedShutdownNotice() : entry.problem?.detail}
+          {entry.problem?.detail}
         </p>
-      ) : null}
+      )}
       <PageSection title="Connection">
         <PageRows>
-          {(described?.details ?? []).map((detail) => (
+          {(described?.details ?? []).map((detail, index) => (
             <Fragment key={detail.label}>
+              {index > 0 ? <Separator /> : null}
               <Item size="sm">
                 <ItemContent>
                   <ItemTitle>{detail.label}</ItemTitle>
@@ -335,32 +353,36 @@ function ProviderDetails({
                   </span>
                 </ItemActions>
               </Item>
-              <Separator />
             </Fragment>
           ))}
-          <Item render={<Link {...paths.change(entry.id, scope)} />} size="sm">
-            <ItemContent>
-              <ItemTitle>
-                {retiring
-                  ? "Choose a replacement"
-                  : entry.ready
-                    ? "Change"
-                    : isSignIn(entry.login)
-                      ? "Sign in again"
-                      : "Replace key"}
-              </ItemTitle>
-              <ItemDescription>
-                {retiring && !changesInPlace
-                  ? "Connect another AI and make it the default if your Bots should use it."
-                  : changesInPlace
-                    ? "Switch to another provider, plan or key. Runs that start after that use it."
-                    : "Sign in again, or use another key."}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <IconChevronRight className="size-4 text-muted-foreground" />
-            </ItemActions>
-          </Item>
+          {/* A retired sign-in's way on is the notice's button above: it is the change. */}
+          {retired ? null : (
+            <>
+              {described?.details.length ? <Separator /> : null}
+              <Item
+                render={<Link {...paths.change(entry.id, scope)} />}
+                size="sm"
+              >
+                <ItemContent>
+                  <ItemTitle>
+                    {entry.ready
+                      ? "Change"
+                      : isSignIn(entry.login)
+                        ? "Sign in again"
+                        : "Replace key"}
+                  </ItemTitle>
+                  <ItemDescription>
+                    {changesInPlace
+                      ? "Switch to another provider, plan or key. Runs that start after that use it."
+                      : "Sign in again, or use another key."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <IconChevronRight className="size-4 text-muted-foreground" />
+                </ItemActions>
+              </Item>
+            </>
+          )}
         </PageRows>
       </PageSection>
       {entry.isDefault ? null : (
@@ -380,7 +402,7 @@ function ProviderDetails({
               </ItemContent>
               <ItemActions>
                 <Button
-                  disabled={busy || !entry.ready || retiring}
+                  disabled={busy || !entry.ready}
                   onClick={() => makeDefault.mutate({ entry, desktop })}
                   size="sm"
                   variant="outline"
@@ -585,7 +607,6 @@ export function ChangeProviderPage({
     (connection) => connection.id === id,
   );
   const changesInPlace = scope === "organization" && entry?.isDefault === true;
-  const retiring = isRetiring(entry);
   const current = useQuery({
     ...aiConnectionQueryOptions(),
     enabled: changesInPlace,
@@ -597,10 +618,12 @@ export function ChangeProviderPage({
     linkProps: paths.provider(id, scope),
   };
   const name = entry ? connectionName(entry) : nameFromAddress(id);
-  const title = retiring
-    ? "Choose a replacement for Unbiased AI"
-    : !entry
-      ? `Change ${name}`
+  // A Google sign-in OpenBot no longer offers: this page takes its Gemini API key.
+  const retired = signInRetired(entry);
+  const title = !entry
+    ? `Change ${name}`
+    : retired
+      ? GOOGLE_SIGN_IN_ENDED.action
       : changesInPlace
         ? providers.organizationWide
           ? "Change your organization's AI"
@@ -654,6 +677,7 @@ export function ChangeProviderPage({
                   kind: "organization",
                   inDesktop: providers.inDesktop,
                   organizationWide: providers.organizationWide,
+                  ...(retired ? { provider: entry.provider } : {}),
                 }
               : {
                   kind: "adding",
@@ -661,13 +685,9 @@ export function ChangeProviderPage({
                   signIns: list.signIns,
                   connected: list.connections,
                   owner: providers.owner,
-                  ...(retiring
-                    ? {}
-                    : {
-                        provider: entry.provider,
-                        login: entry.login,
-                        reconnecting: name,
-                      }),
+                  provider: entry.provider,
+                  login: entry.login,
+                  reconnecting: name,
                 }
           }
           onBack={() => void navigate(paths.provider(id, scope))}

@@ -1,4 +1,3 @@
-import { isUnbiasedEndpoint } from "@openbot/shared/unbiased-retirement";
 import {
   IconAlertTriangleFilled,
   IconChevronRight,
@@ -82,6 +81,7 @@ import {
   AI_PROVIDERS,
   type AiProvider,
   ENDPOINT_PRESETS,
+  GOOGLE_SIGN_IN_ENDED,
   hostOf,
   isEndpointAddress,
   isSignIn,
@@ -89,6 +89,7 @@ import {
   personalLogins,
   providerById,
   sharedLogins,
+  signInRetired,
   signInWords,
 } from "@/lib/ai-connection/providers";
 import type {
@@ -128,8 +129,8 @@ import { queryClient } from "@/query-client";
  * TWO KINDS OF CONNECTION. `organization` is the AI every Bot in the organization runs on, which an
  * admin changes in Settings; inside OpenBot Desktop it may be a plan or a provider sign-in Desktop
  * holds. `personal` is a person's own AI on OpenBot Cloud: a key or an address for every provider,
- * and first the setup window's sign-in (a ChatGPT or Claude plan, a Google or xAI
- * sign-in) wherever the server runs it itself (`signIns`). The server keeps that sign-in for the
+ * and first the setup window's sign-in (a ChatGPT or Claude plan, or an xAI sign-in) wherever the
+ * server runs it itself (`signIns`). The server keeps that sign-in for the
  * person and renews it, so never a Desktop-held one there, even inside Desktop: the server runs
  * the person's Bots. Inside Desktop, Desktop only listens for a Claude or ChatGPT plan's redirect,
  * so the person pastes nothing (lib/ai-connection/sign-in-redirect.ts); the sign-in stays the
@@ -157,6 +158,11 @@ export type ChooserMode =
         signIns: readonly AiConnectionProviderAnswer[];
         mine: AiConnection | null;
       };
+      /**
+       * Open on this provider's first way in, to fix the connection in use: a Google sign-in
+       * OpenBot no longer offers opens on Google Gemini's API key.
+       */
+      provider?: AiConnectionProviderAnswer;
     }
   | { kind: "personal"; signIns: readonly AiConnectionProviderAnswer[] }
   /**
@@ -482,7 +488,10 @@ export function ChooseConnection({
   stopLatest.current = stopSignIn;
   useEffect(() => () => stopLatest.current(), []);
   // Reconnecting one connection: open on its provider, ready to sign in or take its key.
-  const opening = useRef(adding?.provider);
+  const opening = useRef(
+    adding?.provider ??
+      (mode.kind === "organization" ? mode.provider : undefined),
+  );
   const chooseLatest = useRef<(next: AiProvider | null) => void>(() => {});
   useEffect(() => {
     const id = opening.current;
@@ -572,14 +581,15 @@ export function ChooseConnection({
       ? usingSaved || typedKey.length > 0
       : login === "endpoint"
         ? isEndpointAddress(address) &&
-          !isUnbiasedEndpoint(address) &&
           typedModel.length > 0 &&
           (!preset || usingSaved || typedKey.length > 0)
         : login === "oauth"
           ? signedIn && signInModel.length > 0
           : signedIn);
 
-  /** The model this provider's sign-in already names, in the list or as the connection in use. */
+  /**
+   * The model this provider's sign-in already names, in the list or as the connection in use.
+   */
   function ownModel(id: AiProvider["id"]): string | null {
     const listed = adding?.connected.find(
       (entry) => entry.provider === id && entry.login === "oauth",
@@ -745,9 +755,7 @@ export function ChooseConnection({
         // Otherwise the browser comes back to Desktop, and it finishes on its own.
         await finishPlanSignIn(plan);
       } else {
-        const begun = await beginProviderSignIn(
-          provider.id as "google" | "xai",
-        );
+        const begun = await beginProviderSignIn();
         if (!current()) {
           void cancelProviderSignIn(begun.attemptId).catch(() => {});
           return;
@@ -760,7 +768,6 @@ export function ChooseConnection({
         });
         window.open(begun.url, "_blank", "noopener");
         await finishProviderSignIn(begun.attemptId);
-        if (!current()) return;
       }
       if (!current()) return;
       attempt.current = null;
@@ -830,7 +837,7 @@ export function ChooseConnection({
   }
 
   /**
-   * Share the admin's own sign-in as it is, from the list: no sign-in again. A Google or xAI
+   * Share the admin's own sign-in as it is, from the list: no sign-in again. An xAI
    * sign-in runs on the model their own AI names, or the provider's usual one.
    */
   function shareMine(mine: AiConnection) {
@@ -995,7 +1002,9 @@ export function ChooseConnection({
                         className="size-4 text-destructive"
                       />
                       <span className="text-muted-foreground text-xs">
-                        Reconnect
+                        {signInRetired(entry)
+                          ? GOOGLE_SIGN_IN_ENDED.action
+                          : "Reconnect"}
                       </span>
                     </>
                   ) : entry ? (
@@ -1091,8 +1100,7 @@ export function ChooseConnection({
                 <FieldLabel htmlFor="ai-connection-address">Address</FieldLabel>
                 <Input
                   aria-invalid={
-                    baseUrl.trim().length > 0 &&
-                    (!isEndpointAddress(baseUrl) || isUnbiasedEndpoint(baseUrl))
+                    baseUrl.trim().length > 0 && !isEndpointAddress(baseUrl)
                   }
                   autoComplete="off"
                   disabled={busy}
@@ -1106,9 +1114,7 @@ export function ChooseConnection({
                   value={baseUrl}
                 />
                 <FieldDescription>
-                  {isUnbiasedEndpoint(baseUrl)
-                    ? "Unbiased AI is shutting down. Choose a different endpoint."
-                    : "The address of a server that speaks OpenAI's API."}
+                  The address of a server that speaks OpenAI's API.
                 </FieldDescription>
               </Field>
             ) : null}
@@ -1270,8 +1276,6 @@ const SIGN_IN_SAYS: Record<string, string> = {
     "Anthropic opens in your browser. Approve the request there, then paste the code it shows you.",
   openai:
     "OpenAI opens in your browser. It finishes on its own once you approve.",
-  google:
-    "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
   xai: "Authorize OpenBot to use models available to your xAI account.",
 };
 
@@ -1355,11 +1359,7 @@ function SignInFields({
     chatGptServer &&
     (waiting ? waiting.method !== "device" : chatGptWay === "browser");
   const chatGptCode = chatGptServer && !chatGptInBrowser;
-  const signInName = chatGptServer
-    ? "ChatGPT"
-    : provider.id === "google"
-      ? "Google"
-      : provider.name;
+  const signInName = chatGptServer ? "ChatGPT" : provider.name;
   if (kept)
     return (
       <p className="flex items-center gap-2 text-sm">

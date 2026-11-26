@@ -112,7 +112,7 @@ export const getGetPersonalAiConnectionResponseMock =
     uses: "personal",
     required: true,
     available: true,
-    signIns: ["openai", "anthropic", "xai", "unbiased"],
+    signIns: ["openai", "anthropic", "xai"],
   });
 
 export const getReplacePersonalAiConnectionResponseMock =
@@ -133,7 +133,7 @@ export const getReplacePersonalAiConnectionResponseMock =
     uses: "personal",
     required: true,
     available: true,
-    signIns: ["openai", "anthropic", "xai", "unbiased"],
+    signIns: ["openai", "anthropic", "xai"],
   });
 
 export const getDeletePersonalAiConnectionResponseMock =
@@ -154,13 +154,13 @@ export const getDeletePersonalAiConnectionResponseMock =
     uses: "organization",
     required: true,
     available: true,
-    signIns: ["openai", "anthropic", "xai", "unbiased"],
+    signIns: ["openai", "anthropic", "xai"],
   });
 
 export const getStartPersonalAiSignInResponseMock = (): AiSignIn => ({
   id: "c2lnbi1pbi1leGFtcGxl",
-  provider: "unbiased",
-  url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK",
+  provider: "xai",
+  url: "https://accounts.x.ai/oauth2/device?user_code=BCDF-GHJK",
   userCode: "BCDF-GHJK",
   expiresAt: "2026-11-21T09:10:00.000Z",
   interval: 5,
@@ -169,7 +169,7 @@ export const getStartPersonalAiSignInResponseMock = (): AiSignIn => ({
 
 export const getGetPersonalAiSignInResponseMock = (): AiSignInStatus => ({
   id: "c2lnbi1pbi1leGFtcGxl",
-  provider: "unbiased",
+  provider: "xai",
   status: "pending",
   detail: null,
   interval: 5,
@@ -197,6 +197,20 @@ export const getListAiConnectionsResponseMock = (): AiConnectionPage => ({
       connectedAt: "2026-11-20T09:00:00.000Z",
     },
     {
+      id: "xai",
+      provider: "xai",
+      login: "oauth",
+      model: "grok-4.7",
+      endpointHost: null,
+      isDefault: false,
+      ready: false,
+      problem: {
+        code: "sign-in-ended",
+        detail: "Your xAI sign-in ended. Sign in again to use it.",
+      },
+      connectedAt: "2026-11-21T09:00:00.000Z",
+    },
+    {
       id: "google",
       provider: "google",
       login: "oauth",
@@ -205,14 +219,15 @@ export const getListAiConnectionsResponseMock = (): AiConnectionPage => ({
       isDefault: false,
       ready: false,
       problem: {
-        code: "sign-in-ended",
-        detail: "Your Google sign-in ended. Sign in again to use it.",
+        code: "sign-in-retired",
+        detail:
+          "Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.",
       },
-      connectedAt: "2026-11-21T09:00:00.000Z",
+      connectedAt: "2026-11-22T09:00:00.000Z",
     },
   ],
   nextCursor: null,
-  signIns: ["openai", "anthropic", "google", "xai"],
+  signIns: ["openai", "anthropic", "xai"],
 });
 
 export const getConnectAiConnectionResponseMock = (): AiConnectionEntry => ({
@@ -252,7 +267,7 @@ export const getStartAiSignInResponseMock = (): AiSignIn => ({
 
 export const getGetAiSignInResponseMock = (): AiSignInStatus => ({
   id: "c2lnbi1pbi1leGFtcGxl",
-  provider: "unbiased",
+  provider: "xai",
   status: "pending",
   detail: null,
   interval: 5,
@@ -281,6 +296,20 @@ export const getListPersonalAiConnectionsResponseMock =
         connectedAt: "2026-11-20T09:00:00.000Z",
       },
       {
+        id: "xai",
+        provider: "xai",
+        login: "oauth",
+        model: "grok-4.7",
+        endpointHost: null,
+        isDefault: false,
+        ready: false,
+        problem: {
+          code: "sign-in-ended",
+          detail: "Your xAI sign-in ended. Sign in again to use it.",
+        },
+        connectedAt: "2026-11-21T09:00:00.000Z",
+      },
+      {
         id: "google",
         provider: "google",
         login: "oauth",
@@ -289,14 +318,15 @@ export const getListPersonalAiConnectionsResponseMock =
         isDefault: false,
         ready: false,
         problem: {
-          code: "sign-in-ended",
-          detail: "Your Google sign-in ended. Sign in again to use it.",
+          code: "sign-in-retired",
+          detail:
+            "Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.",
         },
-        connectedAt: "2026-11-21T09:00:00.000Z",
+        connectedAt: "2026-11-22T09:00:00.000Z",
       },
     ],
     nextCursor: null,
-    signIns: ["openai", "anthropic", "google", "xai"],
+    signIns: ["openai", "anthropic", "xai"],
   });
 
 export const getConnectPersonalAiConnectionResponseMock =

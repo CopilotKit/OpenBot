@@ -17,7 +17,6 @@ import {
 } from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { ConversationView } from "@/components/channels/conversation-view";
-import { UnbiasedConnectionNotice } from "@/components/channels/stopped-connection-notice";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
@@ -223,10 +222,9 @@ function NewConversation({ composition }: { composition: string }) {
   );
   // Not a Bot that hands work out: it answers on its own model.
   const pickable = !group && selected.length === 1 && takesModel;
-  const usesOpenBotModel = selected.some((bot) => bot.runsOnOpenBotModel);
   const models = useQuery({
     ...modelCatalogueQueryOptions(),
-    enabled: usesOpenBotModel,
+    enabled: pickable,
   });
   const draftModel = useDraftModel(
     pickable ? models.data : undefined,
@@ -522,26 +520,18 @@ function NewConversation({ composition }: { composition: string }) {
           ) : undefined
         }
         notice={
-          <>
-            {usesOpenBotModel && (
-              <UnbiasedConnectionNotice
-                catalogue={models.data}
-                connection={draftModel.value?.connection}
-              />
-            )}
-            {loadError || error ? (
-              <p className="px-3.5 pb-2 text-sm text-destructive" role="alert">
-                {loadError ?? failureSaid(error)}
-              </p>
-            ) : askedForBot && recipients.length === 0 ? (
-              <p
-                className="px-3.5 pb-2 text-sm text-muted-foreground"
-                role="status"
-              >
-                Choose a Bot first.
-              </p>
-            ) : null}
-          </>
+          loadError || error ? (
+            <p className="px-3.5 pb-2 text-sm text-destructive" role="alert">
+              {loadError ?? failureSaid(error)}
+            </p>
+          ) : askedForBot && recipients.length === 0 ? (
+            <p
+              className="px-3.5 pb-2 text-sm text-muted-foreground"
+              role="status"
+            >
+              Choose a Bot first.
+            </p>
+          ) : null
         }
         onSubmit={submit}
         pending={pending}

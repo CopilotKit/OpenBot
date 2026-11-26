@@ -17,21 +17,10 @@ import type {
  * the default (an older app disconnected the default) is grouped, so a pick can name it: with no
  * default, a run with no pick is refused.
  */
-export function isUnbiasedModelConnection(
-  connection: CatalogueConnection | undefined,
-): boolean {
-  return (
-    connection?.provider === "unbiased" ||
-    connection?.problem?.code === "provider-retired"
-  );
-}
-
 export function pickerGroups(
   catalogue: ModelCatalogue | undefined,
 ): CatalogueConnection[] {
-  const connections = (catalogue?.connections ?? []).filter(
-    (connection) => !isUnbiasedModelConnection(connection),
-  );
+  const connections = catalogue?.connections ?? [];
   // One connection draws as before, unless it isn't the default: then only naming it runs.
   if (
     connections.length === 0 ||

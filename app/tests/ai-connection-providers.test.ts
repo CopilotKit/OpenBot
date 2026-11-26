@@ -51,8 +51,14 @@ function catalogue() {
 
 test("Settings lists the setup window's providers, in its order and words", () => {
   const desktop = catalogue();
-  expect(desktop).toHaveLength(6);
-  expect(AI_PROVIDERS.some(({ id }) => id === "unbiased")).toBe(false);
+  expect(desktop.map(({ id }) => id)).toEqual([
+    "openai",
+    "anthropic",
+    "google",
+    "xai",
+    "trustedrouter",
+    "openai-compatible",
+  ]);
   expect<unknown>(
     AI_PROVIDERS.map(({ id, name, summary, logins, mark }) => ({
       id,

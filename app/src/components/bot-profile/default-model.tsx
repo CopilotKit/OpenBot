@@ -88,12 +88,15 @@ export function DefaultModelSection({
     setEditing(true);
   };
   const custom = draft ?? saved ?? deploymentPick;
+  const customSelectable =
+    custom &&
+    connectionOf(catalogue, custom.connection)?.provider !== "unbiased";
   const changed = useDeploymentDefault
     ? agent.defaultModel !== null
-    : custom !== undefined &&
+    : customSelectable &&
       (custom.model !== saved?.model || custom.effort !== saved.effort);
   const save = async () => {
-    if (!useDeploymentDefault && !custom) return;
+    if (!useDeploymentDefault && !customSelectable) return;
     try {
       await onSave(
         useDeploymentDefault || !custom

@@ -3,8 +3,8 @@
  */
 
 /**
- * What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint runs on these words.
+ * What it does, 1 to 5000 characters once trimmed. A Bot with no endpoint runs on these words.
  * @minLength 1
- * @maxLength 1000
+ * @maxLength 5000
  */
 export type BotRoleDescription = string;

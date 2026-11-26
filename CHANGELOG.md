@@ -8,9 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- Unbiased AI stops serving models November 27 at noon EST. If you use it, choose a
-  replacement in **Settings → AI providers**. In an older Desktop build, use **Change AI
-  connection** in the setup window. Your conversations and drafts stay available.
+- **OpenBot removes Unbiased AI from its AI provider choices.**
+- **OpenBot Desktop on a Mac asks for your password only after you choose Continue.** When OpenBot
+  installs the software it runs on, a card says your Mac will ask for your password and why, and
+  macOS's prompt comes up only once you choose Continue. Before, the prompt came up by itself a
+  moment after a line in OpenBot's window, and on a new Mac it covered the browser's sign-in page
+  before anybody had read why it was there.
+- **OpenBot Cloud's account menu offers the desktop app.** Get the desktop app, in the menu under
+  your name, opens the download page for Mac and Windows in a new tab. It shows only on OpenBot
+  Cloud in a browser, not in OpenBot Desktop and not on an OpenBot a company runs itself.
+- **A Bot's drawing that drew nothing reads "Didn't draw an interface".** A Bot that asks to draw an
+  interface with nothing in it is told nothing was drawn, and its step read "Drew an interface" for
+  an interface nobody saw. Folded with other steps it reads "Draw an interface" beside "Didn't work".
 - **The management agent checks a release's chart signature before it touches anything.** With
   the chart's signature check on, the agent has Flux verify the chart a new version names before it
   records an install, stops the server, takes a backup or moves Flux. A chart that is unsigned or
@@ -22,7 +31,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   OpenBot Desktop uses, in a browser's tab, on a phone's home screen when it is added there, and as
   an installed app's icon. Added to an iPhone's home screen it used to show a grey square with a
   letter in it, and a tab showed no icon at all.
-- **A provider's sign-in asks for no model name.** Signing in to Google Gemini or xAI
+- **A provider's sign-in asks for no model name.** Signing in to Google Gemini, xAI or Unbiased AI
   no longer asks for a model name typed in. Once connected, a conversation's model picker offers
   the models the provider lists for that sign-in, as it does for a key or a plan. A sign-in that
   already names a model keeps it, also when it is signed in to again.
@@ -4528,7 +4537,7 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   Unbiased AI's approval page in the browser, where a person signs in or creates an account, and
   OpenBot receives an API key for the `pareto` model on Unbiased AI's OpenAI-compatible gateway. The
   key is stored on this computer the way a typed endpoint key is, and an Unbiased AI API key can be
-  pasted instead. See [Model provider OAuth](desktop/PROVIDER_OAUTH.md#unbiased-ai).
+  pasted instead.
 
 ## 0.3.2
 

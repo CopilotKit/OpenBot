@@ -90,9 +90,27 @@ at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 
 `LANGGRAPH_TS_AG_UI_URL` is where the server finds the TypeScript LangGraph engine,
 `agent-langgraph-ts`, which new Bots run on. It is called with `MANAGED_AGENT_TOKEN`, like the managed
-Bot. Unset, and with no picked harness that is that engine, new Bots run on the server's built-in
-engine. `scripts/start.sh` points it at the engine on 4215 on a laptop, and Compose's `server`
-service reaches it by name. OpenBot Desktop needs neither: its picked harness is that engine.
+Bot, and reaches the model through the server's model gateway with `MODEL_GATEWAY_TOKEN` where one
+is set. The engine is required for new Bots: a server that cannot find it refuses them, with a
+sentence telling the person to ask an admin, and logs why. It does not run them on its built-in
+agent instead. The server looks in this order: `LANGGRAPH_TS_AG_UI_URL`; then the picked harness,
+when it is that engine (OpenBot Desktop's); then `LANGGRAPH_TS_COMPOSE_AG_UI_URL`, which
+`docker-compose.yml` always sets to its own `agent-langgraph-ts` service. So Compose and
+`scripts/start.sh` run the engine and wire it in every edition, the personal edition included, and
+OpenBot Desktop needs neither setting. The one-container image runs the engine itself, beside the
+server on the container's loopback, and wires it in with nothing set (see
+[deployment.md](deployment.md)); `EMBEDDED_ENGINE=off` turns that off, for an image pointed at an
+engine that runs elsewhere through this address.
+
+`OPENBOT_DEFAULT_BOT_ENGINE=built-in` puts every Bot back on the server's built-in agent, for a
+deployment that does not run the engine.
+
+That engine speaks plain AG-UI, as a Bot somebody connects does. Its instructions are the run's
+system messages, and every OpenBot tool it calls ends its run with the call unanswered, for the
+server to answer and carry on, so it reads neither `AGENT_TOOL_TOKEN` nor `OPENBOT_TOOL_URL`. The one
+OpenBot extension it reads is the model for the run, in `forwardedProps` (`openbotModel`,
+`openbotModelRoute`, `openbotOrganization`, `openbotSendOnce`), which an agent that brings its own
+model ignores.
 
 ## General variables
 
@@ -112,7 +130,7 @@ service reaches it by name. OpenBot Desktop needs neither: its picked harness is
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
 | `GOOGLE_API_KEY`     | unset                              | Google key when `BOT_PROVIDER=google`.                              |
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
-| `CLAUDE_CODE_OAUTH_TOKEN`, `CHATGPT_AUTH_FILE` | unset    | A model plan sign-in in place of a key: the Anthropic token from `claude setup-token`, or the file a signed-in ChatGPT plan writes. Set one, not both. The built-in Bots then run on the plan through the installed harness that holds it (`agent-claude-sdk` for Claude, `agent-langgraph-agui` for ChatGPT), named by `PICKED_HARNESS_IMAGE` and `PICKED_HARNESS_URL`, with `MANAGED_AGENT_TOKEN`. A ChatGPT plan can instead name that harness by `CHATGPT_PLAN_HARNESS_URL` (and `CHATGPT_PLAN_HARNESS_TOKEN`, which defaults to `MANAGED_AGENT_TOKEN`), which is how the TypeScript LangGraph engine reaches it too: OpenBot Desktop runs that engine as the Bot on a ChatGPT plan and `agent-langgraph-agui` beside it. The server refuses to start with both set, or with either set and that harness missing. OpenBot Desktop writes these itself; see below. |
+| `CLAUDE_CODE_OAUTH_TOKEN`, `CHATGPT_AUTH_FILE` | unset    | A model plan sign-in in place of a key: the Anthropic token from `claude setup-token`, or the file a signed-in ChatGPT plan writes. Set one, not both. The built-in Bots then run on the plan through the installed harness that holds it (`agent-claude-sdk` for Claude, `agent-langgraph-agui` for ChatGPT), named by `PICKED_HARNESS_IMAGE` and `PICKED_HARNESS_URL`, with `MANAGED_AGENT_TOKEN`. A ChatGPT plan can instead name that harness by `CHATGPT_PLAN_HARNESS_URL` (and `CHATGPT_PLAN_HARNESS_TOKEN`, which defaults to `MANAGED_AGENT_TOKEN`), which is how the TypeScript LangGraph engine reaches it too. OpenBot Desktop signs in to a ChatGPT plan with OpenAI's Sign in with ChatGPT plan usage and runs `agent-openai-agents` (the OpenAI Agents SDK) as the plan's Bot and as its harness, at `CHATGPT_PLAN_HARNESS_URL`; `CHATGPT_AUTH_FILE` then holds that sign-in's credential record, which the engine renews. A server that runs the ChatGPT sign-in itself keeps `agent-langgraph-agui` for it. The server refuses to start with both set, or with either set and that harness missing. OpenBot Desktop writes these itself; see below. |
 | `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-2.5-flash`. Set, it is the default for built-in Bots and the picked harness while the credential lists it; a person can still pick another in the composer. Unset, the [model list](#the-model-list) chooses the default. |
 | `CHATGPT_CODEX_CLIENT_VERSION` | `0.167.0` | The Codex client version the LangGraph harness names when it reads a ChatGPT plan's model list. Change it only if the plan's list comes back empty after a Codex release. |
 | `OPENBOT_MODEL_CAPABILITIES_URL` | `https://models.dev/api.json` | Where the model list reads each model's thinking levels, line and price when the provider's own listing does not say. `off` reads none: providers that publish their own (Anthropic, xAI, a ChatGPT plan) still show thinking levels, and the default falls back to the configured model. See [The model list](#the-model-list). |
@@ -334,7 +352,7 @@ Who decides what is offered depends on who uses the deployment. With `OPENBOT_SI
 | -------------- | ------------------ | -------------------- |
 | OpenAI key | `GET https://api.openai.com/v1/models`, chat models only, dropping any past its `shutdown_date` | models.dev |
 | Anthropic key | `GET https://api.anthropic.com/v1/models` | Anthropic's own `capabilities.effort` |
-| Google key or sign-in | Google's model list (the OpenAI-compatible `/models` for a key, the native list for a sign-in) | models.dev |
+| Google key | Google's model list (the OpenAI-compatible `/models`) | models.dev |
 | xAI key or sign-in | `GET https://api.x.ai/v1/language-models` | xAI's own `capabilities.reasoning_effort` and default |
 | ChatGPT plan | the plan's own Codex listing, read by the LangGraph harness that holds the sign-in | the plan's `supported_reasoning_levels` and default |
 | Claude plan | `GET https://api.anthropic.com/v1/models` with the plan's token | Anthropic's own `capabilities.effort` |
@@ -391,7 +409,7 @@ Joining includes recent thread messages and previous voice chats, capped at 12,0
 Ending a nonempty call saves its text transcript to the database and creates a compact, expandable
 Voice chat card in the same channel. A separate summary request uses the deployment's default chat
 model and its existing credential: OpenAI-compatible or Anthropic API keys, Claude or ChatGPT plan
-sign-in, or the deployment's Google/xAI OAuth proxy. It does not need a separate OpenAI key when
+sign-in, or the deployment's xAI OAuth proxy. It does not need a separate OpenAI key when
 another provider is selected. Plan summaries use an isolated conversation with no tools. A failed
 summary leaves the saved transcript available with a retry button. A successful retry updates the
 sidebar preview only while that call is still the latest activity. Interrupted answers are marked

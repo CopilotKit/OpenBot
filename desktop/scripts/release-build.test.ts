@@ -16,8 +16,13 @@ describe("the release build config", () => {
     });
   });
 
-  test("an internal build, or one desktop-version.ts never ran for, adds nothing", () => {
-    expect(releaseBuildEnv("internal", {})).toEqual({});
+  test("an internal build offers the same Cloud choice as a release", () => {
+    expect(releaseBuildEnv("internal", {})).toEqual({
+      VITE_OPENBOT_CLOUD_ENABLED: "true",
+    });
+  });
+
+  test("an unversioned development build adds nothing", () => {
     expect(releaseBuildEnv(undefined, {})).toEqual({});
   });
 

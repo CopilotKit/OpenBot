@@ -1,48 +1,29 @@
 # Model provider OAuth
 
-OpenBot’s Google and xAI model connections are separate from signing in to OpenBot or
-CopilotKit. Both providers support API keys and sign-in. Sign-in keeps a refreshable
-session in a private credential file. ChatGPT and Claude plans use their own sign-in flows.
+OpenBot Desktop's xAI connection offers provider sign-in alongside an API key.
+The sign-in leaves a refreshable session in a private credential file.
 
 ## Google Gemini
 
-Google OAuth uses the Gemini Developer API and the selected Google Cloud
-project's API quota. It does not use a personal Gemini subscription. OAuth
-requests use Google's native generation API; the local server translates the
-existing agents' Chat Completions requests, streamed replies, tool calls and
-screenshots. API-key connections continue to use Google's compatibility API.
+Gemini connects with an API key only, from Google AI Studio, at Google's
+OpenAI-compatible address. There is no Google sign-in for Gemini.
 
-Before distributing a configured desktop build, register a **Desktop app** OAuth
-client in a Google Cloud project with the Generative Language API enabled. Set
-these variables when building the desktop app to include its defaults. Runtime
-process environment variables can override those defaults:
+OpenBot used to offer one. Every person's calls then ran on the one Google
+Cloud project the build named for API quota, whose free tier refused most of
+them, and a person outside that project needs a role on it before Google takes
+the call at all. Google's own Gemini SDK also takes an API key, not a sign-in,
+on the Gemini API.
 
-- `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID`: that desktop client's ID.
-- `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET`: the client secret, when issued.
-- `OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT`: the project that supplies API quota.
+A Google sign-in saved before this is never resumed. Desktop deletes its saved
+tokens (`.openbot/model-oauth.json` when it holds a Google sign-in) at every
+launch and keeps the choice, refuses it at Start, and its AI screen says "Google sign-in for Gemini has ended" with one
+button, "Add a Gemini API key", that opens the Google Gemini row's API key.
+The server lists a saved one with the problem `sign-in-retired` and refuses a
+run on it; saving a Gemini API key on the same connection fixes it for every
+Bot that used it.
 
-For GitHub-built artifacts, configure repository Actions **variables** named
-`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID` and
-`OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT`, plus an Actions **secret** named
-`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` when the client has one. Every
-workflow that builds the desktop app passes these settings to the native build:
-Desktop build (which Desktop, Internal build and Publish release call) and
-both signing workflows. They become defaults inside the distributed desktop app;
-the desktop client credential is not a user access or refresh token.
-
-When calling the Desktop workflow as a reusable workflow, pass its optional
-`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` secret explicitly or use
-`secrets: inherit`. GitHub does not provide repository secrets to fork pull
-requests. Missing settings do not fail the build; API-key connections remain
-available, and Google sign-in requires a configured build or runtime settings.
-
-Do not reuse OpenBot's web SSO credentials (`GOOGLE_OAUTH_CLIENT_ID` and
-`GOOGLE_OAUTH_CLIENT_SECRET`): their callback and permissions serve a different
-purpose. Configure the consent screen and test users, and complete Google's
-verification requirements before wider distribution.
-
-References: [Gemini API OAuth](https://ai.google.dev/gemini-api/docs/oauth) and
-[Google desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app).
+Signing in to OpenBot itself with Google (`GOOGLE_OAUTH_CLIENT_ID` and
+`GOOGLE_OAUTH_CLIENT_SECRET`) is a different thing, and is unchanged.
 
 ## xAI
 
@@ -57,13 +38,6 @@ apply.
 
 References: [xAI's OpenCode integration](https://x.ai/news/grok-opencode) and
 [xAI OAuth discovery](https://auth.x.ai/.well-known/openid-configuration).
-
-## Unbiased AI
-
-Unbiased AI stops serving models November 27, 2026 at noon EST. Use **Change AI
-connection** in Desktop setup or **Settings → AI providers** to choose a replacement.
-For an installation configured through its environment, update the provider’s endpoint,
-model, and credential together. Your conversations stay with the installation.
 
 ## Other build-time settings
 
