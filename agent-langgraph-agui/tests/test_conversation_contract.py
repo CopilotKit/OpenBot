@@ -149,6 +149,53 @@ def test_a_warm_process_answers_from_what_the_server_sends_now(monkeypatch, envi
         assert sent.count(marker) == 1, f"{marker} was sent {sent.count(marker)} times"
 
 
+NEW_STANDING_ROLE = "CONTRACT_STANDING_ROLE_CHANGED_9c1e"
+
+
+def _with_reserved_context(body: dict) -> dict:
+    """The run as OpenBot sends it to every Bot: the role and the tool guidance as system messages,
+    and the same two, with the same text, as the reserved AG-UI context entries
+    ("OpenBot standing role", "OpenBot granted tools guidance"), for an agent that reads only one.
+    """
+    by_id = {message["id"]: message["content"] for message in body["messages"]}
+    body["context"] = [
+        {"description": "OpenBot standing role", "value": by_id[f"standing-role:{BOT}"]},
+        {"description": "OpenBot granted tools guidance", "value": by_id[f"granted-tools:{BOT}"]},
+    ]
+    return body
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_the_role_and_tool_guidance_are_said_once_though_sent_twice(monkeypatch, environment):
+    """A context entry that repeats a system message is not said again.
+
+    OpenBot sends the role and the guidance both ways, so the model was told each twice. On the
+    next run, after the role changed and a grant went, only the current ones reach the model.
+    """
+    with fake_provider() as (base, bodies):
+        with TestClient(_fresh_app(monkeypatch, environment, base)) as client:
+            _post(client, _with_reserved_context(conversation(run_id="contract-run-1")))
+
+            second = conversation(run_id="contract-run-2")
+            second["messages"][0]["content"] = f"You are Contract Bot. {NEW_STANDING_ROLE}"
+            second["messages"][1]["content"] = f"You hold these tools: {NEW_GRANTED_TOOLS}"
+            second["messages"] += [
+                {"id": "a2", "role": "assistant", "content": "ok"},
+                {"id": "u3", "role": "user", "content": f"And now? {NEWER_QUESTION}"},
+            ]
+            _post(client, _with_reserved_context(second))
+    assert len(bodies) == 2, "each run calls the model once"
+    first, last = (json.dumps(body) for body in bodies)
+    for marker in (STANDING_ROLE, GRANTED_TOOLS):
+        assert first.count(marker) == 1, f"{marker} was said {first.count(marker)} times"
+        assert marker in _system_text(bodies[0]), f"{marker} is not a system message"
+    for marker in (NEW_STANDING_ROLE, NEW_GRANTED_TOOLS):
+        assert last.count(marker) == 1, f"{marker} was said {last.count(marker)} times"
+        assert marker in _system_text(bodies[1]), f"{marker} is not a system message"
+    for stale in (STANDING_ROLE, GRANTED_TOOLS):
+        assert stale not in last, f"the stale {stale} reached the next run"
+
+
 APPROVED_RESULT = "CONTRACT_APPROVED_RESULT_9c1e"
 
 
