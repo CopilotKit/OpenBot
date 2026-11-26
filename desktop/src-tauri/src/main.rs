@@ -98,11 +98,6 @@ struct Shell {
     install_token: Mutex<Option<(PathBuf, Option<String>)>>,
     /// A verified down allows a following Stop/Quit to be an idempotent no-op.
     stopped_container_root: Mutex<Option<PathBuf>>,
-    /// A ChatGPT sign-in waiting for the browser redirect to complete it.
-    ///
-    /// Held across two commands because a person leaves and approves in the middle of it. The
-    /// callback finishes it. A Claude plan's sign-in keeps its own (`claude_sign_in`).
-    signing_in_to_chatgpt: Mutex<Option<openbot_desktop_lib::plan::SigningInToChatGpt>>,
     /// The configured setup destination, resolved using Tauri's build mode and platform.
     /// WebView2's current URL can still be about:blank during startup; it is never a setup source.
     setup_url: Mutex<Option<String>>,
@@ -313,6 +308,9 @@ struct SavedConfiguration {
     model_api_keys: SavedModelApiKeys,
     model_sessions: SavedModelSessions,
     model: Option<openbot_desktop_lib::saved_intent::ModelIntent>,
+    /// A ChatGPT sign-in an earlier version saved, which has to be done again
+    /// (`env::chatgpt_sign_in_changed`). The window says so above the sign-in.
+    chatgpt_sign_in_changed: bool,
 }
 
 #[derive(Serialize)]
@@ -4685,6 +4683,10 @@ impl ChosenModel {
                 if store.is_empty() {
                     return Err("That ChatGPT plan was not signed in to.".into());
                 }
+                // A sign-in an earlier version saved, through Codex: the plan's engine can't use it.
+                if !openbot_env::is_sign_in_with_chatgpt_record(&store) {
+                    return Err(openbot_env::CHATGPT_SIGN_IN_CHANGED.into());
+                }
                 Ok(openbot_env::ModelCredential::ChatGptPlan { store })
             }
             ("openai-compatible", "endpoint") => {
@@ -5981,8 +5983,8 @@ fn quit_cleanup<P>(shell: &Shell, mut progress: P) -> Stopped
 where
     P: FnMut(QuitStep, QuitStepState),
 {
-    // A ChatGPT sign-in left waiting would keep its container, and the callback port, after Quit.
-    openbot_desktop_lib::plan::release_chatgpt_callback_port();
+    // A ChatGPT sign-in left waiting would keep its loopback port after Quit.
+    openbot_desktop_lib::chatgpt_sign_in::cancel();
     let engine = engine_at_stop(shell, &cleanup_root(shell, &stack::default_root()));
     let on_podman = on_podman_at_stop(shell, &cleanup_root(shell, &stack::default_root()));
     let (down, intelligence) = healed_once_before(
@@ -10965,6 +10967,7 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
                 xai: hint(Category::XaiOauth, false),
             },
             model: intent.model,
+            chatgpt_sign_in_changed: openbot_env::chatgpt_sign_in_changed(&root),
         },
         values,
     }
@@ -11083,20 +11086,10 @@ already stopped listening for. The browser tab gets OpenBot's page saying the si
 */
 #[tauri::command]
 async fn cancel_chatgpt_sign_in(app: tauri::AppHandle) -> Result<(), String> {
-    // A sign-in from an earlier version, still holding its container: dropping it removes that.
-    let held = app
-        .state::<Shell>()
-        .signing_in_to_chatgpt
-        .lock()
-        .unwrap()
-        .take();
-    tauri::async_runtime::spawn_blocking(move || {
-        drop(held);
-        openbot_desktop_lib::chatgpt_sign_in::cancel();
-        openbot_desktop_lib::plan::cancel_chatgpt_sign_in();
-    })
-    .await
-    .map_err(|error| format!("The sign-in did not stop: {error}"))
+    let _ = app;
+    tauri::async_runtime::spawn_blocking(openbot_desktop_lib::chatgpt_sign_in::cancel)
+        .await
+        .map_err(|error| format!("The sign-in did not stop: {error}"))
 }
 
 /// The model screen's rows. Independent of the Bot, and required to stay that way: no harness is
@@ -17328,7 +17321,7 @@ mod tests {
         std::fs::create_dir_all(root.join(".langchain")).unwrap();
         std::fs::write(
             root.join(openbot_env::CHATGPT_STORE_FILE),
-            "{\"refresh_token\":\"stored\"}\n",
+            "{\"client_id\":\"oaiapp_stored\",\"access_token\":\"stored-access\",\"refresh_token\":\"stored\",\"scopes\":[\"chatgpt.tokens.use.direct\"]}\n",
         )
         .unwrap();
 
@@ -17509,7 +17502,7 @@ mod tests {
         persist_endpoint_fixture(
             &root,
             &openbot_env::ModelCredential::ChatGptPlan {
-                store: r#"{"refresh_token":"synthetic-refresh"}"#.into(),
+                store: r#"{"client_id":"oaiapp_synthetic","access_token":"synthetic-access","refresh_token":"synthetic-refresh","scopes":["chatgpt.tokens.use.direct"]}"#.into(),
             },
         );
         assert_eq!(saved(&root), (Some(true), Some(false), Some(false)));
@@ -17527,6 +17520,34 @@ mod tests {
             },
         );
         assert_eq!(saved(&root), (Some(false), Some(false), Some(true)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An installation an earlier version signed in to ChatGPT through Codex: its saved sign-in is
+    /// not offered, the window is told to say the sign-in changed, and a Start on it says the same
+    /// thing, never the stack coming up with a Bot that cannot answer.
+    #[test]
+    fn an_earlier_versions_chatgpt_sign_in_is_asked_for_again() {
+        let root = temp_root("openbot-chatgpt-sign-in-changed");
+        std::fs::create_dir_all(&root).unwrap();
+        persist_endpoint_fixture(
+            &root,
+            &openbot_env::ModelCredential::ChatGptPlan {
+                store: r#"{"access_token":"a.b.c","refresh_token":"codex-refresh","id_token":"i","account_id":"acct"}"#.into(),
+            },
+        );
+        let saved = already_configured_for_root(root.to_string_lossy().into_owned()).saved;
+        assert_eq!(saved.model_sessions.openai, Some(false));
+        assert!(saved.chatgpt_sign_in_changed);
+        let chosen: ChosenModel = serde_json::from_value(serde_json::json!({
+            "provider": "openai", "login": "plan", "saved": true
+        }))
+        .unwrap();
+        let said = chosen
+            .into_credential(&root)
+            .err()
+            .map(|problem| problem.said);
+        assert_eq!(said.as_deref(), Some(openbot_env::CHATGPT_SIGN_IN_CHANGED));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -24554,7 +24575,7 @@ fn main() {
                 )
             }
             "chatgpt-plan" => {
-                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
+                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"client_id\":\"oaiapp_synthetic\",\"access_token\":\"synthetic-access\",\"refresh_token\":\"synthetic-plan\",\"scopes\":[\"chatgpt.tokens.use.direct\"]}"});
                 // The plan's own engine is the OpenAI Agents SDK Bot the plan picked, as for a Claude
                 // plan: no container of the Bot's own.
                 ("compose --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-chatgpt-plan", Some("agent-openai-agents"))
@@ -24566,7 +24587,7 @@ fn main() {
                 ("compose --profile claude-plan up -d --no-build --pull never postgres agent-computer server agent-claude-plan", Some("agent-claude-sdk"))
             }
             "chatgpt-plan-switched" => {
-                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
+                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"client_id\":\"oaiapp_synthetic\",\"access_token\":\"synthetic-access\",\"refresh_token\":\"synthetic-plan\",\"scopes\":[\"chatgpt.tokens.use.direct\"]}"});
                 ("compose --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-chatgpt-plan", Some("agent-openai-agents"))
             }
             _ => panic!("unknown test case"),

@@ -63,6 +63,8 @@ export type SavedConfiguration = {
   modelSessions?: Partial<
     Record<"openai" | "anthropic" | "google" | "xai", boolean | null>
   >;
+  /** A ChatGPT sign-in an earlier version saved, which has to be done again. */
+  chatgptSignInChanged?: boolean;
 };
 
 export type HeldConfiguration = {
@@ -164,7 +166,12 @@ export function recordedModel(held: HeldConfiguration): ModelChoice | null {
     case "claude-plan":
       return { provider: "anthropic", login: "plan", saved: true };
     case "chat-gpt-plan":
-      return { provider: "openai", login: "plan", saved: true };
+      // An earlier version's ChatGPT sign-in can't be used: the plan stays chosen, to sign in again.
+      return {
+        provider: "openai",
+        login: "plan",
+        saved: held.saved.chatgptSignInChanged !== true,
+      };
     case "google-oauth":
     case "xai-oauth":
       return {
@@ -839,8 +846,10 @@ export function ProviderPicker({
                  */}
                 <p className="footnote">
                   Your Bot will use{" "}
-                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangChain"}.
-                  It’s the one that can use this plan.
+                  {row.id === "anthropic"
+                    ? "Claude Agent SDK"
+                    : "OpenAI Agents SDK"}
+                  . It’s the one that can use this plan.
                 </p>
               </>
             ) : signInUrl ? (
@@ -862,12 +871,21 @@ export function ProviderPicker({
               </>
             ) : (
               <>
-                {/* Says what the flow below asks for: both plans finish in the
-                    browser, with nothing typed here. */}
-                <p className="lede">
-                  {row.name} opens in your browser. You won't type anything here
-                  or need an API key.
-                </p>
+                {row.id === "openai" && held.saved?.chatgptSignInChanged ? (
+                  /* A ChatGPT sign-in an earlier version saved can't be used any more. Said in
+                     the lede's place, so the one press that fixes it stays where it was. */
+                  <p className="sign-in-changed" role="status">
+                    ChatGPT's sign-in has changed. Sign in to ChatGPT again to
+                    keep using your plan.
+                  </p>
+                ) : (
+                  /* Says what the flow below asks for: both plans finish in the browser, with
+                     nothing typed here. */
+                  <p className="lede">
+                    {row.name} opens in your browser. You won't type anything
+                    here or need an API key.
+                  </p>
+                )}
                 <div className="provider-sign-in-actions">
                   <button
                     type="button"

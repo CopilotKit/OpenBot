@@ -439,6 +439,9 @@ pub fn prepare(engine: &Address, root: &Path, provider: &str, login: &str) -> Re
             }
         }
         Plan::ChatGpt => {
+            if crate::env::chatgpt_sign_in_changed(root) {
+                return Err(Problem::plain(crate::env::CHATGPT_SIGN_IN_CHANGED));
+            }
             if !crate::env::saved_chatgpt_plan_store(root) {
                 return Err(Problem::plain("Sign in to your ChatGPT plan first."));
             }

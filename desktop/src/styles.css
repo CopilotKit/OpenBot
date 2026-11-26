@@ -1412,6 +1412,18 @@ a:hover {
   color: var(--text-primary);
 }
 
+/* A sign-in an earlier version saved that has to be done again, said above its button: the muted
+   fill, calm, as .move-notice says what OpenBot Cloud said. */
+.sign-in-changed {
+  margin: 0 0 12px;
+  padding: 12px 16px;
+  border-radius: var(--r-card);
+  background: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-primary);
+}
+
 /* The code a CopilotKit sign-in page shows, to compare letter by letter. */
 .sign-in-code {
   font-family: var(--mono);

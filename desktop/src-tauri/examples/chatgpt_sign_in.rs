@@ -36,7 +36,8 @@ fn main() {
     let client = value["client_id"].as_str().unwrap_or_default();
     println!(
         "SAVED: {} (client {}…, scopes {}, expires_at {})",
-        root.join(openbot_desktop_lib::env::CHATGPT_STORE_FILE).display(),
+        root.join(openbot_desktop_lib::env::CHATGPT_STORE_FILE)
+            .display(),
         &client[..client.len().min(10)],
         value["scopes"],
         value["expires_at"]

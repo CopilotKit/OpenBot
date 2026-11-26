@@ -57,10 +57,15 @@ class Stand:
         self.bearers: list[str] = []
         app = FastAPI()
 
+        self.unauthorized = False
+
         @app.post("/v1/responses")
         async def responses(request: Request):
             self.bearers.append(request.headers.get("authorization", ""))
             self.requests.append(await request.json())
+            if self.unauthorized:
+                # As the plan route answers a token whose sign-in was disconnected.
+                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
             return JSONResponse(
                 {"error": {"message": "stand-in", "type": "invalid_request_error", "code": "stand_in"}},
                 status_code=400,
@@ -131,12 +136,12 @@ def engine(tmp_path, monkeypatch, stand):
     from openai import AsyncOpenAI
 
     main.run_config.model_provider.client = AsyncOpenAI(
-        api_key=main.CREDENTIALS.access_token, base_url=f"{stand.base}/v1", max_retries=0
+        api_key=main.plan_token, base_url=f"{stand.base}/v1", max_retries=0
     )
     return main, record
 
 
-def _run(main) -> None:
+def _run(main) -> str:
     from fastapi.testclient import TestClient
 
     body = {
@@ -160,6 +165,7 @@ def _run(main) -> None:
         response = client.post("/", json=body, headers={"x-openbot-agent-token": "server-token"})
         assert response.status_code == 200
         assert "RUN_ERROR" in response.text  # the stand-in refuses; the request is what is checked
+        return response.text
 
 
 def test_a_run_sends_what_the_plan_route_accepts(engine, stand):
@@ -214,10 +220,43 @@ def test_a_lapsing_token_is_renewed_and_the_rotated_one_saved(engine, stand):
     assert len(stand.refreshes) == 1
 
 
+def _run_error(text: str) -> dict:
+    events = [json.loads(line[6:]) for line in text.splitlines() if line.startswith("data: ")]
+    return [event for event in events if event.get("type") == "RUN_ERROR"][-1]
+
+
 def test_a_sign_in_without_plan_permission_is_not_used(engine, stand):
     main, record = engine
     data = json.loads(record.read_text())
     data["scopes"] = ["openid", "profile", "email", "offline_access"]
     record.write_text(json.dumps(data))
-    _run(main)
+    error = _run_error(_run(main))
     assert stand.requests == []
+    assert error.get("code") == "OPENBOT_MODEL_AUTH_REQUIRED"
+
+
+def test_an_earlier_versions_codex_sign_in_asks_to_sign_in_again(engine, stand):
+    """The token store an earlier Desktop's Codex sign-in left, which this engine can't use: the run
+    ends with the code that sends OpenBot Desktop to its AI connection to sign in again."""
+    main, record = engine
+    record.write_text(json.dumps({"access_token": _jwt(time.time() + 3600), "refresh_token": "r",
+                                  "id_token": "i", "account_id": "acct", "expires_at": 0}))
+    error = _run_error(_run(main))
+    assert stand.requests == []
+    assert error == {**error, "code": "OPENBOT_MODEL_AUTH_REQUIRED",
+                     "message": "Sign in to ChatGPT again to keep using your plan."}
+
+
+def test_a_refused_token_asks_to_sign_in_again(engine, stand):
+    """OpenAI answers 401 (the person disconnected OpenBot in ChatGPT's settings)."""
+    main, _ = engine
+    stand.unauthorized = True
+    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+
+    main.run_config.model_provider.client = AsyncOpenAI(
+        api_key=main.plan_token, base_url=f"{stand.base}/v1", max_retries=0,
+        http_client=DefaultAsyncHttpxClient(event_hooks={"response": [main._note_response]}),
+    )
+    error = _run_error(_run(main))
+    assert stand.requests, "the model was asked"
+    assert error.get("code") == "OPENBOT_MODEL_AUTH_REQUIRED"

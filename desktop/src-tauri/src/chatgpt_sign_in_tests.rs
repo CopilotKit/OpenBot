@@ -11,10 +11,18 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
-static SLOT: Mutex<()> = Mutex::new(());
-
-fn slot() -> std::sync::MutexGuard<'static, ()> {
-    SLOT.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+/// The one sign-in slot is process-wide, and port 1455 machine-wide: these tests take turns with
+/// every other test that binds it (`plan::tests::CALLBACK_PORT`) and with any that binds ports.
+fn slot() -> (
+    std::sync::MutexGuard<'static, ()>,
+    std::sync::MutexGuard<'static, ()>,
+) {
+    (
+        crate::plan::tests::CALLBACK_PORT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        crate::test_support::hold_ports(),
+    )
 }
 
 const ISSUER_KEY: &[u8] = include_bytes!("testdata/issuer.der");
@@ -77,14 +85,18 @@ impl StandIn {
                 let (status, reply) = if line.starts_with("GET /jwks") {
                     ("200 OK", jwks())
                 } else if line.starts_with("POST /token") {
-                    let form: HashMap<String, String> = reqwest::Url::parse(&format!("http://x/?{body}"))
-                        .unwrap()
-                        .query_pairs()
-                        .into_owned()
-                        .collect();
+                    let form: HashMap<String, String> =
+                        reqwest::Url::parse(&format!("http://x/?{body}"))
+                            .unwrap()
+                            .query_pairs()
+                            .into_owned()
+                            .collect();
                     seen.lock().unwrap().push(form.clone());
                     if form.get("client_id").map(String::as_str) != Some(issue.client_id) {
-                        ("400 Bad Request", r#"{"error":"invalid_client"}"#.to_string())
+                        (
+                            "400 Bad Request",
+                            r#"{"error":"invalid_client"}"#.to_string(),
+                        )
                     } else {
                         let now = now();
                         let id_token = jwt(
@@ -138,7 +150,11 @@ fn read_request(stream: &mut TcpStream) -> (String, String) {
         if let Some(end) = text.find("\r\n\r\n") {
             let length = text[..end]
                 .lines()
-                .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                .find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                })
                 .unwrap_or(0);
             if data.len() >= end + 4 + length {
                 let body = String::from_utf8_lossy(&data[end + 4..end + 4 + length]).to_string();
@@ -150,7 +166,11 @@ fn read_request(stream: &mut TcpStream) -> (String, String) {
 }
 
 fn query_of(url: &str) -> HashMap<String, String> {
-    reqwest::Url::parse(url).unwrap().query_pairs().into_owned().collect()
+    reqwest::Url::parse(url)
+        .unwrap()
+        .query_pairs()
+        .into_owned()
+        .collect()
 }
 
 /// The browser coming back from ChatGPT to the redirect the URL named.
@@ -188,14 +208,23 @@ fn sign_in(
     (url, result, exchanges)
 }
 
-const GRANTED: &str = "chatgpt.tokens.use.direct email offline_access openid profile resource.invoke";
+const GRANTED: &str =
+    "chatgpt.tokens.use.direct email offline_access openid profile resource.invoke";
 
 #[test]
 fn a_first_sign_in_registers_openbot_and_returns_the_plan_record() {
     let _slot = slot();
     let root = crate::test_support::temp_root("chatgpt-first-sign-in");
-    let issue = Issue { scope: GRANTED, key: ISSUER_KEY, client_id: "oaiapp_issued" };
-    let (url, result, exchanges) = sign_in(&root, issue, vec![("code", "the-code"), ("client_id", "oaiapp_issued")]);
+    let issue = Issue {
+        scope: GRANTED,
+        key: ISSUER_KEY,
+        client_id: "oaiapp_issued",
+    };
+    let (url, result, exchanges) = sign_in(
+        &root,
+        issue,
+        vec![("code", "the-code"), ("client_id", "oaiapp_issued")],
+    );
 
     let query = query_of(&url);
     assert!(url.starts_with("https://auth.example.test/api/accounts/authorize?"));
@@ -203,7 +232,10 @@ fn a_first_sign_in_registers_openbot_and_returns_the_plan_record() {
     assert_eq!(query["agent_name_hint"], "OpenBot");
     assert!(query["ext_agent_host_id"].starts_with("urn:uuid:"));
     assert_eq!(query["response_type"], "code");
-    assert_eq!(query["scope"], "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct");
+    assert_eq!(
+        query["scope"],
+        "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
+    );
     assert_eq!(query["resource"], "https://api.openai.com/v1");
     assert_eq!(query["code_challenge_method"], "S256");
     assert!(query["redirect_uri"].starts_with("http://127.0.0.1:"));
@@ -227,18 +259,32 @@ fn a_first_sign_in_registers_openbot_and_returns_the_plan_record() {
     assert_eq!(record["subject"], "user-123");
     assert_eq!(record["refresh_token"], "refresh-1");
     assert_eq!(record["ext_agent_host_id"], query["ext_agent_host_id"]);
-    assert!(record["scopes"].as_array().unwrap().iter().any(|s| s == PLAN_SCOPE));
+    assert!(record["scopes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s == PLAN_SCOPE));
 }
 
 #[test]
 fn a_returning_sign_in_reuses_the_issued_client_and_this_computers_host_id() {
     let _slot = slot();
     let root = crate::test_support::temp_root("chatgpt-returning-sign-in");
-    let first = Issue { scope: GRANTED, key: ISSUER_KEY, client_id: "oaiapp_issued" };
-    let (first_url, record, _) = sign_in(&root, first.clone(), vec![("code", "c1"), ("client_id", "oaiapp_issued")]);
+    let first = Issue {
+        scope: GRANTED,
+        key: ISSUER_KEY,
+        client_id: "oaiapp_issued",
+    };
+    let (first_url, record, _) = sign_in(
+        &root,
+        first.clone(),
+        vec![("code", "c1"), ("client_id", "oaiapp_issued")],
+    );
     crate::env::write_plan_store(
         &root,
-        &crate::env::ModelCredential::ChatGptPlan { store: record.unwrap() },
+        &crate::env::ModelCredential::ChatGptPlan {
+            store: record.unwrap(),
+        },
     )
     .unwrap();
 
@@ -249,7 +295,10 @@ fn a_returning_sign_in_reuses_the_issued_client_and_this_computers_host_id() {
     assert!(!query.contains_key("agent_name_hint"));
     assert!(query.contains_key("id_token_hint"));
     assert_eq!(query["login_hint"], "person@example.test");
-    assert_eq!(query["ext_agent_host_id"], query_of(&first_url)["ext_agent_host_id"]);
+    assert_eq!(
+        query["ext_agent_host_id"],
+        query_of(&first_url)["ext_agent_host_id"]
+    );
     assert_eq!(exchanges[0]["client_id"], "oaiapp_issued");
     assert!(result.is_ok());
 }
@@ -258,8 +307,16 @@ fn a_returning_sign_in_reuses_the_issued_client_and_this_computers_host_id() {
 fn a_sign_in_without_plan_permission_saves_nothing() {
     let _slot = slot();
     let root = crate::test_support::temp_root("chatgpt-no-plan-scope");
-    let issue = Issue { scope: "email offline_access openid profile", key: ISSUER_KEY, client_id: "oaiapp_issued" };
-    let (_, result, _) = sign_in(&root, issue, vec![("code", "c"), ("client_id", "oaiapp_issued")]);
+    let issue = Issue {
+        scope: "email offline_access openid profile",
+        key: ISSUER_KEY,
+        client_id: "oaiapp_issued",
+    };
+    let (_, result, _) = sign_in(
+        &root,
+        issue,
+        vec![("code", "c"), ("client_id", "oaiapp_issued")],
+    );
     assert_eq!(result.unwrap_err(), NOT_ALLOWED);
 }
 
@@ -267,7 +324,11 @@ fn a_sign_in_without_plan_permission_saves_nothing() {
 fn a_declined_consent_is_not_exchanged() {
     let _slot = slot();
     let root = crate::test_support::temp_root("chatgpt-declined");
-    let issue = Issue { scope: GRANTED, key: ISSUER_KEY, client_id: "oaiapp_issued" };
+    let issue = Issue {
+        scope: GRANTED,
+        key: ISSUER_KEY,
+        client_id: "oaiapp_issued",
+    };
     let (_, result, exchanges) = sign_in(&root, issue, vec![("error", "access_denied")]);
     assert_eq!(result.unwrap_err(), NOT_ALLOWED);
     assert!(exchanges.is_empty());
@@ -277,8 +338,16 @@ fn a_declined_consent_is_not_exchanged() {
 fn an_id_token_not_signed_by_the_issuer_is_refused() {
     let _slot = slot();
     let root = crate::test_support::temp_root("chatgpt-forged-id-token");
-    let issue = Issue { scope: GRANTED, key: STRANGER_KEY, client_id: "oaiapp_issued" };
-    let (_, result, _) = sign_in(&root, issue, vec![("code", "c"), ("client_id", "oaiapp_issued")]);
+    let issue = Issue {
+        scope: GRANTED,
+        key: STRANGER_KEY,
+        client_id: "oaiapp_issued",
+    };
+    let (_, result, _) = sign_in(
+        &root,
+        issue,
+        vec![("code", "c"), ("client_id", "oaiapp_issued")],
+    );
     assert_eq!(result.unwrap_err(), REFUSED);
 }
 
@@ -286,7 +355,11 @@ fn an_id_token_not_signed_by_the_issuer_is_refused() {
 fn a_new_registration_without_an_issued_client_is_incomplete() {
     let _slot = slot();
     let root = crate::test_support::temp_root("chatgpt-no-issued-client");
-    let issue = Issue { scope: GRANTED, key: ISSUER_KEY, client_id: "oaiapp_issued" };
+    let issue = Issue {
+        scope: GRANTED,
+        key: ISSUER_KEY,
+        client_id: "oaiapp_issued",
+    };
     let (_, result, exchanges) = sign_in(&root, issue, vec![("code", "c")]);
     assert_eq!(result.unwrap_err(), INCOMPLETE);
     assert!(exchanges.is_empty());

@@ -40,7 +40,8 @@ pub const AUTHORIZE_URL: &str = "https://auth.openai.com/api/accounts/authorize"
 pub const TOKEN_URL: &str = "https://auth.openai.com/api/accounts/oauth/token";
 pub const JWKS_URL: &str = "https://auth.openai.com/.well-known/jwks.json";
 pub const RESOURCE: &str = "https://api.openai.com/v1";
-pub const SCOPE: &str = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
+pub const SCOPE: &str =
+    "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 /// The scope that lets OpenBot use the person's plan. A sign-in without it is not used.
 pub const PLAN_SCOPE: &str = "chatgpt.tokens.use.direct";
 /// The first-time registration entry point. Never saved and never used for an exchange.
@@ -67,8 +68,7 @@ const LOST: &str =
     "Could not reach ChatGPT to finish signing in. Check your connection and sign in again.";
 const REFUSED: &str = "ChatGPT didn't accept the sign-in. Sign in again.";
 const UNREADABLE: &str = "ChatGPT returned an unreadable sign-in response. Sign in again.";
-const INCOMPLETE: &str =
-    "ChatGPT didn't finish registering OpenBot. Sign in again.";
+const INCOMPLETE: &str = "ChatGPT didn't finish registering OpenBot. Sign in again.";
 const OTHER_ACCOUNT: &str =
     "That sign-in came back for a different ChatGPT registration. Sign in again.";
 
@@ -155,6 +155,8 @@ pub struct SignIn {
     state: String,
     nonce: String,
     redirect_uri: String,
+    /// The loopback port the browser comes back to.
+    port: u16,
     url: String,
     host_id: String,
     returning: Option<Registration>,
@@ -170,11 +172,16 @@ impl SignIn {
         host_id: String,
         returning: Option<Registration>,
     ) -> Result<Self, String> {
+        // A redirect OpenBot's page asked Desktop to catch on 1455 (`sign_in_redirect`) gives way
+        // to this newer sign-in, as it gives way to any.
+        crate::sign_in_redirect::release_port(PREFERRED_PORT);
         let listener = match Listener::on_port(PREFERRED_PORT, CALLBACK_PATH) {
             Ok(listener) => listener,
             Err(BindError::Busy) | Err(BindError::Failed(_)) => {
                 Listener::on_any_port(CALLBACK_PATH).map_err(|error| {
-                    format!("OpenBot couldn't start the sign-in on this computer. Try again. ({error})")
+                    format!(
+                        "OpenBot couldn't start the sign-in on this computer. Try again. ({error})"
+                    )
                 })?
             }
         };
@@ -183,6 +190,7 @@ impl SignIn {
         let nonce = crate::provider_oauth::random();
         let challenge = crate::provider_oauth::pkce_challenge(&verifier);
         let redirect_uri = listener.redirect_uri_ipv4();
+        let port = listener.port();
         let url = authorize_url(
             &endpoints.authorize,
             &redirect_uri,
@@ -197,6 +205,7 @@ impl SignIn {
             state,
             nonce,
             redirect_uri,
+            port,
             url,
             host_id,
             returning,
@@ -231,7 +240,9 @@ impl SignIn {
                 Ended::TimedOut | Ended::PortWanted | Ended::Failed(_) => DIDNT_FINISH.to_string(),
             })?;
         let result = match outcome {
-            Outcome::Error { error, .. } if error == "access_denied" => Err(NOT_ALLOWED.to_string()),
+            Outcome::Error { error, .. } if error == "access_denied" => {
+                Err(NOT_ALLOWED.to_string())
+            }
             Outcome::Error { .. } => Err(DIDNT_FINISH.to_string()),
             Outcome::Code { code, .. } => self
                 .client_id_from(&query)
@@ -312,15 +323,25 @@ impl SignIn {
             .ok_or_else(|| REFUSED.to_string())?
             .to_owned();
         if let Some(saved) = &self.returning {
-            if saved.subject.as_deref().is_some_and(|before| before != subject) {
+            if saved
+                .subject
+                .as_deref()
+                .is_some_and(|before| before != subject)
+            {
                 return Err(OTHER_ACCOUNT.into());
             }
         }
         let now = now();
-        let expires_in = tokens.get("expires_in").and_then(|v| v.as_u64()).unwrap_or(3600);
+        let expires_in = tokens
+            .get("expires_in")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(3600);
         let saved_at = time::OffsetDateTime::from_unix_timestamp(now as i64)
             .ok()
-            .and_then(|at| at.format(&time::format_description::well_known::Rfc3339).ok())
+            .and_then(|at| {
+                at.format(&time::format_description::well_known::Rfc3339)
+                    .ok()
+            })
             .unwrap_or_default();
         let record = serde_json::json!({
             "email": claims.get("email").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -419,8 +440,13 @@ fn verify_id_token(
     else {
         return Err(refused());
     };
-    let decode = |part: &str| URL_SAFE_NO_PAD.decode(part.trim_end_matches('=')).map_err(|_| refused());
-    let header: serde_json::Value = serde_json::from_slice(&decode(head)?).map_err(|_| refused())?;
+    let decode = |part: &str| {
+        URL_SAFE_NO_PAD
+            .decode(part.trim_end_matches('='))
+            .map_err(|_| refused())
+    };
+    let header: serde_json::Value =
+        serde_json::from_slice(&decode(head)?).map_err(|_| refused())?;
     if header.get("alg").and_then(|v| v.as_str()) != Some("RS256") {
         return Err(refused());
     }
@@ -466,7 +492,9 @@ fn verify_id_token(
         serde_json::from_slice(&decode(body)?).map_err(|_| refused())?;
     let audience_ok = match claims.get("aud") {
         Some(serde_json::Value::String(aud)) => aud == client_id,
-        Some(serde_json::Value::Array(auds)) => auds.iter().any(|aud| aud.as_str() == Some(client_id)),
+        Some(serde_json::Value::Array(auds)) => {
+            auds.iter().any(|aud| aud.as_str() == Some(client_id))
+        }
         _ => false,
     };
     let issuer_ok = claims.get("iss").and_then(|v| v.as_str()) == Some(endpoints.issuer.as_str());
@@ -527,6 +555,13 @@ pub fn finish() -> Result<String, String> {
         current.take();
     }
     result
+}
+
+/// Whether a sign-in of Desktop's own is waiting for the browser on `port`.
+pub fn waiting_on(port: u16) -> bool {
+    active()
+        .as_ref()
+        .is_some_and(|signing| signing.port == port && !signing.cancelled.load(Ordering::SeqCst))
 }
 
 /// Stop the sign-in in progress, if any. Whoever waits in `finish` hears it stopped.

@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -49,10 +50,11 @@ from agents import (
     set_tracing_disabled,
 )
 from agents.run_config import CallModelData, ModelInputData
+from ag_ui.core import EventType, RunErrorEvent
 from ag_ui_openai_agents import OpenAIAgentsAgent, add_openai_agents_fastapi_endpoint
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
-from .chatgpt_credentials import Credentials, RESOURCE
+from .chatgpt_credentials import Credentials, RESOURCE, SignInNeeded
 
 logger = logging.getLogger("agent-openai-agents")
 TOKEN_HEADER = "x-openbot-agent-token"
@@ -61,8 +63,10 @@ CREDENTIALS = Credentials(
 )
 # Every model request's body, without its headers, one JSON line each, when a test asks for it.
 REQUEST_LOG = (os.environ.get("OPENBOT_MODEL_REQUEST_LOG") or "").strip()
-# Where the Responses requests go: OpenAI's public API, the only address the plan route serves. A
-# test points it at a recording proxy that passes the bearer through to that same API.
+# Where the Responses requests go: OpenAI's public API, the only address the plan route serves.
+# A TEST HOOK, NOTHING ELSE: the end-to-end suite points it at its recording proxy (aimock), which
+# passes the bearer through to that same API and keeps each request. Desktop's Compose file never
+# sets it, and nothing a person chooses can, so the plan's token goes to OpenAI and nowhere else.
 API_BASE = (os.environ.get("OPENBOT_CHATGPT_API_BASE") or "").strip().rstrip("/") or RESOURCE
 
 # Traces go to OpenAI's tracing API with an API key, which a plan has none of.
@@ -77,6 +81,53 @@ def developer_not_system(data: CallModelData[Any]) -> ModelInputData:
             item = {**item, "role": "developer"}
         items.append(item)
     return ModelInputData(input=items, instructions=data.model_data.instructions)
+
+
+# Whether this run's sign-in was refused: the saved one can't be used (an earlier version's, or
+# signed out of), or OpenAI answered 401. One holder per run, shared with the tasks it starts.
+_refused: ContextVar[dict | None] = ContextVar("chatgpt_sign_in_refused", default=None)
+
+# What the person reads, and the code the server and OpenBot Desktop act on: Desktop opens its
+# window on the AI connection, where the person signs in to ChatGPT again.
+SIGN_IN_AGAIN = "Sign in to ChatGPT again to keep using your plan."
+MODEL_AUTH_REQUIRED = "OPENBOT_MODEL_AUTH_REQUIRED"
+
+
+def _note_refused() -> None:
+    holder = _refused.get()
+    if holder is not None:
+        holder["refused"] = True
+
+
+async def plan_token() -> str:
+    """The access token for the next request; a sign-in that can't be used is noted for the run."""
+    try:
+        return await CREDENTIALS.access_token()
+    except SignInNeeded:
+        _note_refused()
+        raise
+
+
+async def _note_response(response: httpx.Response) -> None:
+    if response.status_code == 401:
+        _note_refused()
+
+
+class PlanAgent(OpenAIAgentsAgent):
+    """The AG-UI agent, ending a run whose sign-in was refused with the code to sign in again."""
+
+    async def run_streamed(self, input):  # type: ignore[override]
+        holder: dict = {}
+        token = _refused.set(holder)
+        try:
+            async for event in super().run_streamed(input):
+                if getattr(event, "type", None) == EventType.RUN_ERROR and holder.get("refused"):
+                    event = RunErrorEvent(
+                        type=EventType.RUN_ERROR, message=SIGN_IN_AGAIN, code=MODEL_AUTH_REQUIRED
+                    )
+                yield event
+        finally:
+            _refused.reset(token)
 
 
 async def _log_request(request: httpx.Request) -> None:
@@ -95,10 +146,12 @@ def _client() -> AsyncOpenAI:
     # No retries: the plan's errors say what to do, and a usage limit retried is a wasted request
     # (https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery).
     return AsyncOpenAI(
-        api_key=CREDENTIALS.access_token,
+        api_key=plan_token,
         base_url=API_BASE,
         max_retries=0,
-        http_client=DefaultAsyncHttpxClient(event_hooks={"request": [_log_request]}),
+        http_client=DefaultAsyncHttpxClient(
+            event_hooks={"request": [_log_request], "response": [_note_response]}
+        ),
     )
 
 
@@ -119,7 +172,7 @@ class PlanModels(ModelProvider):
         async with httpx.AsyncClient(timeout=30) as http:
             response = await http.get(
                 f"{API_BASE}/models",
-                headers={"Authorization": f"Bearer {await CREDENTIALS.access_token()}"},
+                headers={"Authorization": f"Bearer {await plan_token()}"},
             )
         response.raise_for_status()
         listed = [
@@ -188,6 +241,6 @@ async def refuse_without_the_server_token(request: Request, call_next):
 
 add_openai_agents_fastapi_endpoint(
     app,
-    OpenAIAgentsAgent(agent, run_config=run_config, name="openai-agents"),
+    PlanAgent(agent, run_config=run_config, name="openai-agents"),
     path="/",
 )
