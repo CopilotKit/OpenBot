@@ -246,7 +246,7 @@ export default function Conversations() {
         keyExtractor={(item) => item.id}
         contentInsetAdjustmentBehavior="automatic"
         // Room under the header for the first chat, and under the last one.
-        contentContainerClassName="pt-2 pb-6"
+        contentContainerClassName="pt-5 pb-6"
         keyboardDismissMode="on-drag"
         refreshControl={
           <Refresh refreshing={pull.refreshing} onRefresh={pull.onRefresh} />

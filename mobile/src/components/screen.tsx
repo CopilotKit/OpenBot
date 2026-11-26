@@ -1,5 +1,11 @@
-import type { ReactNode } from "react";
-import { RefreshControl, type RefreshControlProps, View } from "react-native";
+import { HeaderHeightContext } from "expo-router/react-navigation";
+import { type ReactNode, useContext } from "react";
+import {
+  Platform,
+  RefreshControl,
+  type RefreshControlProps,
+  View,
+} from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { useCSSVariable, withUniwind } from "uniwind";
@@ -12,7 +18,7 @@ const AwareScrollView = withUniwind(KeyboardAwareScrollView);
 const ABOVE_KEYBOARD = 24;
 
 /** How far above the header's edge what scrolls under it fades into the page. */
-const FADE = 20;
+const FADE = 36;
 
 /**
  * The top edge of a screen's content: what scrolls up toward the header fades into the page's ground
@@ -20,17 +26,27 @@ const FADE = 20;
  */
 export function TopFade() {
   const background = useCSSVariable("--color-background") as string | undefined;
+  // On iOS the content runs under the header, so the fade starts at the header's bottom edge, where the bar would
+  // otherwise cut it; on Android the content starts below the header.
+  const headerHeight = useContext(HeaderHeightContext) ?? 0;
   if (!background) return null;
   return (
     <View
       pointerEvents="none"
-      className="absolute top-0 right-0 left-0"
-      style={{ height: FADE }}
+      className="absolute right-0 left-0"
+      style={{
+        top: Platform.OS === "ios" ? headerHeight : 0,
+        height: FADE,
+      }}
     >
       <Svg width="100%" height={FADE}>
         <Defs>
           <LinearGradient id="top-fade" x1="0" y1="0" x2="0" y2="1">
+            {/* Eased, not straight: nearly solid at the bar, then a long soft tail, so no edge reads as a line. */}
             <Stop offset="0" stopColor={background} stopOpacity="1" />
+            <Stop offset="0.25" stopColor={background} stopOpacity="0.92" />
+            <Stop offset="0.5" stopColor={background} stopOpacity="0.62" />
+            <Stop offset="0.75" stopColor={background} stopOpacity="0.25" />
             <Stop offset="1" stopColor={background} stopOpacity="0" />
           </LinearGradient>
         </Defs>
@@ -85,7 +101,7 @@ export function ScrollScreen({
     <View className="flex-1 bg-background">
       <AwareScrollView
         className="flex-1"
-        contentContainerClassName={cn("gap-6 px-4 pt-5 pb-12", className)}
+        contentContainerClassName={cn("gap-6 px-4 pt-6 pb-12", className)}
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"

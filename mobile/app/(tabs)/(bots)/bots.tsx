@@ -39,7 +39,7 @@ export default function Bots() {
         data={listed}
         keyExtractor={(bot) => bot.id}
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerClassName="pt-4 pb-6"
+        contentContainerClassName="pt-5 pb-6"
         refreshControl={
           <Refresh refreshing={pull.refreshing} onRefresh={pull.onRefresh} />
         }
