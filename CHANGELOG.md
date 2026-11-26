@@ -21,6 +21,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the check-ins switch: it is now Check-ins at the top of Settings → Notifications. Behind it,
   `POST /api/v2/organizations/{organizationId}/routines/read` (`readRoutineSentence`) reads a
   sentence as a routine's answers and writes nothing.
+- **A Bot's page shows its routines under For you.** What is running now and what starts next, up
+  to five, in the Routines page's words, with See all to the Bot's Routines. The Activity section
+  that listed them is gone; Activity is a row in For you.
 - **The management agent checks a release's chart signature before it touches anything.** With
   the chart's signature check on, the agent has Flux verify the chart a new version names before it
   records an install, stops the server, takes a backup or moves Flux. A chart that is unsigned or
