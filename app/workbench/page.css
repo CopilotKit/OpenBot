@@ -1,0 +1,17 @@
+/*
+ * The workbench page's one stylesheet: the app's own Tailwind setup and theme, so the workbench's
+ * panels look and work like the app (desktop/workbench/README.md, "The rule"). It lives here, under
+ * app/, so that its imports resolve from the app's own packages.
+ *
+ * Only what the panels use: no skins, no Streamdown, no KaTeX. The window shows the real app in
+ * its own frame, with its own styles, and nothing here reaches it.
+ */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+@import "../src/theme.css";
+
+/* Tailwind ships only the classes it sees used: the app's components and the workbench's files. */
+@source "../src/components/ui";
+@source "../../desktop/workbench";

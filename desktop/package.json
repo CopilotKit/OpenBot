@@ -4,8 +4,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "desktop-workbench": "vite --config vite.workbench.config.ts",
     "build": "vite build",
+    "desktop-workbench:shot": "bun workbench/shot.ts",
     "typecheck": "tsc --noEmit",
+    "typecheck:desktop-workbench": "tsc --noEmit -p workbench",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -17,6 +20,7 @@
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.11.2",
+    "@tailwindcss/vite": "4.3.3",
     "@tauri-apps/cli": "^2",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.4",
@@ -24,6 +28,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.4",
+    "tailwindcss": "4.3.3",
     "typescript": "^5.9.3",
     "vite": "^7.1.7"
   }

@@ -4,9 +4,11 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type AcceptedDesiredState,
   AgentEnrollmentToken,
   CertificateIssued,
   CertificateRequest,
+  Command,
   CommandResult,
   canonicalCommand,
   ENROLLMENT_REFUSAL_CODES,
@@ -22,10 +24,13 @@ import {
   InstallStatus,
   installCertificateSubject,
   readCommands,
+  readDesiredState,
   releaseManifestDigest,
   signCommand,
+  signDesiredState,
   toBase64,
   type UnsignedCommand,
+  type UnsignedDesiredState,
 } from "../management-contract";
 
 async function keys() {
@@ -47,6 +52,47 @@ function command(overrides: Partial<UnsignedCommand> = {}): UnsignedCommand {
     args: { workload: "server", order: [2, 1] },
     issuedAt: "2026-11-18T11:59:00Z",
     expiresAt: "2026-11-18T12:30:00Z",
+    ...overrides,
+  };
+}
+
+const INSTALL = "6f1c1a52-2f0e-4c3b-9b1e-6a3f0f6b2d11";
+const MANIFEST = JSON.stringify({
+  version: "v1.2.0",
+  artifacts: {
+    images: {
+      server: {
+        reference: `ghcr.io/copilotkit/openbot@sha256:${"a".repeat(64)}`,
+      },
+    },
+  },
+});
+function desiredState(
+  overrides: Partial<UnsignedDesiredState> = {},
+): UnsignedDesiredState {
+  return {
+    kind: "desired-state",
+    installId: INSTALL,
+    counter: 1,
+    issuedAt: "2026-11-18T11:59:00Z",
+    expiresAt: "2026-11-18T12:59:00Z",
+    desired: {
+      version: "v1.2.0",
+      releaseManifestSha256: "b".repeat(64),
+      releaseManifest: MANIFEST,
+      charts: {
+        openbot: {
+          ref: "oci://ghcr.io/copilotkit/charts/openbot",
+          digest: `sha256:${"c".repeat(64)}`,
+        },
+        bundle: {
+          ref: "oci://ghcr.io/copilotkit/charts/openbot-bundle",
+          digest: `sha256:${"d".repeat(64)}`,
+        },
+      },
+    },
+    window: { weekday: 2, startUtc: "14:00", hours: 4 },
+    paused: false,
     ...overrides,
   };
 }
@@ -175,6 +221,193 @@ describe("management contract", () => {
     expect(
       HeartbeatReplyWire.safeParse({ ...reply, extra: true }).success,
     ).toBe(false);
+  });
+
+  test("a reply carries one signed desired state among its commands, which an older agent's reading skips", async () => {
+    const service = await keys();
+    const signed = await signDesiredState(
+      desiredState({ counter: 7 }),
+      service.privateKey,
+    );
+    const reply = {
+      desired: null,
+      window: { weekday: 1, startUtc: "08:00", hours: 6 },
+      paused: false,
+      commands: [await signCommand(command(), service.privateKey), signed],
+    };
+    expect(HeartbeatReply.safeParse(reply).success).toBe(true);
+    expect(HeartbeatReplyWire.safeParse(reply).success).toBe(true);
+    // An agent from before reads every entry as a command: this one is no command, and carries no
+    // id, so that agent logs it as an unknown kind and neither records nor answers it.
+    expect(Command.safeParse(signed).success).toBe(false);
+    expect("id" in signed).toBe(false);
+    // An agent that knows it leaves it out of the commands it runs or ignores.
+    const { accepted, ignored } = await readCommands(
+      reply.commands,
+      service.publicKey,
+      now,
+    );
+    expect(accepted.map((entry) => entry.id)).toEqual(["cmd-1"]);
+    expect(ignored).toEqual([]);
+  });
+
+  test("the desired state is acted on only when signed by the command key, for this install, current, and not replayed", async () => {
+    const service = await keys();
+    const stranger = await keys();
+    const read = (
+      value: unknown,
+      last: AcceptedDesiredState | null = null,
+      publicKey = service.publicKey,
+    ) =>
+      readDesiredState([value], {
+        publicKey,
+        installId: INSTALL,
+        last,
+        now,
+      });
+    const good = await signDesiredState(
+      desiredState({ counter: 7 }),
+      service.privateKey,
+    );
+    expect(await read(good)).toEqual({ ok: true, signed: good, newer: true });
+
+    // Tampered: another version, another chart, another image in the manifest.
+    const another = desiredState().desired;
+    for (const tampered of [
+      { ...good, desired: { ...another!, version: "v9.9.9" } },
+      {
+        ...good,
+        desired: {
+          ...good.desired!,
+          charts: {
+            ...good.desired!.charts,
+            bundle: {
+              ...good.desired!.charts.bundle,
+              digest: `sha256:${"e".repeat(64)}`,
+            },
+          },
+        },
+      },
+      {
+        ...good,
+        desired: {
+          ...good.desired!,
+          releaseManifest: good.desired!.releaseManifest.replace(
+            "a".repeat(64),
+            "f".repeat(64),
+          ),
+        },
+      },
+      { ...good, paused: true },
+      { ...good, window: { weekday: 3, startUtc: "02:00", hours: 168 } },
+    ])
+      expect(await read(tampered)).toEqual({
+        ok: false,
+        reason: "signature does not verify",
+      });
+    expect(
+      await read(
+        await signDesiredState(
+          desiredState({ counter: 8 }),
+          stranger.privateKey,
+        ),
+      ),
+    ).toEqual({ ok: false, reason: "signature does not verify" });
+    // Unsigned: the old fields' shape, or the signed one without its signature.
+    const { signature: _signature, ...unsigned } = good;
+    expect(await read(unsigned)).toEqual({
+      ok: false,
+      reason: "malformed signed desired state",
+    });
+    expect(
+      await readDesiredState([], {
+        publicKey: service.publicKey,
+        installId: INSTALL,
+        last: null,
+        now,
+      }),
+    ).toEqual({
+      ok: false,
+      reason: "the reply carries no signed desired state",
+    });
+    expect(
+      await readDesiredState([good, good], {
+        publicKey: service.publicKey,
+        installId: INSTALL,
+        last: null,
+        now,
+      }),
+    ).toEqual({
+      ok: false,
+      reason: "the reply carries more than one signed desired state",
+    });
+
+    const other = "0b7f4f2e-3a49-4f61-9d2c-6c1d5a7e8f90";
+    expect(
+      await read(
+        await signDesiredState(
+          desiredState({ installId: other }),
+          service.privateKey,
+        ),
+      ),
+    ).toEqual({ ok: false, reason: `signed for another install (${other})` });
+    expect(
+      await read(
+        await signDesiredState(
+          desiredState({ expiresAt: "2026-11-18T11:59:59Z" }),
+          service.privateKey,
+        ),
+      ),
+    ).toEqual({ ok: false, reason: "expired at 2026-11-18T11:59:59Z" });
+    expect(
+      await read(
+        await signDesiredState(
+          desiredState({
+            issuedAt: "2026-11-18T12:30:00Z",
+            expiresAt: "2026-11-18T13:30:00Z",
+          }),
+          service.privateKey,
+        ),
+      ),
+    ).toEqual({ ok: false, reason: "issued in the future" });
+
+    // The counter: below the last accepted is a replay; equal is the same one sent again, unless it
+    // is another; above is newer. A last one kept for another install does not count.
+    const last = { installId: INSTALL, counter: 7, signature: good.signature };
+    const older = await signDesiredState(
+      desiredState({ counter: 6 }),
+      service.privateKey,
+    );
+    expect(await read(older, last)).toEqual({
+      ok: false,
+      reason: "replayed: counter 6 is below 7, the last one accepted",
+    });
+    expect(await read(good, last)).toEqual({
+      ok: true,
+      signed: good,
+      newer: false,
+    });
+    const sameCounter = await signDesiredState(
+      desiredState({ counter: 7, paused: true }),
+      service.privateKey,
+    );
+    expect(await read(sameCounter, last)).toEqual({
+      ok: false,
+      reason:
+        "replayed: counter 7 was already accepted for another desired state",
+    });
+    const newer = await signDesiredState(
+      desiredState({ counter: 8 }),
+      service.privateKey,
+    );
+    expect(await read(newer, last)).toEqual({
+      ok: true,
+      signed: newer,
+      newer: true,
+    });
+    expect(
+      await read(older, { ...last, installId: other, counter: 100 }),
+    ).toEqual({ ok: true, signed: older, newer: true });
   });
 
   test("a command result is strict", () => {

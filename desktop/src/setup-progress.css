@@ -1,0 +1,138 @@
+/* Keep real progress rows together without boxing the completed work a second time. */
+.setup-layout :is(.setup-progress-focus, .setup-milestones) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.setup-layout :is(.setup-progress-focus, .setup-milestones) > .step {
+  padding: 13px 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.setup-layout
+  :is(.setup-progress-focus, .setup-milestones)
+  > .step:has(> .mark.good)
+  > .step-label {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.setup-layout
+  :is(.setup-progress-focus, .setup-milestones)
+  > .step:has(> .mark.good)
+  > .step-status.good {
+  color: var(--text-secondary);
+  background: transparent;
+  padding: 0;
+}
+
+/* Focus ordering puts the current operation first; all other actionable rows stay visible. */
+.setup-layout
+  .setup-progress-focus
+  > .step:first-child:has(> .mark:is(.active, .waiting, .bad)) {
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-areas:
+    "mark label"
+    ". status"
+    ". detail";
+  padding: 24px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  row-gap: 7px;
+}
+
+.setup-layout
+  .setup-progress-focus
+  > .step:first-child:has(> .mark:is(.active, .waiting, .bad))
+  > .step-label {
+  font-size: var(--text-lg);
+  line-height: 1.4;
+}
+
+.setup-layout
+  .setup-progress-focus
+  > .step:first-child:has(> .mark:is(.active, .waiting, .bad))
+  > .step-status {
+  justify-self: start;
+  white-space: normal;
+}
+
+.setup-layout
+  .setup-progress-focus
+  > .step:first-child:has(> .mark:is(.active, .waiting, .bad))
+  > .downloads {
+  grid-column: 1 / -1;
+  margin-top: 15px;
+  gap: 9px;
+}
+
+/* Returning starts have long recovery and update notes; their progress keeps its top anchor. */
+main
+  > .rail
+  + .sheet.setup-layout.finishing-layout.returning-layout
+  > .setup-body {
+  justify-content: flex-start;
+}
+
+.setup-layout.finishing-layout .journey {
+  margin: 0;
+  padding: 24px;
+  gap: 22px;
+  border-radius: 10px;
+}
+
+.setup-layout.finishing-layout .journey-head {
+  font-size: var(--text-lg);
+  line-height: 1.4;
+  row-gap: 7px;
+}
+
+/* Directions, measured bytes and estimates can wrap instead of being cut off. */
+.setup-layout.finishing-layout .journey-said {
+  display: block;
+  overflow: visible;
+}
+
+/* The full Docker directions take four lines at both window sizes; shorter prompts keep them. */
+.setup-layout.finishing-layout .journey.handing-off .journey-said {
+  min-height: 5.6em;
+}
+
+/* Byte counts describe the download, including the returning Start screen. */
+.sheet.connection-sheet .journey-bytes {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  line-height: normal;
+}
+
+.setup-layout.finishing-layout .journey-head .journey-time {
+  white-space: normal;
+  overflow: visible;
+}
+
+.setup-layout.finishing-layout .setup-milestones {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.setup-layout.finishing-layout .cannot-cancel {
+  height: auto;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 860px) {
+  .setup-layout
+    .setup-progress-focus
+    > .step:first-child:has(> .mark:is(.active, .waiting, .bad)),
+  .setup-layout.finishing-layout .journey {
+    padding: 18px;
+  }
+}

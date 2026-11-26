@@ -1,6 +1,7 @@
 import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
 import { botNoLongerUsable } from "@/lib/agents/queries";
+import { startedRunId } from "@/lib/copilot/quiet-run";
 import { problemRequestId, recordProblem } from "@/lib/desktop/problems";
 import { useClearWhenHoldEnds } from "@/lib/held-ends";
 import { type Failure, isHeld } from "@/lib/load-failure";
@@ -40,6 +41,10 @@ export function stoppedReason(reported: unknown): string {
   const unreachable = backEndUnreachable(said);
   if (unreachable) return unreachable;
   if (RUNNER_DROPPED.test(said.trim())) return TURN_CUT_OFF;
+  if (AG_UI_RULE_BROKEN.test(said)) {
+    console.warn("A Bot's event stream broke AG-UI's rules.", said);
+    return UNREADABLE_REPLY;
+  }
   if (CONNECTION_CUT.test(said.trim())) {
     console.warn("A Bot's connection was cut part way through a turn.", said);
     return TURN_CUT_OFF;
@@ -67,6 +72,26 @@ const CONNECTION_CUT =
 export function asksToCarryOn(said: string): boolean {
   return /\bAsk (?:it|the Bot) to carry on\.$/.test(said.trim());
 }
+
+/**
+ * The AG-UI client's own words for a stream that breaks its rules (`verifyEvents` in
+ * `@ag-ui/client`): "Cannot send 'TOOL_CALL_START' event: A tool call with ID '…' is already in
+ * progress. Complete it with 'TOOL_CALL_END' first.", and the same with no "event" for the rules about
+ * who owns a message. Anywhere in what ended the run, which may put its own words in front.
+ *
+ * FOUND BY THE AG-UI CONFORMANCE SUITE. A connected Bot's adapter started one tool call twice, the
+ * client refused the stream, and the run ended in those words, shown to the person word for word.
+ * They name an event and a rule the person can do nothing with. The person is told what happened,
+ * and the words go to the console for whoever debugs it, as `backEndUnreachable` does.
+ */
+const AG_UI_RULE_BROKEN = /Cannot send '[A-Z_]+'(?: event)?:/;
+
+/**
+ * Said under a turn a Bot's own stream broke: what it sent didn't follow AG-UI's rules, and the AG-UI
+ * client refused it. Its work so far stands, and Carry on asks it to go on.
+ */
+export const UNREADABLE_REPLY =
+  "The Bot sent something OpenBot couldn't read, so its turn ended. Ask it to carry on.";
 
 /** Said under a turn cut off part way because OpenBot's backend stopped answering. Its work stands. */
 export const TURN_CUT_OFF =
@@ -356,15 +381,19 @@ export function followLastRun(agent: Pick<AbstractAgent, "subscribe">): {
   failure: () => string | null;
   /** Whether the last run the join has heard of started and has not ended yet. */
   running: () => boolean;
+  /** The id of the last run the join heard start, to ask the server how it ended. */
+  runId: () => string | null;
   stop: () => void;
 } {
   let failure: string | null = null;
   let broken = false;
   let running = false;
+  let runId: string | null = null;
   const subscription = agent.subscribe({
-    onRunStartedEvent: () => {
+    onRunStartedEvent: ({ event }) => {
       failure = null;
       running = true;
+      runId = startedRunId(event) ?? runId;
     },
     onRunFinishedEvent: () => {
       failure = null;
@@ -382,6 +411,7 @@ export function followLastRun(agent: Pick<AbstractAgent, "subscribe">): {
   return {
     failure: () => (broken ? null : failure),
     running: () => !broken && running,
+    runId: () => runId,
     stop: () => subscription.unsubscribe(),
   };
 }

@@ -17,6 +17,7 @@ import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
   answersTheModel,
   ownToolAttempt,
+  ownToolFailedLabel,
   ownToolSubject,
   readToolName,
 } from "@openbot/shared/tool-name";
@@ -2002,6 +2003,10 @@ export function ServerToolLine({
         : {})}
       // A blocked step did not happen: "Blocked: Save a file", never "Blocked: Saved a file".
       {...(refused ? { attempted: ownToolAttempt(name) ?? undefined } : {})}
+      // And one that did not work, where its label would say it happened: "Didn't draw an interface".
+      {...(failed && ownToolFailedLabel(name)
+        ? { failedLabel: ownToolFailedLabel(name) ?? undefined }
+        : {})}
       label={label}
       refused={refused}
       failed={failed}

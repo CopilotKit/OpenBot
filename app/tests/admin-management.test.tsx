@@ -762,7 +762,7 @@ test("on OpenBot Cloud Admin never asks for managed updates, so no Admin page ge
   hostedSignIn = true;
   setCurrentOrganization("01a2117e-8fe4-7a8c-b7ae-62d649749aaa");
   const rail = await draw(Rail);
-  expect(await rail.findByText("Providers")).toBeTruthy();
+  expect(await rail.findByText("AI providers")).toBeTruthy();
   await waitFor(() =>
     expect(
       queryClient.getQueryState(["deployment", "capabilities"])?.status,
@@ -779,7 +779,7 @@ test("on OpenBot Cloud Admin never asks for managed updates, so no Admin page ge
 test("on a hosted OpenBot Admin doesn't ask even in default", async () => {
   hostedSignIn = true;
   const rail = await draw(Rail);
-  expect(await rail.findByText("Providers")).toBeTruthy();
+  expect(await rail.findByText("AI providers")).toBeTruthy();
   await waitFor(() =>
     expect(
       queryClient.getQueryState(["deployment", "capabilities"])?.status,

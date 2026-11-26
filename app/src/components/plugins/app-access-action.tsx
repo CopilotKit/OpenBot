@@ -25,6 +25,7 @@ import {
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { appPageReads, useOpenAppPage } from "@/lib/connections/open-app-page";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import { failureSaid } from "@/lib/load-failure";
@@ -270,10 +271,10 @@ function disabledSentence(
  *   administrator's request, so there is no second one to make.
  * - `reconnect` on an account the Bot's owner holds — nothing. Only the owner can reconnect their
  *   own account, and nobody else's press could do it for them.
- * - `not_connected` / `reconnect` — the person's own connection. Connect starts it in a new tab
- *   with the connect route Settings presses; an app connected with a typed key goes to the app's own
- *   page with the key form open, and a Composio app that already has a row (which the connect route
- *   refuses until it is disconnected) goes to that page as it is, where Disconnect is.
+ * - `not_connected` / `reconnect` — the person's own connection. Connect and Reconnect start the
+ *   sign-in in a new tab with the connect route Settings presses, for every app that signs in; an
+ *   app connected with a typed key goes to the app's own page with the key form open, Reconnect
+ *   included.
  * - the three an administrator fixes — Request access, which files the request the server decides
  *   the kind of, and then Requested with a way to withdraw it. Pressed by an administrator, it would
  *   be a request to themselves, so they get the fix itself instead: see `AdminAction`.
@@ -351,6 +352,14 @@ export function useOpenApps(agentId: string): OpenApps | undefined {
   return { owner: bot.data?.mine ?? false };
 }
 
+/**
+ * What a press says while it is on its way, once the app is on: an app that takes a key is going
+ * to its key form, and anything else to its sign-in.
+ */
+function openingWord(access: AppAccess): string {
+  return access.connect === "key" ? "Connecting…" : "Opening sign-in…";
+}
+
 /** An app's page with its key form open (`?connect=true`), which is where a key is typed. */
 function keyForm(app: string) {
   return {
@@ -403,22 +412,21 @@ function useConnectOnceOn(agentId: string, tab: ConnectInNewTab) {
       now.connect === "key" &&
       now.connectedAt === null
     )
-      return {
-        next: () => {
-          void queryClient.invalidateQueries();
-          return navigate(keyForm(now.key));
-        },
-      };
+      return { next: () => toKeyForm(now.key) };
     if (now.state !== "not_connected")
       return { next: () => queryClient.invalidateQueries() };
-    if (now.connect === "key")
-      return {
-        next: () => {
-          void queryClient.invalidateQueries();
-          return navigate(keyForm(now.key));
-        },
-      };
+    if (now.connect === "key") return { next: () => toKeyForm(now.key) };
     return { signIn: now.key };
+  };
+
+  /*
+   * The key form, on a page that has something to draw: the press stays pending until its reads
+   * are in (`appPageReads`), so the card never reads as done while the page is still on its way.
+   */
+  const toKeyForm = async (app: string) => {
+    void queryClient.invalidateQueries();
+    await appPageReads(queryClient).catch(() => undefined);
+    return navigate(keyForm(app));
   };
 
   return {
@@ -426,33 +434,37 @@ function useConnectOnceOn(agentId: string, tab: ConnectInNewTab) {
     claimingTab: (app: string, turnOn: () => Promise<unknown>) => {
       tab.stopWaiting();
       let instead: (() => Promise<unknown>) | null = null;
-      void tab
-        .openAfter(async () => {
-          try {
-            await turnOn();
-            const left = await whatIsLeft(app);
-            if ("signIn" in left) return left.signIn;
-            instead = left.next;
-            return null;
-          } catch (thrown) {
-            // A refusal is drawn from the mutation's error; a failed read leaves the card's state.
-            void queryClient.invalidateQueries();
-            throw thrown;
-          }
-        })
-        // Once the unused tab is closed: the key form, or the card reads the app as ready.
-        .then(() => instead?.());
+      void tab.during(
+        tab
+          .openAfter(async () => {
+            try {
+              await turnOn();
+              const left = await whatIsLeft(app);
+              if ("signIn" in left) return left.signIn;
+              instead = left.next;
+              return null;
+            } catch (thrown) {
+              // A refusal is drawn from the mutation's error; a failed read leaves the card's state.
+              void queryClient.invalidateQueries();
+              throw thrown;
+            }
+          })
+          // Once the unused tab is closed: the key form, or the card reads the app as ready.
+          .then(() => instead?.()),
+      );
     },
     /** For an app known to take a key: turn it on, then the key form, with no tab. */
     withoutTab: (app: string, turnOn: () => Promise<unknown>) => {
-      turnOn()
-        .then(() => whatIsLeft(app))
-        .then((left) => {
-          if (!("signIn" in left)) return left.next();
-          tab.stopWaiting();
-          tab.open(left.signIn);
-        })
-        .catch(() => queryClient.invalidateQueries());
+      void tab.during(
+        turnOn()
+          .then(() => whatIsLeft(app))
+          .then((left) => {
+            if (!("signIn" in left)) return left.next();
+            tab.stopWaiting();
+            tab.open(left.signIn);
+          })
+          .catch(() => queryClient.invalidateQueries()),
+      );
     },
   };
 }
@@ -689,7 +701,7 @@ function AdminAction({
                 ? "Connecting…"
                 : "Giving…"
               : tab.pending
-                ? "Opening sign-in…"
+                ? openingWord(access)
                 : label}
         </Button>
       </div>
@@ -718,10 +730,17 @@ function AdminAction({
    * edition. There `/connections/composio` would read as an app called "composio" and say there is
    * none; the team edition's `/admin/plugins/composio` happens to be that directory already.
    */
+  /*
+   * THE SHARED ACCOUNT'S SIGN-IN STARTS AS ITS PAGE OPENS (`?connect=true`), so Connect or Reconnect
+   * the shared account is one press, as the admin's own Connect is. It used to open the page, where
+   * a second Connect began it.
+   */
   const target =
     page === "composio" || page === "arcade"
       ? paths.brokerDirectory(page)
-      : paths.plugin(page);
+      : access.state === "shared_not_connected"
+        ? { ...paths.plugin(page), search: { connect: true as const } }
+        : paths.plugin(page);
   return (
     <Button
       render={<Link {...target} rel="noreferrer" target="_blank" />}
@@ -971,7 +990,7 @@ function PersonalConnectAction({
           : approve.isPending
             ? "Connecting…"
             : tab.pending
-              ? "Opening sign-in…"
+              ? openingWord(access)
               : "Connect"}
       </Button>
     </div>
@@ -1096,7 +1115,7 @@ function AddAndConnectAction({
           : add.isPending
             ? "Connecting…"
             : tab.pending
-              ? "Opening sign-in…"
+              ? openingWord(access)
               : "Connect"}
       </Button>
     </div>
@@ -1113,6 +1132,7 @@ function ConnectAction({
 }) {
   const label = access.state === "reconnect" ? "Reconnect" : "Connect";
   const { waiting, stopWaiting } = tab;
+  const appPage = useOpenAppPage();
 
   /*
    * WATCHING THE SERVER WHILE A CONSENT IS OPEN in the other tab, because the return trip proves
@@ -1138,39 +1158,41 @@ function ConnectAction({
   );
 
   /*
-   * A FORM, OR A CONNECTION THAT ALREADY HAS A ROW, IS SETTINGS' JOB. A typed key has nowhere to be
-   * typed but the app's page, and a Composio app whose row still stands — a refused key, an account
-   * the vendor lost — is refused by the connect route until it is disconnected there. Only this
-   * deployment's own OAuth flow takes a fresh consent over a withdrawn one.
+   * A FORM IS SETTINGS' JOB: a typed key has nowhere to be typed but the app's page. A SIGN-IN IS
+   * STARTED HERE, Connect and Reconnect alike, on every kind of app that signs in: this OpenBot's own
+   * sign-in (`oauth`) and a directory's (`consent`, Composio's or Arcade's). The connect route takes
+   * a fresh sign-in over a connection that stands: a new consent over a withdrawn grant, an Arcade
+   * consent over the connection it adds to, and on Composio a new account beside one the call
+   * found lost. Reconnect used to open a sign-in app's page as it was, where a second press began it.
+   * Only an app that says nothing of how it connects still opens its page.
    */
   const viaSettings =
     access.connect === "key" ||
-    (access.state === "reconnect" && access.connect !== "oauth") ||
+    (access.state === "reconnect" && access.connect === null) ||
     tab.needsKey;
   /*
-   * A key to type opens the page with its form open, so Connect goes straight to the key. A
-   * connection to repair opens the page as it is, where Disconnect is.
+   * A key to type opens the page with its form open, so Connect goes straight to the key, and so
+   * does Reconnect on a key the app didn't take: the new key replaces it in the same form.
    */
-  const typesKey =
-    access.state === "not_connected" &&
-    (access.connect === "key" || tab.needsKey);
-  if (viaSettings)
+  const typesKey = access.connect === "key" || tab.needsKey;
+  /*
+   * The page opens once it has something to draw (`useOpenAppPage`): until then this button says
+   * it is working, and the screen it is on stays as it is.
+   */
+  if (viaSettings) {
+    const opening = appPage.opening === access.key;
     return (
       <Button
-        render={
-          typesKey ? (
-            <Link {...keyForm(access.key)} />
-          ) : (
-            <Link params={{ key: access.key }} to="/connections/$key" />
-          )
-        }
-        aria-label={`${label} ${access.displayName}`}
+        aria-label={opening ? undefined : `${label} ${access.displayName}`}
+        disabled={opening}
+        onClick={() => void appPage.open(access.key, typesKey)}
         size="sm"
         variant="outline"
       >
-        {label}
+        {opening ? "Connecting…" : label}
       </Button>
     );
+  }
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">

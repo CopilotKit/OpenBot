@@ -6,6 +6,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { CompanySignInSection } from "@/components/settings/company-sign-in";
+import { DeleteAccountSection } from "@/components/settings/delete-account";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { NameRow } from "@/components/settings/profile";
 import { StandingInstructionsRow } from "@/components/settings/standing-instructions";
@@ -35,7 +36,7 @@ function RouteComponent() {
    *
    * Connected accounts used to be a section below. It is its own screen now: a connector can need
    * more from a person than one switch, and a section cannot grow a page's worth of that. So is the
-   * AI Bots run on (Providers): several providers, each with a page of its own.
+   * AI Bots run on (AI providers): several providers, each with a page of its own.
    */
   return (
     <PageShell
@@ -97,8 +98,10 @@ function RouteComponent() {
           ))}
         </PageRows>
       </PageSection>
-      {/* Last: OpenBot itself rather than this person's OpenBot. Gone when the deployment says so. */}
+      {/* OpenBot itself rather than this person's OpenBot. Gone when the deployment says so. */}
       <StarOnGitHubSection />
+      {/* Last, as GitHub and every settings page put it: deleting the account. */}
+      <DeleteAccountSection />
     </PageShell>
   );
 }

@@ -62,11 +62,13 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { mayAddApps } from "@/lib/auth/roles";
 import { useConnectApp } from "@/lib/connections/connect-app";
+import { useOpenAppPage } from "@/lib/connections/open-app-page";
 import {
   type ConnectionRow,
   catalogueToAddRows,
   connectionRows,
   directoryRows,
+  needsReconnecting,
   personalConnectionRows,
 } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -343,6 +345,12 @@ function RouteComponent() {
       (row) => row.serverId,
     ),
   );
+  /* Of those, the ones to reconnect: their tiles say Reconnect, and pressing one starts it. */
+  const reconnect = new Set(
+    personalConnections(connections.data?.connections ?? [])
+      .filter(needsReconnecting)
+      .map((row) => row.serverId),
+  );
   const added = new Set((apps.data ?? []).map((s) => s.id));
 
   /*
@@ -471,6 +479,7 @@ function RouteComponent() {
         brokered: brokeredAccountsListedOn(listed),
         byUrl: addedByUrlListedOn(listed),
         connected,
+        reconnect,
         links: links.data ?? [],
         providers: providers.data,
       })
@@ -480,6 +489,7 @@ function RouteComponent() {
         shared: sharedAccountsListedOn(listed),
         byUrl: addedByUrlListedOn(listed),
         connected,
+        reconnect,
         links: links.data ?? [],
         providers: providers.data,
       });
@@ -858,6 +868,12 @@ function ConnectionGrid({
   directory?: readonly DirectoryApp[];
   children?: React.ReactNode;
 }) {
+  /*
+   * RECONNECT IS ONE PRESS: the app's page opens with its connect started (the sign-in, or the key
+   * form over a key the app didn't take), and the tile stays here saying Connecting… until that page
+   * can draw. It used to open the page as it was, where a second press began it.
+   */
+  const appPage = useOpenAppPage();
   return (
     <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
       {rows.map((row) => {
@@ -878,20 +894,27 @@ function ConnectionGrid({
             />
           );
         }
+        // An app of the person's own to reconnect; a linked account (GitHub, Slack) opens its page.
+        const reconnects =
+          row.state === "needs_reconnect" && row.mark.kind !== "provider";
         return (
           <ConnectionItem
             key={row.key}
             onPress={
-              row.state === "available" &&
-              (row.action === "connect" || row.action === "add")
-                ? () =>
-                    void connectApp.run(
-                      row.key,
-                      row.action as "connect" | "add",
-                    )
-                : undefined
+              reconnects
+                ? () => void appPage.open(row.key, true)
+                : row.state === "available" &&
+                    (row.action === "connect" || row.action === "add")
+                  ? () =>
+                      void connectApp.run(
+                        row.key,
+                        row.action as "connect" | "add",
+                      )
+                  : undefined
             }
-            pending={connectApp.pending === row.key}
+            pending={
+              connectApp.pending === row.key || appPage.opening === row.key
+            }
             row={row}
           />
         );

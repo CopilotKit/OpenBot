@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { asProblem, Failure, type Problem } from "./Problem";
+import { SetupPage } from "./SetupPage";
 import { StatusLine } from "./SetupProgress";
 
 export type Blocker =
@@ -231,52 +232,54 @@ export function WindowsBlocker({
   );
 
   return (
-    <main>
-      <div className="sheet blocker-sheet">
-        <p className="steps-of">Before OpenBot can start</p>
-        <h1>{screen.title}</h1>
-        <p className="lede">{screen.why}</p>
-        {screen.fix ? (
-          <>
-            <p className="blocker-asks">{screen.fix.asks}</p>
-            {!declined && !failure && (
-              <StatusLine>
-                {fixing
-                  ? "Setting up Windows. Approve the Windows prompt when it asks. This can take a few minutes."
-                  : "Getting ready to set up Windows…"}
-              </StatusLine>
-            )}
-            {declined && (
-              <p className="caution" role="status">
-                {DECLINED}
-              </p>
-            )}
-            {failure && <Failure problem={failure} />}
-            {/* Only after a prompt said no or a failure: never a gate before the prompt. */}
-            {(declined || failure) && (
-              <div className="row">
-                <button type="button" disabled={fixing} onClick={() => fix()}>
-                  Try again
-                </button>
-              </div>
-            )}
-            <details className="blocker-manual">
-              <summary>Or run the commands yourself</summary>
-              {steps}
-            </details>
-          </>
-        ) : (
-          <>
-            {steps}
-            <p className="footnote">
-              {blocker === "nested-virtualization-unavailable"
-                ? "Windows on a Mac with Apple silicon cannot do this in any virtual machine app. Use a Windows PC, or an x64 cloud virtual machine whose size supports nested virtualization."
-                : "In a virtual machine, turn on nested virtualization for it in the host's settings instead."}
+    <SetupPage
+      heading={screen.title}
+      lede={screen.why}
+      footer={
+        screen.fix &&
+        (declined || failure) && (
+          <div className="row">
+            <button type="button" disabled={fixing} onClick={() => fix()}>
+              Try again
+            </button>
+          </div>
+        )
+      }
+    >
+      {screen.fix ? (
+        <>
+          <p className="blocker-asks">{screen.fix.asks}</p>
+          {!declined && !failure && (
+            <StatusLine>
+              {fixing
+                ? "Setting up Windows. Approve the Windows prompt when it asks. This can take a few minutes."
+                : "Getting ready to set up Windows…"}
+            </StatusLine>
+          )}
+          {declined && (
+            <p className="caution" role="status">
+              {DECLINED}
             </p>
-          </>
-        )}
-      </div>
-    </main>
+          )}
+          {failure && <Failure problem={failure} />}
+          {/* Only after a prompt said no or a failure: never a gate before the prompt. */}
+
+          <details className="blocker-manual">
+            <summary>Or run the commands yourself</summary>
+            {steps}
+          </details>
+        </>
+      ) : (
+        <>
+          {steps}
+          <p className="footnote">
+            {blocker === "nested-virtualization-unavailable"
+              ? "Windows on a Mac with Apple silicon cannot do this in any virtual machine app. Use a Windows PC, or an x64 cloud virtual machine whose size supports nested virtualization."
+              : "In a virtual machine, turn on nested virtualization for it in the host's settings instead."}
+          </p>
+        </>
+      )}
+    </SetupPage>
   );
 }
 
@@ -294,37 +297,39 @@ export function WindowsRestart({
   const [restarting, setRestarting] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   return (
-    <main>
-      <div className="sheet blocker-sheet">
-        <p className="steps-of">Before OpenBot can start</p>
-        <h1>Restart Windows to finish</h1>
-        <p className="lede">{lede}</p>
-        {restarting && <StatusLine>Restarting Windows…</StatusLine>}
-        {failure && <Failure problem={failure} />}
-        <div className="row">
-          <button
-            type="button"
-            disabled={restarting}
-            onClick={async () => {
-              setRestarting(true);
-              setFailure(null);
-              try {
-                await invoke("windows_restart");
-              } catch (error) {
-                setFailure(asProblem(error));
-                setRestarting(false);
-              }
-            }}
-          >
-            Restart now
-          </button>
-        </div>
-        <p className="footnote">
-          Save your work in other apps first. To restart later, use the Start
-          menu, then open OpenBot.
-        </p>
-      </div>
-    </main>
+    <SetupPage
+      heading="Restart Windows to finish"
+      lede={lede}
+      footer={
+        <>
+          <p className="footnote">
+            Save your work in other apps first. To restart later, use the Start
+            menu, then open OpenBot.
+          </p>
+          <div className="row">
+            <button
+              type="button"
+              disabled={restarting}
+              onClick={async () => {
+                setRestarting(true);
+                setFailure(null);
+                try {
+                  await invoke("windows_restart");
+                } catch (error) {
+                  setFailure(asProblem(error));
+                  setRestarting(false);
+                }
+              }}
+            >
+              Restart now
+            </button>
+          </div>
+        </>
+      }
+    >
+      {restarting && <StatusLine>Restarting Windows…</StatusLine>}
+      {failure && <Failure problem={failure} />}
+    </SetupPage>
   );
 }
 

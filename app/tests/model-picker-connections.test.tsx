@@ -112,7 +112,7 @@ async function open(view: ReturnType<typeof render>, name: string | RegExp) {
 
 /** The rail's buttons, in order. */
 function rail(popup: HTMLElement) {
-  return within(within(popup).getByRole("group", { name: "Providers" }))
+  return within(within(popup).getByRole("group", { name: "AI providers" }))
     .getAllByRole("button")
     .map((button) => ({
       name: button.getAttribute("aria-label"),
@@ -187,7 +187,9 @@ test("one connection draws no rail", async () => {
     />,
   );
   const { popup } = await open(view, "Model: Claude Sonnet 5.5");
-  expect(within(popup).queryByRole("group", { name: "Providers" })).toBeNull();
+  expect(
+    within(popup).queryByRole("group", { name: "AI providers" }),
+  ).toBeNull();
 });
 
 test("the same model id under two connections saves the connection picked, and only that one reads as picked", async () => {

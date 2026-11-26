@@ -238,7 +238,7 @@ export const createBotBodyNameMax = 80;
 
 export const createBotBodyTitleMax = 120;
 
-export const createBotBodyRoleDescriptionMax = 1000;
+export const createBotBodyRoleDescriptionMax = 5000;
 
 export const createBotBodyEndpointOneMax = 0;
 
@@ -246,7 +246,7 @@ export const createBotBodyEndpointTwoRegExp = new RegExp(
   "^[Hh][Tt][Tt][Pp][Ss]?:/",
 );
 export const createBotBodyAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
-export const createBotBodyInstructionsMax = 1000;
+export const createBotBodyInstructionsMax = 5000;
 
 export const CreateBotBody = zod
   .object({
@@ -266,7 +266,7 @@ export const CreateBotBody = zod
       .min(1)
       .max(createBotBodyRoleDescriptionMax)
       .describe(
-        "What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint runs on these words.",
+        "What it does, 1 to 5000 characters once trimmed. A Bot with no endpoint runs on these words.",
       ),
     visibility: zod
       .enum(["public", "private"])
@@ -307,7 +307,7 @@ export const CreateBotBody = zod
       .max(createBotBodyInstructionsMax)
       .optional()
       .describe(
-        "New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.",
+        "New instructions for the starter Bot, 1 to 5000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.",
       ),
     harness: zod
       .enum([
@@ -322,6 +322,7 @@ export const CreateBotBody = zod
         "pydantic-ai",
         "microsoft-agent-framework",
         "claude-agent-sdk",
+        "openai-agents-sdk",
         "strands",
         "ag2",
         "langroid",
@@ -329,7 +330,7 @@ export const CreateBotBody = zod
       ])
       .optional()
       .describe(
-        'The framework an agent somebody runs themselves is built on, by its id in OpenBot\'s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot\'s own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and an administrator may switch new Bots back to the built-in agent.',
+        'The framework an agent somebody runs themselves is built on, by its id in OpenBot\'s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot\'s own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, a ChatGPT plan signed in on OpenBot Desktop the OpenAI Agents SDK engine, and an administrator may switch new Bots back to the built-in agent.',
       ),
   })
   .describe(
@@ -662,7 +663,7 @@ export const updateBotBodyOneNameMax = 80;
 
 export const updateBotBodyOneTitleMax = 120;
 
-export const updateBotBodyOneRoleDescriptionMax = 1000;
+export const updateBotBodyOneRoleDescriptionMax = 5000;
 
 export const updateBotBodyOneEndpointOneMax = 0;
 
@@ -670,7 +671,7 @@ export const updateBotBodyOneEndpointTwoRegExp = new RegExp(
   "^[Hh][Tt][Tt][Pp][Ss]?:/",
 );
 export const updateBotBodyOneAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
-export const updateBotBodyOneInstructionsMax = 1000;
+export const updateBotBodyOneInstructionsMax = 5000;
 
 export const updateBotBodyOneDefaultModelModelMax = 500;
 
@@ -702,7 +703,7 @@ export const UpdateBotBody = zod
       .min(1)
       .max(updateBotBodyOneRoleDescriptionMax)
       .describe(
-        "What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint runs on these words.",
+        "What it does, 1 to 5000 characters once trimmed. A Bot with no endpoint runs on these words.",
       ),
     visibility: zod
       .enum(["public", "private"])
@@ -743,7 +744,7 @@ export const UpdateBotBody = zod
       .max(updateBotBodyOneInstructionsMax)
       .optional()
       .describe(
-        "New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.",
+        "New instructions for the starter Bot, 1 to 5000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.",
       ),
     defaultModel: zod
       .object({

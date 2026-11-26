@@ -13,6 +13,7 @@ import type {
   ConversationGrantPage,
   DecideApprovalRequest,
   ListApprovalsParams,
+  ListConversationApprovalsParams,
   ListConversationGrantsParams,
   ListPersonApprovalRulesParams,
   ListQuestionsParams,
@@ -633,6 +634,52 @@ export const runComputerStep = async (
         ...getHeaders(options?.headers),
       },
       body: JSON.stringify(computerStepRequest),
+    },
+  );
+};
+
+export const getListConversationApprovalsUrl = (
+  organizationId: string,
+  personId: string,
+  conversationId: string,
+  params?: ListConversationApprovalsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/conversations/${encodeURIComponent(String(conversationId))}/approvals?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/conversations/${encodeURIComponent(String(conversationId))}/approvals`;
+};
+
+/**
+ * Return one page of the actions a person's Bots asked them about in one of their conversations, however long ago: the ones still waiting and every one already decided, newest first. Unlike the person's whole list, which keeps only the last hundred, this reaches every approval the conversation has, so an old conversation can still show what the person answered. What an action was called with is cut short for showing, with values that look like secrets masked. Only the person themselves may read them, and only the approvals they were asked: anybody else's conversation, and one that does not exist, reads as an empty list. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List a person's approvals in one conversation
+ */
+export const listConversationApprovals = async (
+  organizationId: string,
+  personId: string,
+  conversationId: string,
+  params?: ListConversationApprovalsParams,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ApprovalPage> => {
+  return apiRequest<ApprovalPage>(
+    getListConversationApprovalsUrl(
+      organizationId,
+      personId,
+      conversationId,
+      params,
+    ),
+    {
+      ...options,
+      method: "GET",
     },
   );
 };

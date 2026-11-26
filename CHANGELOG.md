@@ -8,6 +8,41 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **OpenBot Desktop on a Mac asks for your password only after you choose Continue.** When OpenBot
+  installs the software it runs on, a card says your Mac will ask for your password and why, and
+  macOS's prompt comes up only once you choose Continue. Before, the prompt came up by itself a
+  moment after a line in OpenBot's window, and on a new Mac it covered the browser's sign-in page
+  before anybody had read why it was there.
+- **OpenBot Cloud's account menu offers the desktop app.** Get the desktop app, in the menu under
+  your name, opens the download page for Mac and Windows in a new tab. It shows only on OpenBot
+  Cloud in a browser, not in OpenBot Desktop and not on an OpenBot a company runs itself.
+- **A Bot's drawing that drew nothing reads "Didn't draw an interface".** A Bot that asks to draw an
+  interface with nothing in it is told nothing was drawn, and its step read "Drew an interface" for
+  an interface nobody saw. Folded with other steps it reads "Draw an interface" beside "Didn't work".
+- **The management agent checks a release's chart signature before it touches anything.** With
+  the chart's signature check on, the agent has Flux verify the chart a new version names before it
+  records an install, stops the server, takes a backup or moves Flux. A chart that is unsigned or
+  signed with another key is refused: nothing changes, the agent's status says which chart and why,
+  and it is not pulled again for 30 minutes. Before, the check ran only once Flux was moved, after
+  the server was stopped and backed up, and the upgrade then waited out its timeout with the server
+  down and no reason given.
+- **OpenBot's icon in the browser and on a phone.** The web app shows OpenBot's orb, the icon
+  OpenBot Desktop uses, in a browser's tab, on a phone's home screen when it is added there, and as
+  an installed app's icon. Added to an iPhone's home screen it used to show a grey square with a
+  letter in it, and a tab showed no icon at all.
+- **A provider's sign-in asks for no model name.** Signing in to Google Gemini, xAI or Unbiased AI
+  no longer asks for a model name typed in. Once connected, a conversation's model picker offers
+  the models the provider lists for that sign-in, as it does for a key or a plan. A sign-in that
+  already names a model keeps it, also when it is signed in to again.
+- **Connect another AI goes back to its list.** In Settings and in Admin, each connection goes back
+  to the provider list with a check on what was connected, as onboarding's Connect your AI does. It
+  no longer opens the new connection's own page. Done leaves the list. Changing a connection still
+  goes back to that connection's page.
+- **Settings and Admin call the place you connect your AI "AI providers".** It was "Providers",
+  which didn't say what it provides, and people looking for where to set up their AI didn't find
+  it. Its pages, their Back links and the model picker's provider list say the same. The addresses
+  stay `/settings/providers` and `/admin/providers`.
+
 ## 1.2.0
 
 **Before upgrading.**

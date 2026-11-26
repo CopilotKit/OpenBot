@@ -7,7 +7,11 @@ import {
   ProviderSection,
 } from "@/components/admin/controls/model-sections";
 import { PageShell } from "@/components/layout/page-shell";
-import { ProviderPathsContext, providerPaths } from "@/lib/ai-connection/paths";
+import {
+  AI_PROVIDERS_TITLE,
+  ProviderPathsContext,
+  providerPaths,
+} from "@/lib/ai-connection/paths";
 import { availableModelsQueryOptions } from "@/lib/models/queries";
 
 export const Route = createFileRoute("/_authed/admin/providers")({
@@ -15,7 +19,7 @@ export const Route = createFileRoute("/_authed/admin/providers")({
 });
 
 /**
- * Admin, Providers: the AI provider Bots run on, which an admin changes or disconnects here, which
+ * Admin, AI providers: the AI provider Bots run on, which an admin changes or disconnects here, which
  * models people may pick, and what Bots ran on. Named for the provider rather than the model so a
  * second provider has a place to go.
  *
@@ -37,7 +41,7 @@ export function ProvidersPage() {
             ? "Choose the AI provider your Bots run on and which models people may pick. All changes appear in Activity."
             : "Choose the AI provider your Bots run on, and see what they ran on."
         }
-        title="Providers"
+        title={AI_PROVIDERS_TITLE}
       >
         <ProviderSection />
         <ModelChoiceSection />

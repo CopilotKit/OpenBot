@@ -5,7 +5,8 @@ import {
   IconServer2,
 } from "@tabler/icons-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { BusinessBooker } from "./BusinessBooker";
+import { BusinessBooker, type BusinessWay } from "./BusinessBooker";
+import { CloudMarks } from "./CloudMarks";
 import { CloudSignIn, cloudAddress, cloudEnabled } from "./CloudSignIn";
 import { ConnectToOpenBot, useConnectToOpenBot } from "./ConnectToOpenBot";
 import {
@@ -13,8 +14,11 @@ import {
   earlyDownloadsMeasured,
   useEarlyDownloads,
 } from "./EarlyDownloads";
-import { MarkImage } from "./Mark";
 import type { Problem } from "./Problem";
+import { SetupRail } from "./Sections";
+
+// The move screen draws the same marks on its OpenBot for Business row.
+export { CloudMarks };
 
 /** What the first choice is: OpenBot, whole, on this computer. */
 export const SELF_CONTAINED_SUMMARY =
@@ -58,14 +62,6 @@ const BUSINESS_CHOICES: readonly {
   },
 ];
 
-/** The clouds a company runs OpenBot for Business on, by their vendored marks (`shared/marks`). */
-const CLOUDS = [
-  { id: "aws", name: "AWS" },
-  { id: "azure", name: "Azure" },
-  { id: "google-cloud", name: "Google Cloud" },
-  { id: "kubernetes", name: "Kubernetes" },
-] as const;
-
 /**
  * The least a computer needs to run every part of OpenBot itself.
  *
@@ -95,13 +91,14 @@ export type Hosting = "this-computer" | "connect";
  * Self-Contained that is what this computer needs and why, which is that every part of OpenBot runs
  * on it, how long setup takes, and Install, and it fits the window's default size (1000×800, less a
  * title bar) with no scrollbar. For OpenBot Cloud it is Sign in to OpenBot Cloud (`CloudSignIn`).
- * For OpenBot for Business it is the app's OpenBot for Business view: what it adds and the booking
- * calendar (`BusinessBooker`), which scrolls in the card as any tall step does.
+ * For OpenBot for Business it is the picked way's page (`BusinessBooker`): what that way means, Book a
+ * demo, and what it adds, all in the window at its default size. Book a demo opens the booking
+ * calendar as a step of its own in the page.
  *
  * OpenBot Cloud shows only in a build that turns it on (`VITE_OPENBOT_CLOUD_ENABLED`, `cloudEnabled`).
  * There the screen steers to OpenBot Cloud and OpenBot for Business. They are the two rows, Cloud
  * first and picked to begin with, then the link to connect to a company's own OpenBot, then what the
- * choice shows. OpenBot (Self-Contained) is a line at the very foot of the card, below all of that:
+ * choice shows. OpenBot (Self-Contained) is a line at the very foot of the sidebar, below all of that:
  * never picked to begin with, never the way back from anywhere. Opened, it shows what this computer
  * needs and Install there, and neither row is picked. The one exception is a setup on this computer
  * that failed: the failure is Self-Contained's to show, so it opens there. The order on screen is
@@ -248,182 +245,183 @@ export function Welcome({
       .
     </p>
   );
+  // The page's heading: the picked way's name and its line, as the sidebar names it.
+  const head =
+    shown === "connect"
+      ? { name: "Already have OpenBot at work?", line: null }
+      : shown === "cloud"
+        ? { name: "OpenBot Cloud", line: CLOUD_SUMMARY }
+        : shown === "business"
+          ? // Not where it runs: the page's next line says that, for the picked way.
+            {
+              name: "OpenBot for Business",
+              line: "For your whole team. Book a demo to see it.",
+            }
+          : { name: "OpenBot (Self-Contained)", line: SELF_CONTAINED_SUMMARY };
+  const pageHead = (
+    <header className="choice-head">
+      <h2>{head.name}</h2>
+      {head.line && <p>{head.line}</p>}
+    </header>
+  );
+  // OpenBot for Business's way, as its page says it. With Cloud on, its one row is a company's own
+  // cloud or on-prem: OpenBot Cloud is the row above it.
+  const way: BusinessWay =
+    cloudOn || businessWay === "own-cloud" ? "self-hosted" : "cloud";
+  const localChoice = (
+    <label className={rowClass(shown === "this-computer")}>
+      <input
+        type="radio"
+        name="hosting"
+        className="tile-input"
+        value="this-computer"
+        checked={shown === "this-computer"}
+        disabled={held}
+        onChange={pickThisComputer}
+      />
+      <HostingMark>
+        <IconDeviceLaptop stroke={1.75} />
+      </HostingMark>
+      <span className="tile-name">OpenBot (Self-Contained)</span>
+      <span className="tile-summary">{SELF_CONTAINED_SUMMARY}</span>
+    </label>
+  );
   return (
-    <div className="sheet">
-      <div className="lockup">
-        <div className="orb" aria-hidden="true" />
-        <span>
-          OpenBot
-          <sup className="trademark" aria-hidden="true">
-            ™
-          </sup>
-        </span>
-      </div>
-      <h1>Set up OpenBot</h1>
-      <fieldset className="picker hosting">
-        <legend className="sr-only">Where OpenBot runs</legend>
-        {!cloudOn && (
-          <label className={rowClass(shown === "this-computer")}>
-            <input
-              type="radio"
-              name="hosting"
-              className="tile-input"
-              value="this-computer"
-              checked={shown === "this-computer"}
-              disabled={held}
-              onChange={pickThisComputer}
-            />
-            <HostingMark>
-              <IconDeviceLaptop stroke={1.75} />
-            </HostingMark>
-            <span className="tile-name">OpenBot (Self-Contained)</span>
-            <span className="tile-summary">{SELF_CONTAINED_SUMMARY}</span>
-          </label>
-        )}
-        {cloudOn ? (
+    <>
+      <SetupRail
+        heading
+        label="Where OpenBot runs"
+        foot={
+          // Main's order: the way to connect to a company's OpenBot, then OpenBot
+          // (Self-Contained) last of all, never the way back from anywhere.
           <>
-            <label className={rowClass(shown === "cloud")}>
-              <input
-                type="radio"
-                name="hosting"
-                className="tile-input"
-                value="cloud"
-                checked={shown === "cloud"}
-                disabled={held}
-                onChange={() => pick("cloud")}
-              />
-              <HostingMark>
-                <IconCloud stroke={1.75} />
-              </HostingMark>
-              <span className="tile-name">OpenBot Cloud</span>
-              <span className="tile-summary">{CLOUD_SUMMARY}</span>
-            </label>
-            <label
-              className={rowClass(shown === "business", "tile with-marks")}
+            {connectAside}
+            {!resumes && startDownloads && (
+              <EarlyDownloadsLine firstScreen quiet />
+            )}
+          </>
+        }
+      >
+        <fieldset className="picker hosting">
+          <legend className="sr-only">Where OpenBot runs</legend>
+          {!cloudOn && localChoice}
+          {cloudOn ? (
+            <>
+              <label className={rowClass(shown === "cloud")}>
+                <input
+                  type="radio"
+                  name="hosting"
+                  className="tile-input"
+                  value="cloud"
+                  checked={shown === "cloud"}
+                  disabled={held}
+                  onChange={() => pick("cloud")}
+                />
+                <HostingMark>
+                  <IconCloud stroke={1.75} />
+                </HostingMark>
+                <span className="tile-name">OpenBot Cloud</span>
+                <span className="tile-summary">{CLOUD_SUMMARY}</span>
+              </label>
+              <label
+                className={rowClass(shown === "business", "tile with-marks")}
+              >
+                <input
+                  type="radio"
+                  name="hosting"
+                  className="tile-input"
+                  value="business"
+                  checked={shown === "business"}
+                  disabled={held}
+                  onChange={() => pick("business")}
+                />
+                <HostingMark>
+                  <IconBuilding stroke={1.75} />
+                </HostingMark>
+                <span className="tile-name">OpenBot for Business</span>
+                <span className="tile-summary">{BUSINESS_SUMMARY}</span>
+                <CloudMarks />
+              </label>
+              {localChoice}
+            </>
+          ) : (
+            /* OpenBot for Business, its two ways in one card: both book a demo. */
+            <fieldset
+              className={rowClass(shown === "business", "tile-group")}
+              aria-labelledby="business-name"
             >
-              <input
-                type="radio"
-                name="hosting"
-                className="tile-input"
-                value="business"
-                checked={shown === "business"}
-                disabled={held}
-                onChange={() => pick("business")}
-              />
               <HostingMark>
                 <IconBuilding stroke={1.75} />
               </HostingMark>
-              <span className="tile-name">OpenBot for Business</span>
-              <span className="tile-summary">{BUSINESS_SUMMARY}</span>
-              <CloudMarks />
-            </label>
-            {connectAside}
-          </>
-        ) : (
-          /* OpenBot for Business, its two ways in one card: both book a demo. */
-          <fieldset
-            className={rowClass(shown === "business", "tile-group")}
-            aria-labelledby="business-name"
-          >
-            <HostingMark>
-              <IconBuilding stroke={1.75} />
-            </HostingMark>
-            <span className="tile-name" id="business-name">
-              OpenBot for Business
-            </span>
-            <span className="tile-summary">
-              For your whole team. Book a demo to see it.
-            </span>
-            <div className="tile-options">
-              {BUSINESS_CHOICES.map((choice) => (
-                <label
-                  key={choice.id}
-                  className={rowClass(
-                    shown === "business" && businessWay === choice.id,
-                    "tile-option",
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="hosting"
-                    className="tile-input"
-                    value={`business-${choice.id}`}
-                    checked={shown === "business" && businessWay === choice.id}
-                    disabled={held}
-                    onChange={() => pickBusinessWay(choice.id)}
-                  />
-                  <choice.icon
-                    className="tile-option-icon"
-                    aria-hidden="true"
-                    stroke={1.75}
-                  />
-                  <span className="tile-option-text">
-                    <span className="tile-option-name">{choice.name}</span>
-                    <span className="tile-option-summary">
-                      {choice.summary}
+              <span className="tile-name" id="business-name">
+                OpenBot for Business
+              </span>
+              <span className="tile-summary">
+                For your whole team. Book a demo to see it.
+              </span>
+              <div className="tile-options">
+                {BUSINESS_CHOICES.map((choice) => (
+                  <label
+                    key={choice.id}
+                    className={rowClass(
+                      shown === "business" && businessWay === choice.id,
+                      "tile-option",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="hosting"
+                      className="tile-input"
+                      value={`business-${choice.id}`}
+                      checked={
+                        shown === "business" && businessWay === choice.id
+                      }
+                      disabled={held}
+                      onChange={() => pickBusinessWay(choice.id)}
+                    />
+                    <choice.icon
+                      className="tile-option-icon"
+                      aria-hidden="true"
+                      stroke={1.75}
+                    />
+                    <span className="tile-option-text">
+                      <span className="tile-option-name">{choice.name}</span>
+                      <span className="tile-option-summary">
+                        {choice.summary}
+                      </span>
                     </span>
-                  </span>
-                  {choice.id === "own-cloud" && <CloudMarks />}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        )}
-        {!cloudOn && connectAside}
-      </fieldset>
-      {shown === "connect" ? (
-        <ConnectToOpenBot connecting={connecting} onBack={back} />
-      ) : shown === "cloud" ? (
-        <CloudSignIn connecting={signingIn} focus={pickedNow} />
-      ) : shown === "business" ? (
-        <BusinessBooker place="welcome" />
-      ) : cloudOn ? null : (
-        <SelfContained
-          startDownloads={startDownloads}
-          onInstall={onInstall}
-          failure={failure}
-          resumes={resumes}
-        />
-      )}
-      {cloudOn && (
-        /* The foot of the card, below everything else: OpenBot, whole, on this computer. A line
-           with a link until it is opened, then what this computer needs and Install. */
-        <section
-          className="this-computer-foot"
-          aria-label="Run on this computer"
-        >
-          {shown === "this-computer" ? (
-            <>
-              <p className="this-computer-aside">
-                <span className="this-computer-name">
-                  OpenBot (Self-Contained)
-                </span>{" "}
-                {SELF_CONTAINED_SUMMARY}
-              </p>
-              <SelfContained
-                startDownloads={startDownloads}
-                onInstall={onInstall}
-                failure={failure}
-                resumes={resumes}
-              />
-            </>
-          ) : (
-            <p className="this-computer-aside">
-              {SELF_CONTAINED_ASIDE}{" "}
-              <button
-                type="button"
-                className="text-link inline-link"
-                disabled={held}
-                onClick={pickThisComputer}
-              >
-                Use OpenBot (Self-Contained)
-              </button>
-              .
-            </p>
+                    {choice.id === "own-cloud" && <CloudMarks />}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
           )}
-        </section>
-      )}
-    </div>
+        </fieldset>
+      </SetupRail>
+      <div
+        className={`sheet welcome${shown === "cloud" || shown === "connect" || cloudOn ? " page-first" : ""}`}
+      >
+        {shown !== "business" && pageHead}
+        {shown === "connect" ? (
+          <div className="welcome-task">
+            <ConnectToOpenBot connecting={connecting} onBack={back} />
+          </div>
+        ) : shown === "cloud" ? (
+          <div className="welcome-task">
+            <CloudSignIn connecting={signingIn} focus={pickedNow} />
+          </div>
+        ) : shown === "business" ? (
+          <BusinessBooker key={way} way={way} head={pageHead} place="welcome" />
+        ) : (
+          <SelfContained
+            startDownloads={startDownloads}
+            onInstall={onInstall}
+            failure={failure}
+            resumes={resumes}
+          />
+        )}
+      </div>
+    </>
   );
 }
 
@@ -442,7 +440,7 @@ function SelfContained({
   return (
     <>
       <section className="needs" aria-labelledby="needs-heading">
-        <h2 id="needs-heading">What this computer needs</h2>
+        <h3 id="needs-heading">What this computer needs</h3>
         <p className="lede">
           Every part of OpenBot runs on this computer: the app, its server and
           database, your Bots&apos; memory, and a computer for each Bot to work
@@ -501,21 +499,7 @@ function Install({
           Install
         </button>
       </div>
-      <EarlyDownloadsLine firstScreen />
     </>
-  );
-}
-
-/** The clouds OpenBot for Business runs on, by their marks. The move screen's row draws them too. */
-export function CloudMarks() {
-  return (
-    <span className="cloud-marks">
-      {CLOUDS.map((each) => (
-        <span className="cloud-mark" key={each.id}>
-          <MarkImage id={each.id} name={each.name} />
-        </span>
-      ))}
-    </span>
   );
 }
 

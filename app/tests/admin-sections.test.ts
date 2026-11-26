@@ -26,7 +26,7 @@ describe("Admin's groups", () => {
       "Teams",
       "Permissions",
       "Identity providers",
-      "Providers",
+      "AI providers",
     ]);
     // No group calls everybody a team: a team is one named group inside the organization.
     expect(ADMIN_SECTIONS.map((section) => section.title)).not.toContain(

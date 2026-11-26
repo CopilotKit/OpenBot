@@ -17,15 +17,17 @@
         "height": 800,
         "minWidth": 720,
         "minHeight": 560,
-        "resizable": true,
-        "titleBarStyle": "Transparent",
+        "resizable": false,
+        "maximizable": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "backgroundThrottling": "disabled",
         "dragDropEnabled": false,
         "create": false
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; frame-src https://calendly.com; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'sha256-BhsZhiXS5IsSYtGRiQ6sJ1xGtkYCWhV/ddGR9OQz2YI='; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; frame-src https://calendly.com; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
     }
   },
   "bundle": {

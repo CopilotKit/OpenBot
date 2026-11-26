@@ -26,7 +26,8 @@ import { cn } from "@/lib/utils";
  * lost every address in it (reported on 1.2.0-rc.4). Streamdown 2.8.1, its newest release, still
  * reads the text only, and its controls take no way to say how a cell is written out. So the table
  * is drawn here: the same wrapper, buttons, menus, icons and fullscreen view, class for class, with
- * a link written as `[words](address)` in Markdown and as `words (address)` in CSV and TSV.
+ * a link written as `[words](address)` in Markdown and as `words (address)` in CSV and TSV. Its
+ * body cells sit at the top of their row, where Streamdown's sit in the middle (`CELLS_AT_TOP`).
  *
  * Everything else follows Streamdown's own table: the `controls` and `tableMaxHeight` a caller
  * gives Streamdown, the buttons held while a reply is still arriving, and the copy's rich form,
@@ -230,6 +231,15 @@ const MENU =
   "absolute top-full right-0 z-20 mt-1 min-w-[120px] overflow-hidden rounded-md border border-border bg-background shadow-lg";
 const MENU_ITEM =
   "w-full px-3 py-2 text-left text-sm transition-colors hover:bg-muted/40";
+
+/*
+ * The one change from Streamdown's look: a body cell sits at the top of its row. Streamdown leaves a
+ * cell at the browser's default, the middle, so beside a cell that wraps to many lines a short one
+ * floated halfway down and the top of the row read as empty (seen on a phone on 2026-11-26). Every
+ * other table in the app already sets its cells at the top. The header row keeps the middle: its
+ * cells never wrap, as Streamdown draws them, and the app's other tables centre theirs too.
+ */
+const CELLS_AT_TOP = "[&_td]:align-top";
 
 function Icon({ d, ...props }: SVGProps<SVGSVGElement> & { d: string }) {
   return (
@@ -462,7 +472,10 @@ function Fullscreen({
                 </div>
                 <div className="flex-1 overflow-auto p-4 pt-0 [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10">
                   <table
-                    className="w-full border-collapse border border-border"
+                    className={cn(
+                      "w-full border-collapse border border-border",
+                      CELLS_AT_TOP,
+                    )}
                     data-streamdown="table"
                   >
                     {children}
@@ -563,7 +576,11 @@ export function MarkdownTable({
         style={height ? { maxHeight: height } : undefined}
       >
         <table
-          className={cn("w-full divide-y divide-border", className)}
+          className={cn(
+            "w-full divide-y divide-border",
+            CELLS_AT_TOP,
+            className,
+          )}
           data-streamdown="table"
           {...props}
         >

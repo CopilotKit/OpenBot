@@ -1,6 +1,7 @@
 import { type Icon, IconLogout, IconMessages } from "@tabler/icons-react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
+import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BrandName } from "@/components/edition/brand-name";
 import { Strip, StripItem } from "@/components/layout/strip";
 import { openNewOrganization } from "@/components/organizations/new-organization-dialog";
@@ -19,7 +20,6 @@ import {
   type NavigationLink,
   useNavigationItems,
 } from "@/lib/navigation";
-import { ORB_PALETTES } from "@/lib/orb-palette";
 import {
   useOrganizationChoices,
   useWaitingInvitationCount,
@@ -40,6 +40,7 @@ import {
   accountMenuItemClassName,
   StripVersion,
 } from "./account-label";
+import { DesktopAppMenuItem } from "./desktop-app-item";
 import { TroubleshootingLogsMenuItem } from "./troubleshooting-logs-item";
 import { useSignOut } from "./use-sign-out";
 
@@ -52,9 +53,6 @@ const STRIP_NAMES: Partial<Record<string, string>> = {
   connections: "Apps",
 };
 
-/** The orb's palette: periwinkle, the nearest of the eight to OpenBot's own mark. */
-const ORB_COLORS = ORB_PALETTES[2];
-
 /** OpenBot's orb at the top of the strip. It goes home, as the product's name did. */
 function HomeOrb() {
   return (
@@ -63,18 +61,9 @@ function HomeOrb() {
       className="flex size-9 items-center justify-center rounded-full outline-hidden ring-sidebar-ring focus-visible:ring-2"
       to="/"
     >
-      <span
-        aria-hidden="true"
-        className="bot-orb-still inline-block size-7 rounded-full ring-1 ring-foreground/10"
-        style={
-          {
-            "--c1": ORB_COLORS.c1,
-            "--c2": ORB_COLORS.c2,
-            "--c3": ORB_COLORS.c3,
-            "--c4": ORB_COLORS.c4,
-          } as CSSProperties
-        }
-      />
+      <div aria-hidden="true">
+        <AgentOrb size="28px" />
+      </div>
     </Link>
   );
 }
@@ -150,7 +139,7 @@ function PageItem({ item }: { item: NavigationLink }) {
 
 /**
  * The account at the strip's foot, and the menu it opens: organizations, the account's pages, Get
- * troubleshooting logs, Sign out.
+ * the desktop app on OpenBot Cloud, Get troubleshooting logs, Sign out.
  */
 function StripAccount() {
   const navigation = useNavigationItems();
@@ -204,6 +193,7 @@ function StripAccount() {
               <BrandName>{item.label}</BrandName>
             </DropdownMenuItem>
           ))}
+        <DesktopAppMenuItem className={accountMenuItemClassName} />
         <TroubleshootingLogsMenuItem className={accountMenuItemClassName} />
         {signOutOffered ? (
           <DropdownMenuItem
