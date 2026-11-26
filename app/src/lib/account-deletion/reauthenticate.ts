@@ -1,4 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { getDeployment } from "@/lib/api/generated/organization-settings/organization-settings";
+import { DEPLOYMENT_ORGANIZATION } from "@/lib/api/request";
 import { authClient, providerName } from "@/lib/auth/client";
 import { connectedThroughDesktop } from "@/lib/auth/mutations";
 import {
@@ -50,6 +52,20 @@ export const reauthenticationDeps = {
   }): Promise<Started> =>
     authClient.signIn.social(input as never) as Promise<Started>,
   origin: () => window.location.origin,
+  /**
+   * What the sign-in screen offers, asked as nobody is: on the pending page every signed-in read but
+   * the person's own is refused (ACCOUNT_PENDING_DELETION), and the sign-in screen's is anybody's.
+   */
+  signInOptionsAsNobody: async () => {
+    const body = await getDeployment(DEPLOYMENT_ORGANIZATION, {
+      credentials: "omit",
+      fallback: "Couldn't start signing in again.",
+    });
+    return {
+      providers: body.authProviders as AuthProviderId[],
+      hosted: body.hostedSignIn === true,
+    };
+  },
 };
 
 /**
@@ -63,6 +79,7 @@ export async function signInAgainAtProvider(
   if (await connectedThroughDesktop(queryClient)) return false;
   const options = await queryClient
     .ensureQueryData(authProvidersQueryOptions())
+    .catch(() => reauthenticationDeps.signInOptionsAsNobody())
     .catch(() => undefined);
   if (!options || options.hosted) return false;
   const provider = options.providers.find((one) =>

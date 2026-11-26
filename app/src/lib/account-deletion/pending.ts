@@ -8,6 +8,14 @@
  * Imports nothing of the app, so the query client can call it.
  */
 
+/**
+ * How the pending page and the delete dialog load the app afresh. A test replaces it to see it asked.
+ */
+export const pendingPageDeps = {
+  openHome: () => window.location.assign("/"),
+  openSignIn: () => window.location.assign("/sign"),
+};
+
 /** The API's code for every request from somebody whose account is scheduled to be deleted. */
 export const ACCOUNT_PENDING_DELETION = "ACCOUNT_PENDING_DELETION";
 

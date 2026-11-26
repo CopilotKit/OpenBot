@@ -33,9 +33,11 @@ import { Toaster } from "@/components/ui/toast";
 import {
   clearPendingDeletion,
   resumeDeletionAfterSignIn,
+  showPendingDeletion,
 } from "@/lib/account-deletion/pending";
 import { reauthenticationDeps } from "@/lib/account-deletion/reauthenticate";
 import type { AccountDeletionBlocker } from "@/lib/api/generated/model";
+import { getDeployment } from "@/lib/api/generated/organization-settings/organization-settings";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import {
   CancelAccountDeletionHeader,
@@ -226,7 +228,15 @@ async function answer(
     server.pendingEverywhere = false;
     return checked(CancelAccountDeletionResponse, { status: "none" });
   }
-  if (server.pendingEverywhere)
+  // While it waits, who the person is still answers (their organizations, their own record), as
+  // the server answers it; everything else is refused.
+  if (
+    server.pendingEverywhere &&
+    // Asked as nobody (no cookies), a request is nobody's to refuse.
+    init?.credentials !== "omit" &&
+    path !== "/api/v2/people/me/organizations" &&
+    !/^\/api\/v2\/organizations\/[^/]+\/people\/me$/.test(path)
+  )
     return problem(403, "ACCOUNT_PENDING_DELETION", PENDING_SAID);
   if (path === "/api/v2/organizations/default/deployment")
     return Response.json({
@@ -654,7 +664,11 @@ describe("deleting your account", () => {
     };
     server.pendingEverywhere = true;
     const rootRoute = createRootRoute({
-      beforeLoad: () => signedInUser(queryClient),
+      // Who they are answers; the first screen's own read is refused.
+      beforeLoad: async () => {
+        await signedInUser(queryClient);
+        await getDeployment("org_dana", { fallback: "Could not load." });
+      },
       component: () => <p>The app</p>,
     });
     const router = createRouter({
@@ -673,12 +687,113 @@ describe("deleting your account", () => {
     expect(view.getByRole("button", { name: "Sign out" })).toBeTruthy();
     // Refused for it is an answer: asked once, never again.
     expect(
-      requests.filter((one) => one === "GET /api/v2/people/me/organizations"),
+      requests.filter(
+        (one) => one === "GET /api/v2/organizations/org_dana/deployment",
+      ),
     ).toHaveLength(1);
     await userEvent
       .setup({ document })
       .click(view.getByRole("button", { name: "Cancel deletion" }));
     await waitFor(() => expect(opened).toEqual(["/"]));
+  });
+
+  test("waiting out the 14 days, Delete now on the pending page: confirmed as in Settings, deleted at once, then sent to sign-in", async () => {
+    server.scheduled = {
+      requestedAt: "2026-11-25T10:00:00.000Z",
+      deleteAfter: "2026-12-09T10:00:00.000Z",
+    };
+    server.pendingEverywhere = true;
+    const app = await open("/");
+    showPendingDeletion({ deleteAfter: "2026-12-09T10:00:00.000Z" });
+    await app.person.click(
+      await app.view.findByRole("button", { name: "Delete now" }),
+    );
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Delete your account now?",
+    });
+    expect(dialog.textContent).toContain(
+      "Your account is deleted straight away, and you can't undo it.",
+    );
+    // Now, and nothing else: no Delete in 14 days for somebody already waiting.
+    expect(
+      within(dialog).queryByRole("button", { name: "Delete in 14 days" }),
+    ).toBeNull();
+    const now = within(dialog).getByRole("button", { name: "Delete now" });
+    expect(now.hasAttribute("disabled")).toBe(true);
+    await app.person.type(
+      within(dialog).getByLabelText("Type your email address"),
+      EMAIL,
+    );
+    await app.person.type(
+      within(dialog).getByLabelText("Type delete my account"),
+      "delete my account",
+    );
+    await waitFor(() => expect(now.hasAttribute("disabled")).toBe(false));
+    await app.person.click(now);
+    await waitFor(() => expect(opened).toEqual(["/sign"]));
+    expect(deletions[0]?.body).toEqual({
+      confirmEmail: EMAIL,
+      confirmPhrase: "delete my account",
+      immediate: true,
+    });
+    expect(requests).toContain("POST /api/auth/sign-out");
+  });
+
+  test("a sign-in too old to delete now from the pending page signs in again at its provider, and comes back to it with the dialog open", async () => {
+    server.scheduled = {
+      requestedAt: "2026-11-25T10:00:00.000Z",
+      deleteAfter: "2026-12-09T10:00:00.000Z",
+    };
+    server.pendingEverywhere = true;
+    server.refuse = "reauthenticate";
+    server.providers = ["okta"];
+    server.signedInWith = ["okta"];
+    const app = await open("/");
+    showPendingDeletion({ deleteAfter: "2026-12-09T10:00:00.000Z" });
+    await app.person.click(
+      await app.view.findByRole("button", { name: "Delete now" }),
+    );
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Delete your account now?",
+    });
+    await app.person.type(
+      within(dialog).getByLabelText("Type your email address"),
+      EMAIL,
+    );
+    await app.person.type(
+      within(dialog).getByLabelText("Type delete my account"),
+      "delete my account",
+    );
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Delete now" }),
+    );
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      "To delete your account, sign in again first.",
+    );
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Sign in again" }),
+    );
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({
+      provider: "okta",
+      loginHint: EMAIL,
+      additionalParams: { prompt: "login", max_age: "0" },
+    });
+    expect(requests).not.toContain("POST /api/auth/sign-out");
+    cleanup();
+    clearPendingDeletion();
+
+    // Back from the provider: still waiting, so the pending page, with the dialog open again.
+    queryClient.clear();
+    setCurrentOrganization(undefined);
+    // As the signed-in gate finds it, before anything of the app draws (routes/_authed.tsx).
+    showPendingDeletion({ deleteAfter: "2026-12-09T10:00:00.000Z" });
+    const back = await open("/settings");
+    expect(
+      await back.view.findByRole("dialog", {
+        name: "Delete your account now?",
+      }),
+    ).toBeTruthy();
   });
 
   test("an OpenBot older than deleting an account shows nothing for it", async () => {

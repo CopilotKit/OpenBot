@@ -10,7 +10,6 @@ import {
   useState,
 } from "react";
 import { useSignOut } from "@/components/app-sidebar/use-sign-out";
-import { pendingPageDeps } from "@/components/auth/pending-deletion-page";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { LeaveOrganizationDialog } from "@/components/organizations/organization-settings-page";
 import { Button } from "@/components/ui/button";
@@ -38,6 +37,7 @@ import { requestAccountDeletionMutationOptions } from "@/lib/account-deletion/mu
 import {
   deletionResumed,
   deletionToResume,
+  pendingPageDeps,
   resumeDeletionAfterSignIn,
   showPendingDeletion,
 } from "@/lib/account-deletion/pending";
@@ -247,11 +247,17 @@ function OpenOrganizationSettings({
  * deletes it: in 14 days, or now. In 14 days, the app becomes the pending page at once. Now, the
  * person is signed out and sent to sign-in. A session too old to delete an account is offered
  * Sign in again, which comes back to this dialog.
+ *
+ * `now`: the pending page's, for somebody already waiting out the 14 days. It deletes now and
+ * nothing else, with the same confirmation and the same recent sign-in. A sign-in the request
+ * ended is sent to sign in again, as the pending page's Cancel deletion is.
  */
-function DeleteAccountDialog({
+export function DeleteAccountDialog({
+  now: nowOnly = false,
   onOpenChange,
   open,
 }: {
+  now?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) {
@@ -314,6 +320,9 @@ function DeleteAccountDialog({
             error.code === ACCOUNT_DELETION_BLOCKED
           )
             onOpenChange(false);
+          // On the pending page, a sign-in the request ended: signing in again comes back here.
+          if (nowOnly && error instanceof ClientError && error.status === 401)
+            pendingPageDeps.openSignIn();
         },
       },
     );
@@ -323,11 +332,13 @@ function DeleteAccountDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete your account?</DialogTitle>
+          <DialogTitle>
+            {nowOnly ? "Delete your account now?" : "Delete your account?"}
+          </DialogTitle>
           <DialogDescription>
-            Your account is deleted in {DELETION_WAIT_DAYS} days. Sign in before
-            then to cancel. Delete now deletes it straight away, and you can't
-            undo it.
+            {nowOnly
+              ? "Your account is deleted straight away, and you can't undo it."
+              : `Your account is deleted in ${DELETION_WAIT_DAYS} days. Sign in before then to cancel. Delete now deletes it straight away, and you can't undo it.`}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
@@ -354,7 +365,7 @@ function DeleteAccountDialog({
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
-              remove(false);
+              remove(nowOnly);
             }}
           >
             <FieldGroup className="gap-4">
@@ -424,27 +435,41 @@ function DeleteAccountDialog({
           <Button onClick={() => onOpenChange(false)} size="sm" variant="ghost">
             Cancel
           </Button>
-          <Button
-            disabled={!confirmed || busy}
-            onClick={() => remove(true)}
-            size="sm"
-            variant="outline"
-          >
-            {request.isPending && request.variables?.immediate
-              ? "Deleting…"
-              : "Delete now"}
-          </Button>
-          <Button
-            disabled={!confirmed || busy}
-            form={formId}
-            size="sm"
-            type="submit"
-            variant="destructive"
-          >
-            {request.isPending && !request.variables?.immediate
-              ? "Deleting…"
-              : `Delete in ${DELETION_WAIT_DAYS} days`}
-          </Button>
+          {nowOnly ? (
+            <Button
+              disabled={!confirmed || busy}
+              form={formId}
+              size="sm"
+              type="submit"
+              variant="destructive"
+            >
+              {busy ? "Deleting…" : "Delete now"}
+            </Button>
+          ) : (
+            <>
+              <Button
+                disabled={!confirmed || busy}
+                onClick={() => remove(true)}
+                size="sm"
+                variant="outline"
+              >
+                {request.isPending && request.variables?.immediate
+                  ? "Deleting…"
+                  : "Delete now"}
+              </Button>
+              <Button
+                disabled={!confirmed || busy}
+                form={formId}
+                size="sm"
+                type="submit"
+                variant="destructive"
+              >
+                {request.isPending && !request.variables?.immediate
+                  ? "Deleting…"
+                  : `Delete in ${DELETION_WAIT_DAYS} days`}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
