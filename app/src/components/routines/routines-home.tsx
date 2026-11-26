@@ -83,7 +83,10 @@ export function RoutinesHome() {
           </p>
         </div>
 
-        <RoutineBox examples={empty ? EXAMPLES : undefined} />
+        <RoutineBox
+          bots={shownBots.data}
+          examples={empty ? EXAMPLES : undefined}
+        />
 
         <div className="mt-8">
           {/* One read failing leaves the others listed, and says which part is missing. */}

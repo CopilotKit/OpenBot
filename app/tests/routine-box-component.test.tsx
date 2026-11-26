@@ -16,26 +16,35 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RoutineBox } from "@/components/routines/routine-box";
+import { viewerTimeZone } from "@/components/routines/routine-page";
+import type { AgentProfile } from "@/lib/agents/queries";
 import type { RoutineDraft, RoutineReading } from "@/lib/api/generated/model";
 import { queryClient } from "@/query-client";
-import { answerBotsList, problemResponse } from "./bots-api";
-import { CONVERSATIONS_PATH } from "./conversations-api";
+import { problemResponse } from "./bots-api";
+import { CONVERSATIONS_PATH, problem, ROUTE_PATH } from "./conversations-api";
 import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * The Routines box: one sentence read by the server, written when the reading is ready, and said in
- * the line under the box otherwise.
+ * The Routines box: Home's message box with only its `@` menu. A sentence that names a Bot with `@`
+ * is read for that Bot; one that names nobody is routed first, as Home routes it. The reading is
+ * written when it is ready, and said in the line under the box otherwise.
  */
 
-beforeAll(() => GlobalRegistrator.register());
+let originalRect: typeof Range.prototype.getBoundingClientRect;
+beforeAll(() => {
+  GlobalRegistrator.register({ url: "http://localhost/" });
+  // The `@` menu opens at the caret, and prompt-area draws none for a range with no box.
+  originalRect = Range.prototype.getBoundingClientRect;
+  Range.prototype.getBoundingClientRect = () => new DOMRect(8, 8, 1, 16);
+});
 afterEach(() => {
   cleanup();
   queryClient.clear();
-  window.localStorage.clear();
 });
 afterAll(async () => {
   await settleReactWork();
+  Range.prototype.getBoundingClientRect = originalRect;
   GlobalRegistrator.unregister();
 });
 
@@ -46,6 +55,37 @@ afterEach(() => {
 
 const READ_PATH = "/api/v2/organizations/default/routines/read";
 const CREATE_PATH = "/api/v2/organizations/default/routines";
+const CHECK_INS_PATH = "/api/v2/organizations/default/check-ins";
+
+function bot(id: string, name: string): AgentProfile {
+  return {
+    id,
+    name,
+    avatarSeed: id,
+    assignedToMe: false,
+    runsOnOpenBotModel: false,
+    keyFromOpenBot: false,
+    builtIn: false,
+    canManage: true,
+    endpoint: null,
+    hasAuth: false,
+    hasCallbackToken: false,
+    isolated: false,
+    isolationActive: false,
+    isolationOffReason: null,
+    hidden: false,
+    pinned: false,
+    mine: true,
+    roleDescription: "Role",
+    systemOwned: false,
+    title: "Title",
+    visibility: "private",
+  };
+}
+
+const ATLAS = bot("bot-1", "Atlas");
+const SCOUT = bot("bot-2", "Scout");
+const BOTS = [ATLAS, SCOUT];
 
 const ACT_DRAFT: RoutineDraft = {
   instruction: "Send me a briefing",
@@ -76,17 +116,28 @@ const ready = (draft: RoutineDraft): RoutineReading => ({
   draft,
 });
 
+/** The API's refusal when a sentence names a Bot more than one Bot answers to. */
+const AMBIGUOUS =
+  "More than one Bot has that name. Data Analyst, Risk Analyst. Choose one with @.";
+
 type Request = [method: string, path: string, body: unknown];
 let requests: Request[] = [];
 
 function serving({
-  bots = [{ id: "bot-1", name: "Atlas" }] as unknown[],
   checkIns = [] as unknown[],
   read = () => Response.json(ready(ACT_DRAFT)) as Response | Promise<Response>,
+  route = () =>
+    Response.json({
+      botId: SCOUT.id,
+      name: SCOUT.name,
+      reason: "It reads your inbox.",
+      fallback: false,
+      viaMention: false,
+    }) as Response,
 }: {
-  bots?: unknown[];
   checkIns?: unknown[];
   read?: () => Response | Promise<Response>;
+  route?: () => Response;
 } = {}) {
   requests = [];
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -98,6 +149,7 @@ function serving({
         url,
         typeof init?.body === "string" ? JSON.parse(init.body) : null,
       ]);
+      if (url === ROUTE_PATH) return route();
       if (url === READ_PATH) return read();
       // A new conversation for the routine, which the create makes first.
       if (url === CONVERSATIONS_PATH)
@@ -116,14 +168,25 @@ function serving({
         );
       if (url === CREATE_PATH)
         return Response.json(
-          { routine: { id: "r1", botId: "bot-1" } },
+          {
+            routine: {
+              id: "r1",
+              botId: "bot-1",
+              schedule: "Weekdays at 09:00",
+              timezone: viewerTimeZone(),
+            },
+          },
           { status: 201 },
         );
+      if (url.startsWith(CHECK_INS_PATH) && method === "POST")
+        return Response.json(
+          { checkIn: { id: "ci-new", botId: "bot-2", intervalMinutes: 240 } },
+          { status: 201 },
+        );
+      if (method === "DELETE") return new Response(null, { status: 204 });
       return Response.json({ ok: true });
     }
-    const list = answerBotsList(input, init, { visible: bots });
-    if (list) return list;
-    if (url === "/api/v2/organizations/default/check-ins?limit=100")
+    if (url === `${CHECK_INS_PATH}?limit=100`)
       return Response.json({
         nextCursor: null,
         allowed: true,
@@ -135,19 +198,33 @@ function serving({
   }) as unknown as typeof fetch;
 }
 
-/** The reads of a sentence and the routines made, leaving out the conversations a make starts. */
-const readsAndCreates = () =>
+/**
+ * The routing, the reads of a sentence and the writes, by address alone, leaving out the
+ * conversation a make starts and names.
+ */
+const writes = () =>
   requests
-    .filter(([, path]) => !path.startsWith(CONVERSATIONS_PATH))
+    .map(([method, path]) => [method, path.split("?")[0]] as const)
+    .filter(
+      ([, path]) => path === ROUTE_PATH || !path.startsWith(CONVERSATIONS_PATH),
+    )
     .map(([method, path]) => `${method} ${path}`);
 
-let router: { state: { location: { pathname: string; search: unknown } } };
+/** What the box sent to be read. */
+const readBodies = () =>
+  requests.filter(([, path]) => path === READ_PATH).map(([, , body]) => body);
 
-function draw(examples?: readonly string[]) {
-  router = createRouter({
+function draw({
+  bots = BOTS as readonly AgentProfile[] | undefined,
+  examples,
+}: {
+  bots?: readonly AgentProfile[];
+  examples?: readonly string[];
+} = {}) {
+  const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({
-      component: () => <RoutineBox examples={examples} />,
+      component: () => <RoutineBox bots={bots} examples={examples} />,
     }),
   });
   return render(
@@ -157,50 +234,110 @@ function draw(examples?: readonly string[]) {
   );
 }
 
-/** The sentence box, once the Bots and check-ins are in and it can be typed in. */
-async function box(view: ReturnType<typeof draw>) {
-  const textarea = (await view.findByLabelText(
-    "What should it do, and when?",
-  )) as HTMLTextAreaElement;
-  await waitFor(() => expect(textarea.disabled).toBe(false));
-  return textarea;
+type View = ReturnType<typeof draw>;
+
+/** The message box, once it can be typed in. */
+async function box(view: View) {
+  const editor = await view.findByRole("textbox", { name: "Message" });
+  await waitFor(() =>
+    expect(editor.getAttribute("contenteditable")).toBe("true"),
+  );
+  return editor;
 }
 
-/** Sending waits for the Bot and the check-ins read, so a sentence is only sendable once they are in. */
-async function sendable(view: ReturnType<typeof draw>) {
+/** Sending waits for the check-ins read, so a sentence is only sendable once it is in. */
+async function sendable(view: View) {
   await waitFor(() =>
     expect(
-      (view.getByRole("button", { name: "Send" }) as HTMLButtonElement)
+      (view.getByRole("button", { name: "Send message" }) as HTMLButtonElement)
         .disabled,
     ).toBe(false),
   );
 }
 
-async function type(view: ReturnType<typeof draw>, sentence: string) {
-  const textarea = await box(view);
+async function type(view: View, sentence: string) {
+  const editor = await box(view);
   const user = userEvent.setup({ document });
-  await user.type(textarea, sentence);
+  await user.type(editor, sentence);
   await sendable(view);
-  return { textarea, user };
+  return { editor, user };
 }
 
-test("a ready reading makes one routine and says so in the line", async () => {
+/** Name a Bot with `@` as a person does: type `@`, a few letters, and pick it from the menu. */
+async function mention(view: View, name: string) {
+  const editor = await box(view);
+  const user = userEvent.setup({ document });
+  await user.click(editor);
+  await user.keyboard("@");
+  await user.keyboard(name.slice(0, 3));
+  await user.click(
+    await view.findByRole("option", { hidden: true, name: new RegExp(name) }),
+  );
+  return { editor, user };
+}
+
+test("a sentence that names Atlas with @ is read for Atlas, without the name, and makes one routine", async () => {
   serving();
   const view = draw();
-  const { textarea, user } = await type(view, "Brief me every weekday at 9");
+  const { editor, user } = await mention(view, "Atlas");
+  await user.keyboard("brief me every weekday at 9");
+  await sendable(view);
   await user.keyboard("{Enter}");
 
   const line = await view.findByRole("status");
   expect(line.textContent).toContain(
-    "Atlas took “Morning briefing” · Every weekday at 9:00 AM",
+    "Atlas took “Morning briefing” · Weekdays at 09:00",
   );
-  expect(readsAndCreates()).toEqual([
-    `POST ${READ_PATH}`,
-    `POST ${CREATE_PATH}`,
+  // Nobody is routed: the sentence named its Bot.
+  expect(writes()).toEqual([`POST ${READ_PATH}`, `POST ${CREATE_PATH}`]);
+  expect(readBodies()).toEqual([
+    expect.objectContaining({
+      botId: "bot-1",
+      sentence: "brief me every weekday at 9",
+    }),
   ]);
   const open = view.getByRole("button", { name: "Open" });
   expect(open.getAttribute("href")).toBe("/routines/schedules/r1");
-  expect(textarea.value).toBe("");
+  expect(editor.textContent).toBe("");
+});
+
+test("a sentence that names nobody is routed once, then read for the Bot OpenBot picked", async () => {
+  serving({
+    read: () => Response.json(ready(TELL_DRAFT)),
+  });
+  const view = draw();
+  const { user } = await type(view, "Tell me about the inbox");
+  await user.keyboard("{Enter}");
+
+  const line = await view.findByRole("status");
+  expect(line.textContent).toContain("Scout took “Inbox”");
+  expect(writes()).toContain(`POST ${CHECK_INS_PATH}`);
+  const sent = writes();
+  expect(sent[0]).toBe(`POST ${ROUTE_PATH}`);
+  expect(sent[1]).toBe(`POST ${READ_PATH}`);
+  expect(sent.filter((write) => write === `POST ${ROUTE_PATH}`)).toHaveLength(
+    1,
+  );
+  expect(readBodies()).toEqual([
+    expect.objectContaining({
+      botId: "bot-2",
+      sentence: "Tell me about the inbox",
+    }),
+  ]);
+});
+
+test("a routing refusal says its sentence, reads nothing, and keeps the sentence", async () => {
+  serving({ route: () => problem(409, AMBIGUOUS, "BOT_NAME_AMBIGUOUS") });
+  const view = draw();
+  const { editor, user } = await type(view, "Ask the analyst every day at 9");
+  await user.keyboard("{Enter}");
+
+  const line = await view.findByRole("status");
+  expect(line.textContent).toContain(AMBIGUOUS);
+  expect(writes()).toEqual([`POST ${ROUTE_PATH}`]);
+  await waitFor(() =>
+    expect(editor.textContent).toBe("Ask the analyst every day at 9"),
+  );
 });
 
 test("a reading that needs more makes no routine, shows Finish, and keeps the sentence", async () => {
@@ -213,12 +350,16 @@ test("a reading that needs more makes no routine, shows Finish, and keeps the se
       }),
   });
   const view = draw();
-  const { textarea, user } = await type(view, "Brief me");
+  const { editor, user } = await mention(view, "Atlas");
+  await user.keyboard("brief me");
+  await sendable(view);
   await user.keyboard("{Enter}");
 
   await view.findByRole("button", { name: "Finish" });
-  expect(readsAndCreates()).toEqual([`POST ${READ_PATH}`]);
-  expect(textarea.value).toBe("Brief me");
+  expect(writes()).toEqual([`POST ${READ_PATH}`]);
+  await waitFor(() => expect(editor.textContent).toContain("brief me"));
+  // The chip comes back with the words.
+  expect(editor.textContent).toContain("Atlas");
 });
 
 test("Enter twice while the read is out sends one read", async () => {
@@ -230,13 +371,14 @@ test("Enter twice while the read is out sends one read", async () => {
       }),
   });
   const view = draw();
-  const { textarea } = await type(view, "Brief me");
-  fireEvent.keyDown(textarea, { key: "Enter" });
-  fireEvent.keyDown(textarea, { key: "Enter" });
-  await waitFor(() => expect(readsAndCreates()).toHaveLength(1));
-  fireEvent.keyDown(textarea, { key: "Enter" });
+  const { user } = await mention(view, "Atlas");
+  await user.keyboard("brief me");
+  await sendable(view);
+  await user.keyboard("{Enter}");
+  await waitFor(() => expect(writes()).toHaveLength(1));
+  await user.keyboard("again{Enter}");
   await settleReactWork();
-  expect(readsAndCreates()).toEqual([`POST ${READ_PATH}`]);
+  expect(writes()).toEqual([`POST ${READ_PATH}`]);
 
   release(Response.json({ outcome: "notRoutine" }));
   await waitFor(() =>
@@ -249,14 +391,16 @@ test("Enter twice while the read is out sends one read", async () => {
 test("two Enters before React draws again send one read", async () => {
   serving({ read: () => new Promise<Response>(() => {}) });
   const view = draw();
-  const { textarea } = await type(view, "Brief me");
-  // One act around both: React draws nothing between them, so only the ref stops the second.
+  const { editor } = await mention(view, "Atlas");
+  await userEvent.setup({ document }).keyboard("brief me");
+  await sendable(view);
+  // One act around both: React draws nothing between them, so only a ref stops the second.
   await act(async () => {
-    fireEvent.keyDown(textarea, { key: "Enter" });
-    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    fireEvent.keyDown(editor, { key: "Enter" });
   });
   await settleReactWork();
-  expect(readsAndCreates()).toEqual([`POST ${READ_PATH}`]);
+  expect(writes()).toEqual([`POST ${READ_PATH}`]);
 });
 
 test("a ready check-in the Bot already has makes no routine and says so", async () => {
@@ -272,47 +416,78 @@ test("a ready check-in the Bot already has makes no routine and says so", async 
     ],
   });
   const view = draw();
-  const { user } = await type(view, "Tell me about the inbox");
+  const { user } = await mention(view, "Atlas");
+  await user.keyboard("tell me about the inbox");
+  await sendable(view);
   await user.keyboard("{Enter}");
 
   const line = await view.findByRole("status");
   expect(line.textContent).toContain("Atlas already checks in on “Inbox”.");
-  expect(readsAndCreates()).toEqual([`POST ${READ_PATH}`]);
+  expect(writes()).toEqual([`POST ${READ_PATH}`]);
 });
 
 test("a 503 with the server's sentence shows it and keeps the sentence", async () => {
   const said =
-    "OpenBot needs a model key to read a sentence. Add one in the Vault, or use the form.";
+    "OpenBot needs a model key to read a sentence. Add one in the Vault.";
   serving({ read: () => problemResponse(503, said) });
   const view = draw();
-  const { textarea, user } = await type(view, "Brief me");
+  const { editor, user } = await mention(view, "Atlas");
+  await user.keyboard("brief me");
+  await sendable(view);
   await user.keyboard("{Enter}");
 
   const line = await view.findByRole("status");
   expect(line.textContent).toContain(said);
-  // The line's own action, and the link beside the box.
-  expect(view.getByRole("button", { name: "Use the form" })).toBeTruthy();
-  expect(view.getByRole("link", { name: "Use the form" })).toBeTruthy();
-  expect(textarea.value).toBe("Brief me");
+  await waitFor(() => expect(editor.textContent).toContain("brief me"));
+});
+
+test("Undo deletes what was made and the line reads Removed.", async () => {
+  serving();
+  const view = draw();
+  const { user } = await mention(view, "Atlas");
+  await user.keyboard("brief me every weekday at 9");
+  await sendable(view);
+  await user.keyboard("{Enter}");
+
+  await user.click(await view.findByRole("button", { name: "Undo" }));
+  await waitFor(() =>
+    expect(view.getByRole("status").textContent).toContain("Removed."),
+  );
+  expect(writes()).toContain(`DELETE ${CREATE_PATH}/r1`);
+});
+
+test("there is no form link, no Bot picker, and no menu but @", async () => {
+  serving();
+  const view = draw();
+  await box(view);
+  expect(view.queryByText("Use the form")).toBeNull();
+  expect(view.queryByRole("combobox", { name: "Bot" })).toBeNull();
+  // No attachments, no model picker, no routine clock, no voice call.
+  expect(view.queryByRole("button", { name: "Attach a file" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Start voice call" })).toBeNull();
 });
 
 test("pressing an example fills the box and reads nothing", async () => {
   serving();
-  const view = draw(["Brief me every weekday at 9"]);
-  const textarea = await box(view);
+  const view = draw({ examples: ["Brief me every weekday at 9"] });
+  await box(view);
   const user = userEvent.setup({ document });
   await user.click(
     view.getByRole("button", { name: "Brief me every weekday at 9" }),
   );
-  expect(textarea.value).toBe("Brief me every weekday at 9");
-  expect(document.activeElement).toBe(textarea);
+  await waitFor(() =>
+    expect(view.getByRole("textbox", { name: "Message" }).textContent).toBe(
+      "Brief me every weekday at 9",
+    ),
+  );
   await settleReactWork();
-  expect(readsAndCreates()).toEqual([]);
+  expect(writes()).toEqual([]);
 });
 
 test("with no Bots it says to make one first, and has no box", async () => {
-  serving({ bots: [] });
-  const view = draw();
+  serving();
+  const view = draw({ bots: [] });
   await view.findByText("Make a Bot first to give it routines.");
-  expect(view.queryByLabelText("What should it do, and when?")).toBeNull();
+  expect(view.getByRole("button", { name: "New Bot" })).toBeTruthy();
+  expect(view.queryByRole("textbox", { name: "Message" })).toBeNull();
 });

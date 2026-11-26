@@ -149,10 +149,8 @@ test("the groups follow the shown Bots' order, a hidden Bot's group last", async
 test("the empty page shows three examples, and pressing one fills the box and sends nothing", async () => {
   serving({ shown: [bot("atlas", "Atlas")] });
   const view = draw();
-  const textarea = (await view.findByLabelText(
-    "What should it do, and when?",
-  )) as HTMLTextAreaElement;
-  await waitFor(() => expect(textarea.disabled).toBe(false));
+  const box = await view.findByRole("textbox", { name: "Message" });
+  await waitFor(() => expect(box.getAttribute("contenteditable")).toBe("true"));
 
   const examples = [
     "Every weekday at 9, send me yesterday's new leads",
@@ -168,7 +166,12 @@ test("the empty page shows three examples, and pressing one fills the box and se
 
   const user = userEvent.setup({ document });
   await user.click(view.getByRole("button", { name: examples[1] as string }));
-  expect(textarea.value).toBe(examples[1] as string);
+  // The box is drawn again with the example in it.
+  await waitFor(() =>
+    expect(view.getByRole("textbox", { name: "Message" }).textContent).toBe(
+      examples[1] as string,
+    ),
+  );
   await settleReactWork();
   expect(writes).toEqual([]);
 });
@@ -194,7 +197,7 @@ test("a failed read says so, shows no examples, and keeps the box", async () => 
   expect(alert.textContent).toBe(
     "Couldn't load your routines. Try again in a moment.",
   );
-  expect(view.getByLabelText("What should it do, and when?")).toBeTruthy();
+  expect(view.getByRole("textbox", { name: "Message" })).toBeTruthy();
   expect(
     view.queryByRole("button", {
       name: "Every weekday at 9, send me yesterday's new leads",
