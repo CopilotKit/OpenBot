@@ -47,6 +47,8 @@ export function Composer({
       <TextInput
         accessibilityLabel={placeholder}
         multiline
+        // The most a message can be, as the API takes it.
+        maxLength={16000}
         autoFocus={autoFocus}
         value={value}
         onChangeText={onChangeText}

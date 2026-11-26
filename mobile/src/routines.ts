@@ -62,5 +62,3 @@ export function routineLines(routine: {
     alert: status === "failed" ? "Last run failed" : undefined,
   };
 }
-/** "Add routine" opens the Bot's conversation with this sentence started for the person to finish. */
-export const ADD_ROUTINE_DRAFT = "Set up a routine to ";

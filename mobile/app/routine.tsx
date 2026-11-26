@@ -1,4 +1,10 @@
-import { Redirect, router, Stack, useLocalSearchParams } from "expo-router";
+import {
+  Redirect,
+  router,
+  Stack,
+  useFocusEffect,
+  useLocalSearchParams,
+} from "expo-router";
 import { Button } from "heroui-native/button";
 import { useCallback } from "react";
 import { Alert, View } from "react-native";
@@ -22,7 +28,8 @@ import {
   Text,
   Toggle,
 } from "../src/components";
-import { IconClock } from "../src/icons";
+import { headerActions } from "../src/header";
+import { IconClock, IconPencil } from "../src/icons";
 import { runLabel, runTone, when } from "../src/routines";
 import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
@@ -45,6 +52,13 @@ export default function RoutineScreen() {
     [],
   );
   const routines = useLoad(loadRoutines, Boolean(session));
+  // Back from Edit routine: the page shows what was saved.
+  const { refresh: refreshRoutines } = routines;
+  useFocusEffect(
+    useCallback(() => {
+      void refreshRoutines();
+    }, [refreshRoutines]),
+  );
   const loadRuns = useCallback(
     () =>
       everyPage(
@@ -88,7 +102,27 @@ export default function RoutineScreen() {
         void runs.refresh();
       }}
     >
-      <Stack.Screen options={{ title: routine?.title || "Routine" }} />
+      <Stack.Screen
+        options={{
+          title: routine?.title || "Routine",
+          ...headerActions(
+            routine
+              ? [
+                  {
+                    label: "Edit routine",
+                    sf: "pencil",
+                    icon: IconPencil,
+                    onPress: () =>
+                      router.push({
+                        pathname: "/routine-form",
+                        params: { routineId: routine.id },
+                      }),
+                  },
+                ]
+              : [],
+          ),
+        }}
+      />
       <Notice
         message={action.error || routines.error || runs.error || undefined}
       />
@@ -128,8 +162,8 @@ export default function RoutineScreen() {
               label="Reports in"
               value={
                 routine.conversation.gone
-                  ? "A deleted conversation. Change it from chat."
-                  : (routine.conversation.name ?? "A conversation")
+                  ? "A deleted chat. Change it from a chat."
+                  : (routine.conversation.name ?? "A chat")
               }
             />
           </Card>

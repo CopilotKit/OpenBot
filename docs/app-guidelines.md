@@ -228,20 +228,21 @@ Native's, and builds its own only when neither fits. The development build shows
   Welcome, or swells and fades into a signed-in screen. Nothing else draws a loading screen of its
   own while the app opens.
 - **The tabs** are the signed-in app's five, in the platform's tab bar, as icons with no words:
-  Conversations, Bots (OpenBot's orb, in its own colors), Needs you (its badge counts what waits),
-  your Account, and More (Routines, the approval inbox with a count of what waits there, Memory,
+  Chats, Bots (OpenBot's orb as a flat glyph), your Account in the middle, Needs you (its badge
+  counts what waits), and More (Routines, the approval inbox with a count of what waits there, Memory,
   Skills and Connections). Each tab is a stack of its own with the native header, its title at the
   start of the bar. A conversation, a Bot and everything else opened from a tab open in the app's
   stack over the tabs, so the tab bar steps aside and the message box has the bottom to itself;
   what opens from More stays in More.
-- **A conversation** is headed as iMessage heads one: the orbs of the Bots in it and their names.
-  It reads from the top down, and opens at its newest message once it is longer than the screen.
-  Only an empty conversation shows the Bot's introduction: what it is and what it does.
+- **Chats** is the word for conversations, everywhere a person reads it.
+- **A chat** is headed as iMessage heads one: the orbs of the Bots in it and their names, and
+  tapping it opens the Bot's page, or a group's Bots. It reads from the top down, and opens at its
+  newest message once it is longer than the screen. Only an empty chat shows the Bot in the middle
+  of the page; the first message flies its orb up into the header. Two or more Bots make a group:
+  every Bot reads what is sent, and each reply carries its Bot's orb and name.
 - **Each platform's own chrome.** The chrome around a screen is each platform's, not one look on
-  both: on iOS a tab's title is drawn at the start of the bar, with search under it; on Android it
-  is Material's top app bar, its title at the start, and Conversations draws its
-  search field at the top of the list (`SearchField`), as Android's header offers search only as an
-  icon. Android's sheets draw their handle and title in the sheet (`SheetTitle`), where iOS's sheet
+  both: a tab's title sits at the start of the bar with its buttons at the end, search among them
+  (iOS 26's search button, Android's toolbar search icon). Android's sheets draw their handle and title in the sheet (`SheetTitle`), where iOS's sheet
   has its own. What is inside a screen, drawn from the scheme, is the same on both. Check a change
   on both before it lands.
 

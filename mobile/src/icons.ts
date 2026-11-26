@@ -22,12 +22,14 @@ export { default as IconCircleCheckFilled } from "@tabler/icons-react-native/Ico
 export { default as IconClock } from "@tabler/icons-react-native/IconClock";
 export { default as IconDeviceDesktop } from "@tabler/icons-react-native/IconDeviceDesktop";
 export { default as IconDots } from "@tabler/icons-react-native/IconDots";
+export { default as IconEdit } from "@tabler/icons-react-native/IconEdit";
 export { default as IconInfoCircle } from "@tabler/icons-react-native/IconInfoCircle";
 export { default as IconKey } from "@tabler/icons-react-native/IconKey";
 export { default as IconLogout } from "@tabler/icons-react-native/IconLogout";
 export { default as IconMail } from "@tabler/icons-react-native/IconMail";
 export { default as IconMessages } from "@tabler/icons-react-native/IconMessages";
 export { default as IconMicrophone } from "@tabler/icons-react-native/IconMicrophone";
+export { default as IconPencil } from "@tabler/icons-react-native/IconPencil";
 export { default as IconPlayerPause } from "@tabler/icons-react-native/IconPlayerPause";
 export { default as IconPlug } from "@tabler/icons-react-native/IconPlug";
 export { default as IconPlus } from "@tabler/icons-react-native/IconPlus";

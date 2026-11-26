@@ -46,6 +46,9 @@ Notifications.setNotificationHandler({
  * form sheet leaves its content unlaid-out on this React Native Screens). Android: Material's bottom
  * sheet, with its corners, its handle and title drawn by the screen (`SheetTitle`).
  */
+/** As tall as a sheet goes: on Android it stops short of the status bar, which it would otherwise run under. */
+const SHEET_FULL = Platform.OS === "android" ? 0.94 : 1;
+
 const SHEET =
   Platform.OS === "ios"
     ? ({ presentation: "modal", ...NO_HEADER_LEFT } as const)
@@ -135,22 +138,34 @@ function Layout() {
             <Stack.Screen
               name="new-conversation"
               options={{
-                title: "New conversation",
+                title: "New chat",
                 ...SHEET,
-                sheetAllowedDetents: [0.6, 1],
+                sheetAllowedDetents: [0.6, SHEET_FULL],
+              }}
+            />
+            <Stack.Screen
+              name="routine-form"
+              options={{
+                title: "Routine",
+                ...SHEET,
+                sheetAllowedDetents: [SHEET_FULL],
               }}
             />
             <Stack.Screen
               name="conversation-info"
               options={{
-                title: "Conversation",
+                title: "Chat",
                 ...SHEET,
-                sheetAllowedDetents: [0.6, 1],
+                sheetAllowedDetents: [0.6, SHEET_FULL],
               }}
             />
             <Stack.Screen
               name="new-bot"
-              options={{ title: "New Bot", ...SHEET, sheetAllowedDetents: [1] }}
+              options={{
+                title: "New Bot",
+                ...SHEET,
+                sheetAllowedDetents: [SHEET_FULL],
+              }}
             />
             <Stack.Screen
               name="approvals"

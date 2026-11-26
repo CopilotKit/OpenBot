@@ -13,7 +13,7 @@ const ORB_FILLED = require("../../assets/tab-orb-filled.png");
 /**
  * The signed-in app's tabs, in the platform's own tab bar: UIKit's on iOS (iOS 26's glass, with SF
  * Symbols), Material 3's navigation bar on Android (with Material Symbols), as icons with no words
- * under them: Conversations, Bots (OpenBot's orb), your account in the middle, Needs you and More. Each tab is a stack of
+ * under them: Chats, Bots (OpenBot's orb), your account in the middle, Needs you and More. Each tab is a stack of
  * its own with the native header. A conversation, a Bot and the rest of what is pushed from a tab
  * open in the app's stack over the tabs, so the tab bar steps aside for them.
  */
@@ -46,9 +46,7 @@ export default function TabsLayout() {
           }}
           md="forum"
         />
-        <NativeTabs.Trigger.Label hidden>
-          Conversations
-        </NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label hidden>Chats</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="(bots)">
         <NativeTabs.Trigger.Icon

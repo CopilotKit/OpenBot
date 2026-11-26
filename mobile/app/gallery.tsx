@@ -106,7 +106,7 @@ export default function Gallery() {
 
         <Part only={params.only} title="Text">
           <View className="gap-1">
-            <Text variant="title">Your conversations</Text>
+            <Text variant="title">Your chats</Text>
             <Text variant="heading">Settings for this Bot</Text>
             <Text variant="label">Find good pizza in San Francisco</Text>
             <Text>Your pizza analysis in San Francisco is complete.</Text>
@@ -141,7 +141,7 @@ export default function Gallery() {
           <View className="gap-2">
             <Button>New Bot</Button>
             <Button variant="outline">Sign in with Google</Button>
-            <Button variant="secondary">Older conversations</Button>
+            <Button variant="secondary">Older chats</Button>
             <Button variant="ghost">Your account</Button>
             <Button variant="danger">Delete</Button>
             <View className="flex-row gap-2">
@@ -165,7 +165,7 @@ export default function Gallery() {
           <Segmented
             label="What to show"
             options={[
-              { value: "conversations", label: "Conversations" },
+              { value: "conversations", label: "Chats" },
               { value: "settings", label: "Settings" },
             ]}
             value={segment}
@@ -245,11 +245,11 @@ export default function Gallery() {
           <SearchField
             value={query}
             onChangeText={setQuery}
-            placeholder="Search conversations"
+            placeholder="Search chats"
           />
         </Part>
 
-        <Part only={params.only} title="Conversation rows">
+        <Part only={params.only} title="Chat rows">
           <View className="-mx-4">
             <ConversationRow
               name="Pizza in San Francisco"
@@ -355,7 +355,7 @@ export default function Gallery() {
         </Part>
 
         <Part only={params.only} title="Sheet title (Android)">
-          <SheetTitle title="New conversation" />
+          <SheetTitle title="New chat" />
         </Part>
 
         <Part only={params.only} title="Message box">
@@ -371,14 +371,14 @@ export default function Gallery() {
 
         <Part only={params.only} title="Notices">
           <View className="gap-2">
-            <Notice message="Couldn't load your conversations. Try again in a moment." />
+            <Notice message="Couldn't load your chats. Try again in a moment." />
             <Notice
               tone="warning"
               message="Your sign-in needs renewing before you can do that."
             />
             <Notice
               tone="info"
-              message="This conversation has ended. Start a new one from the Bot's page."
+              message="This chat has ended. Start a new one from the Bot's page."
             />
           </View>
         </Part>
@@ -393,17 +393,17 @@ export default function Gallery() {
         <Part only={params.only} title="Empty state">
           <EmptyState
             icon={IconMessages}
-            title="No conversations yet"
+            title="No chats yet"
             description="Start one with a Bot with the + button."
-            action={<Button size="sm">New conversation</Button>}
+            action={<Button size="sm">New chat</Button>}
           />
         </Part>
       </ScrollScreen>
       <SearchBar
         value={query}
         onChange={setQuery}
-        placeholder="Search conversations"
-        newLabel="New conversation"
+        placeholder="Search chats"
+        newLabel="New chat"
         onNew={() => {}}
       />
     </View>

@@ -44,7 +44,7 @@ import {
   IconPlus,
 } from "../src/icons";
 import { openConversationWith } from "../src/open-conversation";
-import { ADD_ROUTINE_DRAFT, routineLines } from "../src/routines";
+import { routineLines } from "../src/routines";
 import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
 import { usePull } from "../src/use-pull";
@@ -132,27 +132,6 @@ export default function BotScreen() {
       await routines.refresh();
     });
   }
-  async function addRoutine() {
-    await action.run("add", async () => {
-      const page = await listConversations(ORGANIZATION_ID, { limit: 100 });
-      const conversation = page.conversations.find(
-        (item) => item.active && item.botIds.includes(botId),
-      );
-      if (!conversation)
-        throw new Error(
-          `Start a conversation with ${name || "this Bot"} first, then add a routine from it.`,
-        );
-      router.push({
-        pathname: "/conversation",
-        params: {
-          channelId: conversation.id,
-          agentId: botId,
-          draft: ADD_ROUTINE_DRAFT,
-        },
-      });
-    });
-  }
-
   const problem =
     action.error ||
     bot.error ||
@@ -188,7 +167,7 @@ export default function BotScreen() {
         <Segmented
           label={`${name || "Bot"}: what to show`}
           options={[
-            { value: "conversations", label: "Conversations" },
+            { value: "conversations", label: "Chats" },
             { value: "settings", label: "Settings" },
           ]}
           value={view}
@@ -227,7 +206,7 @@ export default function BotScreen() {
           ) : conversations.data ? (
             <EmptyState
               icon={IconMessages}
-              title="No conversations yet"
+              title="No chats yet"
               description={`Start one to give ${name || "this Bot"} some work.`}
             />
           ) : null
@@ -315,10 +294,15 @@ export default function BotScreen() {
                   title="Add routine"
                   description={
                     mine?.length === 0
-                      ? "No routines yet. Ask it in a conversation."
+                      ? "Have it do something for you on a schedule."
                       : undefined
                   }
-                  onPress={action.busy ? undefined : () => void addRoutine()}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/routine-form",
+                      params: { botId },
+                    })
+                  }
                 />
               </Rows>
             </Section>
@@ -376,7 +360,7 @@ export default function BotScreen() {
               void action.run("open", () => openConversationWith(botId))
             }
           >
-            New conversation
+            New chat
           </Button>
         </View>
       ) : null}

@@ -45,7 +45,7 @@ export default function NewConversation() {
         setError(
           failure instanceof Error
             ? failure.message
-            : "Couldn't start the conversation. Try again.",
+            : "Couldn't start the chat. Try again.",
         ),
       )
       .finally(() => setBusy(false));
@@ -65,7 +65,7 @@ export default function NewConversation() {
         ListHeaderComponent={
           <View className="gap-2 pb-2">
             <View className="px-4">
-              <SheetTitle title="New conversation" />
+              <SheetTitle title="New chat" />
               <Notice message={error || bots.error} />
             </View>
             {listed.length > 1 ? (
@@ -89,7 +89,7 @@ export default function NewConversation() {
                   <Text variant="caption" tone="muted">
                     {grouping
                       ? "Pick two or more Bots, then start"
-                      : "Several Bots on one conversation"}
+                      : "Several Bots in one chat"}
                   </Text>
                 </View>
                 {grouping ? null : (

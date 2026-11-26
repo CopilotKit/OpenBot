@@ -41,7 +41,7 @@ export default function ConversationInfo() {
   const names = members.map((bot) => bot.name).join(" & ");
   return (
     <ScrollScreen>
-      <SheetTitle title="Conversation" className="-mt-2" />
+      <SheetTitle title="Chat" className="-mt-2" />
       <Notice message={conversation.error || bots.error} />
       <View className="items-center gap-3">
         <View className="flex-row">

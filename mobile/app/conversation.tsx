@@ -374,8 +374,8 @@ export default function ConversationScreen() {
                 </Text>
                 {isGroup ? (
                   <Text tone="muted" className="text-center">
-                    A group conversation: every Bot here reads what you send,
-                    and each answers in turn.
+                    A group chat: every Bot here reads what you send, and each
+                    answers in turn.
                   </Text>
                 ) : current.about ? (
                   <Text tone="muted" className="text-center">
@@ -394,7 +394,7 @@ export default function ConversationScreen() {
             {conversation && !conversation.active ? (
               <Notice
                 tone="info"
-                message="This conversation has ended. Start a new one from the Bot's page."
+                message="This chat has ended. Start a new one from the Bot's page."
               />
             ) : null}
             <Composer

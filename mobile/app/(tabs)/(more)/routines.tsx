@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, Stack, useFocusEffect } from "expo-router";
 import { useCallback, useMemo } from "react";
 import {
   everyBot,
@@ -22,7 +22,8 @@ import {
   Section,
   Toggle,
 } from "../../../src/components";
-import { IconClock } from "../../../src/icons";
+import { headerActions } from "../../../src/header";
+import { IconClock, IconPlus } from "../../../src/icons";
 import { routineLines } from "../../../src/routines";
 import { useAction } from "../../../src/use-action";
 import { useLoad } from "../../../src/use-load";
@@ -44,6 +45,13 @@ export default function Routines() {
   const loadBots = useCallback(() => everyBot(), []);
   const bots = useLoad(loadBots, Boolean(session));
   const pull = usePull(routines.refresh, bots.refresh);
+  // Back from New routine or a routine's page: the list says what changed.
+  const { refresh: refreshRoutines } = routines;
+  useFocusEffect(
+    useCallback(() => {
+      void refreshRoutines();
+    }, [refreshRoutines]),
+  );
   const byBot = useMemo(() => {
     const grouped = new Map<string, Routine[]>();
     for (const routine of routines.data ?? [])
@@ -64,6 +72,16 @@ export default function Routines() {
   }
   return (
     <ScrollScreen refreshing={pull.refreshing} onRefresh={pull.onRefresh}>
+      <Stack.Screen
+        options={headerActions([
+          {
+            label: "New routine",
+            sf: "plus",
+            icon: IconPlus,
+            onPress: () => router.push("/routine-form"),
+          },
+        ])}
+      />
       <Notice message={action.error || routines.error || bots.error} />
       {byBot.map(([botId, list]) => {
         const bot = bots.data?.find((item) => item.id === botId);
@@ -111,7 +129,7 @@ export default function Routines() {
         <EmptyState
           icon={IconClock}
           title="No routines yet"
-          description="Ask a Bot in a conversation to do something on a schedule, and it shows up here."
+          description="Ask a Bot in a chat to do something on a schedule, and it shows up here."
         />
       ) : null}
     </ScrollScreen>
