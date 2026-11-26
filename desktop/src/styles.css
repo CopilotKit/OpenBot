@@ -3070,6 +3070,13 @@ main > .rail + .sheet > * {
   gap: 2px;
 }
 
+/* As for setup's sections, the choices scroll before downloads leave the sidebar's foot. */
+.rail > fieldset.picker.hosting {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .rail fieldset.picker.hosting .tile,
 .rail .tile-group {
   grid-template-columns: 18px minmax(0, 1fr);

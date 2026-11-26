@@ -77,6 +77,7 @@ type Browser = {
   newPage(options: {
     viewport: { width: number; height: number };
     colorScheme?: "light" | "dark";
+    userAgent?: string;
   }): Promise<Page>;
   close(): Promise<void>;
 };
@@ -1346,7 +1347,35 @@ describe.skipIf(!asked)("approved layout: Cloud hosting narrow", () => {
       };
       try {
         await routeCalendar(page);
+        // Settling the startup animation does not mean the saved connection has answered.
+        // Hold it until that state is drawn, as on a busy native shell.
+        await page.addInitScript(`
+          let control;
+          Object.defineProperty(globalThis, "__workbench", {
+            configurable: true,
+            get: () => control,
+            set: (next) => {
+              control = next;
+              next.setAnswer("connection", { mode: "never" });
+            },
+          });
+        `);
         await open(page, "", cloudBuilt);
+        await page
+          .getByText("Checking your saved setup…", { exact: true })
+          .waitFor();
+        await settled(page);
+        expect(await page.locator(".hosting input").count()).toBe(0);
+        await page.evaluate(() =>
+          globalThis.__workbench!.setAnswer("connection", {
+            mode: "value",
+            value: null,
+          }),
+        );
+        await page
+          .getByRole("heading", { name: "Set up OpenBot", exact: true })
+          .waitFor();
+        await page.getByRole("radio", { name: /^OpenBot Cloud/ }).waitFor();
         await settled(page);
         expect(
           await page.evaluate(() =>
@@ -1395,16 +1424,28 @@ describe.skipIf(!asked)("approved layout: Cloud hosting narrow", () => {
 });
 
 describe.skipIf(!asked)("the first screen while its downloads run", () => {
-  for (const [width, height] of [
+  const platforms = [
+    {
+      platform: "macos",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    },
+    { platform: "linux", userAgent: "Mozilla/5.0 (X11; Linux x86_64)" },
+  ];
+  const sizes = [
     [1000, 800],
     [1000, 760],
     [720, 560],
-  ] as const) {
+  ] as const;
+  const windows = sizes.flatMap(([width, height]) =>
+    platforms.map((platform) => ({ width, height, ...platform })),
+  );
+  for (const { width, height, platform, userAgent } of windows) {
     for (const colorScheme of ["light", "dark"] as const)
-      test(`at ${width}x${height}, downloads stay in the sidebar foot and Install holds its place (${colorScheme})`, async () => {
+      test(`at ${width}x${height}, downloads stay in the sidebar foot and Install holds its place (${platform}, ${colorScheme})`, async () => {
         const page = await browser.newPage({
           viewport: { width, height },
           colorScheme,
+          userAgent,
         });
         try {
           await open(page);
@@ -1488,7 +1529,7 @@ describe.skipIf(!asked)("the first screen while its downloads run", () => {
             seen.push([state, await usage()]);
             if (state === "downloading" && process.env.OPENBOT_APP_SHOTS)
               await page.screenshot({
-                path: `${process.env.OPENBOT_APP_SHOTS}/welcome-download-${width}x${height}-${colorScheme}.png`,
+                path: `${process.env.OPENBOT_APP_SHOTS}/welcome-download-${width}x${height}-${platform}-${colorScheme}.png`,
               });
           }
           const first = seen[0]?.[1];
@@ -1529,7 +1570,7 @@ describe.skipIf(!asked)("the first screen while its downloads run", () => {
           }
           if (process.env.OPENBOT_APP_SHOTS)
             await page.screenshot({
-              path: `${process.env.OPENBOT_APP_SHOTS}/welcome-move-${width}x${height}-${colorScheme}.png`,
+              path: `${process.env.OPENBOT_APP_SHOTS}/welcome-move-${width}x${height}-${platform}-${colorScheme}.png`,
             });
           await move.click();
           await page
