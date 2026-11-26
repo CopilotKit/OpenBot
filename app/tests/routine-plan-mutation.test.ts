@@ -33,27 +33,33 @@ function stub(refuse: Record<string, { status: number; body: unknown }> = {}) {
       ? [refusal.status, refusal.body]
       : method === "POST" && path === "/api/v2/organizations/default/goals"
         ? [200, { goal: { id: "g1", title: "Ship it" } }]
-        : method === "POST" && path === CONVERSATIONS_PATH
-          ? // Starting a conversation answers 201 with the conversation it made.
-            [
-              201,
-              {
-                conversation: {
-                  id: "c9",
-                  name: "Assistant",
-                  botIds: sent.botIds,
-                  threadId: "t9",
-                  active: true,
-                  lastMessageAt: null,
-                },
-              },
-            ]
-          : method === "PATCH" && path === NEW
-            ? // Naming it answers with the name it now has.
-              [200, { summary: sent.title }]
-            : method === "DELETE" && path === NEW
-              ? [204, undefined]
-              : [200, { ok: true }];
+        : method === "POST" && path === "/api/v2/organizations/default/routines"
+          ? [200, { routine: { id: "r1" } }]
+          : method === "POST" &&
+              path ===
+                "/api/v2/organizations/default/check-ins?refuseExisting=true"
+            ? [200, { checkIn: { id: "ci1" } }]
+            : method === "POST" && path === CONVERSATIONS_PATH
+              ? // Starting a conversation answers 201 with the conversation it made.
+                [
+                  201,
+                  {
+                    conversation: {
+                      id: "c9",
+                      name: "Assistant",
+                      botIds: sent.botIds,
+                      threadId: "t9",
+                      active: true,
+                      lastMessageAt: null,
+                    },
+                  },
+                ]
+              : method === "PATCH" && path === NEW
+                ? // Naming it answers with the name it now has.
+                  [200, { summary: sent.title }]
+                : method === "DELETE" && path === NEW
+                  ? [204, undefined]
+                  : [200, { ok: true }];
     return new Response(body === undefined ? null : JSON.stringify(body), {
       status,
       headers: { "content-type": "application/json" },
@@ -82,10 +88,16 @@ async function run(plan: RoutinePlan) {
   const result = await options
     .mutationFn?.(plan, mutationContext(queryClient))
     .then(
-      () => ({ error: undefined as Error | undefined }),
-      (error: Error) => ({ error }),
+      (made) => ({ made, error: undefined as Error | undefined }),
+      (error: Error) => ({ made: undefined, error }),
     );
-  return { options, queryClient, invalidated, error: result?.error };
+  return {
+    options,
+    queryClient,
+    invalidated,
+    made: result?.made,
+    error: result?.error,
+  };
 }
 
 const cron = "0 9 * * 1";
@@ -148,6 +160,38 @@ test("a routine: one POST /api/v2/organizations/default/routines", async () => {
     cron,
     timezone,
   });
+});
+
+test("a routine resolves to the id the server gave it", async () => {
+  stub();
+  const { made, error } = await run({
+    kind: "routine",
+    routine: {
+      botId: "a1",
+      conversationId: "c1",
+      instruction: "Send the digest",
+      cron,
+      timezone,
+    },
+  });
+  expect(error).toBeUndefined();
+  expect(made).toEqual({ kind: "routine", id: "r1" });
+});
+
+test("a goal resolves to its id, schedule and first run included", async () => {
+  stub();
+  const { made, error } = await run(
+    goalPlan("c1", { schedule: true, runNow: true }),
+  );
+  expect(error).toBeUndefined();
+  expect(made).toEqual({ kind: "goal", id: "g1" });
+});
+
+test("a check-in resolves to the id the server gave it", async () => {
+  stub();
+  const { made, error } = await run(checkInPlan("c1"));
+  expect(error).toBeUndefined();
+  expect(made).toEqual({ kind: "check-in", id: "ci1" });
 });
 
 test("a goal with a schedule: the goal, then a routine that names it", async () => {

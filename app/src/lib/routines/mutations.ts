@@ -71,6 +71,12 @@ function createRoutine(body: CreateRoutineRequest) {
   });
 }
 
+/** What a create made: the kind of thing and its id, for a screen that wants to show or open it. */
+export type MadeRoutine = {
+  kind: "routine" | "goal" | "check-in";
+  id: string;
+};
+
 /** A write was saved or may have been saved: the screen must not offer to create it again. */
 export class SavedButRefused extends Error {}
 
@@ -81,7 +87,7 @@ export class SavedButRefused extends Error {}
  * after `name`. `write` gets the conversation to use and a `saved` callback it calls once the write has
  * landed. If the server refuses `write` before `saved` was called, the started conversation is removed (best
  * effort) and the error is rethrown: an empty conversation nobody asked for is not what a refused
- * form should leave behind.
+ * form should leave behind. It resolves to whatever `write` resolves to.
  */
 async function withConversation<T>(
   botId: string,
@@ -158,42 +164,42 @@ async function withConversation<T>(
  */
 export function createFromPlanMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (plan: RoutinePlan): Promise<void> => {
+    mutationFn: async (plan: RoutinePlan): Promise<MadeRoutine> => {
       if (plan.kind === "routine") {
         const { routine } = plan;
-        await withConversation(
+        return withConversation<MadeRoutine>(
           routine.botId,
           routine.conversationId,
           routine.title?.trim() || routine.instruction.trim(),
           async (conversationId, saved) => {
-            await createRoutine({ ...routine, conversationId });
+            const made = await createRoutine({ ...routine, conversationId });
             saved();
+            return { kind: "routine", id: made.routine.id };
           },
         );
-        return;
       }
 
       if (plan.kind === "check-in") {
         const { checkIn } = plan;
-        await withConversation(
+        return withConversation<MadeRoutine>(
           checkIn.botId,
           checkIn.conversationId,
           checkIn.subject.trim() || checkIn.focus.trim(),
           async (conversationId, saved) => {
             // A new one: the server refuses one the Bot already has, should this screen's list of
             // them be out of date, as Name does while it is typed.
-            await createProactiveSetting(
+            const made = await createProactiveSetting(
               { ...checkIn, conversationId },
               { refuseExisting: true },
             );
             saved();
+            return { kind: "check-in", id: made.checkIn.id };
           },
         );
-        return;
       }
 
       const { goal: input, schedule, runNow } = plan;
-      await withConversation(
+      return withConversation<MadeRoutine>(
         input.botId,
         input.conversationId,
         input.title,
@@ -279,6 +285,7 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
               );
             }
           }
+          return { kind: "goal", id };
         },
       );
     },
