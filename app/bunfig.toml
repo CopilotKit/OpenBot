@@ -10,4 +10,8 @@
 #
 # tests/bunfig-preload.test.ts at the repository root fails if this list stops agreeing with the
 # root one.
-preload = ["../tests/support/network-guard.ts", "./tests/preload.ts"]
+preload = [
+  "../tests/support/network-guard.ts",
+  "../tests/support/one-react.ts",
+  "./tests/preload.ts",
+]

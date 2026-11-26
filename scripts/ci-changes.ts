@@ -62,9 +62,20 @@ export const isDocs = matcher(
 /** The TypeScript LangGraph engine's tests are Node's; bunfig.toml keeps the suite out of there. */
 const inLanggraphTs = matcher("agent-langgraph-ts/**");
 
+/** Dev-tool inputs do not schedule production checks; fake-native source still can. */
+const manualOnly = matcher(
+  "app/workbench/**",
+  "desktop/workbench/**",
+  "**/vite.workbench.config.ts",
+  "**/fakeNative/**/*.test.ts",
+  "**/fakeNative/**/*.test.tsx",
+);
+
 /** A test file the root suite runs (`bun test`). */
 export const isBunTest = (path: string) =>
-  matcher("**/*.test.ts", "**/*.test.tsx")(path) && !inLanggraphTs(path);
+  matcher("**/*.test.ts", "**/*.test.tsx")(path) &&
+  !inLanggraphTs(path) &&
+  !manualOnly(path);
 
 /** A Python harness's pytest file. */
 export const isPythonTest = matcher("agent-*/tests/**/*.py");
@@ -80,7 +91,8 @@ export const isTestFile = (path: string) =>
   )(path);
 
 /** Neither docs nor a test: source, configuration, lockfiles, fixtures, workflows. */
-export const isCode = (path: string) => !isDocs(path) && !isTestFile(path);
+export const isCode = (path: string) =>
+  !isDocs(path) && !isTestFile(path) && !manualOnly(path);
 
 /** A change to how CI itself runs, which every job of that workflow reads. */
 const ciInputs = matcher(
@@ -420,7 +432,9 @@ export function decide(
       run[rule.output] = true;
       continue;
     }
-    const read = changes.filter((change) => rule.reads(change.path));
+    const read = changes.filter(
+      (change) => !manualOnly(change.path) && rule.reads(change.path),
+    );
     run[rule.output] = read.length > 0;
     reasons.push(
       read.length > 0
@@ -458,7 +472,9 @@ function decideSuite(
   const candidates = new Set<string>();
   const add = (changes: Change[] | undefined, browser: boolean) => {
     if (!changes) return;
-    const named = changes.map((change) => change.path);
+    const named = changes
+      .filter((change) => !manualOnly(change.path))
+      .map((change) => change.path);
     const files = [
       ...changes
         .filter((change) => !change.deleted && isBunTest(change.path))
@@ -466,7 +482,8 @@ function decideSuite(
       ...deps.mentions(named),
     ];
     for (const file of files) {
-      if (isBrowserTest(file, deps) === browser) candidates.add(file);
+      if (isBunTest(file) && isBrowserTest(file, deps) === browser)
+        candidates.add(file);
     }
   };
   if (!run.suite) add(suiteChanges, false);
@@ -534,7 +551,10 @@ function releaseDecision(
   };
   if (workflow === "ci") {
     run.static = true;
-    decision.tests = deps.mentions(RELEASE_FILES_READ_BY_TESTS).sort();
+    decision.tests = deps
+      .mentions(RELEASE_FILES_READ_BY_TESTS)
+      .filter(isBunTest)
+      .sort();
     run.partial = decision.tests.length > 0;
     decision.reasons.push(
       `tests (changed files): ${decision.tests.join(", ")}.`,
