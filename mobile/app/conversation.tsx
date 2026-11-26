@@ -7,7 +7,6 @@ import {
   useFocusEffect,
   useLocalSearchParams,
 } from "expo-router";
-import { Button } from "heroui-native/button";
 import {
   type RefObject,
   useCallback,
@@ -27,20 +26,33 @@ import Animated, {
 import {
   type ConversationMessage,
   everyBot,
+  loadApprovalInbox,
+  ME,
   ORGANIZATION_ID,
 } from "../src/api";
+import { decideApproval } from "../src/api/generated/approvals/approvals";
 import {
   getConversation,
   listConversationMessages,
   markConversationRead,
   sendConversationMessage,
 } from "../src/api/generated/conversations/conversations";
+import type { Approval } from "../src/api/generated/model";
+import {
+  approvalChange,
+  approvalChoices,
+  approvalDetails,
+  approvalTitle,
+  DECISION_LABELS,
+  type PhoneDecision,
+} from "../src/approval-words";
 import { authClient } from "../src/auth";
 import { useChatFiles, useChatModel } from "../src/chat-extras";
 import {
   BotOrb,
   Composer,
   cn,
+  DecisionCard,
   Icon,
   KeyboardBar,
   Message,
@@ -49,9 +61,15 @@ import {
   MessageWorking,
   Notice,
   Screen,
+  StepsLine,
   Text,
 } from "../src/components";
-import { IconAlertCircle, IconChevronRight, IconTool } from "../src/icons";
+import {
+  IconAlertCircle,
+  IconChevronRight,
+  IconClock,
+  IconTool,
+} from "../src/icons";
 import { conversationOf, showConversation } from "../src/on-screen";
 import { measure, useOrbFlight, type ViewHandle } from "../src/orb-flight";
 import { useLoad } from "../src/use-load";
@@ -62,7 +80,29 @@ const PAUSE_MS = 30 * 60 * 1000;
 
 type Item =
   | { kind: "day"; key: string; label: string }
-  | { kind: "message"; key: string; message: ConversationMessage };
+  | { kind: "message"; key: string; message: ConversationMessage }
+  | { kind: "steps"; key: string; steps: string[] }
+  | { kind: "approval"; key: string; request: Approval };
+
+/**
+ * A step a Bot took rather than something it said: a tool's own line, or a finished reply that only
+ * called tools. A run of them folds into one line, as the web app's transcript folds them.
+ */
+function stepWords(message: ConversationMessage): string[] | null {
+  if (message.role === "tool") return [message.text || "Used a tool."];
+  if (
+    message.role === "bot" &&
+    !message.text &&
+    message.status !== "queued" &&
+    message.status !== "running" &&
+    message.status !== "waiting" &&
+    message.status !== "failed"
+  )
+    return message.toolCalls && message.toolCalls > 1
+      ? [`Used ${message.toolCalls} tools.`]
+      : ["Used a tool."];
+  return null;
+}
 
 /**
  * A conversation: the Bot at the top, what was said, and the message box. The person's messages
@@ -194,6 +234,37 @@ export default function ConversationScreen() {
   const replyUnderway = (history.data?.messages ?? []).some(
     (message) => message.status === "queued" || message.status === "running",
   );
+  // What a Bot asked the person to approve in this chat, decided right here as on the web app.
+  const loadInbox = useCallback(() => loadApprovalInbox(), []);
+  const inbox = useLoad(loadInbox, Boolean(session));
+  const threadId = conversation?.threadId;
+  const waitingHere = useMemo(
+    () =>
+      (inbox.data?.requests ?? []).filter(
+        (request) =>
+          request.status === "pending" &&
+          Boolean(threadId) &&
+          request.action.threadId === threadId,
+      ),
+    [inbox.data, threadId],
+  );
+  const [deciding, setDeciding] = useState(false);
+  async function decide(id: string, decision: PhoneDecision) {
+    setDeciding(true);
+    setError("");
+    try {
+      await decideApproval(ORGANIZATION_ID, ME, id, { decision });
+      await Promise.all([inbox.refresh(), history.refresh()]);
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : "Couldn't save your decision. Try again.",
+      );
+    } finally {
+      setDeciding(false);
+    }
+  }
   // Newest first, as the API answers and as an inverted list draws from the bottom up.
   const items = useMemo<Item[]>(() => {
     const oldestFirst = (history.data?.messages ?? []).slice().reverse();
@@ -208,10 +279,18 @@ export default function ConversationScreen() {
           label: dayAndTime(message.createdAt),
         });
       if (!Number.isNaN(at)) previous = at;
-      out.push({ kind: "message", key: message.id, message });
+      const steps = stepWords(message);
+      const last = out[out.length - 1];
+      if (steps && last?.kind === "steps") last.steps.push(...steps);
+      else if (steps)
+        out.push({ kind: "steps", key: `steps:${message.id}`, steps });
+      else out.push({ kind: "message", key: message.id, message });
     }
+    // What a Bot here is waiting on the person to decide sits at the end, where they are reading.
+    for (const request of waitingHere)
+      out.push({ kind: "approval", key: `approval:${request.id}`, request });
     return out.reverse();
-  }, [history.data]);
+  }, [history.data, waitingHere]);
   // A conversation with something in it shows who it is with in the header from the start.
   useEffect(() => {
     if (items.length > 0 && !flying) setRevealed(true);
@@ -316,7 +395,7 @@ export default function ConversationScreen() {
             keyboardShouldPersistTaps="handled"
             // Drawn bottom up, so a long conversation opens at its newest message; a short one is pushed to the top
             // rather than hanging at the bottom over an empty page.
-            contentContainerClassName="grow justify-end gap-3 px-4 py-4"
+            contentContainerClassName="grow justify-end gap-5 px-4 py-5"
             ListHeaderComponent={
               sending ? (
                 <Message from="person" text={sending} pending />
@@ -332,11 +411,26 @@ export default function ConversationScreen() {
             renderItem={({ item }) =>
               item.kind === "day" ? (
                 <MessageDay label={item.label} />
+              ) : item.kind === "steps" ? (
+                <StepsLine steps={item.steps} />
+              ) : item.kind === "approval" ? (
+                <ApprovalHere
+                  request={item.request}
+                  botName={
+                    botsHere.find((bot) => bot.id === item.request.action.botId)
+                      ?.name
+                  }
+                  busy={deciding}
+                  onDecide={(decision) =>
+                    void decide(item.request.id, decision)
+                  }
+                />
               ) : (
                 <MessageLine
                   message={item.message}
                   bot={speakerOf(item.message)}
                   named={isGroup}
+                  decidingHere={waitingHere.length > 0}
                   onReview={() =>
                     router.push({
                       pathname: "/approvals",
@@ -447,12 +541,15 @@ function MessageLine({
   message,
   bot,
   named,
+  decidingHere,
   onReview,
 }: {
   message: ConversationMessage;
   bot: Speaker;
   /** In a group, each Bot's reply carries its orb and name, as the web app's group conversation does. */
   named?: boolean;
+  /** What it waits on is decided in this chat, on its card: the reply only says it is waiting. */
+  decidingHere?: boolean;
   /** Opens what the Bot is waiting on: the approval inbox, where its request or question is. */
   onReview: () => void;
 }) {
@@ -488,24 +585,32 @@ function MessageLine({
     ) : message.toolCalls ? (
       <ToolLine count={message.toolCalls} />
     ) : null;
+    // Waiting on the person: one quiet line, as the web app says it; the decision's card is below it in this
+    // chat, or, when it isn't one this chat can answer, a link to where it is.
     if (message.status === "waiting")
       return (
         <View className="gap-2">
           {said}
-          <Notice
-            tone="warning"
-            message={message.reason || `${bot.name} is waiting for you.`}
-            action={
-              <Button
-                size="sm"
-                variant="outline"
-                className="self-start"
-                onPress={onReview}
-              >
-                Review
-              </Button>
-            }
-          />
+          <View className="flex-row items-start gap-2">
+            <View className="pt-0.5">
+              <Icon icon={IconClock} size={14} color="accent-muted" />
+            </View>
+            <Text tone="muted" className="flex-1 text-sm leading-5">
+              {message.reason || `${bot.name} is waiting for you.`}
+              {decidingHere ? null : (
+                <>
+                  {"  "}
+                  <Text
+                    accessibilityRole="link"
+                    onPress={onReview}
+                    className="font-medium text-foreground underline"
+                  >
+                    Review
+                  </Text>
+                </>
+              )}
+            </Text>
+          </View>
         </View>
       );
     if (message.status === "failed" && !message.declined)
@@ -530,6 +635,49 @@ function MessageLine({
       <ToolLine count={0} />
     );
   return message.text ? <MessageEvent text={message.text} /> : null;
+}
+
+/**
+ * A Bot's request to act, waiting in this chat, on the web app's decision card: what it wants to do,
+ * why it asks, what it would send, and the answers the server takes.
+ */
+function ApprovalHere({
+  request,
+  botName,
+  busy,
+  onDecide,
+}: {
+  request: Approval;
+  botName?: string;
+  busy: boolean;
+  onDecide: (decision: PhoneDecision) => void;
+}) {
+  const change = approvalChange(request.action.target);
+  const choices = approvalChoices(request.action);
+  const standing = choices.find((choice) => choice === "allow_always");
+  return (
+    <DecisionCard
+      title={approvalTitle(request.action, botName)}
+      caption={request.action.policy?.reason ?? change?.summary}
+      details={change ? [] : approvalDetails(request.action.args)}
+      busy={busy}
+      choices={choices
+        .filter((choice) => choice !== "allow_always")
+        .map((choice) => ({
+          label: DECISION_LABELS[choice],
+          primary: choice !== "deny",
+          onPress: () => onDecide(choice),
+        }))}
+      standing={
+        standing
+          ? {
+              label: DECISION_LABELS[standing],
+              onPress: () => onDecide(standing),
+            }
+          : undefined
+      }
+    />
+  );
 }
 
 /** A Bot's turn that used tools and said nothing. */

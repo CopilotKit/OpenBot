@@ -38,3 +38,4 @@ export { Segmented } from "./segmented";
 export { SheetTitle } from "./sheet-title";
 export { Text, type TextVariant } from "./text";
 export { Toggle } from "./toggle";
+export { DecisionCard, StepsLine } from "./transcript";
