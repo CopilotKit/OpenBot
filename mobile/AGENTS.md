@@ -10,6 +10,11 @@ with the color scheme every OpenBot app shares: its colors come from `src/scheme
 `tokens/src/scheme.ts` by `bun run tokens:generate`, never a value of its own. Before you add
 a screen or a feature, read [docs/app-guidelines.md](../docs/app-guidelines.md).
 
+For now, a build that names the web app (`EXPO_PUBLIC_WEB_URL`) shows it in a web view and keeps
+native only the launch, push notifications and the way out of the page (`src/web/`). Before you
+change `src/web/`, read "The web view" in [README.md](README.md): the page holds the sign-in, and
+nothing is sold in the app.
+
 Released versions of OpenBot Mobile stay on people's phones for months. The server serves every app released in the
 last 12 months, and this app works against any server released in the last 12 months. So this app
 is a tolerant reader: it ignores a field it doesn't know, reads an enum value it doesn't know as

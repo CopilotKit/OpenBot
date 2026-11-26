@@ -36,6 +36,53 @@ The app is on Expo SDK 58, which builds with Xcode 27.
 
 Add a dependency with `npx expo install <name>`. It picks the version this Expo SDK was built with.
 
+## The web view
+
+For now OpenBot Mobile is the web app in a web view. The web app changes every week, and the web
+view has each change the day it ships. The app keeps native what a page can't do.
+
+`EXPO_PUBLIC_WEB_URL` names the web app: `https://my.open.bot` for OpenBot Cloud. It is not the
+API's address. `eas.json` sets it for every build, and `.env` sets it on your machine. Leave it
+empty in `.env`, and the app draws its own screens (`app/`), which stay in the repository.
+
+The code is in `src/web/`:
+
+| File | What it does |
+| --- | --- |
+| `shell.tsx` | The screen: the web view, the launch cover over it, and the notice when OpenBot can't be reached. |
+| `navigation.ts` | Where the web view may go, and the page a notification opens. |
+| `bridge.ts` | The script the app puts in the web app's page, and the messages the page sends back. |
+| `push.ts` | The phone's part of push notifications: asking the person, and the push token. |
+
+**The page holds the sign-in.** The person signs in on the web app's own sign-in page, inside the
+web view, and the page's cookies keep them signed in. The app has no sign-in of its own there. So
+the script in the page does what needs a sign-in: it says who is signed in, registers the phone for
+push notifications, and takes the phone off again before a sign-out is sent. It runs only on the
+web app's address, and it calls only requests the API already has.
+
+**Nothing is sold in the app.** The App Store and Google Play don't allow a plan to be paid for
+through a web page in an app, or a link to one. `navigation.ts` lists the pages that add a card or a
+seat. The app never opens them, and the script hides the links to them. Add a page there when the
+web app gets another one that takes a payment.
+
+**A link that leaves OpenBot opens in the phone's browser.** That is a link the page opens in a new
+window, a mail address or a phone number. The sign-in's own pages stay in the web view, because the
+sign-in has to come back to it.
+
+The web view sends `OpenBotMobile/<release>` at the end of its browser name, so the web app and the
+server can tell it from a browser.
+
+`tests/web-navigation.test.ts` and `tests/web-bridge.test.ts` hold the rules. The second runs the
+script in a page made of fakes. The first also fails when the web app renames a page that a
+notification opens.
+
+Not done yet:
+
+- **The app's own sign-in for the web view.** OpenBot gives the app a token, and a token is not a
+  session, so the app can't sign the web view in. Until the server can hand a session to the web
+  view, Google's sign-in may refuse to finish there: Google doesn't allow its sign-in in a web view.
+- **A file a Bot sends.** The web view shows it where it can, and doesn't save it to the phone.
+
 ## Checks
 
 ```sh

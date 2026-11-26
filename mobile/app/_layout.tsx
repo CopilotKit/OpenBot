@@ -25,6 +25,8 @@ import { renewPush } from "../src/notifications";
 import { aboutShownConversation } from "../src/on-screen";
 import { onSessionRefused } from "../src/session-refused";
 import { useVersionVerdict, VersionGate } from "../src/version-gate";
+import { WEB_ADDRESS } from "../src/web/configured";
+import { WebShell } from "../src/web/shell";
 
 Notifications.setNotificationHandler({
   // One about the conversation on screen shows nothing: the screen has it, and refreshes to show it.
@@ -163,7 +165,14 @@ function Layout() {
   );
 }
 
-const SecuredLayout = withSecurityFloor(Layout);
+/**
+ * A build that names the web app (EXPO_PUBLIC_WEB_URL) is that web app in a web view, with the phone's own parts
+ * kept native (../src/web/shell.tsx). A build that names none draws the screens above.
+ */
+const web = WEB_ADDRESS;
+const SecuredLayout = withSecurityFloor(
+  web ? () => <WebShell address={web} /> : Layout,
+);
 
 export default function RootLayout() {
   // Inter, the web app's face, at the four weights the type scale uses (global.css names them).
