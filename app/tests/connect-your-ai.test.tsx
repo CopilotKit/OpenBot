@@ -2996,7 +2996,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 90_000);
 
   /*
-   * Settings → Providers → Connect another AI, as it was reported on 1.2.0: xAI's sign-in asked for
+   * Settings → AI providers → Connect another AI, as it was reported on 1.2.0: xAI's sign-in asked for
    * a model name typed in raw, and once connected the page went on to xAI's own page. Now nothing is
    * typed, and Connect goes back to the list with xAI checked, as onboarding's Connect your AI does.
    */
@@ -3061,7 +3061,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               { provider: "xai", login: "oauth", model: "grok-4.7" },
             ]);
 
-            // Nothing to cancel: Done goes back to Providers, xAI listed there.
+            // Nothing to cancel: Done goes back to AI providers, xAI listed there.
             expect(
               await chooser.getByRole("button", { name: "Cancel" }).count(),
             ).toBe(0);

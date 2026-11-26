@@ -1,5 +1,5 @@
 /**
- * Settings → Providers: several AI connections at once (plans/multiple-ai-connections-spec.md,
+ * Settings → AI providers: several AI connections at once (plans/multiple-ai-connections-spec.md,
  * step 2), each on a page of its own (`openbot-screen-layout`, Screens, Not Dialogs).
  *
  * The list (the organization's, and a person's own on OpenBot Cloud) has one row per connection,
@@ -274,7 +274,7 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-/** The Providers screens at `path`, as Settings routes them. */
+/** The AI providers screens at `path`, as Settings routes them. */
 function renderAt(path: string) {
   const root = createRootRoute({ component: Outlet });
   const list = createRoute({
@@ -527,7 +527,7 @@ test("Connect another AI is a page: it marks connected providers and posts conne
   expect(at(router)).toBe("/settings/providers/new");
   expect(within(openai).getByText("Uses your OpenAI API key.")).toBeDefined();
   expect(view.getByRole("status").textContent).toBe("OpenAI is connected.");
-  // Nothing to cancel now: Done goes back to Providers, where it is listed.
+  // Nothing to cancel now: Done goes back to AI providers, where it is listed.
   expect(view.queryByRole("button", { name: "Cancel" })).toBeNull();
   await user.click(view.getByRole("button", { name: "Done" }));
   await waitFor(() => expect(at(router)).toBe("/settings/providers"));
@@ -809,7 +809,7 @@ test("disconnecting the default with exactly one other left removes it alone, an
   );
 });
 
-test("after a disconnect the page goes back to Providers, not to the provider it just disconnected", async () => {
+test("after a disconnect the page goes back to AI providers, not to the provider it just disconnected", async () => {
   orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
   const user = userEvent.setup({ document });
   const { view, router } = renderAt("/settings/providers/openai");

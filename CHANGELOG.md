@@ -20,6 +20,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   to the provider list with a check on what was connected, as onboarding's Connect your AI does. It
   no longer opens the new connection's own page. Done leaves the list. Changing a connection still
   goes back to that connection's page.
+- **Settings and Admin call the place you connect your AI "AI providers".** It was "Providers",
+  which didn't say what it provides, and people looking for where to set up their AI didn't find
+  it. Its pages, their Back links and the model picker's provider list say the same. The addresses
+  stay `/settings/providers` and `/admin/providers`.
 
 ## 1.2.0
 

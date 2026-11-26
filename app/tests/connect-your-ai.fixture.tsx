@@ -33,7 +33,7 @@ import { Route as OnboardingRoute } from "@/routes/_authed/onboarding";
 import { Route as SettingsProvidersRoute } from "@/routes/_authed/settings/providers";
 
 /**
- * The signed-in gate, onboarding and Settings → Providers, for connect-your-ai.test.tsx to bundle and
+ * The signed-in gate, onboarding and Settings → AI providers, for connect-your-ai.test.tsx to bundle and
  * load in a browser. The gate is `_authed`'s own `beforeLoad`, and onboarding is its own route, so
  * where a person is sent is what the app does. The app behind the gate is a page that says Home:
  * this is about getting there. What the server answers comes from the test's routes.
@@ -132,7 +132,7 @@ const settingsRoute = createRoute({
 });
 
 /**
- * Settings → Providers' own screens (provider-pages.tsx): Connect another AI, a provider's page and
+ * Settings → AI providers' own screens (provider-pages.tsx): Connect another AI, a provider's page and
  * its Change, at the addresses the app gives them, reading `owner=personal` as the app does.
  */
 const connectRoute = createRoute({

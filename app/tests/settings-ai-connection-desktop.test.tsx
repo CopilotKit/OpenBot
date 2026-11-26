@@ -1,5 +1,5 @@
 /**
- * Settings → Providers inside OpenBot Desktop: a plan or a sign-in changes the connection
+ * Settings → AI providers inside OpenBot Desktop: a plan or a sign-in changes the connection
  * with OpenBot running.
  *
  * Before, Change there only asked Desktop to stop OpenBot and reopen its setup window

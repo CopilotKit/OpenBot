@@ -1,10 +1,10 @@
 /**
- * Settings → Providers inside OpenBot Desktop, from the report: somebody on OpenBot Desktop 1.0.0 could not find
+ * Settings → AI providers inside OpenBot Desktop, from the report: somebody on OpenBot Desktop 1.0.0 could not find
  * which AI provider they had signed in with, or change it.
  *
  * These tests stand in for the IPC Tauri injects into the Desktop window, answering as the shell's
  * `openbot-desktop` plugin does (desktop/src-tauri/src/desktop_page.rs: `ai_connection` and
- * `change_ai_connection`). The Providers page, its queries and its mutation are the real ones.
+ * `change_ai_connection`). The AI providers page, its queries and its mutation are the real ones.
  */
 import {
   afterAll,
@@ -78,7 +78,7 @@ function renderProviders() {
 }
 
 async function aiModelRow(view: ReturnType<typeof renderProviders>) {
-  await view.findByRole("heading", { name: "Providers" });
+  await view.findByRole("heading", { name: "AI providers" });
   return view.findByRole("button", { name: /Signed in|Uses your|Connected/ });
 }
 
@@ -140,7 +140,7 @@ test("Change asks the desktop app to change the AI connection", async () => {
   ).toBe(true);
 });
 
-test("outside the desktop app, against a server without it, Providers has nothing to change", async () => {
+test("outside the desktop app, against a server without it, AI providers has nothing to change", async () => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   const view = renderProviders();
   await view.findByText("Set by your organization");
