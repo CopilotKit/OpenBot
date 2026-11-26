@@ -1,17 +1,12 @@
-import { router } from "expo-router";
+import { router, Stack, useFocusEffect } from "expo-router";
 import { useCallback, useMemo } from "react";
-import {
-  everyBot,
-  everyPage,
-  ORGANIZATION_ID,
-  type Routine,
-} from "../../../src/api";
+import { everyBot, everyPage, ORGANIZATION_ID, type Routine } from "../src/api";
 import {
   listRoutines,
   pauseRoutine,
   resumeRoutine,
-} from "../../../src/api/generated/routines/routines";
-import { authClient } from "../../../src/auth";
+} from "../src/api/generated/routines/routines";
+import { authClient } from "../src/auth";
 import {
   BotOrb,
   EmptyState,
@@ -20,14 +15,14 @@ import {
   Rows,
   ScrollScreen,
   Section,
-  TabTitle,
   Toggle,
-} from "../../../src/components";
-import { IconClock } from "../../../src/icons";
-import { lastRunLine, when } from "../../../src/routines";
-import { useAction } from "../../../src/use-action";
-import { useLoad } from "../../../src/use-load";
-import { usePull } from "../../../src/use-pull";
+} from "../src/components";
+import { headerActions } from "../src/header";
+import { IconClock, IconPlus } from "../src/icons";
+import { routineLines } from "../src/routines";
+import { useAction } from "../src/use-action";
+import { useLoad } from "../src/use-load";
+import { usePull } from "../src/use-pull";
 
 /** Routines: the work every Bot starts by itself for you, under the Bot that does it. */
 export default function Routines() {
@@ -45,6 +40,13 @@ export default function Routines() {
   const loadBots = useCallback(() => everyBot(), []);
   const bots = useLoad(loadBots, Boolean(session));
   const pull = usePull(routines.refresh, bots.refresh);
+  // Back from New routine or a routine's page: the list says what changed.
+  const { refresh: refreshRoutines } = routines;
+  useFocusEffect(
+    useCallback(() => {
+      void refreshRoutines();
+    }, [refreshRoutines]),
+  );
   const byBot = useMemo(() => {
     const grouped = new Map<string, Routine[]>();
     for (const routine of routines.data ?? [])
@@ -65,7 +67,16 @@ export default function Routines() {
   }
   return (
     <ScrollScreen refreshing={pull.refreshing} onRefresh={pull.onRefresh}>
-      <TabTitle title="Routines" className="-mt-2 -mb-3" />
+      <Stack.Screen
+        options={headerActions([
+          {
+            label: "New routine",
+            sf: "plus",
+            icon: IconPlus,
+            onPress: () => router.push("/routine-form"),
+          },
+        ])}
+      />
       <Notice message={action.error || routines.error || bots.error} />
       {byBot.map(([botId, list]) => {
         const bot = bots.data?.find((item) => item.id === botId);
@@ -73,7 +84,7 @@ export default function Routines() {
           <Section
             key={botId}
             title={bot?.name ?? "Bot"}
-            action={
+            leading={
               <BotOrb
                 seed={bot?.avatarSeed || botId}
                 name={bot?.name ?? "Bot"}
@@ -81,22 +92,12 @@ export default function Routines() {
               />
             }
           >
-            <Rows>
+            <Rows iconless>
               {list.map((routine) => (
                 <Row
                   key={routine.id}
-                  icon={IconClock}
                   title={routine.title || routine.instruction}
-                  description={[
-                    routine.enabled
-                      ? `Next run ${when(routine.nextRunAt)}`
-                      : "Paused",
-                    routine.lastRun
-                      ? lastRunLine(routine.lastRun.status)
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  {...routineLines(routine)}
                   trailing={
                     <Toggle
                       label={`${routine.title || routine.instruction} is active`}
@@ -123,7 +124,7 @@ export default function Routines() {
         <EmptyState
           icon={IconClock}
           title="No routines yet"
-          description="Ask a Bot in a conversation to do something on a schedule, and it shows up here."
+          description="Ask a Bot in a chat to do something on a schedule, and it shows up here."
         />
       ) : null}
     </ScrollScreen>

@@ -8,7 +8,7 @@ import { TextField } from "heroui-native/text-field";
 import { useState } from "react";
 import { ORGANIZATION_ID } from "../src/api";
 import { createBot } from "../src/api/generated/bots/bots";
-import { Notice, ScrollScreen } from "../src/components";
+import { Notice, Screen, ScrollScreen, SheetTitle } from "../src/components";
 
 /**
  * New Bot: a name, what it does, and how it should work. It runs inside OpenBot and is yours
@@ -45,37 +45,41 @@ export default function NewBot() {
     }
   }
   return (
-    <ScrollScreen className="gap-5">
-      <Notice message={error} />
-      <TextField isRequired>
-        <Label>Name</Label>
-        <Input
-          placeholder="Research"
-          value={name}
-          onChangeText={setName}
-          autoFocus
-        />
-      </TextField>
-      <TextField isRequired>
-        <Label>What it does</Label>
-        <Input
-          placeholder="Finds and sums up what's out there"
-          value={title}
-          onChangeText={setTitle}
-        />
-      </TextField>
-      <TextField>
-        <Label>Instructions</Label>
-        <TextArea
-          placeholder="How it should work, what to check first, what to leave alone."
-          value={instructions}
-          onChangeText={setInstructions}
-        />
-        <Description>You can change these later.</Description>
-      </TextField>
-      <Button isDisabled={!ready} onPress={() => void create()}>
-        Create
-      </Button>
-    </ScrollScreen>
+    // The title stays put above the form: in the form, the keyboard scrolling to Name would cut it off.
+    <Screen fade={false}>
+      <SheetTitle title="New Bot" />
+      <ScrollScreen className="gap-5" fade={false}>
+        <Notice message={error} />
+        <TextField isRequired>
+          <Label>Name</Label>
+          <Input
+            placeholder="Research"
+            value={name}
+            onChangeText={setName}
+            autoFocus
+          />
+        </TextField>
+        <TextField isRequired>
+          <Label>What it does</Label>
+          <Input
+            placeholder="Finds and sums up what's out there"
+            value={title}
+            onChangeText={setTitle}
+          />
+        </TextField>
+        <TextField>
+          <Label>Instructions</Label>
+          <TextArea
+            placeholder="How it should work, what to check first, what to leave alone."
+            value={instructions}
+            onChangeText={setInstructions}
+          />
+          <Description>You can change these later.</Description>
+        </TextField>
+        <Button isDisabled={!ready} onPress={() => void create()}>
+          Create
+        </Button>
+      </ScrollScreen>
+    </Screen>
   );
 }

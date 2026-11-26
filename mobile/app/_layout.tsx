@@ -8,7 +8,7 @@ import * as Notifications from "expo-notifications";
 import { router, Stack } from "expo-router";
 import { HeroUINativeProvider } from "heroui-native/provider";
 import { useEffect, useRef } from "react";
-import { View } from "react-native";
+import { Platform, StatusBar, useColorScheme, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { setSignedInPerson } from "../src/api";
@@ -23,6 +23,7 @@ import {
 import { notificationDestination } from "../src/links";
 import { renewPush } from "../src/notifications";
 import { aboutShownConversation } from "../src/on-screen";
+import { OrbFlightProvider } from "../src/orb-flight";
 import { onSessionRefused } from "../src/session-refused";
 import { useVersionVerdict, VersionGate } from "../src/version-gate";
 
@@ -38,6 +39,24 @@ Notifications.setNotificationHandler({
     };
   },
 });
+
+/**
+ * How a sheet opens. iOS: the system's page sheet, with its grabber and swipe to put it away (iOS's
+ * form sheet leaves its content unlaid-out on this React Native Screens). Android: Material's bottom
+ * sheet, with its corners, its handle and title drawn by the screen (`SheetTitle`).
+ */
+/** As tall as a sheet goes: on Android it stops short of the status bar, which it would otherwise run under. */
+const SHEET_FULL = Platform.OS === "android" ? 0.94 : 1;
+
+const SHEET =
+  Platform.OS === "ios"
+    ? ({ presentation: "modal", ...NO_HEADER_LEFT } as const)
+    : ({
+        presentation: "formSheet",
+        ...NO_HEADER_LEFT,
+        sheetGrabberVisible: true,
+        sheetCornerRadius: 28,
+      } as const);
 
 function Layout() {
   const { data: session, isPending, refetch } = authClient.useSession();
@@ -90,74 +109,92 @@ function Layout() {
     verdict !== "checking" && verdict.kind !== "ok",
   );
   const header = useHeaderOptions();
-  if (!answered.current) return <View className="flex-1 bg-background" />;
+  // The status bar's clock and icons in the text color: dark on the light scheme, light on the dark. Android draws
+  // them light on its own, which on OpenBot's light background could hardly be read.
+  const scheme = useColorScheme();
+  const statusBar = (
+    <StatusBar
+      barStyle={scheme === "dark" ? "light-content" : "dark-content"}
+    />
+  );
+  if (!answered.current)
+    return <View className="flex-1 bg-background">{statusBar}</View>;
   return (
     <View className="flex-1 bg-background">
-      <Stack screenOptions={header}>
-        {/*
-         * Each guard says where it sends a person. Without one, expo-router picks the first screen no guard
-         * covers by file name, which is the gallery: a signed-out start opened there rather than on Welcome.
-         */}
-        <Stack.Protected guard={signedIn} redirectTo="/sign-in">
-          {/* The tabs, with the dock: everything below opens over them. */}
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="conversation" options={{ title: "" }} />
-          <Stack.Screen name="bot" options={{ title: "" }} />
+      {statusBar}
+      {/* A Bot's orb flies over the screens and their headers (src/orb-flight.tsx). */}
+      <OrbFlightProvider>
+        <Stack screenOptions={header}>
+          {/*
+           * Each guard says where it sends a person. Without one, expo-router picks the first screen no guard
+           * covers by file name, which is the gallery: a signed-out start opened there rather than on Welcome.
+           */}
+          <Stack.Protected guard={signedIn} redirectTo="/sign-in">
+            {/* The tabs, in the platform's tab bar: everything below opens over them. */}
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="conversation" options={{ title: "" }} />
+            <Stack.Screen name="bot" options={{ title: "" }} />
+            <Stack.Screen
+              name="new-conversation"
+              options={{
+                title: "New chat",
+                ...SHEET,
+                sheetAllowedDetents: [0.6, SHEET_FULL],
+              }}
+            />
+            <Stack.Screen
+              name="routine-form"
+              options={{
+                title: "Routine",
+                ...SHEET,
+                sheetAllowedDetents: [SHEET_FULL],
+              }}
+            />
+            <Stack.Screen
+              name="conversation-info"
+              options={{ title: "Chat" }}
+            />
+            <Stack.Screen
+              name="new-bot"
+              options={{
+                title: "New Bot",
+                ...SHEET,
+                sheetAllowedDetents: [SHEET_FULL],
+              }}
+            />
+            <Stack.Screen
+              name="approvals"
+              options={{ title: "Approval inbox" }}
+            />
+            <Stack.Screen name="computer" options={{ title: "Computer" }} />
+            <Stack.Screen name="routines" options={{ title: "Routines" }} />
+            <Stack.Screen name="memory" options={{ title: "Memory" }} />
+            <Stack.Screen name="skills" options={{ title: "Skills" }} />
+            <Stack.Screen
+              name="connections"
+              options={{ title: "Connections" }}
+            />
+            <Stack.Screen name="routine" options={{ title: "Routine" }} />
+            <Stack.Screen name="rules" options={{ title: "Custom rules" }} />
+            <Stack.Screen name="plugins" options={{ title: "Apps" }} />
+            {/* Only the way back to Home after linking the company account: never seen, so no header flashes. */}
+            <Stack.Screen
+              name="company-sign-in/linked"
+              options={{ headerShown: false, animation: "none" }}
+            />
+          </Stack.Protected>
+          {/* Only the way back to Home after signing in, for a code that arrived outside the browser's session. */}
           <Stack.Screen
-            name="account"
-            options={{
-              title: "Your account",
-              presentation: "formSheet",
-              ...NO_HEADER_LEFT,
-              sheetAllowedDetents: [0.6, 1],
-              sheetGrabberVisible: true,
-            }}
-          />
-          <Stack.Screen
-            name="new-conversation"
-            options={{
-              title: "New conversation",
-              presentation: "formSheet",
-              ...NO_HEADER_LEFT,
-              sheetAllowedDetents: [0.6, 1],
-              sheetGrabberVisible: true,
-            }}
-          />
-          <Stack.Screen
-            name="new-bot"
-            options={{
-              title: "New Bot",
-              presentation: "formSheet",
-              ...NO_HEADER_LEFT,
-              sheetAllowedDetents: [1],
-              sheetGrabberVisible: true,
-            }}
-          />
-          <Stack.Screen
-            name="approvals"
-            options={{ title: "Approval inbox" }}
-          />
-          <Stack.Screen name="computer" options={{ title: "Computer" }} />
-          <Stack.Screen name="routine" options={{ title: "Routine" }} />
-          <Stack.Screen name="rules" options={{ title: "Custom rules" }} />
-          <Stack.Screen name="plugins" options={{ title: "Apps" }} />
-          {/* Only the way back to Home after linking the company account: never seen, so no header flashes. */}
-          <Stack.Screen
-            name="company-sign-in/linked"
+            name="oauth/callback"
             options={{ headerShown: false, animation: "none" }}
           />
-        </Stack.Protected>
-        {/* Only the way back to Home after signing in, for a code that arrived outside the browser's session. */}
-        <Stack.Screen
-          name="oauth/callback"
-          options={{ headerShown: false, animation: "none" }}
-        />
-        {/* The component gallery, in development builds only (app/gallery.tsx). */}
-        <Stack.Screen name="gallery" options={{ title: "Components" }} />
-        <Stack.Protected guard={!signedIn} redirectTo="/">
-          <Stack.Screen name="sign-in" options={{ headerShown: false }} />
-        </Stack.Protected>
-      </Stack>
+          {/* The component gallery, in development builds only (app/gallery.tsx). */}
+          <Stack.Screen name="gallery" options={{ title: "Components" }} />
+          <Stack.Protected guard={!signedIn} redirectTo="/">
+            <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+          </Stack.Protected>
+        </Stack>
+      </OrbFlightProvider>
       <VersionGate verdict={verdict} onRetry={() => void check()} />
     </View>
   );

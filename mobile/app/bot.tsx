@@ -1,8 +1,7 @@
-import { Redirect, router, useLocalSearchParams } from "expo-router";
+import { Redirect, router, Stack, useLocalSearchParams } from "expo-router";
 import { Button } from "heroui-native/button";
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { everyPage, ORGANIZATION_ID, type Routine } from "../src/api";
 import {
   getBot,
@@ -18,7 +17,7 @@ import {
   resumeRoutine,
 } from "../src/api/generated/routines/routines";
 import { authClient } from "../src/auth";
-import { hideItem, ItemCard, startItem } from "../src/check-ins";
+import { hideItem, ItemRow, startItem } from "../src/check-ins";
 import {
   BotOrb,
   EmptyState,
@@ -32,32 +31,35 @@ import {
   Text,
   Toggle,
 } from "../src/components";
+import { headerActions } from "../src/header";
 import {
   IconBook,
   IconBrain,
   IconChecks,
   IconClock,
+  IconDeviceDesktop,
+  IconEdit,
   IconMessages,
   IconPlayerPause,
   IconPlug,
   IconPlus,
 } from "../src/icons";
 import { openConversationWith } from "../src/open-conversation";
-import { ADD_ROUTINE_DRAFT, lastRunLine, when } from "../src/routines";
+import { routineLines } from "../src/routines";
 import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
 import { usePull } from "../src/use-pull";
-import { dayHeading, shortWhen } from "../src/when";
+import { dayHeading, timeOfDay } from "../src/when";
 
 type Showing = "conversations" | "settings";
 
 /**
  * A Bot's page: its orb and name, then its conversations by day, or its settings: whether it is
- * working for you, what it found that needs you, its routines, and what it knows and can use.
+ * working for you, what it found that needs you, its routines, and what it knows and can use. A new
+ * chat with it is the compose button in the header, as on Chats.
  */
 export default function BotScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
-  const insets = useSafeAreaInsets();
   const { data: session, isPending } = authClient.useSession();
   const [view, setView] = useState<Showing>("conversations");
   const action = useAction();
@@ -131,27 +133,6 @@ export default function BotScreen() {
       await routines.refresh();
     });
   }
-  async function addRoutine() {
-    await action.run("add", async () => {
-      const page = await listConversations(ORGANIZATION_ID, { limit: 100 });
-      const conversation = page.conversations.find(
-        (item) => item.active && item.botIds.includes(botId),
-      );
-      if (!conversation)
-        throw new Error(
-          `Start a conversation with ${name || "this Bot"} first, then add a routine from it.`,
-        );
-      router.push({
-        pathname: "/conversation",
-        params: {
-          channelId: conversation.id,
-          agentId: botId,
-          draft: ADD_ROUTINE_DRAFT,
-        },
-      });
-    });
-  }
-
   const problem =
     action.error ||
     bot.error ||
@@ -159,8 +140,24 @@ export default function BotScreen() {
     conversations.error ||
     routines.error ||
     items.error;
+  const newChat = () =>
+    void action.run("open", () => openConversationWith(botId));
   return (
     <Screen>
+      <Stack.Screen
+        options={headerActions(
+          name
+            ? [
+                {
+                  label: "New chat",
+                  sf: "square.and.pencil",
+                  icon: IconEdit,
+                  onPress: newChat,
+                },
+              ]
+            : [],
+        )}
+      />
       <ScrollView
         className="flex-1"
         contentContainerClassName="gap-6 px-4 pb-12"
@@ -187,7 +184,7 @@ export default function BotScreen() {
         <Segmented
           label={`${name || "Bot"}: what to show`}
           options={[
-            { value: "conversations", label: "Conversations" },
+            { value: "conversations", label: "Chats" },
             { value: "settings", label: "Settings" },
           ]}
           value={view}
@@ -198,7 +195,7 @@ export default function BotScreen() {
           days.length ? (
             days.map(([day, list]) => (
               <Section key={day} title={day}>
-                <Rows>
+                <Rows iconless>
                   {list.map((item) => (
                     <Row
                       key={item.id}
@@ -207,8 +204,9 @@ export default function BotScreen() {
                         item.lastMessage ?? item.summary ?? undefined
                       }
                       trailing={
+                        // Under its day's heading, only the time: "Yesterday" twice says nothing.
                         <Text variant="caption" tone="muted">
-                          {shortWhen(item.lastMessageAt ?? item.createdAt)}
+                          {timeOfDay(item.lastMessageAt ?? item.createdAt)}
                         </Text>
                       }
                       onPress={() =>
@@ -225,34 +223,47 @@ export default function BotScreen() {
           ) : conversations.data ? (
             <EmptyState
               icon={IconMessages}
-              title="No conversations yet"
+              title="No chats yet"
               description={`Start one to give ${name || "this Bot"} some work.`}
+              action={
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  isDisabled={!name || Boolean(action.busy)}
+                  onPress={newChat}
+                >
+                  New chat
+                </Button>
+              }
             />
           ) : null
         ) : (
           <>
             {found?.length ? (
               <Section title="Needs you">
-                {found.map((item) => (
-                  <ItemCard
-                    key={item.id}
-                    item={item}
-                    botName={name}
-                    busy={action.busy}
-                    onStart={() => {
-                      void action.run(`start:${item.id}`, async () => {
-                        await startItem(item);
-                        void items.refresh();
-                      });
-                    }}
-                    onHide={() => {
-                      void action.run(`hide:${item.id}`, async () => {
-                        await hideItem(item);
-                        await items.refresh();
-                      });
-                    }}
-                  />
-                ))}
+                <Rows iconless>
+                  {found.map((item) => (
+                    <ItemRow
+                      key={item.id}
+                      item={item}
+                      botName={name}
+                      busy={action.busy}
+                      className="px-3"
+                      onStart={() => {
+                        void action.run(`start:${item.id}`, async () => {
+                          await startItem(item);
+                          void items.refresh();
+                        });
+                      }}
+                      onHide={() => {
+                        void action.run(`hide:${item.id}`, async () => {
+                          await hideItem(item);
+                          await items.refresh();
+                        });
+                      }}
+                    />
+                  ))}
+                </Rows>
               </Section>
             ) : null}
             <Section title="Settings for you">
@@ -284,56 +295,57 @@ export default function BotScreen() {
             </Section>
             <Section title="Routines">
               <Rows>
-                {(mine ?? []).map((routine) => {
-                  const last = routine.lastRun
-                    ? lastRunLine(routine.lastRun.status)
-                    : null;
-                  return (
-                    <Row
-                      key={routine.id}
-                      icon={IconClock}
-                      title={routine.instruction}
-                      description={[
-                        routine.enabled
-                          ? `Next run ${when(routine.nextRunAt)}`
-                          : "Paused",
-                        last,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                      trailing={
-                        <Toggle
-                          label={`${routine.title || routine.instruction} is active`}
-                          value={routine.enabled}
-                          disabled={Boolean(action.busy)}
-                          onValueChange={(enabled) =>
-                            void setActive(routine, enabled)
-                          }
-                        />
-                      }
-                      onPress={() =>
-                        router.push({
-                          pathname: "/routine",
-                          params: { routineId: routine.id },
-                        })
-                      }
-                    />
-                  );
-                })}
+                {(mine ?? []).map((routine) => (
+                  <Row
+                    key={routine.id}
+                    icon={IconClock}
+                    title={routine.title || routine.instruction}
+                    {...routineLines(routine)}
+                    trailing={
+                      <Toggle
+                        label={`${routine.title || routine.instruction} is active`}
+                        value={routine.enabled}
+                        disabled={Boolean(action.busy)}
+                        onValueChange={(enabled) =>
+                          void setActive(routine, enabled)
+                        }
+                      />
+                    }
+                    onPress={() =>
+                      router.push({
+                        pathname: "/routine",
+                        params: { routineId: routine.id },
+                      })
+                    }
+                  />
+                ))}
                 <Row
                   icon={IconPlus}
                   title="Add routine"
                   description={
                     mine?.length === 0
-                      ? "No routines yet. Ask it in a conversation."
+                      ? "Have it do something for you on a schedule."
                       : undefined
                   }
-                  onPress={action.busy ? undefined : () => void addRoutine()}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/routine-form",
+                      params: { botId },
+                    })
+                  }
                 />
               </Rows>
             </Section>
             <Section title="Settings for this Bot">
               <Rows>
+                <Row
+                  icon={IconDeviceDesktop}
+                  title="Computer"
+                  description="Watch its screen, or take over."
+                  onPress={() =>
+                    router.push({ pathname: "/computer", params: { botId } })
+                  }
+                />
                 <Row
                   icon={IconBrain}
                   title="Memory"
@@ -367,21 +379,6 @@ export default function BotScreen() {
           </>
         )}
       </ScrollView>
-      {view === "conversations" ? (
-        <View
-          className="border-t border-border bg-background px-4 pt-3"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) }}
-        >
-          <Button
-            isDisabled={!name || Boolean(action.busy)}
-            onPress={() =>
-              void action.run("open", () => openConversationWith(botId))
-            }
-          >
-            New conversation
-          </Button>
-        </View>
-      ) : null}
     </Screen>
   );
 }

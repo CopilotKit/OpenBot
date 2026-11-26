@@ -1,8 +1,8 @@
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
-import { chooseOrganization, organizationChoices } from "../src/api";
-import { authClient, serverUrl } from "../src/auth";
+import { chooseOrganization, organizationChoices } from "../../../src/api";
+import { authClient, serverUrl } from "../../../src/auth";
 import {
   Icon,
   Notice,
@@ -12,18 +12,24 @@ import {
   ScrollScreen,
   Section,
   Text,
-} from "../src/components";
-import { IconBell, IconBuilding, IconCheck, IconLogout } from "../src/icons";
+} from "../../../src/components";
+import {
+  IconBell,
+  IconBuilding,
+  IconCheck,
+  IconLogout,
+} from "../../../src/icons";
 import {
   pushTurnedOn,
   registerPush,
   unregisterPush,
-} from "../src/notifications";
-import { useLoad } from "../src/use-load";
+} from "../../../src/notifications";
+import { useLoad } from "../../../src/use-load";
 
 /**
- * Your account, opened from the initials at the top of each tab and from More: who is signed in, the organization they work in
- * (and the others they can switch to), notifications on this phone, and signing out.
+ * Your account, a tab of its own: who is signed in, the organization they work in
+ * (and the others they can switch to), notifications on this phone, and signing out. It opens as a
+ * Bot's page does: the person, centered, then a card of rows for each part.
  */
 export default function Account() {
   const { data: session } = authClient.useSession();
@@ -55,14 +61,18 @@ export default function Account() {
   }
   const person = session?.user.name || session?.user.email || "";
   const listed = organizations.data?.organizations ?? [];
+  // The OpenBot this phone is signed in to, as its address reads without the scheme.
+  const server = serverUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
   return (
     <ScrollScreen>
-      <View className="flex-row items-center gap-3 px-1">
-        <PersonAvatar name={person} size={48} />
-        <View className="flex-1">
-          <Text variant="heading">{person}</Text>
+      <View className="items-center gap-3">
+        <PersonAvatar name={person} size={64} />
+        <View className="items-center gap-1">
+          <Text variant="heading" className="text-center">
+            {person}
+          </Text>
           {session?.user.name && session.user.email ? (
-            <Text tone="muted" className="text-sm">
+            <Text tone="muted" className="text-center text-sm">
               {session.user.email}
             </Text>
           ) : null}
@@ -81,8 +91,9 @@ export default function Account() {
                   title={organization.name ?? organization.id}
                   description={current ? "You're working here" : undefined}
                   trailing={
-                    current ? <Icon icon={IconCheck} size={18} /> : <View />
+                    current ? <Icon icon={IconCheck} size={18} /> : undefined
                   }
+                  chevron={false}
                   onPress={
                     current || busy
                       ? undefined
@@ -111,8 +122,15 @@ export default function Account() {
                 : "Get told when a Bot finishes or needs you."
             }
             trailing={
-              pushRegistered ? <Icon icon={IconCheck} size={18} /> : undefined
+              pushRegistered ? (
+                <Icon icon={IconCheck} size={18} />
+              ) : (
+                <Text variant="caption" className="font-medium">
+                  Turn on
+                </Text>
+              )
             }
+            chevron={false}
             onPress={
               pushRegistered || busy
                 ? undefined
@@ -123,25 +141,26 @@ export default function Account() {
                     })
             }
           />
-          <Row
-            icon={IconLogout}
-            title="Sign out"
-            tone="danger"
-            onPress={
-              busy
-                ? undefined
-                : () =>
-                    void act("sign-out", async () => {
-                      await unregisterPush();
-                      await authClient.signOut();
-                    })
-            }
-          />
         </Rows>
       </Section>
-      <Text variant="caption" tone="muted" className="text-center">
-        {serverUrl}
-      </Text>
+      <Rows>
+        <Row
+          icon={IconLogout}
+          title="Sign out"
+          description={`Signed in to ${server}`}
+          tone="danger"
+          chevron={false}
+          onPress={
+            busy
+              ? undefined
+              : () =>
+                  void act("sign-out", async () => {
+                    await unregisterPush();
+                    await authClient.signOut();
+                  })
+          }
+        />
+      </Rows>
     </ScrollScreen>
   );
 }

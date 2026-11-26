@@ -1,7 +1,8 @@
 import { router, Stack } from "expo-router";
 import { Button } from "heroui-native/button";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, Platform, View } from "react-native";
+import { FlatList, View } from "react-native";
+import { useCSSVariable } from "uniwind";
 import {
   type ConversationSummary,
   everyBot,
@@ -20,16 +21,13 @@ import { companySignInTicket } from "../../../src/company-sign-in-ticket";
 import {
   ConversationRow,
   EmptyState,
-  IconButton,
   Notice,
   Refresh,
   Screen,
-  SearchField,
-  TabTitle,
 } from "../../../src/components";
-import { plainHeaderRight } from "../../../src/header";
+import { tabRoot } from "../../../src/header";
 import { homeView } from "../../../src/home-view";
-import { IconBuilding, IconMessages, IconPlus } from "../../../src/icons";
+import { IconBuilding, IconEdit, IconMessages } from "../../../src/icons";
 import { linkCompanyAccount, onCompanyLinked } from "../../../src/link-company";
 import { onOrganizationGone } from "../../../src/organization-gone";
 import { onRenewalNeedsClick } from "../../../src/renewal";
@@ -44,6 +42,10 @@ import { shortWhen } from "../../../src/when";
  */
 export default function Conversations() {
   const { data: session } = authClient.useSession();
+  const [foreground, muted] = useCSSVariable([
+    "--color-foreground",
+    "--color-muted",
+  ]) as (string | undefined)[];
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
@@ -215,25 +217,27 @@ export default function Conversations() {
     <Screen>
       <Stack.Screen
         options={{
-          // iOS's own search field, under the title. Android's header offers search only as an icon,
-          // so Android draws the same field at the top of the list instead (`SearchField`).
-          headerSearchBarOptions:
-            Platform.OS === "ios"
-              ? {
-                  placeholder: "Search conversations",
-                  // Under the title: iOS 26 would otherwise float it at the bottom, over the dock.
-                  placement: "stacked",
-                  onChangeText: (event) => setQuery(event.nativeEvent.text),
-                  onCancelButtonPress: () => setQuery(""),
-                }
-              : undefined,
-          ...plainHeaderRight(() => (
-            <IconButton
-              icon={IconPlus}
-              label="New conversation"
-              onPress={() => router.push("/new-conversation")}
-            />
-          )),
+          // Search is a button in the header beside New chat, each platform's own: on iOS 26 the bar's search
+          // button, which opens the field in place; on Android the toolbar's search icon.
+          headerSearchBarOptions: {
+            placeholder: "Search chats",
+            // Android draws its search icon and field in its own gray, which a dark page hides: the text color here.
+            headerIconColor: foreground,
+            textColor: foreground,
+            hintTextColor: muted,
+            placement: "integratedButton",
+            onChangeText: (event) => setQuery(event.nativeEvent.text),
+            onCancelButtonPress: () => setQuery(""),
+            onClose: () => setQuery(""),
+          },
+          ...tabRoot("Chats", [
+            {
+              label: "New chat",
+              sf: "square.and.pencil",
+              icon: IconEdit,
+              onPress: () => router.push("/new-conversation"),
+            },
+          ]),
         }}
       />
       <FlatList
@@ -241,21 +245,15 @@ export default function Conversations() {
         data={listed}
         keyExtractor={(item) => item.id}
         contentInsetAdjustmentBehavior="automatic"
+        // Room under the header for the first chat, and under the last one.
+        contentContainerClassName="pt-5 pb-6"
         keyboardDismissMode="on-drag"
         refreshControl={
           <Refresh refreshing={pull.refreshing} onRefresh={pull.onRefresh} />
         }
         ListHeaderComponent={
-          Platform.OS === "android" || problem || renewal ? (
+          problem || renewal ? (
             <View className="gap-2 px-4 pt-2 pb-2">
-              <TabTitle title="Conversations" />
-              {Platform.OS === "android" ? (
-                <SearchField
-                  value={query}
-                  onChangeText={setQuery}
-                  placeholder="Search conversations"
-                />
-              ) : null}
               <Notice message={problem} />
               {renewal ? (
                 <Notice
@@ -318,10 +316,10 @@ export default function Conversations() {
           conversations.data ? (
             <EmptyState
               icon={IconMessages}
-              title={query ? "No matches" : "No conversations yet"}
+              title={query ? "No matches" : "No chats yet"}
               description={
                 query
-                  ? "No conversation has those words in it."
+                  ? "No chat has those words in it."
                   : "Start one with a Bot with the + button."
               }
             />
@@ -344,7 +342,7 @@ export default function Conversations() {
                   });
                 }}
               >
-                Older conversations
+                Older chats
               </Button>
             </View>
           ) : undefined

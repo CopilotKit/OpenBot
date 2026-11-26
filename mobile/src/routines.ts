@@ -1,3 +1,5 @@
+import { momentWhen } from "./when";
+
 /** Run history in the words the routine page uses: Running, Succeeded, Failed. */
 const RUN_LABELS: Record<string, string> = {
   running: "Running",
@@ -32,7 +34,31 @@ export function lastRunLine(status: string | null | undefined): string | null {
   return label ? `Last run: ${label}` : null;
 }
 
+/** When a routine runs or ran, as a sentence reads it ("Tomorrow, 9:00 AM"); "Not yet" when it hasn't. */
 export const when = (iso: string | null | undefined) =>
-  iso ? new Date(iso).toLocaleString() : "Not yet";
-/** "Add routine" opens the Bot's conversation with this sentence started for the person to finish. */
-export const ADD_ROUTINE_DRAFT = "Set up a routine to ";
+  momentWhen(iso) || "Not yet";
+/**
+ * What a routine's row says under its name: when it runs next (or that it is paused), and its last
+ * run only when that wasn't the usual success. A failed last run is the row's alert, in the color
+ * of what failed, so it doesn't read as one more gray line.
+ */
+export function routineLines(routine: {
+  enabled: boolean;
+  nextRunAt?: string | null;
+  lastRun?: { status: string | null } | null;
+}): { description: string; alert?: string } {
+  const status = routine.lastRun?.status;
+  const unusual =
+    status && status !== "succeeded" && status !== "failed"
+      ? lastRunLine(status)
+      : null;
+  return {
+    description: [
+      routine.enabled ? `Next run ${when(routine.nextRunAt)}` : "Paused",
+      unusual,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    alert: status === "failed" ? "Last run failed" : undefined,
+  };
+}

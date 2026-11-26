@@ -27,6 +27,7 @@ export default defineConfig({
           "Conversations",
           "Devices",
           "Memory",
+          "Models",
           "Organization settings",
           "Organizations",
           "People",

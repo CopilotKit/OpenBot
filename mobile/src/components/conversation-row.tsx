@@ -35,14 +35,35 @@ export function ConversationRow({
       onPress={onPress}
       className="flex-row gap-3 px-4 py-3 active:bg-fill"
     >
-      <View className="pt-0.5">
-        <BotOrb
-          seed={lead?.seed ?? ""}
-          name={lead?.name ?? name}
-          size={40}
-          state={working ? "working" : "idle"}
-        />
-      </View>
+      {bots.length > 1 ? (
+        // A group: its first two Bots, overlapping, in the space one orb takes.
+        <View className="size-10">
+          <View className="absolute top-0 left-0">
+            <BotOrb
+              seed={lead?.seed ?? ""}
+              name={lead?.name ?? name}
+              size={28}
+            />
+          </View>
+          <View className="absolute right-0 bottom-0 rounded-full border-2 border-background">
+            <BotOrb
+              seed={bots[1]?.seed ?? ""}
+              name={bots[1]?.name ?? name}
+              size={26}
+              state={working ? "working" : "idle"}
+            />
+          </View>
+        </View>
+      ) : (
+        <View className="pt-0.5">
+          <BotOrb
+            seed={lead?.seed ?? ""}
+            name={lead?.name ?? name}
+            size={40}
+            state={working ? "working" : "idle"}
+          />
+        </View>
+      )}
       <View className="flex-1 gap-0.5">
         <View className="flex-row items-center gap-2">
           <Text

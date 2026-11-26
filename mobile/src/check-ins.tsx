@@ -8,7 +8,7 @@ import {
   workOnCheckInItem,
 } from "./api/generated/check-ins/check-ins";
 import { sendConversationMessage } from "./api/generated/conversations/conversations";
-import { Card, Text } from "./components";
+import { BotOrb, cn, Text } from "./components";
 import { taskLine } from "./tasks";
 import { webLink } from "./web-link";
 
@@ -45,67 +45,100 @@ export async function hideItem(item: CheckInItem) {
 }
 
 /**
- * One item: what it is, why, which Bot found it and where it read that, with Start, Hide and, when
- * the Bot gave a link, Open. `busy` is the action in flight on this screen, so no second tap lands.
+ * One item, as a row like a chat's: the Bot that found it (its orb, when the list holds more than
+ * one Bot's), what it is and why, and where it read that, then Start, Hide and, when the Bot gave a
+ * link, Open. Start is the one filled button; the rest are quiet. `busy` is the action in flight on
+ * this screen, so no second tap lands.
  */
-export function ItemCard({
+export function ItemRow({
   item,
   botName,
+  seed,
   busy,
   onStart,
   onHide,
+  className,
 }: {
   item: CheckInItem;
   botName: string;
+  /** The Bot's orb seed: drawn where the list mixes Bots, left out on the Bot's own page. */
+  seed?: string;
   busy: string;
   onStart: () => void;
   onHide: () => void;
+  className?: string;
 }) {
   const link = webLink(item.sourceLink);
+  // Which Bot found it (on a list of every Bot's), and where it read that.
+  const caption = [
+    seed ? botName : null,
+    item.sourceApp ? `From ${item.sourceApp}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <Card>
-      <Text variant="label" className="font-semibold">
-        {item.title}
-      </Text>
-      {item.detail ? <Text>{item.detail}</Text> : null}
-      <Text variant="caption" tone="muted">
-        {[botName, item.sourceApp ? `From ${item.sourceApp}` : null]
-          .filter(Boolean)
-          .join(" · ")}
-      </Text>
-      <View className="mt-1 flex-row flex-wrap gap-2">
-        <Button size="sm" isDisabled={Boolean(busy)} onPress={onStart}>
-          {busy === `start:${item.id}` ? "Starting…" : "Start"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          isDisabled={Boolean(busy)}
-          onPress={onHide}
-        >
-          {busy === `hide:${item.id}` ? "Hiding…" : "Hide"}
-        </Button>
-        {link ? (
+    <View className={cn("flex-row gap-3 px-4 py-3", className)}>
+      {seed ? <BotOrb seed={seed} name={botName} size={40} /> : null}
+      <View className="flex-1 gap-1">
+        {caption ? (
+          <Text variant="caption" tone="muted" numberOfLines={1}>
+            {caption}
+          </Text>
+        ) : null}
+        <Text variant="label">{item.title}</Text>
+        {item.detail ? (
+          <Text tone="muted" className="text-sm leading-5">
+            {item.detail}
+          </Text>
+        ) : null}
+        <View className="mt-2 flex-row flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            isDisabled={Boolean(busy)}
+            onPress={onStart}
+          >
+            {busy === `start:${item.id}` ? "Starting…" : "Start"}
+          </Button>
           <Button
             size="sm"
             variant="ghost"
-            onPress={() => {
-              void Linking.openURL(link.href);
-            }}
+            isDisabled={Boolean(busy)}
+            onPress={onHide}
           >
-            {`Open ${link.hostname.replace(/^www\./, "")}`}
+            {busy === `hide:${item.id}` ? "Hiding…" : "Hide"}
           </Button>
-        ) : null}
+          {link ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={() => {
+                void Linking.openURL(link.href);
+              }}
+            >
+              {`Open ${link.hostname.replace(/^www\./, "")}`}
+            </Button>
+          ) : null}
+        </View>
       </View>
-    </Card>
+    </View>
   );
 }
 
 /**
- * One task that waits on the person. The whole card opens its conversation, where they read and
- * reply, the way a row on the Bots list opens its Bot: nothing else to press.
+ * One task that waits on the person, as a chat's row: its Bot's orb, the Bot and where the task
+ * stands, its name, and what it needs. The whole row opens its conversation, where they read and
+ * reply.
  */
-export function TaskCard({ task, botName }: { task: Task; botName: string }) {
+export function TaskRow({
+  task,
+  botName,
+  seed,
+}: {
+  task: Task;
+  botName: string;
+  seed: string;
+}) {
   const next =
     task.status === "failed"
       ? task.failure
@@ -122,22 +155,26 @@ export function TaskCard({ task, botName }: { task: Task; botName: string }) {
           params: { channelId: task.conversationId, agentId: task.botId },
         })
       }
-      className="gap-1.5 rounded-lg border border-border bg-surface p-4 active:bg-fill"
+      className="flex-row gap-3 px-4 py-3 active:bg-fill"
     >
-      <Text variant="label" className="font-semibold">
-        {task.title}
-      </Text>
-      <Text
-        variant="caption"
-        tone={task.status === "failed" ? "danger" : "warning"}
-      >
-        {taskLine(botName, task.status)}
-      </Text>
-      {next ? (
-        <Text tone="muted" numberOfLines={3}>
-          {next}
+      <BotOrb seed={seed} name={botName} size={40} />
+      <View className="flex-1 gap-0.5">
+        <Text
+          variant="caption"
+          tone={task.status === "failed" ? "danger" : "warning"}
+          numberOfLines={1}
+        >
+          {taskLine(botName, task.status)}
         </Text>
-      ) : null}
+        <Text variant="label" numberOfLines={2}>
+          {task.title}
+        </Text>
+        {next ? (
+          <Text tone="muted" numberOfLines={3} className="text-sm leading-5">
+            {next}
+          </Text>
+        ) : null}
+      </View>
     </Pressable>
   );
 }

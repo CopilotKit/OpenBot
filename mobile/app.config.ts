@@ -84,6 +84,16 @@ const config: ExpoConfig = {
       },
     ],
     ["expo-notifications", { defaultChannel: "openbot" }],
+    // Attach a photo to a message: only the photo library, no camera, so no camera permission is asked for.
+    [
+      "expo-image-picker",
+      {
+        photosPermission:
+          "OpenBot uses your photos only when you attach one to a message.",
+        cameraPermission: false,
+        microphonePermission: false,
+      },
+    ],
     // Back from linking the company account after the process died mid-sign-in: no Custom Tab left below Home.
     "./plugins/linked-cold-start",
   ],

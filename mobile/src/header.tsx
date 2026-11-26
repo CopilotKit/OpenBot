@@ -1,12 +1,14 @@
-import { router } from "expo-router";
-import type { ReactElement } from "react";
-import { Platform, Pressable, useColorScheme } from "react-native";
+import type { SFSymbol } from "expo-symbols";
+import { Platform, useColorScheme, View } from "react-native";
 import { useCSSVariable } from "uniwind";
-import { authClient } from "./auth";
-import { IconButton, PersonAvatar } from "./components";
-import { IconChevronLeft } from "./icons";
+import { IconButton, Text } from "./components";
+import type { TablerIcon } from "./icons";
 
-/** The native header in the scheme's colors and Inter, for every stack: the app's and each tab's. */
+/**
+ * The native header in the scheme's colors, for every stack: the app's and each tab's. The way back
+ * is the platform's own: iOS's back button (a glass chevron on iOS 26) with its edge swipe, and
+ * Android's arrow with its back gesture.
+ */
 export function useHeaderOptions() {
   const [background, foreground] = useCSSVariable([
     "--color-background",
@@ -19,101 +21,95 @@ export function useHeaderOptions() {
      * keyboard, a menu. Left alone it follows React Navigation's theme, which is always light here.
      */
     headerUserInterfaceStyle: scheme === "dark" ? "dark" : "light",
-    headerBackTitle: "Back",
-    // Centered, as iOS centers it, so a pushed screen reads the same on Android.
-    headerTitleAlign: "center",
+    // Only the chevron: the screen it goes back to is the one the person just came from.
+    headerBackButtonDisplayMode: "minimal",
     headerShadowVisible: false,
     headerTintColor: foreground,
+    // A solid bar in the page's ground; the page fades out under it (`TopFade`) rather than being cut off.
     headerStyle: { backgroundColor: background },
     headerTitleStyle: { fontFamily: "Inter_600SemiBold", color: foreground },
     headerLargeTitleStyle: { fontFamily: "Inter_700Bold", color: foreground },
     headerLargeTitleShadowVisible: false,
     contentStyle: { backgroundColor: background },
-    // A pushed screen's way back, as a plain chevron.
-    ...plainBackButton(),
+  } as const;
+}
+
+/** A button in a header: its name for a screen reader, and its glyph on each platform. */
+export type HeaderAction = {
+  label: string;
+  /** iOS: an SF Symbol, drawn by the system in the header's glass. */
+  sf: SFSymbol;
+  /** Android: the app's icon, in the toolbar. */
+  icon: TablerIcon;
+  onPress: () => void;
+};
+
+/**
+ * Buttons at the right of a header, as each platform draws its own: on iOS, bar button items with SF
+ * Symbols, which iOS 26 sets in its glass; on Android, icon buttons in the toolbar.
+ */
+export function headerActions(actions: HeaderAction[]) {
+  if (Platform.OS === "ios")
+    return {
+      unstable_headerRightItems: () =>
+        actions.map((action) => ({
+          type: "button" as const,
+          label: action.label,
+          accessibilityLabel: action.label,
+          icon: { type: "sfSymbol" as const, name: action.sf },
+          onPress: action.onPress,
+        })),
+    } as const;
+  return {
+    headerRight: () => (
+      <View className="flex-row items-center gap-1">
+        {actions.map((action) => (
+          <IconButton
+            key={action.label}
+            icon={action.icon}
+            label={action.label}
+            onPress={action.onPress}
+          />
+        ))}
+      </View>
+    ),
   } as const;
 }
 
 /**
- * A tab's own screen: a large title, and the person's account where a back button would be. Android's
- * header has no large title, so there the screen draws it at the top of its content (`TabTitle`) and
- * the header keeps only its buttons, as iOS's does before the page is scrolled.
+ * A tab's own screen. Its title sits at the start of the bar, level with the screen's buttons at the
+ * end: on iOS drawn in the bar's left slot, with no glass of its own; on Android it is Material's top
+ * app bar title. The person's account is a tab of its own, so no header carries it.
  */
-export const tabRoot = (title: string) =>
-  ({
-    title,
-    headerLargeTitle: true,
-    ...(Platform.OS === "android" ? { headerTitle: "" } : {}),
-    ...plainHeaderLeft(() => <AccountButton />),
-  }) as const;
-
-/**
- * Header buttons drawn as plain icons, as the web app's header draws them. On iOS 26 a custom
- * header item sits in a shared glass bubble by default, which on OpenBot's flat background reads
- * as a gray disc; `hidesSharedBackground` takes it away. `headerLeft` and `headerRight` draw the
- * same buttons where those items aren't read (Android).
- */
-export function plainHeaderLeft(render: () => ReactElement) {
-  return {
-    headerLeft: render,
-    unstable_headerLeftItems: () => [
-      {
-        type: "custom" as const,
-        element: render(),
-        hidesSharedBackground: true,
-      },
-    ],
-  } as const;
+export function tabRoot(title: string, actions: HeaderAction[] = []) {
+  if (Platform.OS === "ios")
+    return {
+      title,
+      headerTitle: "",
+      headerLeft: () => <TabHeading title={title} />,
+      unstable_headerLeftItems: () => [
+        {
+          type: "custom" as const,
+          element: <TabHeading title={title} />,
+          hidesSharedBackground: true,
+        },
+      ],
+      ...headerActions(actions),
+    } as const;
+  return { title, ...headerActions(actions) } as const;
 }
 
-/** {@link plainHeaderLeft}, on the header's right. */
-export function plainHeaderRight(render: () => ReactElement) {
-  return {
-    headerRight: render,
-    unstable_headerRightItems: () => [
-      {
-        type: "custom" as const,
-        element: render(),
-        hidesSharedBackground: true,
-      },
-    ],
-  } as const;
-}
-
-/** The signed-in person's initials at the top of each tab, which open their account. */
-export function AccountButton() {
-  const { data: session } = authClient.useSession();
-  const person = session?.user.name || session?.user.email || "";
+/** A tab's title at the start of iOS's bar, at the size of a large title that fits the bar's row. */
+function TabHeading({ title }: { title: string }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Your account"
-      hitSlop={8}
-      onPress={() => router.push("/account")}
-      className="active:opacity-70"
+    <Text
+      accessibilityRole="header"
+      numberOfLines={1}
+      className="font-bold text-[28px] leading-[34px]"
     >
-      <PersonAvatar name={person} size={32} />
-    </Pressable>
+      {title}
+    </Text>
   );
-}
-
-/**
- * The way back on a pushed screen. On iOS 26 the system's back button sits in a glass bubble that
- * can't be taken away, so iOS gets this plain chevron in its place, as the web app's header has no
- * bubbles; swiping back from the edge works as before. Android gets the same chevron in place of its
- * arrow, so the two look alike; its back gesture and button work as before.
- */
-export function plainBackButton() {
-  return {
-    headerBackVisible: false,
-    ...plainHeaderLeft(() => (
-      <IconButton
-        icon={IconChevronLeft}
-        label="Back"
-        onPress={() => router.back()}
-      />
-    )),
-  } as const;
 }
 
 /** A sheet's header: no way back in it, since a sheet is put away by swiping it down. */

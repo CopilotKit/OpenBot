@@ -1,6 +1,7 @@
 import { View } from "react-native";
 import type { TablerIcon } from "../icons";
 import { BotMarkdown } from "./bot-markdown";
+import { BotOrb } from "./bot-orb";
 import { cn } from "./cn";
 import { Icon } from "./icon";
 import { Text } from "./text";
@@ -44,14 +45,23 @@ export function Message({
 export function MessageEvent({
   icon,
   text,
+  tone = "muted",
 }: {
   icon?: TablerIcon;
   text: string;
+  /** `danger` for what failed. */
+  tone?: "muted" | "danger";
 }) {
   return (
     <View className="flex-row items-center gap-2 self-stretch py-0.5">
-      {icon ? <Icon icon={icon} size={14} color="accent-muted" /> : null}
-      <Text variant="caption" tone="muted" className="flex-1">
+      {icon ? (
+        <Icon
+          icon={icon}
+          size={14}
+          color={tone === "danger" ? "accent-danger" : "accent-muted"}
+        />
+      ) : null}
+      <Text variant="caption" tone={tone} className="flex-1">
         {text}
       </Text>
     </View>
@@ -69,5 +79,32 @@ export function MessageDay({ label }: { label: string }) {
     >
       {label}
     </Text>
+  );
+}
+
+/**
+ * A Bot's reply that hasn't been written yet: its orb breathing, and what it is doing. Takes the
+ * reply's place until the words arrive.
+ */
+export function MessageWorking({
+  seed,
+  name,
+  label,
+}: {
+  seed: string;
+  name: string;
+  label: string;
+}) {
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${name}: ${label}`}
+      className="flex-row items-center gap-2 self-stretch py-0.5"
+    >
+      <BotOrb seed={seed} name={name} size={20} state="working" />
+      <Text variant="caption" tone="muted">
+        {label}
+      </Text>
+    </View>
   );
 }

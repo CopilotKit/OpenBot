@@ -45,7 +45,8 @@ export function Rows({
 
 /**
  * A row: a 16px glyph on a 32px tile with a hairline ring, a title, a line under it, and what it
- * opens. Pressable when it opens something, with a chevron unless it brings its own control.
+ * opens. Pressable when it opens something, with a chevron unless it brings its own control. A row
+ * that does something where it is (Sign out, Run now) rather than opening a page has no chevron.
  */
 export function Row({
   icon,
@@ -54,14 +55,20 @@ export function Row({
   trailing,
   onPress,
   tone = "default",
+  alert,
+  chevron = true,
   accessibilityLabel,
 }: {
   icon?: TablerIcon;
   title: string;
   description?: string;
+  /** A line under the description, in the color of what failed: "Last run failed". */
+  alert?: string;
   trailing?: ReactNode;
   onPress?: () => void;
   tone?: "default" | "danger";
+  /** False for a row that acts in place instead of opening a page: no chevron. */
+  chevron?: boolean;
   accessibilityLabel?: string;
 }) {
   const content = (
@@ -76,7 +83,11 @@ export function Row({
         </View>
       ) : null}
       <View className="flex-1 gap-0.5">
-        <Text variant="label" tone={tone === "danger" ? "danger" : "default"}>
+        <Text
+          variant="label"
+          tone={tone === "danger" ? "danger" : "default"}
+          numberOfLines={2}
+        >
           {title}
         </Text>
         {description ? (
@@ -84,9 +95,14 @@ export function Row({
             {description}
           </Text>
         ) : null}
+        {alert ? (
+          <Text variant="caption" tone="danger" numberOfLines={2}>
+            {alert}
+          </Text>
+        ) : null}
       </View>
       {trailing ??
-        (onPress ? (
+        (onPress && chevron ? (
           <Icon icon={IconChevronRight} size={16} color="accent-muted" />
         ) : null)}
     </View>

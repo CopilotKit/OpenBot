@@ -1,8 +1,13 @@
-import { Redirect, router, Stack, useLocalSearchParams } from "expo-router";
-import { Button } from "heroui-native/button";
+import {
+  Redirect,
+  router,
+  Stack,
+  useFocusEffect,
+  useLocalSearchParams,
+} from "expo-router";
 import { useCallback } from "react";
 import { Alert, View } from "react-native";
-import { everyPage, ORGANIZATION_ID } from "../src/api";
+import { everyBot, everyPage, ORGANIZATION_ID } from "../src/api";
 import {
   deleteRoutine,
   listRoutineRuns,
@@ -13,7 +18,7 @@ import {
 } from "../src/api/generated/routines/routines";
 import { authClient } from "../src/auth";
 import {
-  Card,
+  BotOrb,
   Notice,
   Row,
   Rows,
@@ -22,14 +27,21 @@ import {
   Text,
   Toggle,
 } from "../src/components";
-import { IconClock } from "../src/icons";
+import { headerActions } from "../src/header";
+import { IconPencil } from "../src/icons";
 import { runLabel, runTone, when } from "../src/routines";
 import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
+import { took } from "../src/when";
+
+/** A time zone as a person says it: "America/Los_Angeles" as "Los Angeles". */
+const zoneName = (zone: string) =>
+  (zone.split("/").pop() ?? zone).replace(/_/g, " ");
 
 /**
- * One routine: whether it is active, when it runs, what it does and where it reports, Run now, and
- * its run history. The header names it, by its title where it has one.
+ * One routine, as a Bot's page opens: the orb of the Bot that runs it, its name and its Bot, then
+ * one card of rows (whether it is active, when it runs, where it reports, Run now), what it does,
+ * and its run history. Deleting it is the last row on the page.
  */
 export default function RoutineScreen() {
   const { routineId = "" } = useLocalSearchParams<{ routineId: string }>();
@@ -44,6 +56,13 @@ export default function RoutineScreen() {
     [],
   );
   const routines = useLoad(loadRoutines, Boolean(session));
+  // Back from Edit routine: the page shows what was saved.
+  const { refresh: refreshRoutines } = routines;
+  useFocusEffect(
+    useCallback(() => {
+      void refreshRoutines();
+    }, [refreshRoutines]),
+  );
   const loadRuns = useCallback(
     () =>
       everyPage(
@@ -53,9 +72,13 @@ export default function RoutineScreen() {
     [routineId],
   );
   const runs = useLoad(loadRuns, Boolean(session && routineId));
+  // The Bot that runs it, for its orb and name at the top.
+  const loadBots = useCallback(() => everyBot(), []);
+  const bots = useLoad(loadBots, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const routine = routines.data?.find((item) => item.id === routineId);
   const running = runs.data?.some((run) => run.status === "running");
+  const bot = bots.data?.find((item) => item.id === routine?.botId);
 
   async function setActive(enabled: boolean) {
     await action.run("active", async () => {
@@ -87,7 +110,28 @@ export default function RoutineScreen() {
         void runs.refresh();
       }}
     >
-      <Stack.Screen options={{ title: routine?.title || "Routine" }} />
+      <Stack.Screen
+        options={{
+          // The page names it under the orb, as a Bot's page does.
+          title: "",
+          ...headerActions(
+            routine
+              ? [
+                  {
+                    label: "Edit routine",
+                    sf: "pencil",
+                    icon: IconPencil,
+                    onPress: () =>
+                      router.push({
+                        pathname: "/routine-form",
+                        params: { routineId: routine.id },
+                      }),
+                  },
+                ]
+              : [],
+          ),
+        }}
+      />
       <Notice
         message={action.error || routines.error || runs.error || undefined}
       />
@@ -96,9 +140,25 @@ export default function RoutineScreen() {
       ) : null}
       {routine ? (
         <>
-          <Rows>
+          <View className="items-center gap-3">
+            <BotOrb
+              seed={bot?.avatarSeed || routine.botId}
+              name={bot?.name ?? "Bot"}
+              size={64}
+            />
+            <View className="items-center gap-1">
+              <Text variant="heading" className="text-center">
+                {routine.title || "Routine"}
+              </Text>
+              {bot ? (
+                <Text tone="muted" className="text-center text-sm">
+                  {`Runs as ${bot.name}`}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+          <Rows iconless>
             <Row
-              icon={IconClock}
               title="Active"
               description={
                 routine.enabled
@@ -116,37 +176,40 @@ export default function RoutineScreen() {
                 />
               }
             />
-          </Rows>
-          <Card className="gap-3">
-            <Detail
-              label="Schedule"
-              value={`${routine.schedule} (${routine.timezone})`}
+            <Row
+              title="Schedule"
+              description={`${routine.schedule}, ${zoneName(routine.timezone)} time`}
             />
-            <Detail label="Instruction" value={routine.instruction} />
-            <Detail
-              label="Reports in"
-              value={
+            <Row
+              title="Reports in"
+              description={
                 routine.conversation.gone
-                  ? "A deleted conversation. Change it from chat."
-                  : (routine.conversation.name ?? "A conversation")
+                  ? "A deleted chat. Change it from a chat."
+                  : (routine.conversation.name ?? "A chat")
               }
             />
-          </Card>
-          <View className="gap-2">
-            <Button
-              isDisabled={!routine.enabled || Boolean(action.busy) || running}
-              onPress={() => {
-                void runNow();
-              }}
-            >
-              {running ? "Running…" : "Run now"}
-            </Button>
-            {!routine.enabled ? (
-              <Text variant="caption" tone="muted" className="text-center">
-                Turn on Active to run it.
-              </Text>
-            ) : null}
-          </View>
+            <Row
+              title={running ? "Running…" : "Run now"}
+              description={
+                routine.enabled ? undefined : "Turn on Active to run it."
+              }
+              chevron={false}
+              onPress={
+                !routine.enabled || action.busy || running
+                  ? undefined
+                  : () => {
+                      void runNow();
+                    }
+              }
+            />
+          </Rows>
+          <Section title="What it does">
+            <Rows iconless>
+              <View className="px-3 py-3">
+                <Text>{routine.instruction}</Text>
+              </View>
+            </Rows>
+          </Section>
           <Section title="Run history">
             {runs.data?.length === 0 ? (
               <Text tone="muted">No runs yet.</Text>
@@ -165,13 +228,22 @@ export default function RoutineScreen() {
                       </Text>
                     ) : null}
                     <Text variant="caption" tone="muted">
-                      Started {when(run.startedAt)}
-                      {run.finishedAt
-                        ? ` · finished ${when(run.finishedAt)}`
-                        : ""}
+                      {[
+                        when(run.startedAt),
+                        // A skipped run did no work, so it took no time worth saying.
+                        run.status !== "skipped" &&
+                          took(run.startedAt, run.finishedAt) &&
+                          `took ${took(run.startedAt, run.finishedAt)}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </Text>
                     {run.error ? (
-                      <Text variant="caption" tone="danger">
+                      // What stopped a failed run is in the color of what failed; why a run was skipped is not an error.
+                      <Text
+                        variant="caption"
+                        tone={run.status === "failed" ? "danger" : "muted"}
+                      >
                         {run.error}
                       </Text>
                     ) : null}
@@ -180,42 +252,34 @@ export default function RoutineScreen() {
               </Rows>
             ) : null}
           </Section>
-          <Button
-            variant="danger-soft"
-            isDisabled={Boolean(action.busy)}
-            onPress={() =>
-              Alert.alert(
-                "Delete this routine?",
-                "It stops running and its history is removed.",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: () => {
-                      void remove();
-                    },
-                  },
-                ],
-              )
-            }
-          >
-            Delete routine
-          </Button>
+          <Rows iconless>
+            <Row
+              title="Delete routine"
+              tone="danger"
+              chevron={false}
+              onPress={
+                action.busy
+                  ? undefined
+                  : () =>
+                      Alert.alert(
+                        "Delete this routine?",
+                        "It stops running and its history is removed.",
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Delete",
+                            style: "destructive",
+                            onPress: () => {
+                              void remove();
+                            },
+                          },
+                        ],
+                      )
+              }
+            />
+          </Rows>
         </>
       ) : null}
     </ScrollScreen>
-  );
-}
-
-/** One fact about the routine: a quiet label over its value. */
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <View className="gap-0.5">
-      <Text variant="caption" tone="muted">
-        {label}
-      </Text>
-      <Text>{value}</Text>
-    </View>
   );
 }

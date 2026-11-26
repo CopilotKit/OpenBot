@@ -148,8 +148,9 @@ The platform draws everything around a screen. HeroUI Native draws what is insid
 | What | Drawn by |
 | --- | --- |
 | Stacks, headers, titles, back buttons | Expo Router's native `Stack`, set in the route's layout or the screen's options. |
-| Tabs | The dock (`mobile/src/dock.tsx`), on Expo Router's JS tabs. The one piece of chrome the app draws itself: iOS 26's native tab bar is a floating glass pill, and the dock is flat, as the web app's sidebar is. |
-| Header buttons (your account, back, new, a Bot's computer and settings) | `IconButton`s placed with `plainHeaderLeft` and `plainHeaderRight` (`mobile/src/header.tsx`), as plain icons the way the web app's header draws them. On iOS 26 they would otherwise sit in a gray glass bubble, and the system's back button can't lose its bubble, so a plain chevron takes its place, on Android too so the two look alike; swiping back and Android's back work the same. |
+| Tabs | Expo Router's `NativeTabs` (`mobile/app/(tabs)/_layout.tsx`): UIKit's tab bar on iOS, iOS 26's glass with SF Symbols, and Material 3's navigation bar on Android, with Material Symbols. |
+| Back buttons | The platform's own: iOS's chevron (in glass on iOS 26) with its edge swipe, Android's arrow with its back gesture. |
+| Header buttons (new, a Bot's computer and settings) | `headerActions` (`mobile/src/header.tsx`): native bar button items with SF Symbols on iOS, icon buttons in the toolbar on Android. A tab's title sits at the start of the bar, level with them (`tabRoot`). |
 | Header menus, search in the header, a bottom toolbar | The native `Stack` toolbar and search bar. |
 | Sheets and modals | Expo Router's native presentations (`formSheet`, `modal`). |
 | Pickers, switches, sliders, system menus | `@expo/ui`, so they look and behave as the platform's own. |
@@ -159,7 +160,7 @@ The platform draws everything around a screen. HeroUI Native draws what is insid
 | A bar at the bottom with a field (the message box) | `KeyboardBar`, inside a `KeyboardAvoidingView` around the screen, so the bar rides on the keyboard. |
 
 - **Native chrome stays native.** Don't draw a header, a tab bar or a sheet yourself, even when
-  HeroUI Native could make one that looks the same. The dock is the one exception (below). The native one gets each platform's look for
+  HeroUI Native could make one that looks the same. The native one gets each platform's look for
   free, including iOS's glass material and Android's Material behavior, and keeps it as the
   platforms change.
 - **Don't imitate glass.** No blur, gradient or translucent card to look like the system's
@@ -226,18 +227,24 @@ Native's, and builds its own only when neither fits. The development build shows
   security floor, the session and the version check have answered, and then the orb glides into
   Welcome, or swells and fades into a signed-in screen. Nothing else draws a loading screen of its
   own while the app opens.
-- **The dock** is the signed-in app's five tabs along the bottom: Conversations, Bots, Routines,
-  Needs you (with a count of what waits) and More (Memory, Skills, Connections, the approval inbox
-  and your account). Each tab is a stack of its own with the native header and a large title, and
-  the person's initials where a back button would be, which open their account. A conversation, a
-  Bot and everything else opened from a tab open in the app's stack over the tabs, so the dock
-  steps aside and the message box has the bottom to itself; what opens from More stays in More.
-  Search sits in the header, under the title.
-- **Android looks like iOS.** Android's header has no large title and offers search only as an
-  icon, so on Android a tab's screen draws its title at the top of its content (`TabTitle`), and
-  Conversations draws its search field there (`SearchField`), at iOS's sizes. Titles of pushed
-  screens are centered on both. What stays each platform's own is the system's: switches, the
-  keyboard, sheets and the status bar. Check a change on both before it lands.
+- **The tabs** are the signed-in app's five, in the platform's tab bar, as icons with no words:
+  Chats, Bots (OpenBot's orb as a flat glyph), your Account in the middle, Needs you (its badge
+  counts what waits), and More (Routines, the approval inbox with a count of what waits there, Memory,
+  Skills and Connections). Each tab is a stack of its own with the native header, its title at the
+  start of the bar. A conversation, a Bot and everything else opened from a tab open in the app's
+  stack over the tabs, so the tab bar steps aside and the message box has the bottom to itself;
+  what opens from More stays in More.
+- **Chats** is the word for conversations, everywhere a person reads it.
+- **A chat** is headed as iMessage heads one: the orbs of the Bots in it and their names, and
+  tapping it opens the Bot's page, or a group's Bots. It reads from the top down, and opens at its
+  newest message once it is longer than the screen. Only an empty chat shows the Bot in the middle
+  of the page; the first message flies its orb up into the header. Two or more Bots make a group:
+  every Bot reads what is sent, and each reply carries its Bot's orb and name.
+- **Each platform's own chrome.** The chrome around a screen is each platform's, not one look on
+  both: a tab's title sits at the start of the bar with its buttons at the end, search among them
+  (iOS 26's search button, Android's toolbar search icon). Android's sheets draw their handle and title in the sheet (`SheetTitle`), where iOS's sheet
+  has its own. What is inside a screen, drawn from the scheme, is the same on both. Check a change
+  on both before it lands.
 
 ## The web app and OpenBot Desktop
 

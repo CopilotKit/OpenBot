@@ -5,7 +5,7 @@ import { tabRoot, useHeaderOptions } from "../../../src/header";
 export default function ConversationsLayout() {
   return (
     <Stack screenOptions={useHeaderOptions()}>
-      <Stack.Screen name="index" options={tabRoot("Conversations")} />
+      <Stack.Screen name="index" options={tabRoot("Chats")} />
     </Stack>
   );
 }
