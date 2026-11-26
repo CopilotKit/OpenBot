@@ -73,11 +73,12 @@ Three ways, and either of the first two writes a routine or a goal with the same
 
 - **The box**, on Routines in the main menu. See [The box](#the-box).
 - **New routine.** A Bot's Routines page has **New routine**, and the box has **Use the form**;
-  either opens one screen (`/routines/new`). It asks, in order: **Bot**, **What to do**, **It should** (Act
-  for you or Only tell you), **Starts** (On a schedule, When something happens, or Now, once), **Done
-  when** (optional), **Posts in**, and **Name**. It does not ask whether you want a routine, a goal
-  or a check-in; the answers decide: `planRoutine` (`app/src/lib/routines/plan.ts`) turns them into a
-  plan, and `createFromPlanMutationOptions` writes it:
+  either opens one screen (`/routines/new`). It asks, in order: **Bot**, **What to do**, **It
+  should** (Act for you or Only tell you), **Starts** (On a schedule, When something happens, or
+  Now, once), **Done when** (optional), **Posts in**, and **Name**. It does not ask whether you
+  want a routine, a goal or a check-in; the answers decide: `planRoutine`
+  (`app/src/lib/routines/plan.ts`) turns them into a plan, and `createFromPlanMutationOptions`
+  writes it:
   - Act on a schedule with nothing in Done when is a routine
     (`POST /api/v2/organizations/{organizationId}/routines`, which writes it exactly as
     `create_routine` does).
@@ -145,14 +146,16 @@ with **Use the form**, which opens the same screen with the answers where there 
 are the form's (`brokenRules`, `app/src/lib/routines/rules.ts`), so the box and the form refuse the
 same things.
 
-**The refusals.** The line is amber, says why, and keeps the sentence in the box so it can be changed.
-The server refuses, in a sentence of its own, what a routine can't do: a routine more often than every 15 minutes, a check-in at
-an interval that isn't offered, a web page to watch, an app the Bot can't read (with **Connect**,
-which opens Connections), something that happens once at a set time ("tomorrow at 9"), a schedule five
-cron fields can't say. It never moves a sentence to the nearest thing allowed, because a moved time
-is a guessed time. The box refuses two more before it writes anything: an admin has turned check-ins
-off ("Your admin turned check-ins off, so *Bot* can only act for you."), and the Bot already has a check-in on
-that subject ("*Bot* already checks in on "*subject*"."). The 20-enabled cap and the 15-minute floor
+**The refusals.** The line is amber, says why, and keeps the sentence in the box so it can be
+changed. The server refuses, each in a sentence of its own, what a routine can't do: running more
+often than every 15 minutes, a check-in that looks other than every hour, every 4 hours, twice a day
+or once a day, a web page to watch, something once at a set time ("tomorrow at 9"), a schedule five
+cron fields can't say, an app the Bot can't read, and a check-in for a Bot that can't read any of
+your apps yet. The last two come with **Connect**, which opens Connections. It never moves a
+sentence to the nearest thing allowed, because a moved time is a guessed time. The box refuses two
+more before it writes anything: an admin has turned check-ins off ("Your admin turned check-ins
+off, so *Bot* can only act for you."), and the Bot already has a check-in on that subject ("*Bot*
+already checks in on "*subject*"."). The 20-enabled cap and the 15-minute floor
 (see below) still apply at the write, and so does taking back a goal whose schedule is refused. A
 write that fails says why and keeps the sentence. A write that may have been saved (its answer never
 came back, or a goal whose schedule was refused could not be taken back) says "It may have been
