@@ -51,9 +51,15 @@ SplashScreen.setOptions({ fade: true, duration: 150 });
 /** OpenBot's orb: the desktop app's icon, without a ground. */
 const ORB = require("../assets/orb.png");
 
-/** What the cover waits for before it opens. */
-export type LaunchWait = "fonts" | "floor" | "session" | "version";
-const WAITS: readonly LaunchWait[] = ["fonts", "floor", "session", "version"];
+/** What the cover waits for before it opens. `setup`: whether a signed-in person has setting up to finish (src/setup-gate.tsx). */
+export type LaunchWait = "fonts" | "floor" | "session" | "version" | "setup";
+const WAITS: readonly LaunchWait[] = [
+  "fonts",
+  "floor",
+  "session",
+  "version",
+  "setup",
+];
 
 /** How long a wait may last before the cover says what it is waiting for. */
 const SLOW_MS = 1_500;

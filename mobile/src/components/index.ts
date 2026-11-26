@@ -14,6 +14,7 @@ export {
   Composer,
   type ComposerFile,
   type ComposerModels,
+  type ComposerStop,
 } from "./composer";
 export { ConversationRow, type ConversationRowBot } from "./conversation-row";
 export { EmptyState } from "./empty-state";

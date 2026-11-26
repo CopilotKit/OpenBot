@@ -8,6 +8,28 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **OpenBot Mobile draws the cards a Bot answers with.** Charts, tables, records, metrics,
+  checklists, notices, quotations and activity reports appear in the conversation on the phone as
+  they do in the web app, as the Bot writes them. The questions a Bot asks with a card (approval,
+  choice, form) show read-only, with the answer once there is one. A Bot's message now lists the
+  cards it drew (`components` on `ConversationMessage`), so they stay after the conversation is
+  opened again. A server without that field shows them only while the answer is being written.
+- **Stop a Bot's answer from the phone.** While a Bot is writing in a one-Bot conversation, Send
+  becomes Stop. It calls the new `stopConversationRun`, which ends the run as the web app's Stop does;
+  the phone offers it only where `getDeployment` says `runStop`. When an answer fails part way, the
+  phone now says so, and offers Connect your AI when the reason is that none is connected.
+- **A new account can finish setting up on the phone.** After signing in, OpenBot Mobile asks for
+  what the web app asks for before the first conversation: accepting the terms, a name, and an AI
+  connected with a key. Before, a new account's first message on the phone went unanswered with
+  nothing said. Signing in to a plan or a provider account is still done on the computer.
+- **A Bot's settings on the phone.** Setup (name, title, what it does, instructions, model,
+  isolation, which Bots it can ask), Sharing (visibility, publishing to people and teams,
+  assignments), Reaching you (Slack, Microsoft Teams and text messages), Activity (with Stop and
+  Cancel), notifications, and pin, hide, duplicate, reset and delete.
+- **Connect apps and write skills on the phone.** Connections lists your apps as the web app does,
+  and connects one with a key or the app's own sign-in page, which now can send you back to the
+  phone (`returnTo: mobile` on `connectApp`, offered where `getDeployment` says
+  `mobileConnections`). Skills can be read, written, edited and deleted on the phone.
 - **OpenBot Mobile shows a Bot's answer as it is written.** A conversation open on the phone shows
   "Working…" as soon as the Bot starts, then its words as they come, as the web app does. Before,
   the answer appeared all at once up to 10 seconds after it was finished. The phone joins the

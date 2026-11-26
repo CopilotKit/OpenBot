@@ -7,6 +7,7 @@ import {
   useFocusEffect,
   useLocalSearchParams,
 } from "expo-router";
+import { Button } from "heroui-native/button";
 import {
   type RefObject,
   useCallback,
@@ -24,18 +25,22 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import {
+  ApiError,
   type ConversationMessage,
   everyBot,
   loadApprovalInbox,
   ME,
   ORGANIZATION_ID,
+  readDeployment,
 } from "../src/api";
 import { decideApproval } from "../src/api/generated/approvals/approvals";
+import { callComponentFunction } from "../src/api/generated/components/components";
 import {
   getConversation,
   listConversationMessages,
   markConversationRead,
   sendConversationMessage,
+  stopConversationRun,
 } from "../src/api/generated/conversations/conversations";
 import type { Approval } from "../src/api/generated/model";
 import {
@@ -65,20 +70,32 @@ import {
   Text,
 } from "../src/components";
 import {
+  answersIn,
+  DrawnCards,
+  DrawnContext,
+  type DrawnSetting,
+  drawable,
+} from "../src/gallery";
+import {
   IconAlertCircle,
   IconChevronRight,
   IconClock,
   IconTool,
 } from "../src/icons";
 import {
+  arriving,
   asMessages,
   caughtUp,
   type LiveRuns,
+  liveAnswers,
   reduce,
+  sentAgain,
   settle,
+  stopOffer,
 } from "../src/live-run";
 import { conversationOf, showConversation } from "../src/on-screen";
 import { measure, useOrbFlight, type ViewHandle } from "../src/orb-flight";
+import { connectAiRouteFor } from "../src/setup";
 import { useLoad } from "../src/use-load";
 import { watchConversationLive } from "../src/watch-conversation";
 import { dayAndTime } from "../src/when";
@@ -94,10 +111,12 @@ type Item =
 
 /**
  * A step a Bot took rather than something it said: a tool's own line, or a finished reply that only
- * called tools. A run of them folds into one line, as the web app's transcript folds them.
+ * called tools. A run of them folds into one line, as the web app's transcript folds them. A reply
+ * that drew cards is not a step: its cards are drawn.
  */
 function stepWords(message: ConversationMessage): string[] | null {
   if (message.role === "tool") return [message.text || "Used a tool."];
+  if (drawable(message).length > 0) return null;
   if (
     message.role === "bot" &&
     !message.text &&
@@ -197,6 +216,8 @@ export default function ConversationScreen() {
   const liveNow = useRef(live);
   liveNow.current = live;
   const watcher = useRef<{ reconnect(): void } | null>(null);
+  // The runs Stop was pressed for: they are ending on the server, and the button waits for them.
+  const [stopAsked, setStopAsked] = useState<ReadonlySet<string>>(new Set());
   // Read through a ref, so the socket isn't opened again each time the reloads change who they read for.
   const reload = useRef({
     history: history.refresh,
@@ -208,6 +229,7 @@ export default function ConversationScreen() {
     if (!channelId || !person) return;
     setLive([]);
     setDelivered(null);
+    setStopAsked(new Set());
     const refreshHistory = () => reload.current.history();
     const refreshConversation = () => reload.current.conversation();
     // What the thread replays when the socket joins is gathered and drawn once, not event by event.
@@ -269,6 +291,21 @@ export default function ConversationScreen() {
       };
     }, [channelId, history.refresh]),
   );
+  // Whether this OpenBot lets a person stop a Bot's run (runStop): Stop is offered only then. Read once per person.
+  const [runStop, setRunStop] = useState(false);
+  useEffect(() => {
+    setRunStop(false);
+    if (!person) return;
+    let current = true;
+    readDeployment(true)
+      .then((deployment) => {
+        if (current) setRunStop(deployment.runStop === true);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [person]);
   const newest = history.data?.messages[0]?.id;
   useEffect(() => {
     if (inFront && channelId && newest)
@@ -332,6 +369,46 @@ export default function ConversationScreen() {
       setDeciding(false);
     }
   }
+  /*
+   * What the Bot's cards share: which ones are still streaming their arguments, what the person answered the
+   * questions among them (a live run's results, else what the read messages say), how a report reads its figures, and
+   * the Bots' names.
+   */
+  const botList = bots.data;
+  const readReport = useCallback<NonNullable<DrawnSetting["readReport"]>>(
+    async (botId, name, args) => {
+      try {
+        const result = await callComponentFunction(
+          ORGANIZATION_ID,
+          botId || agentId,
+          "showActivityReport",
+          { function: name, arguments: args },
+        );
+        return result.allowed
+          ? { allowed: true, data: result.data }
+          : { allowed: false, reason: result.reason ?? undefined };
+      } catch (failure) {
+        return {
+          allowed: false,
+          reason:
+            failure instanceof Error
+              ? failure.message
+              : "Couldn't read that data. Try again in a moment.",
+        };
+      }
+    },
+    [agentId],
+  );
+  const drawnSetting = useMemo<DrawnSetting>(() => {
+    const answers = answersIn((history.data?.messages ?? []).slice().reverse());
+    for (const [id, answer] of liveAnswers(live)) answers.set(id, answer);
+    return {
+      arriving: arriving(live),
+      answers,
+      readReport,
+      botName: (id) => botList?.find((bot) => bot.id === id)?.name,
+    };
+  }, [history.data, live, readReport, botList]);
   // Newest first, as the API answers and as an inverted list draws from the bottom up.
   const items = useMemo<Item[]>(() => {
     const read = history.data?.messages ?? [];
@@ -377,9 +454,50 @@ export default function ConversationScreen() {
   }, [history.data, waitingHere, live, sending, delivered]);
   // A live reply doesn't say which Bot in a group is writing it: it is named once it is read back.
   const liveIds = useMemo(
-    () => new Set(asMessages(live, []).map((message) => message.id)),
-    [live],
+    () =>
+      new Set(
+        asMessages(live, history.data?.messages ?? []).map(
+          (message) => message.id,
+        ),
+      ),
+    [live, history.data],
   );
+  /*
+   * Stop, while a Bot's run here is live and this OpenBot offers it, in a conversation with one Bot: the server keeps
+   * no run record for a group, so it could stop nothing there. Every live run is stopped with one press. The runs then
+   * end over the socket as usual, and the conversation is read again.
+   */
+  const offer = stopOffer(live, { runStop, group: isGroup }, stopAsked);
+  async function stop() {
+    const runs = offer?.runs ?? [];
+    if (!channelId || runs.length === 0) return;
+    setStopAsked((asked) => new Set([...asked, ...runs]));
+    setError("");
+    const results = await Promise.allSettled(
+      runs.map((runId) =>
+        stopConversationRun(ORGANIZATION_ID, channelId, runId),
+      ),
+    );
+    // A run the server no longer knows (404) has nothing left to stop.
+    const failed = results.flatMap((result, index) =>
+      result.status === "rejected" &&
+      !(result.reason instanceof ApiError && result.reason.status === 404)
+        ? [{ runId: runs[index] as string, reason: result.reason as unknown }]
+        : [],
+    );
+    if (failed.length === 0) return;
+    setStopAsked((asked) => {
+      const next = new Set(asked);
+      for (const { runId } of failed) next.delete(runId);
+      return next;
+    });
+    const reason = failed[0]?.reason;
+    setError(
+      reason instanceof Error && reason.message
+        ? reason.message
+        : "Couldn't stop the Bot. Try again.",
+    );
+  }
   // A conversation with something in it shows who it is with in the header from the start.
   useEffect(() => {
     if (items.length > 0 && !flying) setRevealed(true);
@@ -421,6 +539,8 @@ export default function ConversationScreen() {
         ...(isGroup ? {} : { botId: agentId }),
       });
       setDelivered({ id, text: pendingText });
+      // A failure already seen goes once something new is sent, so it isn't drawn after it.
+      setLive(sentAgain);
       chatFiles.sent();
       // A conversation's first message gives its socket something to join.
       watcher.current?.reconnect();
@@ -478,62 +598,65 @@ export default function ConversationScreen() {
        */}
       <Animated.View style={aboveKeyboard} className="flex-1">
         <View className="flex-1">
-          <FlatList
-            ref={list}
-            className="flex-1"
-            inverted
-            data={items}
-            keyExtractor={(item) => item.key}
-            keyboardDismissMode="interactive"
-            keyboardShouldPersistTaps="handled"
-            // Drawn bottom up, so a long conversation opens at its newest message; a short one is pushed to the top
-            // rather than hanging at the bottom over an empty page.
-            contentContainerClassName="grow justify-end gap-5 px-4 py-5"
-            ListHeaderComponent={
-              sending ? (
-                <Message from="person" text={sending} pending />
-              ) : working && current && !replyUnderway ? (
-                // The Bot is at work in this conversation with no reply of its own on screen yet.
-                <MessageWorking
-                  seed={current.seed}
-                  name={current.name}
-                  label="Working…"
-                />
-              ) : undefined
-            }
-            renderItem={({ item }) =>
-              item.kind === "day" ? (
-                <MessageDay label={item.label} />
-              ) : item.kind === "steps" ? (
-                <StepsLine steps={item.steps} />
-              ) : item.kind === "approval" ? (
-                <ApprovalHere
-                  request={item.request}
-                  botName={
-                    botsHere.find((bot) => bot.id === item.request.action.botId)
-                      ?.name
-                  }
-                  busy={deciding}
-                  onDecide={(decision) =>
-                    void decide(item.request.id, decision)
-                  }
-                />
-              ) : (
-                <MessageLine
-                  message={item.message}
-                  bot={speakerOf(item.message)}
-                  named={isGroup && !liveIds.has(item.message.id)}
-                  decidingHere={waitingHere.length > 0}
-                  onReview={() =>
-                    router.push({
-                      pathname: "/approvals",
-                      params: { channelId },
-                    })
-                  }
-                />
-              )
-            }
-          />
+          <DrawnContext.Provider value={drawnSetting}>
+            <FlatList
+              ref={list}
+              className="flex-1"
+              inverted
+              data={items}
+              keyExtractor={(item) => item.key}
+              keyboardDismissMode="interactive"
+              keyboardShouldPersistTaps="handled"
+              // Drawn bottom up, so a long conversation opens at its newest message; a short one is pushed to the top
+              // rather than hanging at the bottom over an empty page.
+              contentContainerClassName="grow justify-end gap-5 px-4 py-5"
+              ListHeaderComponent={
+                sending ? (
+                  <Message from="person" text={sending} pending />
+                ) : working && current && !replyUnderway ? (
+                  // The Bot is at work in this conversation with no reply of its own on screen yet.
+                  <MessageWorking
+                    seed={current.seed}
+                    name={current.name}
+                    label="Working…"
+                  />
+                ) : undefined
+              }
+              renderItem={({ item }) =>
+                item.kind === "day" ? (
+                  <MessageDay label={item.label} />
+                ) : item.kind === "steps" ? (
+                  <StepsLine steps={item.steps} />
+                ) : item.kind === "approval" ? (
+                  <ApprovalHere
+                    request={item.request}
+                    botName={
+                      botsHere.find(
+                        (bot) => bot.id === item.request.action.botId,
+                      )?.name
+                    }
+                    busy={deciding}
+                    onDecide={(decision) =>
+                      void decide(item.request.id, decision)
+                    }
+                  />
+                ) : (
+                  <MessageLine
+                    message={item.message}
+                    bot={speakerOf(item.message)}
+                    named={isGroup && !liveIds.has(item.message.id)}
+                    decidingHere={waitingHere.length > 0}
+                    onReview={() =>
+                      router.push({
+                        pathname: "/approvals",
+                        params: { channelId },
+                      })
+                    }
+                  />
+                )
+              }
+            />
+          </DrawnContext.Provider>
           {/* An empty conversation opens on the Bot: its orb, its name and what it does, in the middle of the page. */}
           {empty && current ? (
             <Animated.View
@@ -614,6 +737,15 @@ export default function ConversationScreen() {
               files={chatFiles.files}
               onRemoveFile={chatFiles.remove}
               models={chatModel}
+              stop={
+                offer
+                  ? {
+                      onStop: () => void stop(),
+                      stopping: offer.stopping,
+                      label: "Stop the Bot",
+                    }
+                  : undefined
+              }
             />
           </View>
         </KeyboardBar>
@@ -651,7 +783,9 @@ function MessageLine({
   if (message.role === "bot") {
     const unfinished =
       message.status === "queued" || message.status === "running";
-    if (unfinished && !message.text)
+    // The cards the Bot drew in this message, under what it said, in the order it drew them.
+    const drew = drawable(message).length > 0;
+    if (unfinished && !message.text && !drew)
       return (
         <MessageWorking
           seed={bot.seed}
@@ -659,7 +793,14 @@ function MessageLine({
           label={message.status === "queued" ? "Starting…" : "Working…"}
         />
       );
-    const said = message.text ? (
+    const content =
+      message.text || drew ? (
+        <View className="gap-3">
+          {message.text ? <Message from="bot" text={message.text} /> : null}
+          {drew ? <DrawnCards message={message} /> : null}
+        </View>
+      ) : null;
+    const said = content ? (
       named ? (
         <View className="gap-1">
           <View className="flex-row items-center gap-2">
@@ -668,12 +809,10 @@ function MessageLine({
               {bot.name}
             </Text>
           </View>
-          <View className="pl-7">
-            <Message from="bot" text={message.text} />
-          </View>
+          <View className="pl-7">{content}</View>
         </View>
       ) : (
-        <Message from="bot" text={message.text} />
+        content
       )
     ) : message.toolCalls ? (
       <ToolLine count={message.toolCalls} />
@@ -715,10 +854,16 @@ function MessageLine({
             tone="danger"
             text="This reply stopped before it finished."
           />
+          <ConnectAi reasons={[message.text, message.reason]} />
         </View>
       );
     if (message.declined && message.text)
-      return <MessageEvent text={message.text} />;
+      return (
+        <View className="gap-2">
+          <MessageEvent text={message.text} />
+          <ConnectAi reasons={[message.text, message.reason]} />
+        </View>
+      );
     return said ?? <ToolLine count={0} />;
   }
   if (message.role === "tool")
@@ -770,6 +915,27 @@ function ApprovalHere({
           : undefined
       }
     />
+  );
+}
+
+/**
+ * "Connect your AI", under a reply that failed because no AI is connected (the server's own sentence, ../src/setup.ts),
+ * to the screen that connects one. Under any other failure, nothing.
+ */
+function ConnectAi({ reasons }: { reasons: (string | null | undefined)[] }) {
+  const route = reasons
+    .map((reason) => connectAiRouteFor(reason))
+    .find((found) => found !== null);
+  if (!route) return null;
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="self-start"
+      onPress={() => router.push(route)}
+    >
+      Connect your AI
+    </Button>
   );
 }
 

@@ -15,6 +15,7 @@ import {
   IconFile,
   IconMicrophone,
   IconPhoto,
+  IconPlayerStopFilled,
   IconPlus,
   IconX,
 } from "../icons";
@@ -36,6 +37,18 @@ export type ComposerFile = {
   uploading: boolean;
 };
 
+/**
+ * Stop for the Bot's run in progress: offered in place of send while the box is empty, as the web app's
+ * composer does. Something typed brings send back, since that is the thing that can't wait.
+ */
+export type ComposerStop = {
+  onStop: () => void;
+  /** The Bots asked to stop are ending: the button waits. */
+  stopping?: boolean;
+  /** What a screen reader calls it: "Stop the Bot", or "Stop the Bots" in a group. */
+  label?: string;
+};
+
 /** The model the next reply runs on, and the ones the person may pick. */
 export type ComposerModels = {
   label: string;
@@ -45,7 +58,8 @@ export type ComposerModels = {
 
 /**
  * The message box, shaped as the web app's: the text across the full width, the files going with it
- * above, and under it attach on the left, and the model, speak and send on the right. A flat card at
+ * above, and under it attach on the left, and the model, speak and send (or Stop, while a Bot's run
+ * can be stopped and nothing is typed) on the right. A flat card at
  * rest that lights in the focus color while someone types in it, the one control that does
  * (docs/app-guidelines.md, "The look"). Attach and the model are the platform's own menus.
  */
@@ -58,6 +72,7 @@ export function Composer({
   onRemoveFile,
   models,
   onSpeak,
+  stop,
   placeholder = "Message",
   disabled,
   sending,
@@ -71,6 +86,7 @@ export function Composer({
   onRemoveFile?: (key: string) => void;
   models?: ComposerModels;
   onSpeak?: () => void;
+  stop?: ComposerStop;
   placeholder?: string;
   disabled?: boolean;
   sending?: boolean;
@@ -83,6 +99,7 @@ export function Composer({
   const uploading = files.some((file) => file.uploading);
   const canSend =
     value.trim().length > 0 && !disabled && !sending && !uploading;
+  const showStop = Boolean(stop) && !value.trim() && files.length === 0;
   return (
     <View
       className={cn(
@@ -218,14 +235,27 @@ export function Composer({
               disabled={disabled}
             />
           ) : null}
-          <IconButton
-            icon={IconArrowUp}
-            label={sending ? "Sending" : "Send"}
-            size="sm"
-            variant="primary"
-            onPress={onSend}
-            disabled={!canSend}
-          />
+          {showStop && stop ? (
+            <IconButton
+              icon={IconPlayerStopFilled}
+              label={
+                stop.stopping ? "Stopping" : (stop.label ?? "Stop the Bot")
+              }
+              size="sm"
+              variant="primary"
+              onPress={stop.onStop}
+              disabled={stop.stopping}
+            />
+          ) : (
+            <IconButton
+              icon={IconArrowUp}
+              label={sending ? "Sending" : "Send"}
+              size="sm"
+              variant="primary"
+              onPress={onSend}
+              disabled={!canSend}
+            />
+          )}
         </View>
       </View>
     </View>

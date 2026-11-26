@@ -30,6 +30,13 @@ import {
   Toggle,
 } from "../src/components";
 import {
+  type Answer,
+  DrawnCard,
+  DrawnContext,
+  type DrawnSetting,
+  GALLERY_SAMPLES,
+} from "../src/gallery";
+import {
   IconAlertCircle,
   IconBell,
   IconBook,
@@ -51,6 +58,29 @@ const BOTS = [
     seed: "general-assistant",
   },
 ];
+
+/**
+ * The Bot cards' samples drawn as a conversation draws them: the activity report reads made-up figures
+ * (never a real read), and the questions show one answer each.
+ */
+const CARDS: DrawnSetting = {
+  arriving: new Set(),
+  answers: new Map<string, Answer>([
+    ["sample-askChoice", { kind: "choice", choice: "staging" }],
+  ]),
+  readReport: async () => ({
+    allowed: true,
+    data: {
+      days: 7,
+      rows: [
+        { bot: "research", actions: 42 },
+        { bot: "analyst", actions: 17 },
+        { bot: "engineer", actions: 5 },
+      ],
+    },
+  }),
+  botName: (id) => BOTS.find((bot) => bot.id === id)?.name,
+};
 
 /** One part of the gallery, shown unless `only` names another. */
 function Part({
@@ -356,6 +386,20 @@ export default function Gallery() {
           />
         </Part>
 
+        <Part only={params.only} title="Bot cards">
+          <DrawnContext.Provider value={CARDS}>
+            <View className="gap-3">
+              {GALLERY_SAMPLES.map((component) => (
+                <DrawnCard
+                  key={component.toolCallId}
+                  component={component}
+                  asked={component.name === "askApproval" ? "waiting" : "done"}
+                />
+              ))}
+            </View>
+          </DrawnContext.Provider>
+        </Part>
+
         <Part only={params.only} title="Sheet title (Android)">
           <SheetTitle title="New chat" />
         </Part>
@@ -367,6 +411,13 @@ export default function Gallery() {
             onSend={() => setDraft("")}
             onAttach={() => {}}
             onSpeak={() => {}}
+            placeholder="Message Research"
+          />
+          <Composer
+            value=""
+            onChangeText={() => {}}
+            onSend={() => {}}
+            stop={{ onStop: () => {} }}
             placeholder="Message Research"
           />
         </Part>

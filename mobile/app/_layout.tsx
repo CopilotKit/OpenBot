@@ -25,6 +25,7 @@ import { renewPush } from "../src/notifications";
 import { aboutShownConversation } from "../src/on-screen";
 import { OrbFlightProvider } from "../src/orb-flight";
 import { onSessionRefused } from "../src/session-refused";
+import { SetupGate, useSetupGate } from "../src/setup-gate";
 import { useVersionVerdict, VersionGate } from "../src/version-gate";
 
 Notifications.setNotificationHandler({
@@ -92,6 +93,8 @@ function Layout() {
     return () => subscription.remove();
   }, [session]);
   const signedIn = Boolean(session);
+  // Whether a signed-in person has setting up to finish (the terms, onboarding, their AI): src/setup-gate.tsx.
+  const setup = useSetupGate(signedIn, session?.user.id);
   /*
    * The screens wait for the first answer about the session. Drawn while it is still pending, the signed-in
    * screens are guarded out, the app opens on a screen outside the guards (the gallery, in a development build),
@@ -102,6 +105,7 @@ function Layout() {
   if (!isPending) answered.current = true;
   // The launch cover (src/launch.tsx) stays over the app until this answer, and the version check's, are in.
   useLaunchSettled("session", answered.current);
+  useLaunchSettled("setup", answered.current && setup.settled);
   useLaunchExpectsOrb(answered.current ? !signedIn : undefined);
   useLaunchSettled(
     "version",
@@ -170,13 +174,40 @@ function Layout() {
             <Stack.Screen name="routines" options={{ title: "Routines" }} />
             <Stack.Screen name="memory" options={{ title: "Memory" }} />
             <Stack.Screen name="skills" options={{ title: "Skills" }} />
+            <Stack.Screen name="skill" options={{ title: "" }} />
+            <Stack.Screen
+              name="skill-form"
+              options={{
+                title: "Skill",
+                ...SHEET,
+                sheetAllowedDetents: [SHEET_FULL],
+              }}
+            />
             <Stack.Screen
               name="connections"
               options={{ title: "Connections" }}
             />
+            <Stack.Screen name="connection" options={{ title: "" }} />
+            {/* Only the way back to an app's screen after its sign-in page: never seen, so no header flashes. */}
+            <Stack.Screen
+              name="connections/returned"
+              options={{ headerShown: false, animation: "none" }}
+            />
             <Stack.Screen name="routine" options={{ title: "Routine" }} />
             <Stack.Screen name="rules" options={{ title: "Custom rules" }} />
             <Stack.Screen name="plugins" options={{ title: "Apps" }} />
+            <Stack.Screen name="bot-setup" options={{ title: "Setup" }} />
+            <Stack.Screen name="bot-sharing" options={{ title: "Sharing" }} />
+            <Stack.Screen name="bot-activity" options={{ title: "Activity" }} />
+            <Stack.Screen name="bot-publish" options={{ title: "Publish" }} />
+            <Stack.Screen
+              name="bot-reach"
+              options={{ title: "Reaching you" }}
+            />
+            <Stack.Screen
+              name="setup/ai"
+              options={{ title: "Connect your AI" }}
+            />
             {/* Only the way back to Home after linking the company account: never seen, so no header flashes. */}
             <Stack.Screen
               name="company-sign-in/linked"
@@ -195,6 +226,8 @@ function Layout() {
           </Stack.Protected>
         </Stack>
       </OrbFlightProvider>
+      {/* Finishing setting up, over the app until it is done; Update OpenBot over that. */}
+      <SetupGate gate={setup} />
       <VersionGate verdict={verdict} onRetry={() => void check()} />
     </View>
   );
