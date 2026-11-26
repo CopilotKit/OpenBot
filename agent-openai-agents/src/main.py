@@ -53,7 +53,9 @@ from agents.run_config import CallModelData, ModelInputData
 from ag_ui.core import EventType, RunErrorEvent
 from ag_ui_openai_agents import OpenAIAgentsAgent, add_openai_agents_fastapi_endpoint
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+from openai.types.shared import Reasoning
 
+from . import plan_models
 from .chatgpt_credentials import Credentials, RESOURCE, SignInNeeded
 
 logger = logging.getLogger("agent-openai-agents")
@@ -113,12 +115,35 @@ async def _note_response(response: httpx.Response) -> None:
         _note_refused()
 
 
+# The model and reasoning effort OpenBot's server chose for this run (`forwardedProps.openbotModel`,
+# as every engine reads it), or none. The server strips any a browser sent, so it is the deployment's.
+_run_choice: ContextVar[dict] = ContextVar("openbot_model", default={})
+
+
+def run_choice(forwarded_props) -> dict:
+    """`{"model": ..., "effort": ...}` from the run's `openbotModel`, each only when well formed."""
+    props = forwarded_props if isinstance(forwarded_props, dict) else {}
+    choice = props.get("openbotModel")
+    if not isinstance(choice, dict):
+        return {}
+    model = choice.get("model")
+    if not isinstance(model, str) or not model.strip():
+        return {}
+    effort = choice.get("reasoningEffort")
+    return {
+        "model": model.strip(),
+        "effort": effort if isinstance(effort, str) and effort in plan_models.WIRE_EFFORTS else "",
+    }
+
+
 class PlanAgent(OpenAIAgentsAgent):
-    """The AG-UI agent, ending a run whose sign-in was refused with the code to sign in again."""
+    """The AG-UI agent: the run's model choice, and a refused sign-in ending with the code to sign in
+    again."""
 
     async def run_streamed(self, input):  # type: ignore[override]
         holder: dict = {}
         token = _refused.set(holder)
+        choice = _run_choice.set(run_choice(input.forwarded_props))
         try:
             async for event in super().run_streamed(input):
                 if getattr(event, "type", None) == EventType.RUN_ERROR and holder.get("refused"):
@@ -127,6 +152,7 @@ class PlanAgent(OpenAIAgentsAgent):
                     )
                 yield event
         finally:
+            _run_choice.reset(choice)
             _refused.reset(token)
 
 
@@ -156,59 +182,59 @@ def _client() -> AsyncOpenAI:
 
 
 class PlanModels(ModelProvider):
-    """The Responses model the signed-in account offers.
+    """The Responses model each run answers on (`plan_models.choose`).
 
-    `CHATGPT_MODEL` names one; otherwise the first the account lists for display
-    (`GET /v1/models`, `visibility: "list"`, in the server's order), asked once.
+    The model picked in OpenBot when the account lists it; otherwise `CHATGPT_MODEL` when listed,
+    else the first model the account lists for display (`GET /v1/models`, `visibility: "list"`, in
+    the server's order). Every run logs which model it ran on and why.
     """
 
     def __init__(self) -> None:
         self.client = _client()
-        self.default: str | None = (os.environ.get("CHATGPT_MODEL") or "").strip() or None
+        self.configured = (os.environ.get("CHATGPT_MODEL") or "").strip()
+        self.listing = plan_models.PlanListing(f"{API_BASE}/models", plan_token)
+        self._models: dict[str, OpenAIResponsesModel] = {}
 
-    async def _account_default(self) -> str:
-        if self.default:
-            return self.default
-        async with httpx.AsyncClient(timeout=30) as http:
-            response = await http.get(
-                f"{API_BASE}/models",
-                headers={"Authorization": f"Bearer {await plan_token()}"},
-            )
-        response.raise_for_status()
-        listed = [
-            model.get("slug") or model.get("id")
-            for model in response.json().get("models", [])
-            if model.get("visibility") == "list"
-        ]
-        if not listed:
-            raise RuntimeError("The ChatGPT account lists no model this Bot can use.")
-        self.default = listed[0]
-        logger.info("model: %s (first of %d the account lists)", self.default, len(listed))
-        return self.default
+    async def resolve(self) -> tuple[OpenAIResponsesModel, str]:
+        """This run's model, and the effort it asked for (empty for the model's own default)."""
+        choice = _run_choice.get()
+        picked = choice.get("model", "")
+        name, why = plan_models.choose(picked, self.configured, await self.listing.models())
+        effort = choice.get("effort", "") if name == picked else ""
+        logger.info("model: %s (%s)%s", name, why, f", effort {effort}" if effort else "")
+        if name not in self._models:
+            self._models[name] = OpenAIResponsesModel(model=name, openai_client=self.client)
+        return self._models[name], effort
 
     def get_model(self, model_name: str | None) -> Model:
-        return _LazyModel(self, model_name)
+        return _RunModel(self)
 
 
-class _LazyModel(Model):
-    """A Responses model whose name is settled on its first call."""
+def _with_effort(args: tuple, kwargs: dict, effort: str) -> tuple[tuple, dict]:
+    """The model call's arguments with the run's reasoning effort in its settings."""
+    if not effort:
+        return args, kwargs
+    extra = ModelSettings(reasoning=Reasoning(effort=effort))
+    if "model_settings" in kwargs:
+        return args, {**kwargs, "model_settings": kwargs["model_settings"].resolve(extra)}
+    # `system_instructions, input, model_settings, ...`, positionally, as the SDK's run loop calls it.
+    return (*args[:2], args[2].resolve(extra), *args[3:]), kwargs
 
-    def __init__(self, provider: PlanModels, name: str | None) -> None:
+
+class _RunModel(Model):
+    """The Responses model, settled per run from the run's own choice."""
+
+    def __init__(self, provider: PlanModels) -> None:
         self.provider = provider
-        self.name = name
-        self.model: OpenAIResponsesModel | None = None
-
-    async def _resolved(self) -> OpenAIResponsesModel:
-        if self.model is None:
-            name = self.name or await self.provider._account_default()
-            self.model = OpenAIResponsesModel(model=name, openai_client=self.provider.client)
-        return self.model
 
     async def get_response(self, *args: Any, **kwargs: Any):
-        return await (await self._resolved()).get_response(*args, **kwargs)
+        model, effort = await self.provider.resolve()
+        args, kwargs = _with_effort(args, kwargs, effort)
+        return await model.get_response(*args, **kwargs)
 
     async def stream_response(self, *args: Any, **kwargs: Any):
-        model = await self._resolved()
+        model, effort = await self.provider.resolve()
+        args, kwargs = _with_effort(args, kwargs, effort)
         async for event in model.stream_response(*args, **kwargs):
             yield event
 
@@ -219,8 +245,9 @@ agent = Agent(
     instructions=None,
     model_settings=ModelSettings(store=False),
 )
+PROVIDER = PlanModels()
 run_config = RunConfig(
-    model_provider=PlanModels(),
+    model_provider=PROVIDER,
     model_settings=ModelSettings(store=False),
     call_model_input_filter=developer_not_system,
     tracing_disabled=True,
@@ -237,6 +264,21 @@ async def refuse_without_the_server_token(request: Request, call_next):
         if not expected or not hmac.compare_digest(offered.encode("utf-8"), expected.encode("utf-8")):
             return JSONResponse({"error": "unauthorised"}, status_code=401)
     return await call_next(request)
+
+
+@app.get("/models")
+async def models():
+    """The models the signed-in ChatGPT account offers, for OpenBot's model picker.
+
+    `{"object": "list", "data": [{"id", "label", "efforts", "default_effort", "priority"}]}`, in the
+    account's own order, the shape every plan harness answers with.
+    """
+    listed = await PROVIDER.listing.models()
+    if listed is None:
+        return JSONResponse(
+            {"error": "The ChatGPT plan's model list could not be read."}, status_code=502
+        )
+    return {"object": "list", "data": [model.as_entry() for model in listed]}
 
 
 add_openai_agents_fastapi_endpoint(
