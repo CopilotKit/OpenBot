@@ -6893,6 +6893,71 @@ function bundledPolicy(): { text: string; directives: Map<string, string[]> } {
   return { text, directives };
 }
 
+/*
+ * Gemini takes an API key only. An installation whose saved connection is a Google sign-in opens on
+ * the AI step, never Start: the step says the sign-in ended, and its one button opens Google
+ * Gemini's API key, with no way to sign in to Google left on the row. In light and dark, wide and
+ * at the window's smallest, the notice and its button are whole and in view.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each.
+ */
+describe.skipIf(!asked)("a saved Google sign-in for Gemini", () => {
+  for (const colorScheme of ["light", "dark"] as const)
+    for (const [width, height] of [
+      [1000, 760],
+      [760, 640],
+    ] as const)
+      test(`at ${width}x${height} (${colorScheme}), says it ended, and its button opens Gemini's API key`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        const shot = (name: string) =>
+          shots
+            ? page.screenshot({
+                path: `${shots}/google-sign-in-ended-${name}-${colorScheme}-${width}.png`,
+              })
+            : Promise.resolve();
+        try {
+          await open(page, "#google-sign-in-ended");
+          const notice = page.locator(".blocker", {
+            hasText: "Google sign-in for Gemini has ended",
+          });
+          await notice.waitFor();
+          await page.waitForTimeout(300);
+          await shot("notice");
+          expect(await notice.textContent()).toContain(
+            "Add a Gemini API key to keep your Bots running on Gemini.",
+          );
+          const add = page.getByRole("button", {
+            name: "Add a Gemini API key",
+            exact: true,
+          });
+          const box = await add.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+          expect(box!.y + box!.height).toBeLessThanOrEqual(height);
+          // Nothing started: the saved sign-in is never handed to Start.
+          expect(await calls(page)).not.toContain("start_stack");
+          await add.click();
+          await page
+            .getByLabel("Google Gemini API key", { exact: true })
+            .waitFor();
+          await page.waitForTimeout(300);
+          await shot("key");
+          expect(await notice.count()).toBe(0);
+          expect(
+            await page
+              .getByRole("tab", { name: "Sign in", exact: true })
+              .count(),
+          ).toBe(0);
+        } finally {
+          await page.close();
+        }
+      });
+});
+
 describe("the bundled window's Content Security Policy", () => {
   test("loads only the window's own files, its images, the IPC and the booking calendar", () => {
     const { directives } = bundledPolicy();

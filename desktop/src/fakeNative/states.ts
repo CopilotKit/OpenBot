@@ -139,6 +139,8 @@ function createStates(where: Where): States {
   // unfinished install, as start_stack does, and the window installs before it starts again.
   // Offline here, so that install fails and the window says so.
   const imageListGone = where.hash === "#image-list-gone";
+  // A relaunch whose saved connection is a Google sign-in for Gemini, which Gemini no longer takes.
+  const googleSignInEnded = where.hash === "#google-sign-in-ended";
   // Found running by the launch is a relaunch too: an installation set up and started before.
   const relaunch =
     where.hash === "#start" ||
@@ -148,6 +150,7 @@ function createStates(where: Where): States {
     runningTooOld ||
     launcherAhead ||
     imageListGone ||
+    googleSignInEnded ||
     Boolean(move);
   const MOVE_PREVIEW = {
     counts: [
@@ -424,12 +427,24 @@ function createStates(where: Where): States {
       case "already_configured":
         return relaunch
           ? {
-              values: {},
-              saved: {
-                modelApiKeys: { openai: true, anthropic: false },
-                modelSessions: none,
-                model: "open-ai-api-key",
-              },
+              values: googleSignInEnded
+                ? {
+                    BOT_MODEL: "gemini-3-pro",
+                    OPENAI_BASE_URL:
+                      "http://127.0.0.1:3001/api/model-provider/v1",
+                  }
+                : {},
+              saved: googleSignInEnded
+                ? {
+                    modelApiKeys: none,
+                    modelSessions: { ...none, google: true },
+                    model: "google-oauth",
+                  }
+                : {
+                    modelApiKeys: { openai: true, anthropic: false },
+                    modelSessions: none,
+                    model: "open-ai-api-key",
+                  },
               launch: { harness: { id: "langgraph" } },
               localEval: {
                 stack: "local-abc123",
@@ -466,7 +481,8 @@ function createStates(where: Where): States {
           !localTooOld &&
           !runningTooOld &&
           !launcherAhead &&
-          !imageListGone
+          !imageListGone &&
+          !googleSignInEnded
           ? { from: "1.0.0", to: "1.0.1" }
           : null;
       case "upgrade_and_start":
@@ -519,9 +535,8 @@ function createStates(where: Where): States {
           {
             id: "google",
             name: "Google Gemini",
-            summary:
-              "Use a Google AI Studio key or sign in for Gemini API access.",
-            logins: ["endpoint", "oauth"],
+            summary: "Use a Google AI Studio key for the Gemini API.",
+            logins: ["endpoint"],
             mark: "google-color",
             caution: null,
           },

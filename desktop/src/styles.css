@@ -1518,10 +1518,10 @@ a:hover {
 }
 
 /*
- * A notice above the list (a saved Google sign-in that ended): set under the lede as the list
- * would be, and apart from the first row, so it reads as the screen's and not as a row's.
+ * A notice above the list (a saved Google sign-in that ended): where the list would start, and apart
+ * from the first row, so it reads as the screen's and not as a row's.
  */
-.lede + .blocker {
+.setup-body > .blocker:first-child {
   margin-top: 0;
 }
 

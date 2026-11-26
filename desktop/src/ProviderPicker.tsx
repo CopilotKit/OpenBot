@@ -115,7 +115,7 @@ const endpointPresets: Record<
 
 /** What approving in the browser does, for each provider that signs in that way. */
 const oauthExplanation: Record<string, string> = {
-  xai:"Authorize OpenBot to use models available to your xAI account.",
+  xai: "Authorize OpenBot to use models available to your xAI account.",
   unbiased:
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here. OpenBot receives an API key for Pareto and keeps it on this computer.",
 };
@@ -704,8 +704,7 @@ export function ProviderPicker({
       r.id === "openai-compatible" ||
       (nextPreset && endpointProvider(held.OPENAI_BASE_URL) === r.id);
     setReuseEndpointKey(
-      Boolean(restoreEndpoint) &&
-        held.saved?.modelApiKeys?.compatible === true,
+      Boolean(restoreEndpoint) && held.saved?.modelApiKeys?.compatible === true,
     );
     if (restoreEndpoint && held.OPENAI_BASE_URL) {
       setBaseUrl(held.OPENAI_BASE_URL);
