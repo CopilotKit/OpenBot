@@ -90,9 +90,18 @@ at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 
 `LANGGRAPH_TS_AG_UI_URL` is where the server finds the TypeScript LangGraph engine,
 `agent-langgraph-ts`, which new Bots run on. It is called with `MANAGED_AGENT_TOKEN`, like the managed
-Bot. Unset, and with no picked harness that is that engine, new Bots run on the server's built-in
-engine. `scripts/start.sh` points it at the engine on 4215 on a laptop, and Compose's `server`
-service reaches it by name. OpenBot Desktop needs neither: its picked harness is that engine.
+Bot, and reaches the model through the server's model gateway with `MODEL_GATEWAY_TOKEN` where one
+is set. The engine is required for new Bots: a server that cannot find it refuses them, with a
+sentence telling the person to ask an admin, and logs why. It does not run them on its built-in
+agent instead. The server looks in this order: `LANGGRAPH_TS_AG_UI_URL`; then the picked harness,
+when it is that engine (OpenBot Desktop's); then `LANGGRAPH_TS_COMPOSE_AG_UI_URL`, which
+`docker-compose.yml` always sets to its own `agent-langgraph-ts` service. So Compose and
+`scripts/start.sh` run the engine and wire it in every edition, the personal edition included, and
+OpenBot Desktop needs neither setting. The one-container image does not carry the engine: run
+`agent-langgraph-ts` beside it and set this address (see [deployment.md](deployment.md)).
+
+`OPENBOT_DEFAULT_BOT_ENGINE=built-in` puts every Bot back on the server's built-in agent, for a
+deployment that does not run the engine.
 
 ## General variables
 
