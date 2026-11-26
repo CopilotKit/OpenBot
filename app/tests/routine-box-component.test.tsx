@@ -491,3 +491,21 @@ test("with no Bots it says to make one first, and has no box", async () => {
   expect(view.getByRole("button", { name: "New Bot" })).toBeTruthy();
   expect(view.queryByRole("textbox", { name: "Message" })).toBeNull();
 });
+
+test("the box is a rounded rectangle about three lines tall, not a pill", async () => {
+  serving();
+  const view = draw();
+  await box(view);
+  const frame = view.container.querySelector(
+    '[data-slot="composer"]',
+  ) as HTMLElement;
+  expect(frame.className).toMatch(/\brounded-(xl|2xl)\b/);
+  expect(frame.className).not.toContain("rounded-full");
+  // Three 24px lines before anything is typed.
+  const input = view.container.querySelector(
+    '[data-slot="composer-input"]',
+  ) as HTMLElement;
+  expect(
+    input.querySelector('[class*="prompt-area-editor]:min-h-18"]'),
+  ).not.toBeNull();
+});

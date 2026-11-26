@@ -212,6 +212,8 @@ export function RoutineBox({
         className="w-full [&_[data-slot=composer-dictate]]:hidden"
         commands={[]}
         disabled={!bots}
+        // A few lines tall before anything is typed, like a note, not a one-line pill.
+        editorClassName="[&_.prompt-area-editor]:min-h-18"
         key={filled?.times ?? 0}
         onSubmit={send}
         // Sending waits for the check-ins read, which the rules for a check-in need.
