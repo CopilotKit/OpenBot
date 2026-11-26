@@ -5,6 +5,7 @@ import { appsQueryOptions, catalogueQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import {
   connectionsQueryOptions,
   personalConnections,
@@ -55,6 +56,7 @@ export function useMovedApps() {
   const catalogue = useQuery({ ...catalogueQueryOptions(), enabled: any });
   const preferences = useUserPreferences();
   const user = useQuery(currentUserQueryOptions());
+  const open = useAppsOpen();
   const dismiss = useMutation(
     dismissNoticeMutationOptions(queryClient, preferences.userId),
   );
@@ -107,10 +109,10 @@ export function useMovedApps() {
     },
     retrying: reads.some((read) => read.isFetching),
     /**
-     * Whether the person may add an app the organization hasn't yet: only an admin may add one from
-     * the directory (createApp), as on the directory's own page.
+     * Whether the person may add an app the organization hasn't yet (createApp), as on the
+     * directory's own page: an admin, or anybody while apps are open.
      */
-    mayAdd: isOrganizationAdmin(user.data?.role),
+    mayAdd: isOrganizationAdmin(user.data?.role) || open === true,
     cloudIdOf,
     /** Whether any finished move listed an app at all, dismissed or not. */
     listedAny: listed.length > 0,

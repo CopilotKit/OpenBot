@@ -36,6 +36,7 @@ import {
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
@@ -72,8 +73,9 @@ import { connectionsQueryOptions } from "@/lib/plugins/queries";
  * an admin of their organization, which is OpenBot Cloud's usual case) presses Connect: the app is
  * added for everybody and their own sign-in or key form follows on the same press, from Connections
  * and from Admin alike. Admin's Browse apps used to stop at "Add", and the row then asked for a
- * second press to Connect; "turn it on, then connect it" was a step nobody read as one. A member
- * asks an admin for it. `place` decides only where the back button and the app's page go.
+ * second press to Connect; "turn it on, then connect it" was a step nobody read as one. With apps
+ * open a member connects in the same press; locked down, a member asks an admin for it. `place`
+ * decides only where the back button and the app's page go.
  *
  * A COMPONENT AND NOT A ROUTE, so every directory route is the same screen rather than several that
  * drift. A route file importing another route file is how that drift starts, so none does. Every
@@ -89,15 +91,19 @@ export type DirectoryPlace = "connections" | "admin";
 
 /**
  * What a press does for this person, opened from `place`. Admin is opened only by an admin, so
- * there it is always Connect.
+ * there it is always Connect. With apps open (`open`, the organization's switch) a member connects
+ * too; locked down, a member asks an admin.
  */
 export function directoryPressMode(input: {
   edition: "team" | "personal";
   place: DirectoryPlace;
   role: string | null | undefined;
+  open?: boolean;
 }): DirectoryPressMode {
   if (input.edition === "personal" || input.place === "admin") return "connect";
-  return isOrganizationAdmin(input.role) ? "connect" : "request";
+  return isOrganizationAdmin(input.role) || input.open === true
+    ? "connect"
+    : "request";
 }
 
 export function BrokerDirectory({
@@ -124,7 +130,13 @@ export function BrokerDirectory({
   const apps = useQuery(directoryAppsQueryOptions(query));
   const personal = paths.edition === "personal";
   const role = useQuery(currentUserQueryOptions()).data?.role;
-  const mode = directoryPressMode({ edition: paths.edition, place, role });
+  const open = useAppsOpen();
+  const mode = directoryPressMode({
+    edition: paths.edition,
+    place,
+    role,
+    open,
+  });
   /** From Connections the app's page is under Connections, in either edition. */
   const ownPages = personal || place === "connections";
   /*

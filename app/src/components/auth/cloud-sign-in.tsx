@@ -139,7 +139,9 @@ export function CloudSignIn({ flowId }: { flowId?: string }) {
        */}
       <Item
         className="text-left hover:bg-muted dark:border-input dark:bg-input/30 dark:hover:bg-input/50"
-        render={<button onClick={openTeamFeatures} type="button" />}
+        render={
+          <button onClick={() => openTeamFeatures("sign_in")} type="button" />
+        }
         size="sm"
         variant="outline"
       >

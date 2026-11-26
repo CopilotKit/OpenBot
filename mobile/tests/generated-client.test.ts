@@ -693,7 +693,7 @@ test("before sign-in the app reads the deployment and decides: this release's Op
   expect(await checkVersion()).toEqual({
     kind: "app",
     detail:
-      "This OpenBot needs OpenBot Mobile 1.2.0 or later. Update OpenBot, then try again.",
+      "This OpenBot needs OpenBot Mobile 9.0.0 or later. Update OpenBot, then try again.",
   });
 
   deploymentAnswer = { status: 200, body: fixture.deployments["v3-only"] };

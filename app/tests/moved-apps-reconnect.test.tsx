@@ -384,6 +384,13 @@ class FakeServer {
   connects: { appId: string; key: boolean }[] = [];
   /** The apps that take a key, whatever the app list says about how they connect. */
   keyApps = new Set<string>();
+  /**
+   * The organization's apps switch. Locked down unless a test opens it: the tests here that pin a
+   * member waiting for an admin pin it locked down. Open, a member adds an app as an admin does.
+   */
+  lockedDown = true;
+  /** Holds the directory's answers until released: the seconds a real directory search takes. */
+  directoryHeld: Promise<void> | null = null;
 
   constructor(
     imports: Import[] | null,
@@ -507,6 +514,8 @@ class FakeServer {
           hostedSignIn: this.hosted,
         },
       };
+    if (path === `${ORGANIZATION}/settings/apps` && method === "GET")
+      return { status: 200, json: { lockedDown: this.lockedDown } };
     if (path === `${ORGANIZATION}/bots` && method === "GET")
       return { status: 200, json: { bots: [], nextCursor: null } };
     if (path === `${ORGANIZATION}/conversations` && method === "GET")
@@ -544,7 +553,8 @@ class FakeServer {
       expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
         0,
       );
-      expect(this.role).toBe("admin");
+      // An admin adds apps; so does anybody while apps are open.
+      if (this.lockedDown) expect(this.role).toBe("admin");
       const sent = request.postDataJSON() as Record<string, unknown>;
       CreateAppBody.parse(sent);
       // A server added by its address: reached with the organization's key, nobody signs in.
@@ -564,6 +574,27 @@ class FakeServer {
       expect(sent.from).toBe("directory");
       const entry = String(sent.directoryEntryId);
       this.added.push(entry);
+      /*
+       * Fireflies, which the directory offers as its sign-in (the vendor's own server): where that
+       * server is already here, the add is refused as already added, naming it, as OpenBot Cloud
+       * 1.2.0 answers.
+       */
+      const signIn = (this.apps.servers ?? []).find(
+        (server) =>
+          "url" in server && server.url === "https://api.fireflies.ai/mcp",
+      );
+      if (entry === "directory:fireflies" && signIn)
+        return {
+          status: 409,
+          json: {
+            type: "https://open.bot/errors/app-already-added",
+            title: "That app is already added.",
+            status: 409,
+            detail: `That server is already here, as ${signIn.title}.`,
+            code: "APP_ALREADY_ADDED",
+            appId: signIn.id,
+          },
+        };
       // An entry of OpenBot's own catalogue: added as its key, with the key it was given, if any.
       const listed = (this.apps.catalogue ?? []).find(
         (item) => `catalogue:${item.key}` === entry,
@@ -622,6 +653,8 @@ class FakeServer {
       const members = membersResponse(url.toString(), ORGANIZATION_MEMBERS);
       return { status: members.status, json: await members.json() };
     }
+    if (path === `${ORGANIZATION}/app-directory` && this.directoryHeld)
+      await this.directoryHeld;
     const apps = answerAppsApi(url.toString(), { method }, this.apps);
     if (apps) return { status: apps.status, json: await apps.json() };
     this.unanswered.push(`${method} ${path}`);
@@ -1418,6 +1451,28 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
       }
     }, 90_000);
 
+  for (const engine of engines)
+    test(`apps open, a member's Reconnect adds an app the organization hasn't yet, as an admin's does, in ${engine}`, async () => {
+      const server = new FakeServer([finishedMove([SLACK])]);
+      server.lockedDown = false;
+      const page = await open("/reconnect", server, engine);
+      try {
+        // Nothing waits for an admin: the row offers Reconnect, and names nobody.
+        await row(page, "slack")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL(`${ORIGIN}/connections/composio-slack`);
+        await page.getByRole("dialog", { name: "Connecting Slack" }).waitFor();
+        expect(server.added).toEqual(["directory:slack"]);
+        expect(server.connects).toEqual([
+          { appId: "composio-slack", key: false },
+        ]);
+        expect(server.membersAsks).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
   /*
    * Reported on 1.2.0-rc.3, on OpenBot Cloud after a move: Reconnect opened the app's page, where
    * Connect had to be pressed again. One press of Reconnect is the whole connect now, for every kind
@@ -1530,6 +1585,96 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         ]);
       } finally {
         await page.close();
+      }
+    }, 60_000);
+
+  /*
+   * FOUND IN DOGFOODING (OpenBot Desktop 1.2.0 on OpenBot Cloud): Fireflies moved as its key app,
+   * and here it had been added as its sign-in, Fireflies' own server. Reconnect never found it, so
+   * it added Fireflies again; the add was refused as already added three times, and the press never
+   * reached the sign-in. While it looked, the list was a blank page for seconds.
+   */
+  for (const engine of engines)
+    test(`one Reconnect on a key app added here as its sign-in starts that sign-in, and the list stays while it looks, in ${engine}`, async () => {
+      const vendorServer = (id: string) => ({
+        id,
+        title: "Fireflies.ai",
+        provenance: "custom",
+        url: "https://api.fireflies.ai/mcp",
+        signIn: true,
+      });
+      const server = new FakeServer(
+        [finishedMove([FIREFLIES, GMAIL])],
+        "admin",
+      );
+      server.apps.servers = [
+        ...(server.apps.servers ?? []),
+        vendorServer("fireflies-mcp"),
+      ];
+      const page = await open("/reconnect", server, engine);
+      try {
+        // The server's own id for it: found here, so nothing is added again.
+        await row(page, "fireflies")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL(`${SIGN_IN}/fireflies-mcp`);
+        expect(server.added).toEqual([]);
+        expect(server.connects).toEqual([
+          { appId: "fireflies-mcp", key: false },
+        ]);
+        server.connected.add("fireflies-mcp");
+        await page.goto(`${ORIGIN}/connections?connected=fireflies-mcp`);
+        await page.waitForURL(`${ORIGIN}/reconnect`);
+        await row(page, "fireflies").getByText("Reconnected").waitFor();
+      } finally {
+        await page.close();
+      }
+
+      // Under an id nothing can tell from its name: the add answers that it is already here.
+      const again = new FakeServer([finishedMove([FIREFLIES, GMAIL])], "admin");
+      again.apps.servers = [
+        ...(again.apps.servers ?? []),
+        vendorServer("fireflies-mcp-2"),
+      ];
+      again.apps.directory = [
+        ...(again.apps.directory ?? []),
+        {
+          slug: "fireflies",
+          name: "Fireflies",
+          connection: { kind: "self-registering" },
+        },
+      ];
+      let release: () => void = () => {};
+      const second = await open("/reconnect", again, engine);
+      try {
+        const reconnect = row(second, "fireflies").getByRole("button", {
+          name: "Reconnect",
+        });
+        await reconnect.waitFor();
+        again.directoryHeld = new Promise((resolve) => {
+          release = resolve;
+        });
+        await reconnect.click();
+        // Looking it up: the list stays, and the row says it is under way.
+        await row(second, "fireflies")
+          .getByRole("button", { name: "Connecting…" })
+          .waitFor();
+        await heading(second, "Reconnect your apps");
+        await row(second, "gmail")
+          .getByRole("button", { name: "Reconnect" })
+          .waitFor();
+        expect(await measured(second)).toEqual(FINE);
+        await shoot(second, "reconnect-working", engine, "light", WIDE);
+        release();
+        await second.waitForURL(`${SIGN_IN}/fireflies-mcp-2`, {
+          timeout: 15_000,
+        });
+        expect(again.added).toEqual(["directory:fireflies"]);
+        expect(again.connects).toEqual([
+          { appId: "fireflies-mcp-2", key: false },
+        ]);
+      } finally {
+        await second.close();
       }
     }, 60_000);
 

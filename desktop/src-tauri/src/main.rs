@@ -1915,7 +1915,9 @@ fn record_setup_event<R: tauri::Runtime>(app: tauri::AppHandle<R>, event: serde_
     if let Ok(
         event @ (telemetry::EventData::StepViewed { .. }
         | telemetry::EventData::HarnessChosen { .. }
-        | telemetry::EventData::ModelChosen { .. }),
+        | telemetry::EventData::ModelChosen { .. }
+        | telemetry::EventData::BusinessOpened { .. }
+        | telemetry::EventData::BusinessBooked { .. }),
     ) = serde_json::from_value(event)
     {
         desktop_telemetry::record(&app, event);

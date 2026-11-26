@@ -23,6 +23,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { AI_PROVIDERS_TITLE } from "@/lib/ai-connection/paths";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { managePaths } from "@/lib/manage-paths";
@@ -66,7 +67,7 @@ type SettingsSidebarItem = {
  *
  * - You: your account, where updates reach you, your Vault, the organization you work in, and
  *   your API keys.
- * - Every Bot: the AI they run on (Providers), then what is set once for all of them, in the fixed
+ * - Every Bot: the AI they run on (AI providers), then what is set once for all of them, in the fixed
  *   order of `lib/primitives.ts`.
  *   Conversations is not here: it is where work happens, not something to set. Routines, Memory,
  *   Skills and Apps (Connections) are things you make and come back to, so they are in the main
@@ -117,10 +118,10 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
   {
     /*
      * The AI every Bot runs on: each provider connected, with a page of its own. The same mark as
-     * Admin → Providers, which shows the organization's from the admin's side.
+     * Admin → AI providers, which shows the organization's from the admin's side.
      */
     group: "every-bot",
-    title: "Providers",
+    title: AI_PROVIDERS_TITLE,
     icon: IconBrain,
     linkOptions: { to: "/settings/providers" },
   },

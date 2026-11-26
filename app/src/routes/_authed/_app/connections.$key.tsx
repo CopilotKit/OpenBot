@@ -52,6 +52,7 @@ import { useDropBrokerReturn } from "@/lib/connections/broker-return";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
@@ -308,6 +309,12 @@ function AppConnectionPage({
     connections.data?.connections ?? [],
   ).find((row) => row.serverId === key);
   /*
+   * A SIGN-IN THE VENDOR WITHDREW: the row stands and the grant it points at was revoked. The page
+   * read it as connected, offered nothing but a Disconnect that isn't built, and a Reconnect from the
+   * reconnect list arrived here and started nothing. It is offered Reconnect, which is Connect's press.
+   */
+  const withdrawn = connection?.revoked === true;
+  /*
    * Asked of the row rather than the catalogue, because a brokered app has no catalogue entry at
    * all: the deployment recorded how it is reached when the app was enabled, and that record is the
    * only thing here that knows.
@@ -368,6 +375,12 @@ function AppConnectionPage({
     paths.edition === "team" &&
     signedIn.isSuccess &&
     !isOrganizationAdmin(role);
+  /*
+   * APPS OPEN (the organization's switch): a member adds an app nobody has added, as an admin does,
+   * and is never told an admin has to turn it on. Locked down, they are.
+   */
+  const open = useAppsOpen() === true;
+  const openToMember = member && open;
   const noticeNamesAdmin = notice !== null && /\badmin\b/i.test(notice.message);
   const notSetUp =
     setup.data !== undefined &&
@@ -379,7 +392,7 @@ function AppConnectionPage({
     server === undefined &&
     entry?.auth === "user-oauth";
   const admins = useOrganizationAdmins(
-    member && (noticeNamesAdmin || notSetUp || notOn),
+    member && (noticeNamesAdmin || notSetUp || (notOn && !open)),
   );
   /* The server's refusal as it said it, and beside it who the admins are where it names one. */
   const shownNotice: Failure | null =
@@ -392,12 +405,18 @@ function AppConnectionPage({
     server !== undefined;
   /*
    * AN ADMIN'S CONNECT ON AN APP NOBODY HAS ADDED adds it for everyone and goes straight on to their
-   * own sign-in, the press Connections' tiles make (`useConnectApp`). A member is told an admin has
-   * to make it available. An app with no client to sign in against yet goes to Admin's page for it,
-   * which is where the client is typed in.
+   * own sign-in, the press Connections' tiles make (`useConnectApp`). So does a member's, with apps
+   * open; locked down, a member is told an admin has to make it available. An app with no client to
+   * sign in against yet goes to Admin's page for it, which is where the client is typed in; a member
+   * stays here, where the server's refusal says it has to be set up first.
    */
-  const mayAdd = paths.edition === "team" && isOrganizationAdmin(role);
-  const connectApp = useConnectApp((app) => paths.plugin(app));
+  const mayAdd =
+    paths.edition === "team" && (isOrganizationAdmin(role) || openToMember);
+  const connectApp = useConnectApp((app) =>
+    openToMember
+      ? { to: "/connections/$key", params: { key: app } }
+      : paths.plugin(app),
+  );
   /* In the card under the row above it, where the page has one. */
   const switchRow =
     removable && server ? (
@@ -419,9 +438,9 @@ function AppConnectionPage({
   /*
    * THE SIGN-IN ON ARRIVAL, for an app OpenBot signs in to itself: one added by its address that
    * signs each person in, or a built-in one. The same press as this page's Connect below, made for
-   * the person who already pressed Reconnect on the list (`startConnect`). Once per visit, only once
-   * every read has answered, and never over an account that is already connected. A directory app's
-   * row starts its own (`BrokeredAccountRow`).
+   * the person who already pressed Reconnect (`startConnect`). Once per visit, only once every read
+   * has answered, and never over an account that is connected and working: over a withdrawn one it
+   * is the reconnection. A directory app's row starts its own (`BrokeredAccountRow`).
    */
   const signedInHere =
     entry?.auth === "user-oauth" ||
@@ -436,7 +455,7 @@ function AppConnectionPage({
     !brokered &&
     !sharedHere &&
     signedInHere &&
-    connection === undefined;
+    (connection === undefined || withdrawn);
   const signInStarted = useRef(false);
   const { mutate: startSignIn } = connect;
   useEffect(() => {
@@ -735,7 +754,9 @@ function AppConnectionPage({
            * does from Connections.
            */}
           {signsInForDirectory(server) &&
-          (paths.edition === "personal" || isOrganizationAdmin(role)) ? (
+          (paths.edition === "personal" ||
+            isOrganizationAdmin(role) ||
+            openToMember) ? (
             <KeyVersionOffer appId={key} title={server.title} />
           ) : null}
         </PageSection>
@@ -837,13 +858,30 @@ function AppConnectionPage({
                         "Not available yet. An admin has to turn this on first.",
                         admins,
                       )
-                    : connection
-                      ? "Bots you allow use this as you, and see only what you can see."
-                      : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}
+                    : withdrawn
+                      ? `Your ${app.title} connection needs reconnecting.`
+                      : connection
+                        ? "Bots you allow use this as you, and see only what you can see."
+                        : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
-              {connection ? (
+              {withdrawn ? (
+                /* Connect's press over the grant that was withdrawn: the vendor's consent page. */
+                <Button
+                  disabled={connect.isPending}
+                  onClick={() => {
+                    setNotice(null);
+                    connect.mutate(key);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {connect.isPending ? "Connecting…" : "Reconnect"}
+                  <IconArrowUpRight />
+                </Button>
+              ) : connection ? (
                 /*
                  * A state and a menu, not a switch. Connected is a fact about a grant that lives at
                  * the vendor, and withdrawing it is a deliberate act rather than the other half of a
@@ -924,7 +962,7 @@ function AppConnectionPage({
         </PageRows>
       </PageSection>
 
-      {connection ? (
+      {connection && !withdrawn ? (
         <PageSection
           description={`Review the permissions recorded by ${app.vendor}. They may include fewer permissions than OpenBot requested.`}
           title="Access"

@@ -865,7 +865,7 @@ function Choice({
       </fieldset>
       {/* OpenBot for Business books a demo: it moves nothing and keeps nothing, so neither shows. */}
       {picked === "business" ? (
-        <BusinessBooker />
+        <BusinessBooker place="move_to_cloud" />
       ) : (
         <>
           <div className="row">

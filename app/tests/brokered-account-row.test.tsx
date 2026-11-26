@@ -2999,3 +2999,88 @@ test("arriving to connect a key app opens its key form without a second press", 
 
   expect(await view.findByLabelText("API Key")).toBeTruthy();
 });
+
+/*
+ * FOUND IN DOGFOODING: Reconnect on Fireflies, whose key didn't pass its check, landed on its page
+ * as it was. The account still stood, so the key form never opened and nothing on the page
+ * reconnected it: the only way out was Disconnect and then Connect. A key that didn't pass is now
+ * reconnected in the key form, from a Bot's Reconnect and from the page's own.
+ */
+test("arriving to reconnect a key that didn't pass its check opens the key form over the account that stands", async () => {
+  const server = installDeployment({
+    authScheme: "API_KEY",
+    checkable: true,
+    composioConfigured: true,
+    confirms: true,
+    fields: [PERPLEXITY_KEY],
+    recorded: true,
+    verified: false,
+    verifiedAt: null,
+    probe: PROBE,
+  });
+
+  const view = renderAccountScreen(
+    queryClient(),
+    `/connections/${APP_KEY}?connect=true`,
+  );
+
+  const dialog = await view.findByRole("dialog");
+  await userEvent.type(await view.findByLabelText("API Key"), "pplx-new-key");
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Connect" }),
+  );
+  await waitFor(() => expect(server.submitted).toHaveLength(1));
+  expect(server.submitted[0]).toEqual({ generic_api_key: "pplx-new-key" });
+});
+
+test("a key that didn't pass its check offers Reconnect, which asks for a new key", async () => {
+  const server = installDeployment({
+    authScheme: "API_KEY",
+    checkable: true,
+    composioConfigured: true,
+    confirms: true,
+    fields: [PERPLEXITY_KEY],
+    recorded: true,
+    verified: false,
+    verifiedAt: null,
+    probe: PROBE,
+  });
+
+  const view = renderAccountScreen(queryClient());
+
+  expect(
+    await view.findByText(/Re-check to try again, or Reconnect with a new key/),
+  ).toBeTruthy();
+  // Nothing opens until it is pressed: the page arrived without being asked to connect.
+  expect(view.queryByRole("dialog")).toBeNull();
+  await userEvent.click(await view.findByRole("button", { name: "Reconnect" }));
+  const dialog = await view.findByRole("dialog");
+  await userEvent.type(await view.findByLabelText("API Key"), "pplx-new-key");
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Connect" }),
+  );
+  await waitFor(() => expect(server.submitted).toHaveLength(1));
+});
+
+test("a key that passed its check offers no Reconnect and opens no form on arrival", async () => {
+  installDeployment({
+    authScheme: "API_KEY",
+    checkable: true,
+    composioConfigured: true,
+    confirms: true,
+    fields: [PERPLEXITY_KEY],
+    recorded: true,
+    verified: true,
+    verifiedAt: CHECKED_AT,
+    probe: PROBE,
+  });
+
+  const view = renderAccountScreen(
+    queryClient(),
+    `/connections/${APP_KEY}?connect=true`,
+  );
+
+  expect(await view.findByText(/Connected with your key/)).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Reconnect" })).toBeNull();
+  expect(view.queryByRole("dialog")).toBeNull();
+});

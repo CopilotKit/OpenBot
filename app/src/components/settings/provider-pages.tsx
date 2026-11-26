@@ -36,10 +36,15 @@ import {
   removeAiConnectionMutationOptions,
 } from "@/lib/ai-connection/mutations";
 import {
+  AI_PROVIDERS_TITLE,
   type JustConnected,
   useProviderPaths,
 } from "@/lib/ai-connection/paths";
-import { AI_PROVIDERS, isSignIn } from "@/lib/ai-connection/providers";
+import {
+  AI_PROVIDERS,
+  isSignIn,
+  providerById,
+} from "@/lib/ai-connection/providers";
 import {
   type AiConnectionEntry,
   type AiConnections,
@@ -64,7 +69,7 @@ import { lastGoes } from "./ai-connection-list";
 import { YourAiSection } from "./your-ai";
 
 /**
- * Settings → Providers and Admin → Providers, as screens rather than dialogs
+ * Settings → AI providers and Admin → AI providers, as screens rather than dialogs
  * (`.claude/skills/openbot-screen-layout`, Screens, Not Dialogs):
  *
  * - The list: one row per connected provider, each a link to its page, and a row that connects
@@ -105,7 +110,7 @@ function nameFromAddress(id: string): string {
 const LIST_FAILED = "Couldn't load your AI connections. Try again in a moment.";
 
 /**
- * Settings → Providers: the person's own AI on OpenBot Cloud, and the organization's for whoever
+ * Settings → AI providers: the person's own AI on OpenBot Cloud, and the organization's for whoever
  * may change it. The organization's alone everywhere else, where it is what every Bot runs on.
  */
 export function ProvidersSettingsPage() {
@@ -129,7 +134,7 @@ export function ProvidersSettingsPage() {
           ? "Bots use your own AI when they work for you. Anyone who hasn't connected one uses your organization's."
           : "Connect the AI providers your Bots run on. Bots use the default unless someone picks a model from another provider in a conversation."
       }
-      title="Providers"
+      title={AI_PROVIDERS_TITLE}
     >
       {cloud ? <YourAiSection /> : null}
       {nothingHere ? (
@@ -155,7 +160,7 @@ export function ProviderPage({
 }) {
   const paths = useProviderPaths();
   const providers = useProviders(scope);
-  const back = { label: "Providers", linkProps: paths.list() };
+  const back = { label: AI_PROVIDERS_TITLE, linkProps: paths.list() };
   const entry = providers.list.data?.connections.find(
     (connection) => connection.id === id,
   );
@@ -460,12 +465,27 @@ function ProviderDetails({
   );
 }
 
-/** Connect one more AI beside the others: the shared chooser, on its own page. */
+/**
+ * Connect one more AI beside the others: the shared chooser, on its own page.
+ *
+ * Each connection goes back to the list, where what was connected has a check, as onboarding's
+ * Connect your AI does: the person may connect another, or leave with Done. A provider's own page
+ * is where a connection is changed, made the default or disconnected, not where adding one ends.
+ * The chooser is drawn again from the list the connection refreshed (its mutation waits for that),
+ * and a line only a screen reader hears says what was connected, since the form it was in is gone.
+ */
 export function ConnectProviderPage({ scope }: { scope: ConnectionScope }) {
   const paths = useProviderPaths();
   const navigate = useNavigate();
   const providers = useProviders(scope);
-  const back = { label: "Providers", linkProps: paths.list() };
+  const [lastConnected, setLastConnected] = useState<{
+    provider: Connected["connection"]["provider"];
+    round: number;
+  }>();
+  const connectedName = lastConnected
+    ? (providerById(lastConnected.provider)?.name ?? "Your AI")
+    : null;
+  const back = { label: AI_PROVIDERS_TITLE, linkProps: paths.list() };
   const list = providers.list.data;
   const first = list?.connections.length === 0;
   const title = first
@@ -501,24 +521,28 @@ export function ConnectProviderPage({ scope }: { scope: ConnectionScope }) {
     >
       <ChooserCard>
         <ChooseConnection
+          connectedHere={lastConnected !== undefined}
+          initialFocusProvider={lastConnected?.provider ?? undefined}
+          key={lastConnected?.round ?? 0}
           mode={{
             kind: "adding",
             scope,
             signIns: list.signIns,
-            connected: list.connections.map((entry) => entry.provider),
+            connected: list.connections,
+            owner: providers.owner,
           }}
           onBack={() => void navigate(paths.list())}
-          onConnected={(next) =>
-            void navigate(
-              paths.provider(
-                next.connection.provider ?? "",
-                scope,
-                next.isDefault === false ? "added" : "in-use",
-              ),
-            )
+          onConnected={({ connection }) =>
+            setLastConnected((previous) => ({
+              provider: connection.provider,
+              round: (previous?.round ?? 0) + 1,
+            }))
           }
         />
       </ChooserCard>
+      <p aria-live="polite" className="sr-only" role="status">
+        {connectedName ? `${connectedName} is connected.` : ""}
+      </p>
     </PageShell>
   );
 }
@@ -565,7 +589,7 @@ export function ChangeProviderPage({
   if (done)
     return (
       <PageShell
-        backButton={{ label: "Providers", linkProps: paths.list() }}
+        backButton={{ label: AI_PROVIDERS_TITLE, linkProps: paths.list() }}
         title={`Connected to ${describeConnection(done.connection)?.provider ?? "your AI"}`}
       >
         <ConnectedRow connection={done.connection} owner={providers.owner} />
@@ -613,7 +637,8 @@ export function ChangeProviderPage({
                   kind: "adding",
                   scope,
                   signIns: list.signIns,
-                  connected: list.connections.map((other) => other.provider),
+                  connected: list.connections,
+                  owner: providers.owner,
                   provider: entry.provider,
                   login: entry.login,
                   reconnecting: name,

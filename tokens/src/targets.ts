@@ -22,4 +22,6 @@ export const REGIONS = [
 export const WHOLE_FILES = [
   // OpenBot Mobile, which builds from mobile/ alone and can't import a workspace package.
   "mobile/src/scheme.ts",
+  // The web app's manifest, whose colors a phone paints an added app's splash and bar with.
+  "app/public/manifest.webmanifest",
 ] as const;

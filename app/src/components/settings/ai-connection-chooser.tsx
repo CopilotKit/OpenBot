@@ -1,4 +1,5 @@
 import {
+  IconAlertTriangleFilled,
   IconChevronRight,
   IconCircleCheckFilled,
   IconCloud,
@@ -11,6 +12,7 @@ import {
   type ReactNode,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -88,7 +90,10 @@ import {
   sharedLogins,
   signInWords,
 } from "@/lib/ai-connection/providers";
-import type { ConnectionScope } from "@/lib/ai-connection/queries";
+import type {
+  AiConnectionEntry,
+  ConnectionScope,
+} from "@/lib/ai-connection/queries";
 import {
   awaitSignInRedirect,
   beginSignInRedirect,
@@ -157,13 +162,17 @@ export type ChooserMode =
    * One more connection beside the others, in a list of several (connectAiConnection or
    * connectPersonalAiConnection). Like `personal`, the server runs each sign-in it names in
    * `signIns` (for the organization: startAiSignIn), and every other provider connects with a key
-   * or an address. `connected`: the providers already connected, which choosing replaces.
+   * or an address. `connected`: the connections already made, one per provider, which choosing
+   * replaces. Each reads as connected in the list: what it is, a check, and Default once there are
+   * two or more; one that can't run says why and offers Reconnect.
    */
   | {
       kind: "adding";
       scope: ConnectionScope;
       signIns: readonly AiConnectionProviderAnswer[];
-      connected: readonly AiConnectionProviderAnswer[];
+      connected: readonly AiConnectionEntry[];
+      /** Whose the connected ones are, in their rows' words. The reader's when absent. */
+      owner?: AiConnectionOwner;
       /** Open on this provider, to fix its connection: `reconnecting` names it in the title. */
       provider?: AiConnectionProviderAnswer;
       /** And on the connection's own way in, where the provider offers it: a key asks for the key. */
@@ -364,17 +373,31 @@ const wait = (seconds: number) =>
 
 export function ChooseConnection({
   connection,
+  connectedHere = false,
+  initialFocusProvider,
   mode,
   onBack,
   onConnected,
 }: {
   /** The connection in use, for its kept keys. Absent when adding one more beside it. */
   connection?: AiConnection;
+  /** Restore focus to this provider when the list remounts after a connection. */
+  initialFocusProvider?: AiConnectionProviderAnswer;
   mode: ChooserMode;
   /** Back from a chosen provider, or Cancel from the list. Absent: the list has no way back. */
   onBack?: () => void;
+  /**
+   * Something was connected from this list already, and the list is drawn again with it checked:
+   * leaving it is Done, since there is nothing to cancel.
+   */
+  connectedHere?: boolean;
   onConnected: (connected: ConnectedResult) => void;
 }) {
+  const initialFocusRow = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    initialFocusRow.current?.focus();
+  }, []);
+
   const personal = mode.kind === "personal";
   const adding = mode.kind === "adding" ? mode : null;
   // A person's own, or one more in a list: the server runs sign-ins, keys elsewhere, Back to the list.
@@ -473,9 +496,15 @@ export function ChooseConnection({
     connect.reset();
     setProviderId(next?.id ?? null);
     const nextLogins = next ? loginsFor(next, mode) : [];
-    // Fixing one connection opens on its own way in; anything else on the provider's first.
+    /*
+     * Fixing one connection opens on its own way in, and so does choosing a connected one in the
+     * list, which replaces it; anything else on the provider's first.
+     */
     const own =
-      adding?.provider && adding.provider === next?.id ? adding.login : null;
+      adding?.provider && adding.provider === next?.id
+        ? adding.login
+        : (adding?.connected.find((entry) => entry.provider === next?.id)
+            ?.login ?? null);
     const nextLogin =
       own && nextLogins.includes(own) ? own : (nextLogins[0] ?? null);
     setLogin(nextLogin);
@@ -525,6 +554,18 @@ export function ChooseConnection({
   const usingSaved = Boolean(savedKey && useSaved);
   const typedKey = apiKey.trim();
   const typedModel = model.trim();
+  /*
+   * A sign-in asks for no model, as a key or a plan doesn't: once connected, the conversation's
+   * model picker offers every model the provider lists for it. The connection still names one, the
+   * model a run uses when nobody picked: the one this sign-in already names where it is being
+   * signed in again, so an upgrade changes nothing, and otherwise the provider's usual one.
+   */
+  const signInModel = (
+    (provider && login === "oauth" ? ownModel(provider.id) : null) ??
+    kept?.model ??
+    preset?.model ??
+    ""
+  ).trim();
 
   const ready =
     !!provider &&
@@ -536,8 +577,24 @@ export function ChooseConnection({
           typedModel.length > 0 &&
           (!preset || usingSaved || typedKey.length > 0)
         : login === "oauth"
-          ? signedIn && typedModel.length > 0
+          ? signedIn && signInModel.length > 0
           : signedIn);
+
+  /**
+   * The model this provider's sign-in already names, in the list or as the connection in use.
+   * Unbiased AI's sign-in is kept as a key for its own address, so its address names it.
+   */
+  function ownModel(id: AiProvider["id"]): string | null {
+    const signedInBefore = (login: AiConnectionLogin | null) =>
+      login === "oauth" || (id === "unbiased" && login === "endpoint");
+    const listed = adding?.connected.find(
+      (entry) => entry.provider === id && signedInBefore(entry.login),
+    );
+    if (listed) return listed.model;
+    return connection?.provider === id && signedInBefore(connection.login)
+      ? connection.model
+      : null;
+  }
 
   function input(): AiConnectionInput | null {
     if (!provider || !login) return null;
@@ -571,7 +628,7 @@ export function ChooseConnection({
         provider: provider.id,
         login: "endpoint",
         baseUrl: preset.baseUrl,
-        model: typedModel,
+        model: signInModel,
         useSavedKey: true,
       };
     // Unbiased AI's sign-in ends in a key for its own address, sent exactly as a typed one is.
@@ -582,11 +639,11 @@ export function ChooseConnection({
         login: "endpoint",
         apiKey: minted.current,
         baseUrl: preset.baseUrl,
-        model: typedModel,
+        model: signInModel,
       };
     }
     if (login === "oauth")
-      return { provider: provider.id, login, model: typedModel };
+      return { provider: provider.id, login, model: signInModel };
     return { provider: provider.id, login };
   }
 
@@ -905,47 +962,91 @@ export function ChooseConnection({
           aria-label="AI provider"
           className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0"
         >
-          {(provider ? [provider] : AI_PROVIDERS).map((row) => (
-            <Item
-              key={row.id}
-              render={
-                /*
-                 * Changing one connection keeps to its provider: picking another here would connect
-                 * that one beside it instead of changing this one.
-                 */
-                provider && adding?.provider ? (
-                  <div />
-                ) : (
-                  <button
-                    disabled={busy}
-                    onClick={() => choose(provider ? null : row)}
-                    type="button"
-                  />
-                )
-              }
-              // A button centres its text; a row reads from the left like every other.
-              className="text-left"
-              size="sm"
-              variant="muted"
-            >
-              <ProviderTile provider={row} />
-              <ItemContent>
-                <ItemTitle>{row.name}</ItemTitle>
-                <ItemDescription>{providerSummary(row, mode)}</ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                {provider && adding?.provider ? null : provider ? (
-                  <span className="text-muted-foreground text-xs">Change</span>
-                ) : adding?.connected.includes(row.id) ? (
-                  <span className="text-muted-foreground text-xs">
-                    Connected
-                  </span>
-                ) : (
-                  <IconChevronRight className="size-4 text-muted-foreground" />
-                )}
-              </ItemActions>
-            </Item>
-          ))}
+          {(provider ? [provider] : AI_PROVIDERS).map((row) => {
+            // In the list, one already connected reads as connected (adding several).
+            const entry = provider
+              ? undefined
+              : adding?.connected.find((one) => one.provider === row.id);
+            return (
+              <Item
+                key={row.id}
+                render={
+                  /*
+                   * Changing one connection keeps to its provider: picking another here would connect
+                   * that one beside it instead of changing this one.
+                   */
+                  provider && adding?.provider ? (
+                    <div />
+                  ) : (
+                    <button
+                      disabled={busy}
+                      onClick={() => choose(provider ? null : row)}
+                      ref={
+                        row.id === initialFocusProvider
+                          ? initialFocusRow
+                          : undefined
+                      }
+                      type="button"
+                    />
+                  )
+                }
+                // A button centres its text; a row reads from the left like every other.
+                className="text-left"
+                size="sm"
+                variant="muted"
+              >
+                <ProviderTile provider={row} />
+                <ItemContent>
+                  <ItemTitle>
+                    {row.name}
+                    {entry?.isDefault &&
+                    adding &&
+                    adding.connected.length > 1 ? (
+                      <span className="font-normal text-muted-foreground text-xs">
+                        Default
+                      </span>
+                    ) : null}
+                  </ItemTitle>
+                  <ItemDescription>
+                    {!entry ? (
+                      providerSummary(row, mode)
+                    ) : entry.ready ? (
+                      describeConnection(entry, adding?.owner)?.summary
+                    ) : (
+                      <span className="text-destructive">
+                        {entry.problem?.detail}
+                      </span>
+                    )}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  {provider && adding?.provider ? null : provider ? (
+                    <span className="text-muted-foreground text-xs">
+                      Change
+                    </span>
+                  ) : entry && !entry.ready ? (
+                    <>
+                      <IconAlertTriangleFilled
+                        aria-hidden
+                        className="size-4 text-destructive"
+                      />
+                      <span className="text-muted-foreground text-xs">
+                        Reconnect
+                      </span>
+                    </>
+                  ) : entry ? (
+                    <IconCircleCheckFilled
+                      aria-label="Connected"
+                      className="size-5 text-success"
+                      role="img"
+                    />
+                  ) : (
+                    <IconChevronRight className="size-4 text-muted-foreground" />
+                  )}
+                </ItemActions>
+              </Item>
+            );
+          })}
         </fieldset>
 
         {provider && login ? (
@@ -1045,7 +1146,7 @@ export function ChooseConnection({
               </Field>
             ) : null}
 
-            {login === "endpoint" || login === "oauth" ? (
+            {login === "endpoint" ? (
               <Field>
                 <FieldLabel htmlFor="ai-connection-model">
                   Model name
@@ -1119,7 +1220,7 @@ export function ChooseConnection({
               type="button"
               variant="ghost"
             >
-              {provider ? "Back" : "Cancel"}
+              {provider ? "Back" : connectedHere ? "Done" : "Cancel"}
             </Button>
           ) : null}
           {provider ? (

@@ -25,8 +25,10 @@ import {
   BUSINESS_URL,
   type BusinessFeatureIcon,
   bookingCalendarSrc,
+  type DesktopBusinessPlace,
 } from "../../shared/openbot-for-business";
 import { ExternalLink } from "./ExternalLink";
+import { recordSetupEvent } from "./telemetry";
 
 /** The same icons the app's OpenBot for Business dialog draws each feature with. */
 const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
@@ -57,9 +59,19 @@ const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
  * it. Book a demo under the first line takes the person there, so the way to book is in view the
  * moment OpenBot for Business is picked: its heading comes to the top of the card and takes the
  * focus, and the calendar follows it.
+ *
+ * IT SAYS WHERE IT IS. `place` is the screen it is drawn on: the booking's `utm_content`, and the
+ * place of `business_opened`, once for each place each time the setup window loads, however often
+ * it is picked again there, and of `business_booked` with each booking. Neither names the time
+ * booked or anything typed into the calendar.
  */
-export function BusinessBooker() {
+export function BusinessBooker({ place }: { place: DesktopBusinessPlace }) {
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (opened.has(place)) return;
+    opened.add(place);
+    recordSetupEvent({ kind: "business_opened", place });
+  }, [place]);
   const booking = useRef<HTMLHeadingElement>(null);
   const toBooking = () => {
     const heading = booking.current;
@@ -112,11 +124,28 @@ export function BusinessBooker() {
             </ExternalLink>
           </div>
         ) : (
-          <BookingCalendar onFailed={() => setFailed(true)} />
+          <BookingCalendar
+            place={place}
+            onFailed={() => setFailed(true)}
+            onBooked={() =>
+              recordSetupEvent({ kind: "business_booked", place })
+            }
+          />
         )}
       </section>
     </section>
   );
+}
+
+/**
+ * The places whose booker came on screen since the setup window's page loaded: `business_opened` is
+ * said once each. Coming back to setup from OpenBot loads the page again, which starts it afresh.
+ */
+const opened = new Set<DesktopBusinessPlace>();
+
+/** For tests: a new window, where no booker has come on screen yet. */
+export function forgetBusinessOpened() {
+  opened.clear();
 }
 
 /** The height Calendly's embed instructions give an inline calendar, until it reports its own. */
@@ -181,18 +210,29 @@ type CalendlyMessage = {
  * ITS OWN MESSAGES SAY IT LOADED. A frame's `load` fires for an error page too, so the calendar
  * counts as there only once Calendly, from its own origin and this frame, says so. Until then a
  * spinner stands in its place. Offline, an `error` from the frame, or no word from it in
- * {@link BOOKING_CALENDAR_TIMEOUT_MS} on screen, and `onFailed` hands back to Book a demo. Its height
+ * {@link BOOKING_CALENDAR_TIMEOUT_MS} on screen, and `onFailed` hands back to Book a demo. A booking
+ * made in it, said by Calendly from its own origin and this frame, calls `onBooked`. Its height
  * follows what it reports, so it never scrolls inside the card.
  */
-function BookingCalendar({ onFailed }: { onFailed: () => void }) {
+function BookingCalendar({
+  place,
+  onFailed,
+  onBooked,
+}: {
+  place: DesktopBusinessPlace;
+  onFailed: () => void;
+  onBooked: () => void;
+}) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [src] = useState(() =>
-    bookingCalendarSrc(window.location.host, windowColors()),
+    bookingCalendarSrc(window.location.host, place, windowColors()),
   );
   const [ready, setReady] = useState(false);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const failed = useRef(onFailed);
   failed.current = onFailed;
+  const booked = useRef(onBooked);
+  booked.current = onBooked;
 
   useEffect(() => {
     if (!navigator.onLine) {
@@ -219,6 +259,8 @@ function BookingCalendar({ onFailed }: { onFailed: () => void }) {
       } else if (message.event === "calendly.event_type_viewed") {
         heard = true;
         setReady(true);
+      } else if (message.event === "calendly.event_scheduled") {
+        booked.current();
       }
     };
     window.addEventListener("message", onMessage);

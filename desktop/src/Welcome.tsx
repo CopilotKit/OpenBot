@@ -376,7 +376,7 @@ export function Welcome({
       ) : shown === "cloud" ? (
         <CloudSignIn connecting={signingIn} focus={pickedNow} />
       ) : shown === "business" ? (
-        <BusinessBooker />
+        <BusinessBooker place="welcome" />
       ) : cloudOn ? null : (
         <SelfContained
           startDownloads={startDownloads}

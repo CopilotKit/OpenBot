@@ -19,14 +19,14 @@ export function openComposerModelPicker(): void {
 }
 
 /**
- * Where a connection is fixed: its own page in Settings → Providers. `owner` says whose list it is
+ * Where a connection is fixed: its own page in Settings → AI providers. `owner` says whose list it is
  * in: on OpenBot Cloud a person's own and the organization's may share an id.
  */
 export function reconnectPath(connectionId: string, owner?: string): string {
   return providerAddress(connectionId, owner);
 }
 
-/** Where a default is chosen: Settings → Providers, which says when there is none. */
+/** Where a default is chosen: Settings → AI providers, which says when there is none. */
 export function chooseDefaultPath(): string {
   return PROVIDERS_ADDRESS;
 }
@@ -41,7 +41,7 @@ export function chooseDefaultPath(): string {
  * server's sentence varies by connection, and an OpenBot older than several connections sends no
  * `stopped`, which draws nothing here.
  *
- * Reconnect is a whole page load into Settings → Providers, as the other ways to fix an AI from a conversation
+ * Reconnect is a whole page load into Settings → AI providers, as the other ways to fix an AI from a conversation
  * are (add-model-key-link.tsx). It is left out for a member whose runs use the organization's
  * connection: only an admin can fix that one. Named query client, as everything drawn inside a
  * conversation.

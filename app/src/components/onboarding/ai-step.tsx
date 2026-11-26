@@ -16,11 +16,15 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { providerById } from "@/lib/ai-connection/providers";
 import {
+  type AiConnections,
+  aiConnectionsQueryOptions,
   type PersonalAiConnection,
   personalAiConnectionInQueryOptions,
   personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
+import type { AiConnection } from "@/lib/api/generated/model";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { StepIntro } from "./onboarding-frame";
@@ -38,8 +42,12 @@ import type { OnboardingStep } from "./onboarding-wizard";
  * server says a connection is in use, the step's button is disabled and there is no Not now.
  *
  * THE CHOOSER IS SETTINGS' OWN, ON THE PAGE. The same provider list, ways in and checks as
- * Settings' AI connection dialog (ai-connection-chooser.tsx), in its personal mode, drawn in a card
- * where the other steps draw their picture: beside the words on a desktop, under them on a phone.
+ * Settings → AI providers → Connect another AI (ai-connection-chooser.tsx), drawn in a card where the
+ * other steps draw their picture: beside the words on a desktop, under them on a phone.
+ *
+ * SEVERAL, ONE AFTER ANOTHER. Each connection brings the person back to the list, where what they
+ * connected has a check, so they can connect another or go on. One is enough to go on; the first is
+ * the default (the server's rule), and which one is the default is changed in Settings.
  */
 export function useAiStep(): OnboardingStep {
   const personal = useQuery(personalAiConnectionQueryOptions());
@@ -61,11 +69,11 @@ export function useAiStep(): OnboardingStep {
         }
       >
         <p>
-          Bots need an AI model to work. Connect your own by signing in or with
-          an API key. It's personal to you and never shared with your
+          Bots need an AI model to work. Connect one or more by signing in or
+          with an API key. They're personal to you and never shared with your
           organization.
         </p>
-        <p>You can change it anytime in Settings.</p>
+        <p>You can add more or change them anytime in Settings.</p>
       </StepIntro>
     ),
     demo: () =>
@@ -181,8 +189,87 @@ function WayOut() {
   );
 }
 
-/** The chooser, or once connected, what is connected and a way to change it. */
+/**
+ * The person's own connections, as a list to add to. A server older than several connections (404),
+ * or one where a person can't have their own (409), answers no list: the one connection's chooser,
+ * as before.
+ */
 function AiChooserPane({ personal }: { personal: PersonalAiConnection }) {
+  const list = useQuery(aiConnectionsQueryOptions("personal"));
+  if (list.isPending) return null;
+  // Keep an open form mounted if refreshing its cached list fails.
+  if (list.isLoadingError)
+    return (
+      <div className="mx-auto w-full max-w-lg">
+        <ChooserCard>
+          <div className="flex flex-col gap-4">
+            <p className="text-destructive text-sm" role="alert">
+              Couldn't load your AI connections. Try again.
+            </p>
+            <div className="flex justify-end">
+              <Button
+                disabled={list.isFetching}
+                onClick={() => void list.refetch()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Try again
+              </Button>
+            </div>
+          </div>
+        </ChooserCard>
+      </div>
+    );
+  return list.data ? (
+    <SeveralPane list={list.data} />
+  ) : (
+    <OnePane personal={personal} />
+  );
+}
+
+/**
+ * The provider list, with a check on each one connected. Connecting goes back to the list: the
+ * chooser is drawn again from the list the connection refreshed (its mutation waits for that), and
+ * a line only a screen reader hears says what was connected, since the form it was in is gone.
+ */
+function SeveralPane({ list }: { list: AiConnections }) {
+  const [lastConnected, setLastConnected] = useState<{
+    provider: AiConnection["provider"];
+    round: number;
+  }>();
+  const name = lastConnected
+    ? (providerById(lastConnected.provider)?.name ?? "Your AI")
+    : null;
+  return (
+    <div className="mx-auto w-full max-w-lg">
+      <ChooserCard>
+        <ChooseConnection
+          key={lastConnected?.round ?? 0}
+          initialFocusProvider={lastConnected?.provider ?? undefined}
+          mode={{
+            kind: "adding",
+            scope: "personal",
+            signIns: list.signIns,
+            connected: list.connections,
+          }}
+          onConnected={({ connection }) =>
+            setLastConnected((previous) => ({
+              provider: connection.provider,
+              round: (previous?.round ?? 0) + 1,
+            }))
+          }
+        />
+      </ChooserCard>
+      <p aria-live="polite" className="sr-only" role="status">
+        {name ? `${name} is connected.` : ""}
+      </p>
+    </div>
+  );
+}
+
+/** The one connection's chooser, or once connected, what is connected and a way to change it. */
+function OnePane({ personal }: { personal: PersonalAiConnection }) {
   const [changing, setChanging] = useState(false);
   const connected = personal.uses !== "none";
   return (

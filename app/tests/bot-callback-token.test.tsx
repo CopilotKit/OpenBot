@@ -82,6 +82,22 @@ test("generating a key shows it once, and Done puts it away for good", async () 
   expect(view.getByRole("button", { name: "Generate key" })).toBeTruthy();
 });
 
+/*
+ * A connected Bot gets OpenBot's tools in its conversations over AG-UI and hands each call back for
+ * OpenBot to run, with no key. The panel used to tell one with no key that it "can't use tools",
+ * right after it had used four of them.
+ */
+test("a Bot with no key is told it can use OpenBot's tools, and what a key is for", () => {
+  const view = draw(false);
+  const said = view.container.textContent ?? "";
+  expect(said).not.toContain("can't use tools");
+  expect(
+    view.getByText(
+      "This Bot can use OpenBot's tools in its conversations without a key. Generate a key only if your agent calls OpenBot's tools itself.",
+    ),
+  ).toBeTruthy();
+});
+
 test("revoking a key is the API's revoke, with a key of its own", async () => {
   const writes = serving();
   const view = draw(true);

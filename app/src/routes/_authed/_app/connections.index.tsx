@@ -62,13 +62,17 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { mayAddApps } from "@/lib/auth/roles";
 import { useConnectApp } from "@/lib/connections/connect-app";
+import { useOpenAppPage } from "@/lib/connections/open-app-page";
 import {
   type ConnectionRow,
+  catalogueToAddRows,
   connectionRows,
   directoryRows,
+  needsReconnecting,
   personalConnectionRows,
 } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
@@ -341,6 +345,12 @@ function RouteComponent() {
       (row) => row.serverId,
     ),
   );
+  /* Of those, the ones to reconnect: their tiles say Reconnect, and pressing one starts it. */
+  const reconnect = new Set(
+    personalConnections(connections.data?.connections ?? [])
+      .filter(needsReconnecting)
+      .map((row) => row.serverId),
+  );
   const added = new Set((apps.data ?? []).map((s) => s.id));
 
   /*
@@ -401,9 +411,12 @@ function RouteComponent() {
    * WHO ADDS AN APP, decided by the one rule the app has for it (`mayAddApps`: an owner or
    * an admin of the organization being worked in), which is the server's `admin` too. On OpenBot
    * Cloud that is usually the one person who made their own organization, and they add and connect
-   * an app here in one press, never by way of Admin. A member asks an admin for it.
+   * an app here in one press, never by way of Admin. With apps open (the organization's switch) a
+   * member adds and connects in the same press; locked down, a member asks an admin for it.
    */
-  const mayAdd = mayAddApps(personal, role);
+  const open = useAppsOpen();
+  const openTeam = edition === "team" && open === true;
+  const mayAdd = mayAddApps(personal, role) || openTeam;
   const mayAddServer = mayAdd;
   const connectApp = useConnectApp();
   const paths = useManagePaths();
@@ -454,6 +467,7 @@ function RouteComponent() {
     edition: edition ?? "team",
     place: "connections",
     role,
+    open,
   });
   const press = useDirectoryPress(pressMode);
   const mine = useQuery(myAppRequestsQueryOptions(pressMode === "request"));
@@ -465,6 +479,7 @@ function RouteComponent() {
         brokered: brokeredAccountsListedOn(listed),
         byUrl: addedByUrlListedOn(listed),
         connected,
+        reconnect,
         links: links.data ?? [],
         providers: providers.data,
       })
@@ -474,6 +489,7 @@ function RouteComponent() {
         shared: sharedAccountsListedOn(listed),
         byUrl: addedByUrlListedOn(listed),
         connected,
+        reconnect,
         links: links.data ?? [],
         providers: providers.data,
       });
@@ -486,7 +502,18 @@ function RouteComponent() {
    * broker's directory is its last tile.
    */
   const yourApps = matching.filter((row) => row.state !== "available");
-  const toAdd = matching.filter((row) => row.state === "available");
+  /*
+   * And with apps open in the team edition, the catalogue's apps nobody has added yet, which anybody
+   * adds and connects in one press, as the personal edition's one person does.
+   */
+  const teamToAdd = openTeam
+    ? catalogueToAddRows({ catalogue: catalogue.data ?? [], added, connected })
+    : [];
+  const toAdd = personal
+    ? matching.filter((row) => row.state === "available")
+    : teamToAdd.filter((row) =>
+        `${row.title} ${row.summary}`.toLocaleLowerCase().includes(query),
+      );
   /*
    * The directory's apps for this search that aren't on the page already, as tiles under Connect an app.
    * Read only while the answer is for what is typed now, so a tile never stands for an older term.
@@ -502,7 +529,9 @@ function RouteComponent() {
   const found = directoryRows({
     entries: directoryEntries,
     mayAdd,
-    listed: new Set(rows.map((row) => row.title.toLocaleLowerCase())),
+    listed: new Set(
+      [...rows, ...teamToAdd].map((row) => row.title.toLocaleLowerCase()),
+    ),
     requested,
   });
   // Waiting on the directory for what is typed now: nothing claims "No matches" until it answers.
@@ -539,7 +568,7 @@ function RouteComponent() {
     !loading &&
     !appsError &&
     !connections.error &&
-    (rows.length > 0 || browse !== null);
+    (rows.length > 0 || teamToAdd.length > 0 || browse !== null);
   /*
    * A search that matches nothing, here or in the directory, says so once, with no section or
    * directory tile under it.
@@ -547,6 +576,7 @@ function RouteComponent() {
   const nothingMatches =
     query !== "" &&
     matching.length === 0 &&
+    toAdd.length === 0 &&
     found.length === 0 &&
     !directoryWaiting &&
     // A directory that couldn't be searched says so below; it isn't "No matches".
@@ -702,11 +732,13 @@ function RouteComponent() {
             icon={IconPlug}
             title="No apps yet"
           >
-            {edition === "team"
-              ? "Apps show up here once an admin turns them on."
-              : edition === "personal"
-                ? "Apps show up here once OpenBot is set up to reach them."
-                : "Apps show up here once they're turned on."}
+            {openTeam
+              ? "Apps show up here once they're added. Add one with Add custom MCP."
+              : edition === "team"
+                ? "Apps show up here once an admin turns them on."
+                : edition === "personal"
+                  ? "Apps show up here once OpenBot is set up to reach them."
+                  : "Apps show up here once they're turned on."}
           </PageEmpty>
         ) : (
           <>
@@ -770,15 +802,15 @@ function RouteComponent() {
       {/*
        * Connect an app, in both editions: the apps you could add (the personal edition's catalogue), the
        * directory's matches for a search, and Browse apps last. In the team edition an admin's press
-       * adds and connects, and a member's asks an admin.
+       * adds and connects, and so does everybody's with apps open; locked down, a member's asks an
+       * admin.
        */}
-      {showingApps &&
-      ((personal ? toAdd.length : 0) + found.length > 0 || browse) ? (
+      {showingApps && (toAdd.length + found.length > 0 || browse) ? (
         <PageSection title="Connect an app">
           <ConnectionGrid
             connectApp={connectApp}
             press={press}
-            rows={[...(personal ? toAdd : []), ...found]}
+            rows={[...toAdd, ...found]}
             directory={directoryEntries}
           >
             {browse ? <BrowseTile browse={browse} link={browseLink} /> : null}
@@ -836,6 +868,12 @@ function ConnectionGrid({
   directory?: readonly DirectoryApp[];
   children?: React.ReactNode;
 }) {
+  /*
+   * RECONNECT IS ONE PRESS: the app's page opens with its connect started (the sign-in, or the key
+   * form over a key the app didn't take), and the tile stays here saying Connecting… until that page
+   * can draw. It used to open the page as it was, where a second press began it.
+   */
+  const appPage = useOpenAppPage();
   return (
     <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
       {rows.map((row) => {
@@ -856,20 +894,27 @@ function ConnectionGrid({
             />
           );
         }
+        // An app of the person's own to reconnect; a linked account (GitHub, Slack) opens its page.
+        const reconnects =
+          row.state === "needs_reconnect" && row.mark.kind !== "provider";
         return (
           <ConnectionItem
             key={row.key}
             onPress={
-              row.state === "available" &&
-              (row.action === "connect" || row.action === "add")
-                ? () =>
-                    void connectApp.run(
-                      row.key,
-                      row.action as "connect" | "add",
-                    )
-                : undefined
+              reconnects
+                ? () => void appPage.open(row.key, true)
+                : row.state === "available" &&
+                    (row.action === "connect" || row.action === "add")
+                  ? () =>
+                      void connectApp.run(
+                        row.key,
+                        row.action as "connect" | "add",
+                      )
+                  : undefined
             }
-            pending={connectApp.pending === row.key}
+            pending={
+              connectApp.pending === row.key || appPage.opening === row.key
+            }
             row={row}
           />
         );

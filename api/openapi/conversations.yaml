@@ -118,6 +118,58 @@ paths:
           $ref: '#/components/responses/LiveChannelsUnavailable'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/runs/{runId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/ConversationId'
+      - $ref: '#/components/parameters/ConversationRunId'
+    get:
+      tags: [Conversations]
+      operationId: getConversationRun
+      summary: See how a Bot's run in a conversation ended
+      description: >-
+        Say how one of a Bot's runs in the conversation ended, as the run's
+        own last event said: it finished, it stopped to ask a person, it was
+        stopped, or it failed. The run is named by the runId its events carry
+        (RUN_STARTED on the threadStream channel of api/asyncapi.yaml). A
+        client that stopped hearing a run before its end asks this, once
+        createConversationJoinToken says the conversation has no run going,
+        to tell a run that finished from one that stopped part way. outcome
+        is null while the run is going, and for a run that ended without
+        saying how (its server stopped under it). A run this server keeps no
+        record of, or one of another conversation, is not found. Only a
+        person in the conversation may ask, about the thread they see there.
+      security:
+        - webSession: []
+        - appOAuth: [conversations:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The run, and how it ended.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationRunResponse'
+              examples:
+                finished:
+                  $ref: '#/components/examples/ConversationRunResponseExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationRunNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/conversations:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
@@ -1976,6 +2028,17 @@ components:
         type: string
         format: uuid
       example: 6f3d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
+    ConversationRunId:
+      name: runId
+      in: path
+      required: true
+      description: The run's id, as its events carry it.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+        pattern: \S
+      example: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
     TaskId:
       name: taskId
       in: path
@@ -2020,6 +2083,35 @@ components:
           description: >-
             Pass as cursor for the next page. Null ends the list. Written in
             URL-safe base64, the only form the cursor parameter accepts.
+    ConversationRun:
+      type: object
+      description: One of a Bot's runs in a conversation, and how it ended.
+      required: [id, outcome, endedAt]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: The run's id, as its events carry it.
+        outcome:
+          type: [string, 'null']
+          x-extensible-enum: [succeeded, interrupted, cancelled, failed]
+          description: >-
+            How the run ended, as its own last event said. succeeded: it
+            finished. interrupted: it stopped to ask a person (an approval, a
+            missing value). cancelled: it was stopped. failed: it ended with an
+            error, or its stream failed, or its server ended it on the way
+            down. Null while the run is going, and for a run that ended
+            without saying how.
+        endedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the run ended, or null while outcome is null.
+    ConversationRunResponse:
+      type: object
+      required: [run]
+      properties:
+        run:
+          $ref: '#/components/schemas/ConversationRun'
     ConversationJoinToken:
       type: object
       description: >-
@@ -3403,6 +3495,29 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    ConversationRunNotFound:
+      description: >-
+        The conversation does not exist, or the caller is not in it, or this
+        server keeps no record of a run by that id in the conversation.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/conversation-run-not-found
+                title: Run not found.
+                status: 404
+                detail: Couldn't find that run in this conversation.
+                code: CONVERSATION_RUN_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     LiveChannelsUnavailable:
       description: The service that carries live runs did not answer. Try again.
       headers:
@@ -3745,6 +3860,13 @@ components:
         realtime:
           clientUrl: wss://realtime.example.com/client
           topic: thread:6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+    ConversationRunResponseExample:
+      summary: A run that finished
+      value:
+        run:
+          id: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          outcome: succeeded
+          endedAt: '2026-11-14T12:04:10.000Z'
     ConversationPageExample:
       summary: "One page of conversations, and the last."
       value: {"conversations": [{"id": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "name": "General Assistant", "botIds": ["general-assistant"], "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "active": true, "lastMessageAt": "2026-11-14T12:00:00.000Z", "summary": "Quarterly forecast", "opening": "Can you draft the quarterly forecast?", "lastMessage": "Here is the first draft.", "lastMessageBotId": "general-assistant", "createdAt": "2026-11-13T09:00:00.000Z", "pinned": false, "lastReadAt": "2026-11-14T12:00:05.000Z", "canRename": true, "task": false, "work": []}], "nextCursor": null}

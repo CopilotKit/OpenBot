@@ -7,6 +7,7 @@ import {
   REACT_TOOL,
   STOP_TOOL,
 } from "./orchestration";
+import { RECALL_EARLIER_RESULTS } from "./recall-earlier-results";
 import { RESEARCH_ROLE_LABELS, researchRoleOfTool } from "./research";
 import { SUBAGENT_TOOL } from "./subagent";
 import { lowerFirst, nameInWords } from "./tool-name-words";
@@ -663,6 +664,11 @@ const OWN_TOOLS: Record<string, OwnTool> = {
   [SEARCH_TOOLS]: {
     running: "Looking for a tool",
     done: "Looked for a tool",
+    answersTheModel: true,
+  },
+  [RECALL_EARLIER_RESULTS]: {
+    running: "Rereading an earlier result",
+    done: "Reread an earlier result",
     answersTheModel: true,
   },
   // Claude Code's own search over the tools a Claude Agent SDK Bot holds, the same step as the one
