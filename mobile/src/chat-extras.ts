@@ -1,3 +1,6 @@
+import * as DocumentPicker from "expo-document-picker";
+import { File } from "expo-file-system";
+import * as ImagePicker from "expo-image-picker";
 import { useCallback, useState } from "react";
 import { ME, ORGANIZATION_ID } from "./api";
 import {
@@ -21,8 +24,7 @@ type Picked = { uri: string; name: string; mimeType: string; image: boolean };
 /**
  * Files for the next message in a chat, as the web app's message box holds them: each one uploads
  * as soon as it is picked, and the server holds it for the person's next message there, so sending
- * needs nothing more. Removing one takes it back off the server. The pickers are loaded only when
- * the person attaches something.
+ * needs nothing more. Removing one takes it back off the server.
  */
 export function useChatFiles(channelId: string) {
   const [files, setFiles] = useState<(ComposerFile & { id?: string })[]>([]);
@@ -35,7 +37,6 @@ export function useChatFiles(channelId: string) {
       return [];
     }
     if (from === "photos") {
-      const ImagePicker = await import("expo-image-picker");
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
         allowsMultipleSelection: true,
@@ -54,7 +55,6 @@ export function useChatFiles(channelId: string) {
         image: true,
       }));
     }
-    const DocumentPicker = await import("expo-document-picker");
     const result = await DocumentPicker.getDocumentAsync({
       multiple: true,
       copyToCacheDirectory: true,
@@ -96,7 +96,6 @@ export function useChatFiles(channelId: string) {
         ]);
         try {
           // Expo's fetch sends a file it can read as a Blob: expo-file-system's File, at the picked file's address.
-          const { File } = await import("expo-file-system");
           const held = await uploadConversationAttachment(
             ORGANIZATION_ID,
             channelId,
