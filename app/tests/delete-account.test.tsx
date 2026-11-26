@@ -441,6 +441,32 @@ describe("deleting your account", () => {
     expect(currentOrganizationId()).toBe("org_acme");
   });
 
+  test("the only admin of an organization with no owner is sent to its settings to make someone else an admin", async () => {
+    // A self-hosted OpenBot's one organization is run by its admins, and has no owner.
+    server.blockers = [{ ...ACME, reason: "only_admin" }];
+    const app = await open();
+    const acme = (await app.view.findByText("Acme")).closest(
+      "[data-slot=item]",
+    ) as HTMLElement;
+    expect(acme.textContent).toContain(
+      "You're its only admin: make someone else an admin.",
+    );
+    expect(
+      within(acme).queryByRole("button", { name: "Leave organization" }),
+    ).toBeNull();
+    expect(
+      app.view
+        .getByRole("button", { name: "Delete account" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    await app.person.click(
+      within(acme).getByRole("button", { name: "Open its settings" }),
+    );
+    await waitFor(() =>
+      expect(app.router.state.location.pathname).toBe("/settings/organization"),
+    );
+  });
+
   test("in 14 days: confirmed with the email and the phrase, then only the page that says when, and Cancel deletion gives it back", async () => {
     const app = await open();
     // Typed as a person might: other case, spaces around.

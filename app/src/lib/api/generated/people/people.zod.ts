@@ -1500,7 +1500,7 @@ export const CreateCompanySignInTicketResponse = zod.object({
 });
 
 /**
- * Return whether the caller's account is scheduled to be deleted, and when, and what stops it being deleted now. An account belongs to the person, not to an organization, so this sits outside every organization's address. blockers lists each organization the person has to deal with first, as GitHub does: one where they are the only owner (only_owner), which they hand to another owner or delete, and one where they are an owner beside others (owner_must_leave), which they leave. Memberships that are not ownerships end with the account and block nothing; so does the person's own organization when they are its only member. Once a deletion is scheduled, every other operation answers 403 with the code ACCOUNT_PENDING_DELETION until it is cancelled or the account is gone; this one and cancelAccountDeletion still answer, so the apps can say when the account goes and offer to cancel. Only the person themselves may read it, signed in to OpenBot or its app, never with an API key.
+ * Return whether the caller's account is scheduled to be deleted, and when, and what stops it being deleted now. An account belongs to the person, not to an organization, so this sits outside every organization's address. blockers lists each organization the person has to deal with first, as GitHub does: one where they are the only owner (only_owner), which they hand to another owner or delete, and one where they are an owner beside others (owner_must_leave), which they leave, and one with no owner where they are the only admin (only_admin, as a self-hosted OpenBot's one organization is run), where they make another member an admin. Other memberships end with the account and block nothing; so does the person's own organization when they are its only member. Once a deletion is scheduled, every other operation answers 403 with the code ACCOUNT_PENDING_DELETION until it is cancelled or the account is gone; this one and cancelAccountDeletion still answer, so the apps can say when the account goes and offer to cancel. Only the person themselves may read it, signed in to OpenBot or its app, never with an API key.
  * @summary Read where deleting the caller's account stands
  */
 export const GetAccountDeletionResponse = zod
@@ -1531,7 +1531,7 @@ export const GetAccountDeletionResponse = zod
             reason: zod
               .string()
               .describe(
-                "only_owner: the person is its only owner, so they make another member an owner or delete the organization. owner_must_leave: it has other owners, so the person leaves it. A later OpenBot may add a reason; read one you don't know as having to leave it.",
+                "only_owner: the person is its only owner, so they make another member an owner or delete the organization. owner_must_leave: it has other owners, so the person leaves it. only_admin: it has no owner and the person is its only admin, so they make another member an admin. A later OpenBot may add a reason; read one you don't know as having to leave it.",
               ),
           })
           .describe(

@@ -1457,9 +1457,11 @@ paths:
         has to deal with first, as GitHub does: one where they are the only
         owner (only_owner), which they hand to another owner or delete, and
         one where they are an owner beside others (owner_must_leave), which
-        they leave. Memberships that are not ownerships end with the account
-        and block nothing; so does the person's own organization when they
-        are its only member. Once a deletion is scheduled, every other
+        they leave, and one with no owner where they are the only admin
+        (only_admin, as a self-hosted OpenBot's one organization is run),
+        where they make another member an admin. Other memberships end with
+        the account and block nothing; so does the person's own organization
+        when they are its only member. Once a deletion is scheduled, every other
         operation answers 403 with the code ACCOUNT_PENDING_DELETION until it
         is cancelled or the account is gone; this one and
         cancelAccountDeletion still answer, so the apps can say when the
@@ -2307,11 +2309,13 @@ components:
           description: The organization's name, as its members see it.
         reason:
           type: string
-          x-extensible-enum: [only_owner, owner_must_leave]
+          x-extensible-enum: [only_owner, owner_must_leave, only_admin]
           description: >-
             only_owner: the person is its only owner, so they make another
             member an owner or delete the organization. owner_must_leave:
-            it has other owners, so the person leaves it. A later OpenBot may
+            it has other owners, so the person leaves it. only_admin: it has
+            no owner and the person is its only admin, so they make another
+            member an admin. A later OpenBot may
             add a reason; read one you don't know as having to leave it.
     AccountDeletion:
       type: object

@@ -53,6 +53,7 @@ import {
   reauthenticationRequired,
   sameEmail,
   samePhrase,
+  settledInItsSettings,
 } from "@/lib/account-deletion/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
@@ -170,7 +171,7 @@ function BlockerRow({ blocker }: { blocker: AccountDeletionBlocker }) {
       </ItemContent>
       {/* Under the words on a phone, as on Organization's members: a button beside them squeezes them. */}
       <ItemActions className="max-sm:basis-full max-sm:pl-11">
-        {blocker.reason === "only_owner" ? (
+        {settledInItsSettings(blocker) ? (
           <OpenOrganizationSettings organizationId={blocker.organizationId} />
         ) : (
           <>

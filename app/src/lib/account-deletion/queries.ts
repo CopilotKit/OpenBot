@@ -113,7 +113,17 @@ export function samePhrase(typed: string): boolean {
  * having to leave, as the API says to read it.
  */
 export function blockerWords(blocker: AccountDeletionBlocker): string {
-  return blocker.reason === "only_owner"
-    ? "You're its only owner: make someone else an owner, or delete the organization."
-    : "Leave this organization first.";
+  if (blocker.reason === "only_owner")
+    return "You're its only owner: make someone else an owner, or delete the organization.";
+  if (blocker.reason === "only_admin")
+    return "You're its only admin: make someone else an admin.";
+  return "Leave this organization first.";
+}
+
+/**
+ * Whether what a blocker asks is done in the organization's own settings (making someone else an
+ * owner or an admin, or deleting it) rather than by leaving it here.
+ */
+export function settledInItsSettings(blocker: AccountDeletionBlocker): boolean {
+  return blocker.reason === "only_owner" || blocker.reason === "only_admin";
 }
