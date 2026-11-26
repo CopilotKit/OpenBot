@@ -8,48 +8,217 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.**
+
+- **Migrations run at start: six, and none removes a table or a column.** The database moves from
+  `0182_withdraw_default_source_imports`, where 1.2.0 left it, to `0188_audit_events_redacted_index`.
+  Every one is an expand except `0185`, a backfill that changes no schema: a 1.2.0 server works against
+  the new schema, so the upgrade rolls its servers one by one, with no downtime.
+  - `0183_bot_run_thread` keeps the conversation each Bot run ran in, so the app can ask how a run
+    ended (below).
+  - `0184_brokered_reconnect` keeps a Reconnect in progress on a person's connection, so the account
+    the new sign-in adds replaces the one that stopped working (below).
+  - `0185_delete_google_model_sign_ins` deletes every saved Google sign-in for Gemini (the next item).
+  - `0186_account_deletions` keeps each request to delete an account, and what it paused (below).
+  - `0187_account_purges_and_deleted_people` keeps each deletion's progress, so one stopped part way
+    finishes. A deleted person's messages and files in a conversation others are still in are kept,
+    with no sender, and read "Deleted user". The audit trail may now replace a deleted person's id with
+    a pseudonym and strip their name and address, and delete such an entry 180 days later; it is
+    otherwise as append-only as before.
+  - `0188_audit_events_redacted_index` adds an index for that 180-day pass. It is built concurrently,
+    outside a transaction, so writes carry on while it builds, but on a large audit trail it can take
+    a while, and the upgrade waits for it.
+- **Google sign-in for Gemini has ended, and the upgrade deletes what was saved.** Gemini connects with
+  a Gemini API key only. Every Google sign-in a person or an organization saved for Gemini is deleted at
+  upgrade, and OpenBot Desktop deletes the one it kept on the computer at its next launch. The
+  connection itself stays, under the same name: it reads "Google sign-in for Gemini has ended" with one
+  button, Add a Gemini API key, and a key saved there carries on every Bot that used it. Signing in to
+  OpenBot itself with Google is unchanged. On Kubernetes, `config.googleModelSignIn` and
+  `secrets.googleModelOAuthClientSecret` are no longer read; a release that still sets them upgrades
+  unchanged.
+- **The LangGraph engine is on by default, and a new Bot never quietly runs anywhere else.** New Bots
+  are made on the LangGraph (TypeScript) engine. Where a run of one can't reach the engine, the person
+  reads why where the answer would be ("... can't run because OpenBot's LangGraph engine isn't running
+  here. Ask an admin to turn it on."), and the server logs it at error level, instead of running it on
+  the built-in agent with nothing said. Bots made before, and every Bot once an admin sets
+  `OPENBOT_DEFAULT_BOT_ENGINE=built-in`, run on the built-in agent.
+  - **Kubernetes:** `engine.langgraphTs.enabled` is on by default, also for a release upgraded with
+    `--reuse-values`. An install that brings its own secrets, from a secret store (`externalSecrets`)
+    or a Secret of its own (`secrets.existingSecret`), must add the engine's two tokens before
+    upgrading: `managed-agent-token` and `model-gateway-token`, each `openssl rand -hex 32`. `helm
+    upgrade` refuses before it changes anything and names the missing keys. The chart no longer makes
+    or reads `agent-tool-token`; a release that still sets `secrets.agentToolToken` upgrades unchanged.
+    To run without the engine, set `engine.langgraphTs.enabled=false` and, so new Bots still run,
+    `OPENBOT_DEFAULT_BOT_ENGINE=built-in` in `config.extraEnv`.
+  - **One container:** the image now runs the engine beside the server, on the container's loopback
+    (port 4215, not exposed), restarted if it stops, with the tokens it shares with the server made at
+    start unless you set them. `EMBEDDED_ENGINE=off` turns it off; then set `LANGGRAPH_TS_AG_UI_URL` to
+    an engine elsewhere, or `OPENBOT_DEFAULT_BOT_ENGINE=built-in`.
+  - **Compose:** the engine starts with a plain `docker compose up`, in every edition, and the server
+    always knows where it is. `scripts/start.sh` starts it in the personal edition too.
+- **OpenBot Desktop: a ChatGPT plan signs in again, once.** Desktop now signs in to a ChatGPT plan with
+  OpenAI's own Sign in with ChatGPT and runs new Bots on the plan's own engine, OpenAI's Agents SDK.
+  A sign-in saved by an earlier version is no longer offered: the AI step says "ChatGPT's sign-in has
+  changed. Sign in to ChatGPT again to keep using your plan." OpenBot Cloud and an OpenBot a company runs
+  itself keep their ChatGPT plan sign-in as it was.
+- **Managed updates take only a signed instruction and a signed chart.** The management agent acts only
+  on a signed desired state (the version, the window and the pause, signed for that install, expiring
+  after an hour, never replayed) and never installs a release older than one it accepted. The
+  `openbot-agent` chart checks the product chart's signature by default, with OpenBot's release key
+  shipped in the chart, and the agent has Flux verify the chart a new version names before it records
+  an install, stops the server, takes a backup or moves Flux. A chart that is unsigned or signed with
+  another key is refused with nothing changed, the agent's status says which chart and why, and it is
+  not pulled again for 30 minutes. Before, the check ran only once Flux was moved, after the server was
+  stopped and backed up. A mirror whose charts carry no signature copies them with `cosign copy`, or
+  sets `product.verify.enabled: false`.
+- **A Bot you connect over AG-UI is offered OpenBot's app tools under new names.** An app's tool goes out
+  as `<app>__<tool>`, no longer `mcp__<app>__<tool>`, which some providers refuse. A call under the old
+  name still works, and everything OpenBot stores and shows keeps the old name, so older conversations
+  carry on.
+- **A Bot is told the person's memory as quoted data, never as its instructions.** Every Bot, built-in
+  or connected, gets the person's memory as the AG-UI context entry `OpenBot personal memory` alone,
+  quoted as untrusted data, and no longer also as a system message. A `system` or `developer` message a
+  request carries reaches the Bot as quoted conversation, so a page can't speak as the Bot's role. A
+  connected Bot is sent its role first and once on every request, and is no longer sent
+  `forwardedProps.openbotSystemPrompt`.
+
+**Delete your account.**
+
+- **Anybody can delete their own account, from Settings, General.** Delete account lists any
+  organization that must be dealt with first (one you're the only owner of: make someone else an owner or
+  delete it; one you own beside others: leave it), then asks for your email and the words "delete my
+  account". Delete in 14 days or Delete now. It asks you to sign in again if you signed in more than ten
+  minutes ago.
+- **While it waits, nothing runs for you.** Every sign-in, API key and app token ends at once, your
+  saved logins are forgotten, your routines, check-ins and goals are paused, your own Bots stop working
+  for you (others using a shared Bot carry on), and what you connected is retired. Signing in shows only
+  "Your account will be deleted on ..." with Cancel deletion, which resumes exactly what was paused.
+  Other members see you as "Deactivated" in member lists and the people picker.
+- **Then everything of yours goes:** memories, Learning space, threads, solo conversations, files, your
+  computer and its saved copies, Bots nobody else uses, skills and routines, and your own organization if
+  nobody else is in it. Bots others use go to the organization's owner. A conversation others are still in
+  keeps your messages as "Deleted user". The audit trail keeps its entries with a pseudonym in place of you
+  for 180 days. On an OpenBot a company runs itself, the address can sign up again afterwards. On OpenBot
+  Cloud, the last step removes your Cloud sign-in; until Cloud's sign-in service is updated for this
+  release, that step waits and is retried, and everything else is already gone.
+- **API:** `getAccountDeletion`, `requestAccountDeletion` and `cancelAccountDeletion` under
+  `/api/v2/people/me/account-deletion`, with the problem types `account-deletion-blocked`,
+  `reauthenticate`, `account-deletion-not-confirmed`, `account-deletion-under-way` and
+  `account-pending-deletion`. A session or an app's sign-in only; an API key is refused.
+
+**Conversations.**
+
+- **A finished answer is shown finished when its end never reached the screen.** A phone that slept
+  through a long answer, or a socket that dropped, showed a finished answer with "The Bot stopped before
+  it finished" and Carry on. The app now asks how that run ended and shows a finished one whole, with no
+  notice. API: `getConversationRun`.
+- **An answered approval stays in the conversation as one line**, such as "Allowed once: Create event on
+  Google Calendar", which opens to the card as it was answered. It does in every conversation, however
+  old, through the new `listConversationApprovals`; before, only the person's last hundred approvals had
+  their line.
 - **A Bot's "can't run" stays under the message it couldn't answer.** When a Bot's engine isn't
-  answering, the sentence that says so stays under that message after the next message is
-  answered, and after a reload. It used to go as soon as the next turn started, and the message sat
-  in the conversation with nothing under it. `listRefusedTurns` gains the code
-  `BOT_ENGINE_UNAVAILABLE`, and the run's RUN_ERROR carries the same code.
-- **A Bot's instructions take up to 5000 characters.** New Bot's Instructions, a Bot's What it
-  does on its Setup page, and the starter Bot's Instructions each took 1000, and New Bot stopped
-  taking text at 1000 without saying so. Longer than 5000 is refused with the same message as before.
-- **OpenBot Desktop on a Mac asks for your password only after you choose Continue.** When OpenBot
-  installs the software it runs on, a card says your Mac will ask for your password and why, and
-  macOS's prompt comes up only once you choose Continue. Before, the prompt came up by itself a
-  moment after a line in OpenBot's window, and on a new Mac it covered the browser's sign-in page
-  before anybody had read why it was there.
-- **OpenBot Cloud's account menu offers the desktop app.** Get the desktop app, in the menu under
-  your name, opens the download page for Mac and Windows in a new tab. It shows only on OpenBot
-  Cloud in a browser, not in OpenBot Desktop and not on an OpenBot a company runs itself.
-- **A Bot's drawing that drew nothing reads "Didn't draw an interface".** A Bot that asks to draw an
-  interface with nothing in it is told nothing was drawn, and its step read "Drew an interface" for
-  an interface nobody saw. Folded with other steps it reads "Draw an interface" beside "Didn't work".
-- **The management agent checks a release's chart signature before it touches anything.** With
-  the chart's signature check on, the agent has Flux verify the chart a new version names before it
-  records an install, stops the server, takes a backup or moves Flux. A chart that is unsigned or
-  signed with another key is refused: nothing changes, the agent's status says which chart and why,
-  and it is not pulled again for 30 minutes. Before, the check ran only once Flux was moved, after
-  the server was stopped and backed up, and the upgrade then waited out its timeout with the server
-  down and no reason given.
-- **OpenBot's icon in the browser and on a phone.** The web app shows OpenBot's orb, the icon
-  OpenBot Desktop uses, in a browser's tab, on a phone's home screen when it is added there, and as
-  an installed app's icon. Added to an iPhone's home screen it used to show a grey square with a
-  letter in it, and a tab showed no icon at all.
-- **A provider's sign-in asks for no model name.** Signing in to Google Gemini, xAI or Unbiased AI
-  no longer asks for a model name typed in. Once connected, a conversation's model picker offers
-  the models the provider lists for that sign-in, as it does for a key or a plan. A sign-in that
-  already names a model keeps it, also when it is signed in to again.
-- **Connect another AI goes back to its list.** In Settings and in Admin, each connection goes back
-  to the provider list with a check on what was connected, as onboarding's Connect your AI does. It
-  no longer opens the new connection's own page. Done leaves the list. Changing a connection still
-  goes back to that connection's page.
-- **Settings and Admin call the place you connect your AI "AI providers".** It was "Providers",
-  which didn't say what it provides, and people looking for where to set up their AI didn't find
-  it. Its pages, their Back links and the model picker's provider list say the same. The addresses
-  stay `/settings/providers` and `/admin/providers`.
+  answering, the sentence that says so stays under that message after the next message is answered,
+  and after a reload. It used to go as soon as the next turn started, and the message sat in the
+  conversation with nothing under it. `listRefusedTurns` gains the code `BOT_ENGINE_UNAVAILABLE`, and
+  the run's RUN_ERROR carries the same code.
+- **A Bot can connect another account at an app from the conversation.** Asked to connect a second
+  account ("my personal email as well"), the Bot puts up one card that starts the sign-in for one more
+  account, says which account Bots use once it's listed, and offers Make default. A how-to answer now
+  names only the job asked.
+- **Browse steps name the field and the button**: "Filled in field Email address", "Clicked on page
+  Sign in". What was typed is never shown.
+- **A drawing that drew nothing reads "Didn't draw an interface".** Its step read "Drew an interface"
+  for an interface nobody saw. Folded with other steps it reads "Draw an interface" beside "Didn't
+  work".
+- **A Bot that draws now says what it drew.** A Bot that ended its turn on a drawing is asked again with
+  what was drawn, so its sentence after the drawing arrives in the same turn. It waits until every call
+  the turn made is answered first, so no call is made twice.
+- **A connected LangChain or LangGraph Bot carries on after it draws an interface**, instead of ending
+  its turn in an error. The drawing stays in the browser and is never sent back to the agent.
+- **A Bot told its gallery call was wrong can fix it.** A chart, card, table or decision called with
+  arguments it doesn't take is no longer drawn empty: the Bot is told what was wrong, field by field,
+  and calls again. A connected Bot whose stream breaks reads "The Bot sent something OpenBot couldn't
+  read, so its turn ended. Ask it to carry on." with Carry on.
+- **An answer shows once** when a connected Bot hands it back under a new id at the end of its turn, on
+  screen and in what is stored. A connected Bot that asks you something and draws in the same step shows
+  each once.
+- **A table in a reply sets its cells at the top of their row.**
+- **On a phone, Return starts a new line in the message box**; the send button sends. A computer is
+  unchanged (Enter sends, Shift+Enter starts a line). In Safari, the Enter that confirms a composed
+  character no longer sends.
+
+**Bots.**
+
+- **A Bot's instructions take up to 5000 characters**, up from 1000: New Bot's Instructions, a Bot's
+  What it does on its Setup page, the starter Bot's Instructions and the API. New Bot used to stop taking
+  text at 1000 without saying so. Longer than 5000 is refused with the same message as before.
+- **A long task on the LangGraph engine runs to its last step.** It used to end in an error at its 31st
+  tool step, before the engine's own last-step answer at step 40.
+- **An approved app call is carried out exactly as it was asked about.** A connected Bot that sent a
+  number as text ("2") was asked about 2, then refused after Allow once with "its details changed".
+  Every app call now reads its arguments in the types the app names before anything compares them.
+- **A connected Bot carries on after an approval.** After Allow once, a stock AG-UI agent was sent a
+  resume it never asked for and stopped with no answer; it is now sent the approved result only.
+- **A connected Bot's reply is stored once**, under the id it was streamed under.
+- **A connected Bot's Setup no longer says it "can't use tools" without a key.** A Bot at an address
+  uses OpenBot's tools without one; the key is only for an agent that calls OpenBot's tools itself.
+- **What a connected agent is sent is documented**, and how a LangGraph agent reads its role
+  (`docs/coworkers.md`), with a snippet per framework. A Bot connected as LangChain is also sent its
+  role as the context entry `OpenBot standing role`, which its adapter would otherwise drop. The
+  LangGraph engine and harness tell the model the role and the tool guidance once each.
+
+**Apps.**
+
+- **Reconnect is one press for every app, from every screen.** A key app opens its key form over the
+  account that stands; an app that signs in starts its sign-in from the press, from a Bot's Apps row, a
+  card in a conversation, the app's page or Admin's page. A withdrawn sign-in reads "Your <app>
+  connection needs reconnecting." instead of Connected. The screen no longer blanks while it works, and
+  Connect no longer looks finished before the sign-in opens.
+- **Reconnect replaces the account that stopped working.** The account the new sign-in adds becomes the
+  one calls use, and the old one is ended; your other accounts at the app are untouched. A new key typed
+  over a refused one does the same.
+- **An app already added is taken as added** on every screen that adds from the directory, so a moved
+  app reconnects instead of failing as a duplicate.
+
+**AI providers.**
+
+- **Settings and Admin call the place you connect your AI "AI providers".** It was "Providers", which
+  didn't say what it provides. Its pages, their Back links and the model picker's provider list say the
+  same. The addresses stay `/settings/providers` and `/admin/providers`.
+- **A provider's sign-in asks for no model name.** Signing in to xAI or Unbiased AI no longer asks for a
+  model name typed in; the model picker offers the models the provider lists for that sign-in. A sign-in
+  that already names a model keeps it, also when signed in to again.
+- **Connect another AI goes back to its list**, with a check on what was connected, as onboarding's
+  Connect your AI does. Done leaves the list. Changing a connection still goes back to that
+  connection's page.
+- **OpenBot Desktop's ChatGPT plan runs the model picked in OpenBot** when the account lists it, and the
+  picker offers every model the plan lists.
+
+**OpenBot Desktop.**
+
+- **Setup has new layouts**: a sidebar and an inset panel for setup, Cloud start-up, updating and
+  shutdown, the first window at 1120 by 860 (or the screen's work area), later launches at your size.
+- **On a Mac, the password prompt comes only after Continue.** When OpenBot installs the software it
+  runs on, a card says your Mac will ask for your password and why, and macOS's prompt comes up only
+  once you choose Continue. Before, it came up by itself, and on a new Mac it covered the browser's
+  sign-in page before anybody had read why it was there.
+- **Finishing setup waits for Open OpenBot on a first run**, so the diagnostics choice can be read and
+  changed. A return or an update still opens OpenBot by itself.
+- **Desktop counts opens and bookings of the OpenBot for Business calendar**, with the place it was
+  opened from and nothing else, under the same usage-data choice as every other Desktop event.
+
+**OpenBot Cloud.**
+
+- **The account menu offers Get the desktop app**, in a browser only. It opens the download page for
+  Mac and Windows in a new tab.
+- **The hosted sign-in page's buttons wrap their labels on a narrow phone** or with larger text.
+
+**Everywhere.**
+
+- **OpenBot's icon** in a browser tab, on a phone's home screen and as an installed app's icon. Added to
+  an iPhone's home screen it used to show a grey square with a letter in it.
+- **Run now on a routine says it started**, with a link to its conversation.
+- A booking made inside OpenBot says which screen it came from.
 
 ## 1.2.0
 
