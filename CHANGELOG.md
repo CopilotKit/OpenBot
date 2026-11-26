@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **A Bot's instructions take up to 5000 characters.** New Bot's Instructions, a Bot's What it
+  does on its Setup page, and the starter Bot's Instructions each took 1000, and New Bot stopped
+  taking text at 1000 without saying so. Longer than 5000 is refused with the same message as before.
 - **OpenBot Desktop on a Mac asks for your password only after you choose Continue.** When OpenBot
   installs the software it runs on, a card says your Mac will ask for your password and why, and
   macOS's prompt comes up only once you choose Continue. Before, the prompt came up by itself a
