@@ -3,7 +3,7 @@
  * app's sign-in page sends the browser back to is read, the key form's values, and which apps Connections lists. The
  * steps that need a phone (the API and the system browser) are given to it here.
  */
-import { expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import type {
   Connection,
   ConnectionField,
@@ -12,6 +12,7 @@ import type {
 import {
   type BrowserResult,
   type ConnectSteps,
+  confirmOrRead,
   connectAccount,
   disconnectWarning,
   formValues,
@@ -429,4 +430,54 @@ test("a return outside the browser's session is heard only by the screen it is f
   stop();
   expect(reportConnectionReturned({ appId: "gmail" })).toBe(false);
   expect(heard).toEqual(["ok", "failed"]);
+});
+
+describe("whether an account is connected after its sign-in", () => {
+  const refused = new Error("That app doesn't connect this way.");
+  const nothingToConfirm = (error: unknown) => error === refused;
+
+  test("an app connected through a broker is asked, and its answer stands", async () => {
+    const read = mock(async () => false);
+    expect(
+      await confirmOrRead("gmail", {
+        confirm: async () => ({ connected: true }),
+        read,
+        nothingToConfirm,
+      }),
+    ).toEqual({ connected: true });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  test("an app whose sign-in OpenBot keeps itself has nothing to confirm: its connection is read instead", async () => {
+    const confirm = async () => {
+      throw refused;
+    };
+    expect(
+      await confirmOrRead("notes", {
+        confirm,
+        read: async () => true,
+        nothingToConfirm,
+      }),
+    ).toEqual({ connected: true });
+    expect(
+      await confirmOrRead("notes", {
+        confirm,
+        read: async () => false,
+        nothingToConfirm,
+      }),
+    ).toEqual({ connected: false });
+  });
+
+  test("any other failure is not taken for an answer", async () => {
+    const offline = new Error("Couldn't reach OpenBot.");
+    await expect(
+      confirmOrRead("notes", {
+        confirm: async () => {
+          throw offline;
+        },
+        read: async () => true,
+        nothingToConfirm,
+      }),
+    ).rejects.toBe(offline);
+  });
 });

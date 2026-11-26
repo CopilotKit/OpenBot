@@ -46,6 +46,7 @@ import {
 import {
   type ConnectOutcome,
   type ConnectSteps,
+  confirmOrRead,
   connectAccount,
   disconnectWarning,
   formValues,
@@ -67,6 +68,25 @@ import { webLink } from "../src/web-link";
  * a connection approves them one at a time (`perAction`, getAppSetup's `authorizesPerAction`), as on the web app:
  * reading them asks the app itself.
  */
+/** Whether the person's account is connected, after the app's sign-in: src/connect-app.ts `confirmOrRead`. */
+function confirmed(appId: string) {
+  return confirmOrRead(appId, {
+    confirm: (id) => confirmConnection(ORGANIZATION_ID, ME, id),
+    read: async (id) => {
+      try {
+        await getConnection(ORGANIZATION_ID, ME, id);
+        return true;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return false;
+        throw error;
+      }
+    },
+    // An app whose sign-in OpenBot keeps itself: "That app doesn't connect this way."
+    nothingToConfirm: (error) =>
+      error instanceof ApiError && error.status === 400,
+  });
+}
+
 async function readConnection(appId: string, perAction: Promise<boolean>) {
   let connection: Awaited<ReturnType<typeof getConnection>> | null;
   try {
@@ -163,9 +183,8 @@ export default function ConnectionScreen() {
   const [pending, setPending] = useState(false);
   const [about, setAbout] = useState<{
     phone: boolean;
-    app?: { title: string; connect: string };
+    app?: { title: string; connect: string; ownSignIn: boolean };
   }>();
-  const named = Boolean(params.title);
   const refresh = useCallback(async () => {
     if (!appId || !person) return;
     setPending(true);
@@ -178,10 +197,8 @@ export default function ConnectionScreen() {
           setup.then((each) => each?.authorizesPerAction === true),
         ),
         readDeployment(true).catch(() => undefined),
-        // Opened from the return address, the screen has only the app's id.
-        named
-          ? undefined
-          : getApp(ORGANIZATION_ID, appId).catch(() => undefined),
+        // Its title, when opened from the return address with only its id, and how it connects.
+        getApp(ORGANIZATION_ID, appId).catch(() => undefined),
       ]);
       setRead(connection);
       setAbout({
@@ -191,6 +208,9 @@ export default function ConnectionScreen() {
               app: {
                 title: app.title,
                 connect: app.connectsWith === "key" ? "key" : "sign-in",
+                // Added by its address and signing each person in itself, as the web app's `user-oauth`: OpenBot
+                // keeps the sign-in, so there is no broker to confirm with or disconnect through.
+                ownSignIn: app.source !== "directory" && app.signIn === true,
               },
             }
           : {}),
@@ -205,7 +225,7 @@ export default function ConnectionScreen() {
     } finally {
       setPending(false);
     }
-  }, [appId, person, named]);
+  }, [appId, person]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -218,7 +238,7 @@ export default function ConnectionScreen() {
     start: (id, body) => connectApp(ORGANIZATION_ID, ME, id, body),
     open: (url, returnTo) =>
       WebBrowser.openAuthSessionAsync(url, returnTo, BROWSER_OPTIONS),
-    confirm: (id) => confirmConnection(ORGANIZATION_ID, ME, id),
+    confirm: confirmed,
   };
 
   /** What one press came to: a form to fill in, a sentence, or a connection to read again. */
@@ -274,7 +294,7 @@ export default function ConnectionScreen() {
     (error?: string) =>
       run.current("confirm", async () => {
         if (error) throw new Error(returnSentence(error));
-        await confirmConnection(ORGANIZATION_ID, ME, appId);
+        await confirmed(appId);
         await refresh();
       }),
     [appId, refresh],
@@ -547,7 +567,7 @@ export default function ConnectionScreen() {
               </Rows>
             </Section>
           ) : null}
-          {connection && !several ? (
+          {connection && !several && !about?.app?.ownSignIn ? (
             <Rows iconless>
               <Row
                 title="Disconnect"

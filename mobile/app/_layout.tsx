@@ -14,6 +14,7 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { setSignedInPerson } from "../src/api";
 import { authClient } from "../src/auth";
 import { withSecurityFloor } from "../src/floor-gate";
+import { announceGallery } from "../src/gallery/announce";
 import { NO_HEADER_LEFT, useHeaderOptions } from "../src/header";
 import {
   LaunchProvider,
@@ -95,6 +96,11 @@ function Layout() {
   const signedIn = Boolean(session);
   // Whether a signed-in person has setting up to finish (the terms, onboarding, their AI): src/setup-gate.tsx.
   const setup = useSetupGate(signedIn, session?.user.id);
+  // Once set up, the cards this app draws are announced, as the web app does on load: src/gallery/announce.ts.
+  const setUp = signedIn && setup.facts !== null && setup.step === null;
+  useEffect(() => {
+    if (setUp) void announceGallery();
+  }, [setUp]);
   /*
    * The screens wait for the first answer about the session. Drawn while it is still pending, the signed-in
    * screens are guarded out, the app opens on a screen outside the guards (the gallery, in a development build),

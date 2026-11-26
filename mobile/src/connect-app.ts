@@ -115,6 +115,27 @@ export type ConnectOutcome =
   /** Something to tell the person, in the app's own words. */
   | { kind: "failed"; message: string };
 
+/**
+ * Whether the person's account is connected now, asked after the app's sign-in. An app connected through a broker
+ * (Composio, Arcade) is asked with confirmConnection. One whose sign-in OpenBot keeps itself has nothing to confirm, and
+ * confirmConnection refuses it (`nothingToConfirm`), so its connection is read instead: one that is there is connected.
+ */
+export async function confirmOrRead(
+  appId: string,
+  ask: {
+    confirm: (appId: string) => Promise<{ connected: boolean }>;
+    read: (appId: string) => Promise<boolean>;
+    nothingToConfirm: (error: unknown) => boolean;
+  },
+): Promise<{ connected: boolean }> {
+  try {
+    return await ask.confirm(appId);
+  } catch (error) {
+    if (!ask.nothingToConfirm(error)) throw error;
+    return { connected: await ask.read(appId) };
+  }
+}
+
 /** The sentence for a sign-in the app didn't confirm. */
 export const NOT_CONFIRMED =
   "The app didn't confirm the connection. Nothing was saved. Try again.";
