@@ -17,7 +17,6 @@ import {
   Text,
   Toggle,
 } from "../src/components";
-import { IconBook, IconPlug } from "../src/icons";
 import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
 
@@ -88,13 +87,16 @@ export default function PluginsScreen() {
         message={action.error || granted.error || catalogue.error || undefined}
       />
       <Section title="Skills">
-        {skills?.length === 0 ? <Text tone="muted">No skills yet.</Text> : null}
+        {skills?.length === 0 ? (
+          <Text tone="muted" className="px-1 text-sm">
+            No skills yet.
+          </Text>
+        ) : null}
         {skills?.length ? (
-          <Rows>
+          <Rows iconless>
             {skills.map((skill) => (
               <Row
                 key={skill.slug}
-                icon={IconBook}
                 title={skill.title}
                 description={skill.summary || `/${skill.slug}`}
                 trailing={
@@ -113,25 +115,26 @@ export default function PluginsScreen() {
         ) : null}
       </Section>
       <Section title="Connected tools">
-        <Text tone="muted">
-          Connecting an app needs its sign-in, so add and remove tools in
-          OpenBot on your computer.
-        </Text>
         {tools?.length === 0 ? (
-          <Text tone="muted">No connected tools.</Text>
+          <Text tone="muted" className="px-1 text-sm">
+            No connected tools.
+          </Text>
         ) : null}
         {tools?.length ? (
-          <Rows>
+          <Rows iconless>
             {tools.map((tool) => (
               <Row
                 key={tool.ref}
-                icon={IconPlug}
                 title={tool.ref}
                 description={tool.description || undefined}
               />
             ))}
           </Rows>
         ) : null}
+        <Text variant="caption" tone="muted" className="px-1 leading-4">
+          Connecting an app needs its sign-in, so add and remove tools in
+          OpenBot on your computer.
+        </Text>
       </Section>
     </ScrollScreen>
   );

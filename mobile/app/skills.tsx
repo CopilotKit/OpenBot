@@ -24,11 +24,10 @@ export default function Skills() {
     <ScrollScreen refreshing={pull.refreshing} onRefresh={pull.onRefresh}>
       <Notice message={skills.error} />
       {skills.data?.length ? (
-        <Rows>
+        <Rows iconless>
           {skills.data.map((skill) => (
             <Row
               key={skill.slug}
-              icon={IconBook}
               title={skill.title}
               description={skill.summary || `/${skill.slug}`}
             />

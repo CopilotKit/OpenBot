@@ -1,20 +1,16 @@
 import { Redirect } from "expo-router";
 import { useCallback, useEffect } from "react";
+import { View } from "react-native";
 import { everyBot, everyPage, ORGANIZATION_ID } from "../../../src/api";
 import { listCheckInItems } from "../../../src/api/generated/check-ins/check-ins";
 import { listTasks } from "../../../src/api/generated/tasks/tasks";
 import { authClient } from "../../../src/auth";
-import {
-  hideItem,
-  ItemCard,
-  startItem,
-  TaskCard,
-} from "../../../src/check-ins";
+import { hideItem, ItemRow, startItem, TaskRow } from "../../../src/check-ins";
 import {
   EmptyState,
   Notice,
   ScrollScreen,
-  Section,
+  Text,
 } from "../../../src/components";
 import { IconBell } from "../../../src/icons";
 import { showNeedsYouCount } from "../../../src/needs-you-count";
@@ -25,7 +21,7 @@ import { useLoad } from "../../../src/use-load";
 /**
  * Needs you: what every Bot's check-ins found that the person hasn't started or hidden, and the
  * tasks started from them that wait on the person. A ping's notification opens here, since one ping
- * folds several Bots' items. Each row names its Bot.
+ * folds several Bots' items. Each row is a chat's: its Bot's orb and name, then what it is.
  */
 export default function NeedsYouScreen() {
   const { data: session, isPending } = authClient.useSession();
@@ -60,44 +56,54 @@ export default function NeedsYouScreen() {
     if (count !== undefined) showNeedsYouCount(count);
   }, [count]);
   if (!session && !isPending) return <Redirect href="/" />;
-  const nameOf = (agentId: string) =>
-    bots.data?.find((bot) => bot.id === agentId)?.name ?? "A Bot";
+  const botOf = (agentId: string) => {
+    const bot = bots.data?.find((item) => item.id === agentId);
+    return { name: bot?.name ?? "A Bot", seed: bot?.avatarSeed || agentId };
+  };
 
+  const problem =
+    action.error || items.error || tasks.error || bots.error || undefined;
   return (
+    // Rows run the width of the screen, as the Chats and Bots lists do.
     <ScrollScreen
-      className="gap-3"
+      className="gap-2 px-0 pt-2"
       refreshing={items.pending || tasks.pending}
       onRefresh={() => {
         void items.refresh();
         void tasks.refresh();
       }}
     >
-      <Notice
-        message={
-          action.error || items.error || tasks.error || bots.error || undefined
-        }
-      />
-      {found.map((item) => (
-        <ItemCard
-          key={item.id}
-          item={item}
-          botName={nameOf(item.botId)}
-          busy={action.busy}
-          onStart={() => {
-            void action.run(`start:${item.id}`, async () => {
-              await startItem(item);
-              void items.refresh();
-              void tasks.refresh();
-            });
-          }}
-          onHide={() => {
-            void action.run(`hide:${item.id}`, async () => {
-              await hideItem(item);
-              await items.refresh();
-            });
-          }}
-        />
-      ))}
+      {problem ? (
+        <View className="px-4">
+          <Notice message={problem} />
+        </View>
+      ) : null}
+      {found.length > 0 ? (
+        <View>
+          {found.map((item) => (
+            <ItemRow
+              key={item.id}
+              item={item}
+              botName={botOf(item.botId).name}
+              seed={botOf(item.botId).seed}
+              busy={action.busy}
+              onStart={() => {
+                void action.run(`start:${item.id}`, async () => {
+                  await startItem(item);
+                  void items.refresh();
+                  void tasks.refresh();
+                });
+              }}
+              onHide={() => {
+                void action.run(`hide:${item.id}`, async () => {
+                  await hideItem(item);
+                  await items.refresh();
+                });
+              }}
+            />
+          ))}
+        </View>
+      ) : null}
       {items.data && found.length === 0 && waiting.length === 0 ? (
         <EmptyState
           icon={IconBell}
@@ -106,11 +112,24 @@ export default function NeedsYouScreen() {
         />
       ) : null}
       {waiting.length > 0 ? (
-        <Section title="Tasks">
+        <View className={found.length > 0 ? "pt-4" : undefined}>
+          <Text
+            variant="caption"
+            tone="muted"
+            accessibilityRole="header"
+            className="px-5 pb-1 font-medium"
+          >
+            Tasks
+          </Text>
           {waiting.map((task) => (
-            <TaskCard key={task.id} task={task} botName={nameOf(task.botId)} />
+            <TaskRow
+              key={task.id}
+              task={task}
+              botName={botOf(task.botId).name}
+              seed={botOf(task.botId).seed}
+            />
           ))}
-        </Section>
+        </View>
       ) : null}
     </ScrollScreen>
   );

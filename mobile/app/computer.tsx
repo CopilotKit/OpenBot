@@ -215,28 +215,30 @@ export default function ComputerScreen() {
 
   return (
     <ScrollScreen className="gap-4">
-      <View
-        className={cn(
-          "gap-1 rounded-lg border p-3",
-          driving
-            ? "border-success/30 bg-success/10"
-            : "border-border bg-surface",
-        )}
-      >
-        <Text variant="label" className="font-semibold">
-          {!control
-            ? "Checking who has control…"
-            : control.transitioning
-              ? "Finishing the Bot's current action before giving you control…"
-              : driving
-                ? "You have control. Tap the screen to click."
-                : "The Bot has control."}
-        </Text>
-        {control?.reason ? (
-          <Text variant="caption" tone="muted">
-            {control.reason}
+      {/* Who has control, as a quiet line: a dot in the color of what is working when it is you. */}
+      <View className="flex-row items-start gap-2.5 px-1">
+        <View
+          className={cn(
+            "mt-1.5 size-2 rounded-full",
+            driving ? "bg-success" : "bg-muted",
+          )}
+        />
+        <View className="flex-1 gap-0.5">
+          <Text variant="label" className="text-sm">
+            {!control
+              ? "Checking who has control…"
+              : control.transitioning
+                ? "Finishing the Bot's current action before giving you control…"
+                : driving
+                  ? "You have control. Tap the screen to click."
+                  : "The Bot has control."}
           </Text>
-        ) : null}
+          {control?.reason ? (
+            <Text variant="caption" tone="muted">
+              {control.reason}
+            </Text>
+          ) : null}
+        </View>
       </View>
       <Notice message={action.error || live.problem || undefined} />
       {control?.secretWanted ? (
@@ -330,7 +332,7 @@ export default function ComputerScreen() {
               <Button
                 key={key}
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 isDisabled={Boolean(action.busy)}
                 onPress={() => {
                   void send("key", { key });
@@ -341,7 +343,7 @@ export default function ComputerScreen() {
             ))}
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               onPress={() => {
                 void send("scroll", { deltaY: -500 });
               }}
@@ -350,7 +352,7 @@ export default function ComputerScreen() {
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               onPress={() => {
                 void send("scroll", { deltaY: 500 });
               }}

@@ -7,6 +7,7 @@ export * from "./computers/computers";
 export * from "./conversations/conversations";
 export * from "./devices/devices";
 export * from "./memory/memory";
+export * from "./models/models";
 export * from "./organization-settings/organization-settings";
 export * from "./organizations/organizations";
 export * from "./people/people";

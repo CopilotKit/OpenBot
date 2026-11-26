@@ -36,6 +36,7 @@ import {
   sendConversationMessage,
 } from "../src/api/generated/conversations/conversations";
 import { authClient } from "../src/auth";
+import { useChatFiles, useChatModel } from "../src/chat-extras";
 import {
   BotOrb,
   Composer,
@@ -89,6 +90,12 @@ export default function ConversationScreen() {
   const introOrb = useRef<ViewHandle>(null);
   const headerOrb = useRef<ViewHandle>(null);
   const fly = useOrbFlight();
+  // What goes with the next message: files, held by the server as they are picked, and the model it runs on.
+  const chatFiles = useChatFiles(channelId ?? "");
+  const chatModel = useChatModel(
+    channelId ?? "",
+    Boolean(session && channelId),
+  );
   const keyboard = useReanimatedKeyboardAnimation();
   const aboveKeyboard = useAnimatedStyle(() => ({
     paddingBottom: Math.abs(keyboard.height.value),
@@ -244,6 +251,7 @@ export default function ConversationScreen() {
         // A group's message goes to every Bot in it; another conversation's to its one Bot.
         ...(isGroup ? {} : { botId: agentId }),
       });
+      chatFiles.sent();
       await history.refresh();
     } catch (failure) {
       // What they wrote goes back in the box, so nothing is lost; a first message that didn't go leaves the
@@ -389,7 +397,13 @@ export default function ConversationScreen() {
         <KeyboardBar className="px-3 pt-1">
           <View className="gap-2">
             <Notice
-              message={error || channels.error || history.error || undefined}
+              message={
+                error ||
+                chatFiles.error ||
+                channels.error ||
+                history.error ||
+                undefined
+              }
             />
             {conversation && !conversation.active ? (
               <Notice
@@ -409,6 +423,10 @@ export default function ConversationScreen() {
               disabled={!conversation?.active || (!agentId && !isGroup)}
               sending={Boolean(sending)}
               autoFocus={Boolean(draft)}
+              onAttach={(from) => void chatFiles.attach(from)}
+              files={chatFiles.files}
+              onRemoveFile={chatFiles.remove}
+              models={chatModel}
             />
           </View>
         </KeyboardBar>

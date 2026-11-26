@@ -9,7 +9,12 @@ export { BotTile } from "./bot-tile";
 export { Card } from "./card";
 export { ChoiceList } from "./choice-list";
 export { cn } from "./cn";
-export { Composer } from "./composer";
+export {
+  type AttachFrom,
+  Composer,
+  type ComposerFile,
+  type ComposerModels,
+} from "./composer";
 export { ConversationRow, type ConversationRowBot } from "./conversation-row";
 export { EmptyState } from "./empty-state";
 export { Icon } from "./icon";

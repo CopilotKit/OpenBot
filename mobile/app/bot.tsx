@@ -1,8 +1,7 @@
-import { Redirect, router, useLocalSearchParams } from "expo-router";
+import { Redirect, router, Stack, useLocalSearchParams } from "expo-router";
 import { Button } from "heroui-native/button";
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { everyPage, ORGANIZATION_ID, type Routine } from "../src/api";
 import {
   getBot,
@@ -18,7 +17,7 @@ import {
   resumeRoutine,
 } from "../src/api/generated/routines/routines";
 import { authClient } from "../src/auth";
-import { hideItem, ItemCard, startItem } from "../src/check-ins";
+import { hideItem, ItemRow, startItem } from "../src/check-ins";
 import {
   BotOrb,
   EmptyState,
@@ -32,12 +31,14 @@ import {
   Text,
   Toggle,
 } from "../src/components";
+import { headerActions } from "../src/header";
 import {
   IconBook,
   IconBrain,
   IconChecks,
   IconClock,
   IconDeviceDesktop,
+  IconEdit,
   IconMessages,
   IconPlayerPause,
   IconPlug,
@@ -54,11 +55,11 @@ type Showing = "conversations" | "settings";
 
 /**
  * A Bot's page: its orb and name, then its conversations by day, or its settings: whether it is
- * working for you, what it found that needs you, its routines, and what it knows and can use.
+ * working for you, what it found that needs you, its routines, and what it knows and can use. A new
+ * chat with it is the compose button in the header, as on Chats.
  */
 export default function BotScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
-  const insets = useSafeAreaInsets();
   const { data: session, isPending } = authClient.useSession();
   const [view, setView] = useState<Showing>("conversations");
   const action = useAction();
@@ -139,8 +140,24 @@ export default function BotScreen() {
     conversations.error ||
     routines.error ||
     items.error;
+  const newChat = () =>
+    void action.run("open", () => openConversationWith(botId));
   return (
     <Screen>
+      <Stack.Screen
+        options={headerActions(
+          name
+            ? [
+                {
+                  label: "New chat",
+                  sf: "square.and.pencil",
+                  icon: IconEdit,
+                  onPress: newChat,
+                },
+              ]
+            : [],
+        )}
+      />
       <ScrollView
         className="flex-1"
         contentContainerClassName="gap-6 px-4 pb-12"
@@ -178,7 +195,7 @@ export default function BotScreen() {
           days.length ? (
             days.map(([day, list]) => (
               <Section key={day} title={day}>
-                <Rows>
+                <Rows iconless>
                   {list.map((item) => (
                     <Row
                       key={item.id}
@@ -208,32 +225,45 @@ export default function BotScreen() {
               icon={IconMessages}
               title="No chats yet"
               description={`Start one to give ${name || "this Bot"} some work.`}
+              action={
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  isDisabled={!name || Boolean(action.busy)}
+                  onPress={newChat}
+                >
+                  New chat
+                </Button>
+              }
             />
           ) : null
         ) : (
           <>
             {found?.length ? (
               <Section title="Needs you">
-                {found.map((item) => (
-                  <ItemCard
-                    key={item.id}
-                    item={item}
-                    botName={name}
-                    busy={action.busy}
-                    onStart={() => {
-                      void action.run(`start:${item.id}`, async () => {
-                        await startItem(item);
-                        void items.refresh();
-                      });
-                    }}
-                    onHide={() => {
-                      void action.run(`hide:${item.id}`, async () => {
-                        await hideItem(item);
-                        await items.refresh();
-                      });
-                    }}
-                  />
-                ))}
+                <Rows iconless>
+                  {found.map((item) => (
+                    <ItemRow
+                      key={item.id}
+                      item={item}
+                      botName={name}
+                      busy={action.busy}
+                      className="px-3"
+                      onStart={() => {
+                        void action.run(`start:${item.id}`, async () => {
+                          await startItem(item);
+                          void items.refresh();
+                        });
+                      }}
+                      onHide={() => {
+                        void action.run(`hide:${item.id}`, async () => {
+                          await hideItem(item);
+                          await items.refresh();
+                        });
+                      }}
+                    />
+                  ))}
+                </Rows>
               </Section>
             ) : null}
             <Section title="Settings for you">
@@ -349,21 +379,6 @@ export default function BotScreen() {
           </>
         )}
       </ScrollView>
-      {view === "conversations" ? (
-        <View
-          className="border-t border-border bg-background px-4 pt-3"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) }}
-        >
-          <Button
-            isDisabled={!name || Boolean(action.busy)}
-            onPress={() =>
-              void action.run("open", () => openConversationWith(botId))
-            }
-          >
-            New chat
-          </Button>
-        </View>
-      ) : null}
     </Screen>
   );
 }

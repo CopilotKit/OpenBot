@@ -25,7 +25,6 @@ import {
   Rows,
   Screen,
   ScrollScreen,
-  Section,
   SheetTitle,
   Text,
 } from "../src/components";
@@ -46,6 +45,10 @@ import {
   WEEKDAY_LABEL,
 } from "../src/routine-schedule";
 import { useLoad } from "../src/use-load";
+
+/** A time zone as a person says it: "America/Los_Angeles" as "Los Angeles". */
+const zoneName = (zone: string) =>
+  (zone.split("/").pop() ?? zone).replace(/_/g, " ");
 
 /**
  * New routine, or Edit routine with a `routineId`: which Bot does it, what it does, and when, with
@@ -140,12 +143,13 @@ export default function RoutineForm() {
   }
 
   return (
-    <Screen>
+    <Screen fade={false}>
       <SheetTitle title={editing ? "Edit routine" : "New routine"} />
-      <ScrollScreen className="gap-5">
+      <ScrollScreen className="gap-5" fade={false}>
         <Notice message={error || bots.error || routines.error} />
         {editing ? null : (
-          <Section title="Who does it">
+          <View className="gap-2">
+            <Label>Who does it</Label>
             <ChoiceList
               label="The Bot that does it"
               value={botId}
@@ -155,7 +159,7 @@ export default function RoutineForm() {
                 label: bot.name,
               }))}
             />
-          </Section>
+          </View>
         )}
         {editing && routine ? (
           <View className="flex-row items-center gap-2 px-1">
@@ -190,7 +194,8 @@ export default function RoutineForm() {
             onChangeText={setTitle}
           />
         </TextField>
-        <Section title="When">
+        <View className="gap-2">
+          <Label>When</Label>
           <ChoiceList
             label="How often it runs"
             value={schedule.repeat}
@@ -254,9 +259,9 @@ export default function RoutineForm() {
           <Text tone="muted" className="px-1 text-sm">
             {keepsSchedule && routine
               ? `${routine.schedule}. Pick a new schedule to change it.`
-              : `${scheduleSentence(schedule)}, ${phoneTimeZone().replace(/_/g, " ")} time.`}
+              : `${scheduleSentence(schedule)}, ${zoneName(phoneTimeZone())} time.`}
           </Text>
-        </Section>
+        </View>
         <Button isDisabled={!ready} onPress={() => void save()}>
           {editing ? "Save" : "Create routine"}
         </Button>

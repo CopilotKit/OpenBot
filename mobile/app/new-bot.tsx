@@ -46,9 +46,9 @@ export default function NewBot() {
   }
   return (
     // The title stays put above the form: in the form, the keyboard scrolling to Name would cut it off.
-    <Screen>
+    <Screen fade={false}>
       <SheetTitle title="New Bot" />
-      <ScrollScreen className="gap-5">
+      <ScrollScreen className="gap-5" fade={false}>
         <Notice message={error} />
         <TextField isRequired>
           <Label>Name</Label>

@@ -1,10 +1,10 @@
+import MenuView from "@expo/ui/community/menu";
 import { Redirect, useLocalSearchParams } from "expo-router";
 import { Button } from "heroui-native/button";
 import { Input } from "heroui-native/input";
-import { Label } from "heroui-native/label";
 import { TextField } from "heroui-native/text-field";
 import { useCallback, useState } from "react";
-import { Alert } from "react-native";
+import { Alert, View } from "react-native";
 import {
   type ApprovalRule,
   BEHAVIOUR_LABELS,
@@ -21,8 +21,8 @@ import {
 } from "../src/api/generated/approvals/approvals";
 import { authClient } from "../src/auth";
 import {
-  Card,
   ChoiceList,
+  Icon,
   Notice,
   Row,
   Rows,
@@ -31,6 +31,7 @@ import {
   Text,
   Toggle,
 } from "../src/components";
+import { IconSelector } from "../src/icons";
 import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
 
@@ -50,6 +51,7 @@ const describe = (rule: ApprovalRule) =>
 /**
  * Custom rules: what a Bot may do without asking, and the ask-first switches. The header says
  * "Custom rules"; the page opens on the switches, then the team's rules, yours, and adding one.
+ * Each of your rules is a row that opens the platform's menu: what a Bot does with it, and Remove.
  */
 export default function RulesScreen() {
   const { botId = "*" } = useLocalSearchParams<{ botId?: string }>();
@@ -57,6 +59,7 @@ export default function RulesScreen() {
   const action = useAction();
   const [toolRef, setToolRef] = useState("");
   const [behaviour, setBehaviour] = useState<RuleBehaviour>("ask");
+  const [rowWidth, setRowWidth] = useState(0);
   const load = useCallback(() => loadApprovalSettings(), []);
   const settings = useLoad(load, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
@@ -82,6 +85,21 @@ export default function RulesScreen() {
       });
       await settings.refresh();
     });
+
+  const confirmRemove = (rule: ApprovalRule) =>
+    Alert.alert("Remove this rule?", describe(rule), [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => {
+          void action.run(rule.id, async () => {
+            await deletePersonApprovalRule(ORGANIZATION_ID, ME, rule.id);
+            await settings.refresh();
+          });
+        },
+      },
+    ]);
 
   return (
     <ScrollScreen
@@ -139,67 +157,101 @@ export default function RulesScreen() {
       ) : null}
       <Section title="Your rules">
         {!editable ? (
-          <Text tone="muted">
+          <Text tone="muted" className="px-1 text-sm">
             Your workspace has switched custom rules off.
           </Text>
         ) : null}
-        {rules?.length === 0 ? <Text tone="muted">No rules yet.</Text> : null}
-        {rules?.map((rule) => (
-          <Card key={rule.id} className="gap-3">
-            <Text variant="label" className="font-semibold">
-              {describe(rule)}
-            </Text>
-            {rule.botId === "*" ? (
-              <Text variant="caption" tone="muted" className="-mt-2">
-                Every Bot
-              </Text>
-            ) : null}
-            <ChoiceList
-              label={`What a Bot does with ${describe(rule)}`}
-              options={BEHAVIOURS}
-              value={rule.behaviour}
-              disabled={!editable || Boolean(action.busy)}
-              onChange={(next) => {
-                void changeRule(rule, next);
-              }}
-            />
-            <Button
-              size="sm"
-              variant="danger-soft"
-              className="self-start"
-              isDisabled={Boolean(action.busy)}
-              onPress={() =>
-                Alert.alert("Remove this rule?", describe(rule), [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Remove",
-                    style: "destructive",
-                    onPress: () => {
-                      void action.run(rule.id, async () => {
-                        await deletePersonApprovalRule(
-                          ORGANIZATION_ID,
-                          ME,
-                          rule.id,
-                        );
-                        await settings.refresh();
-                      });
-                    },
-                  },
-                ])
-              }
-            >
-              Remove rule
-            </Button>
-          </Card>
-        ))}
+        {rules?.length === 0 ? (
+          <Text tone="muted" className="px-1 text-sm">
+            No rules yet.
+          </Text>
+        ) : null}
+        {rules?.length ? (
+          <View
+            onLayout={(event) =>
+              // Inside the card's hairline border.
+              setRowWidth(event.nativeEvent.layout.width - 2)
+            }
+          >
+            <Rows iconless>
+              {rules.map((rule) => {
+                const row = (
+                  <Row
+                    title={describe(rule)}
+                    description={[
+                      BEHAVIOUR_LABELS[rule.behaviour],
+                      rule.botId === "*" ? "Every Bot" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    trailing={
+                      editable ? (
+                        <Icon
+                          icon={IconSelector}
+                          size={16}
+                          color="accent-muted"
+                        />
+                      ) : undefined
+                    }
+                  />
+                );
+                if (!editable || action.busy)
+                  return <View key={rule.id}>{row}</View>;
+                return (
+                  <MenuView
+                    key={rule.id}
+                    title={describe(rule)}
+                    actions={[
+                      {
+                        id: "behaviour",
+                        title: "What a Bot does with it",
+                        displayInline: true,
+                        subactions: BEHAVIOURS.map((option) => ({
+                          id: option.value,
+                          title: option.label,
+                          state: option.value === rule.behaviour ? "on" : "off",
+                        })),
+                      },
+                      {
+                        id: "remove",
+                        title: "Remove rule",
+                        attributes: { destructive: true },
+                      },
+                    ]}
+                    onPressAction={({ nativeEvent }) => {
+                      const picked = nativeEvent.event;
+                      if (picked === "remove") return confirmRemove(rule);
+                      const next = BEHAVIOURS.find(
+                        (option) => option.value === picked,
+                      );
+                      if (next && next.value !== rule.behaviour)
+                        void changeRule(rule, next.value);
+                    }}
+                  >
+                    <View
+                      // The menu sizes itself to its trigger, so the row says its own width to reach the card's edge.
+                      style={rowWidth ? { width: rowWidth } : undefined}
+                      accessible
+                      accessibilityRole="button"
+                      accessibilityLabel={`${describe(rule)}, ${BEHAVIOUR_LABELS[rule.behaviour]}`}
+                      accessibilityHint="Change what a Bot does with it, or remove it"
+                    >
+                      {row}
+                    </View>
+                  </MenuView>
+                );
+              })}
+            </Rows>
+          </View>
+        ) : null}
       </Section>
       {editable ? (
         <Section title="Add a rule">
-          <Card className="gap-3">
+          <View className="gap-3">
             <TextField>
-              <Label>Tool or app</Label>
               <Input
-                placeholder="gmail/send_email, or * for any"
+                accessibilityLabel="Tool or app"
+                placeholder="Tool or app: gmail/send_email, or * for any"
                 autoCapitalize="none"
                 autoCorrect={false}
                 value={toolRef}
@@ -214,6 +266,8 @@ export default function RulesScreen() {
               onChange={setBehaviour}
             />
             <Button
+              size="sm"
+              className="self-end"
               isDisabled={Boolean(action.busy) || !toolRef.trim()}
               onPress={() => {
                 void action.run("add", async () => {
@@ -229,7 +283,7 @@ export default function RulesScreen() {
             >
               {action.busy === "add" ? "Adding…" : "Add rule"}
             </Button>
-          </Card>
+          </View>
         </Section>
       ) : null}
     </ScrollScreen>

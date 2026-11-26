@@ -25,6 +25,7 @@ export function useHeaderOptions() {
     headerBackButtonDisplayMode: "minimal",
     headerShadowVisible: false,
     headerTintColor: foreground,
+    // A solid bar in the page's ground; the page fades out under it (`TopFade`) rather than being cut off.
     headerStyle: { backgroundColor: background },
     headerTitleStyle: { fontFamily: "Inter_600SemiBold", color: foreground },
     headerLargeTitleStyle: { fontFamily: "Inter_700Bold", color: foreground },

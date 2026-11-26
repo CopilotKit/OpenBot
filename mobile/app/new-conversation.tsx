@@ -55,7 +55,7 @@ export default function NewConversation() {
       now.includes(id) ? now.filter((item) => item !== id) : [...now, id],
     );
   return (
-    <Screen>
+    <Screen fade={false}>
       <FlatList
         className="flex-1"
         data={listed}
