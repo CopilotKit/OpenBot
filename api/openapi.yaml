@@ -10528,7 +10528,7 @@ paths:
                       starts: schedule
                       cron: 0 9 * * 1-5
                       timezone: America/New_York
-                      doneWhen: Never. It repeats until you turn it off.
+                      doneWhen: ''
                       conversationId: null
                       intervalMinutes: null
                 needsMore:
@@ -10541,7 +10541,7 @@ paths:
                       starts: unsaid
                       cron: null
                       timezone: America/New_York
-                      doneWhen: Never. It repeats until you turn it off.
+                      doneWhen: ''
                       conversationId: null
                       intervalMinutes: null
                     missing: time
@@ -32957,7 +32957,7 @@ components:
           description: The IANA time zone the schedule is read in.
         doneWhen:
           type: string
-          description: What ends it, in a sentence.
+          description: 'The outcome that ends it, in the sentence''s words. Empty when the sentence gives none: on a schedule that makes a routine, and an outcome makes a goal that ends when it is met.'
         conversationId:
           type:
             - string

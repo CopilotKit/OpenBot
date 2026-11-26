@@ -395,7 +395,11 @@ export const ReadRoutineSentenceResponse = zod
             timezone: zod
               .string()
               .describe("The IANA time zone the schedule is read in."),
-            doneWhen: zod.string().describe("What ends it, in a sentence."),
+            doneWhen: zod
+              .string()
+              .describe(
+                "The outcome that ends it, in the sentence's words. Empty when the sentence gives none: on a schedule that makes a routine, and an outcome makes a goal that ends when it is met.",
+              ),
             conversationId: zod
               .string()
               .nullable()
@@ -448,7 +452,11 @@ export const ReadRoutineSentenceResponse = zod
             timezone: zod
               .string()
               .describe("The IANA time zone the schedule is read in."),
-            doneWhen: zod.string().describe("What ends it, in a sentence."),
+            doneWhen: zod
+              .string()
+              .describe(
+                "The outcome that ends it, in the sentence's words. Empty when the sentence gives none: on a schedule that makes a routine, and an outcome makes a goal that ends when it is met.",
+              ),
             conversationId: zod
               .string()
               .nullable()

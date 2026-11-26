@@ -24,7 +24,7 @@ export interface RoutineDraft {
   cron: string | null;
   /** The IANA time zone the schedule is read in. */
   timezone: string;
-  /** What ends it, in a sentence. */
+  /** The outcome that ends it, in the sentence's words. Empty when the sentence gives none: on a schedule that makes a routine, and an outcome makes a goal that ends when it is met. */
   doneWhen: string;
   /**
    * The conversation it posts in. Null means a new conversation.

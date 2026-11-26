@@ -74,7 +74,7 @@ export const getReadRoutineSentenceResponseMock = (): RoutineReading => ({
     starts: "schedule",
     cron: "0 9 * * 1-5",
     timezone: "America/New_York",
-    doneWhen: "Never. It repeats until you turn it off.",
+    doneWhen: "",
     conversationId: null,
     intervalMinutes: null,
   },
