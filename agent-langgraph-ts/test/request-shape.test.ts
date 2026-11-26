@@ -306,6 +306,42 @@ test("Prompt authority, Anthropic: the role and holdings are the system prompt; 
   }
 });
 
+/*
+ * MEMORY AS THE SERVER NOW SENDS IT: one row in the person's role, never a system row, no context
+ * copy. Said at the start of the person's first turn, so Anthropic's turns still alternate.
+ */
+test("Prompt authority, Anthropic: memory sent as the person's row is said with their first turn, once", async () => {
+  const provider = await fakeProvider(answer);
+  try {
+    const env = {
+      BOT_PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "sk-ant-test",
+      ANTHROPIC_BASE_URL: provider.base,
+    };
+    const input = conversation();
+    const messages = input.messages as unknown[];
+    // After the server's two rows, ahead of the conversation, as the server sends it.
+    messages.splice(2, 0, { ...UNTRUSTED.memory, role: "user" });
+    await withEngine({ env }, (base) => run(base, input));
+    const { body } = provider.requests[0]!;
+    assert.ok(!JSON.stringify(body.system).includes("MEMORY_MARKER"));
+    const sent = body.messages as { role: string; content: unknown }[];
+    assert.deepEqual(
+      sent.map((message) => message.role),
+      ["user", "assistant", "user"],
+    );
+    const first = JSON.stringify(sent[0]);
+    assert.ok(
+      first.indexOf("MEMORY_MARKER") >= 0 &&
+        first.indexOf("MEMORY_MARKER") <
+          first.indexOf("EARLIER_QUESTION_MARKER"),
+    );
+    assert.equal(JSON.stringify(sent).split("MEMORY_MARKER").length - 1, 1);
+  } finally {
+    await provider.close();
+  }
+});
+
 test("Prompt authority, OpenAI: one system message, the server's instructions only", async () => {
   const provider = await fakeProvider(answer);
   try {
