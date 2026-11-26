@@ -230,7 +230,8 @@ test("Anthropic: one top-level system prompt, output_config.effort, the tools", 
           },
         },
       });
-      // Quoted memory at the head of the thread, ahead of the standing role, as the server puts it.
+      // A system message at the head of the thread, ahead of the standing role, where the server
+      // puts a Bot's quoted memory.
       (input.messages as unknown[]).unshift(memory);
       const result = await run(base, input);
       assert.equal(result.events.at(-1)!.type, "RUN_FINISHED");
@@ -253,16 +254,18 @@ test("Anthropic: one top-level system prompt, output_config.effort, the tools", 
       system.includes("STANDING_ROLE_MARKER") &&
         system.includes("GRANTED_TOOLS_MARKER"),
     );
+    // Every system message is the system prompt, as on any AG-UI agent, in the thread's order.
     assert.ok(
-      !system.includes("MEMORY_MARKER"),
-      "quoted memory never gets the system prompt's authority",
+      system.indexOf("MEMORY_MARKER") >= 0 &&
+        system.indexOf("MEMORY_MARKER") <
+          system.indexOf("STANDING_ROLE_MARKER"),
+      "the system message at the head of the thread heads the system prompt",
     );
     const messages = body.messages as { role: string }[];
     assert.ok(messages.every((message) => message.role !== "system"));
-    assert.equal(
-      JSON.stringify(messages).split("MEMORY_MARKER").length - 1,
-      1,
-      "memory reaches the model once, in the conversation",
+    assert.ok(
+      !JSON.stringify(messages).includes("MEMORY_MARKER"),
+      "and is not repeated in the conversation",
     );
   } finally {
     await provider.close();

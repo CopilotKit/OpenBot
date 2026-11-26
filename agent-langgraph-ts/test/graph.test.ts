@@ -1,126 +1,20 @@
 /**
- * The run's shape: the step budget and its last-step answer, the server's tools run here through
- * the signed callback, the surface's tools handed back and resumed, and parallel calls streamed
- * under their own ids. Driven through the real AG-UI endpoint against a provider that speaks
- * OpenAI's real streaming format.
+ * The run's shape: a browser's tool handed back and resumed, and parallel calls streamed under
+ * their own ids. Driven through the real AG-UI endpoint against a provider that speaks OpenAI's real
+ * streaming format. The hand-back of OpenBot's own tools, the step budget across hand-backs and
+ * recall are in hand-back.test.ts.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LAST_STEP_NOTICE } from "../../shared/run-notices.ts";
-import { MAX_STEPS } from "../src/run.ts";
-import { fakeProvider, type Recorded } from "./fake-provider.ts";
+import { fakeProvider } from "./fake-provider.ts";
 import {
   conversation,
   type Event,
+  pendingOf,
   run,
-  toolCallback,
-  types,
   WEATHER_TOOL,
   withEngine,
 } from "./helpers.ts";
-
-const LOOKUP = {
-  name: "lookup",
-  description: "Look something up.",
-  parameters: { type: "object", properties: { q: { type: "string" } } },
-};
-
-function lastMessage(request: Recorded): { role: string; content: unknown } {
-  return (request.body.messages as { role: string; content: unknown }[]).at(
-    -1,
-  )!;
-}
-
-test(`A run takes at most ${MAX_STEPS} steps, and the last one answers in words with tools off`, async () => {
-  const provider = await fakeProvider((request, index) =>
-    request.body.tool_choice === "none"
-      ? { text: "Here is what I found so far, and what I did not get to." }
-      : {
-          calls: [
-            {
-              id: `call_${index}`,
-              name: "lookup",
-              args: { q: `page ${index}` },
-            },
-          ],
-        },
-  );
-  const callback = await toolCallback();
-  try {
-    const env = {
-      BOT_PROVIDER: "openai",
-      OPENAI_API_KEY: "sk-test",
-      OPENAI_BASE_URL: `${provider.base}/v1`,
-      AGENT_TOOL_TOKEN: "tool-token",
-      OPENBOT_TOOL_URL: callback.url,
-    };
-    const result = await withEngine({ env }, (base) =>
-      run(
-        base,
-        conversation({
-          tools: [LOOKUP],
-          forwardedProps: {
-            openbotDeploymentTools: ["lookup"],
-            openbotRun: "signed-run-statement",
-            // On Chat Completions, whose request this test reads.
-            openbotModel: { model: "gpt-5.2" },
-          },
-        }),
-      ),
-    );
-    assert.equal(
-      provider.requests.length,
-      MAX_STEPS,
-      "one model call per step, and no more",
-    );
-    for (const request of provider.requests.slice(0, -1))
-      assert.notEqual(request.body.tool_choice, "none");
-    const last = provider.requests.at(-1)!;
-    assert.equal(
-      last.body.tool_choice,
-      "none",
-      "tools are off on the last step",
-    );
-    assert.ok(
-      (last.body.tools as unknown[]).length > 0,
-      "the tools are still described, so the history reads",
-    );
-    assert.deepEqual(lastMessage(last), {
-      role: "user",
-      content: LAST_STEP_NOTICE,
-    });
-
-    assert.equal(callback.calls.length, MAX_STEPS - 1);
-    assert.ok(
-      callback.calls.every(
-        (call) =>
-          call.token === "tool-token" && call.run === "signed-run-statement",
-      ),
-    );
-    const kinds = types(result.events);
-    assert.equal(
-      kinds.filter((type) => type === "TOOL_CALL_RESULT").length,
-      MAX_STEPS - 1,
-    );
-    assert.equal(kinds.at(-1), "RUN_FINISHED");
-    const words = result.events
-      .filter((event) => event.type === "TEXT_MESSAGE_CONTENT")
-      .map((event) => event.delta)
-      .join("");
-    assert.equal(
-      words,
-      "Here is what I found so far, and what I did not get to.",
-    );
-    // The notice was this call's only: it is not in the thread the run hands back.
-    const snapshot = result.events.find(
-      (event) => event.type === "MESSAGES_SNAPSHOT",
-    )!;
-    assert.ok(!JSON.stringify(snapshot).includes(LAST_STEP_NOTICE));
-  } finally {
-    await provider.close();
-    await callback.close();
-  }
-});
 
 test("A surface tool ends the run on its call, and the next run carries on from its result", async () => {
   const provider = await fakeProvider((request) =>
@@ -132,7 +26,6 @@ test("A surface tool ends the run on its call, and the next run carries on from 
           ],
         },
   );
-  const callback = await toolCallback();
   const renderUi = {
     name: "render_ui",
     description: "Draw a component.",
@@ -148,29 +41,17 @@ test("A surface tool ends the run on its call, and the next run carries on from 
       BOT_MODEL: "gpt-5.2",
       OPENAI_API_KEY: "sk-test",
       OPENAI_BASE_URL: `${provider.base}/v1`,
-      AGENT_TOOL_TOKEN: "t",
-      OPENBOT_TOOL_URL: callback.url,
     };
     await withEngine({ env }, async (base) => {
-      const first = await run(
-        base,
-        conversation({
-          tools: [renderUi],
-          forwardedProps: { openbotDeploymentTools: [], openbotRun: "s" },
-        }),
-      );
+      const first = await run(base, conversation({ tools: [renderUi] }));
       assert.equal(provider.requests.length, 1);
-      assert.equal(
-        callback.calls.length,
-        0,
-        "the surface's tool is never run here",
-      );
       const start = first.events.find(
         (event) => event.type === "TOOL_CALL_START",
       )!;
       assert.equal(start.toolCallName, "render_ui");
       assert.equal(start.toolCallId, "call_ui");
       assert.equal(first.events.at(-1)!.type, "RUN_FINISHED");
+      assert.deepEqual(pendingOf(first.events), ["call_ui"]);
 
       const thread = [
         ...(conversation().messages as unknown[]),
@@ -229,7 +110,6 @@ test("A surface tool ends the run on its call, and the next run carries on from 
     );
   } finally {
     await provider.close();
-    await callback.close();
   }
 });
 
@@ -279,188 +159,8 @@ test("Parallel calls stream under their own ids, their arguments never mixed", a
       ["call_paris", "call_tokyo"],
     );
     assert.equal(result.events.at(-1)!.type, "RUN_FINISHED");
+    assert.deepEqual(pendingOf(result.events), ["call_paris", "call_tokyo"]);
   } finally {
     await provider.close();
   }
 });
-
-test("A step mixing a server tool with a surface tool goes back to the surface without running either", async () => {
-  const provider = await fakeProvider(() => ({
-    calls: [
-      { id: "call_send", name: "send_message", args: { to: "x" } },
-      { id: "call_ui", name: "render_ui", args: {} },
-    ],
-  }));
-  const callback = await toolCallback();
-  try {
-    const env = {
-      BOT_PROVIDER: "openai",
-      OPENAI_API_KEY: "sk-test",
-      OPENAI_BASE_URL: `${provider.base}/v1`,
-      AGENT_TOOL_TOKEN: "t",
-      OPENBOT_TOOL_URL: callback.url,
-    };
-    const tools = [
-      {
-        name: "send_message",
-        description: "Send.",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        name: "render_ui",
-        description: "Draw.",
-        parameters: { type: "object", properties: {} },
-      },
-    ];
-    const result = await withEngine({ env }, (base) =>
-      run(
-        base,
-        conversation({
-          tools,
-          forwardedProps: {
-            openbotDeploymentTools: ["send_message"],
-            openbotRun: "s",
-          },
-        }),
-      ),
-    );
-    assert.equal(callback.calls.length, 0);
-    assert.equal(provider.requests.length, 1);
-    assert.equal(result.events.at(-1)!.type, "RUN_FINISHED");
-  } finally {
-    await provider.close();
-    await callback.close();
-  }
-});
-
-test("A Bot's computer calls run one after another, in the order the model made them", async () => {
-  const provider = await fakeProvider((_request, index) =>
-    index === 0
-      ? {
-          calls: [
-            { id: "c1", name: "computer_type", args: { text: "slow" } },
-            { id: "c2", name: "computer_click", args: { at: "save" } },
-          ],
-        }
-      : { text: "Saved." },
-  );
-  const callback = await toolCallback(
-    (name) => `${name} done`,
-    (name) => (name === "computer_type" ? 80 : 0),
-  );
-  try {
-    const env = {
-      BOT_PROVIDER: "openai",
-      OPENAI_API_KEY: "sk-test",
-      OPENAI_BASE_URL: `${provider.base}/v1`,
-      AGENT_TOOL_TOKEN: "t",
-      OPENBOT_TOOL_URL: callback.url,
-    };
-    const tools = ["computer_type", "computer_click"].map((name) => ({
-      name,
-      description: name,
-      parameters: { type: "object", properties: {} },
-    }));
-    const result = await withEngine({ env }, (base) =>
-      run(
-        base,
-        conversation({
-          tools,
-          forwardedProps: {
-            openbotDeploymentTools: ["computer_type", "computer_click"],
-            openbotRun: "s",
-          },
-        }),
-      ),
-    );
-    assert.deepEqual(
-      callback.calls.map((call) => call.name),
-      ["computer_type", "computer_click"],
-    );
-    const results = result.events.filter(
-      (event) => event.type === "TOOL_CALL_RESULT",
-    );
-    assert.deepEqual(
-      results.map((event) => [event.toolCallId, event.content]),
-      [
-        ["c1", "computer_type done"],
-        ["c2", "computer_click done"],
-      ],
-    );
-    assert.equal(result.events.at(-1)!.type, "RUN_FINISHED");
-  } finally {
-    await provider.close();
-    await callback.close();
-  }
-});
-
-// FOUND ON THE REAL GEMINI API: @langchain/google streams a call whole, in `tool_calls`, with no
-// `tool_call_chunks`, so a run that read only the chunks saw no call and finished with nothing said.
-for (const [gemini, id] of [
-  ["Gemini 3, which names its calls", "call_10067008614775455048"],
-  ["Gemini 2.5, which does not", ""],
-] as const) {
-  test(`${gemini}: a call streamed whole is run, and its thought signature goes back with it`, async () => {
-    const provider = await fakeProvider((request) =>
-      JSON.stringify(request.body.contents).includes("Reading id W-1")
-        ? { text: "Paris: 17 C (W-1)." }
-        : {
-            calls: [
-              {
-                id,
-                name: "get_weather",
-                args: { city: "Paris" },
-                signature: "SIGNATURE_MARKER",
-              },
-            ],
-          },
-    );
-    const callback = await toolCallback(() => "Paris: 17 C. Reading id W-1.");
-    try {
-      const env = {
-        BOT_PROVIDER: "google",
-        GOOGLE_API_KEY: "AIza-test",
-        GOOGLE_GENERATIVE_AI_BASE_URL: `${provider.base}/v1beta`,
-        AGENT_TOOL_TOKEN: "t",
-        OPENBOT_TOOL_URL: callback.url,
-      };
-      const result = await withEngine({ env }, (base) =>
-        run(
-          base,
-          conversation({
-            tools: [WEATHER_TOOL],
-            forwardedProps: {
-              openbotDeploymentTools: ["get_weather"],
-              openbotRun: "s",
-              openbotModel: { model: "gemini-3.6-flash" },
-            },
-          }),
-        ),
-      );
-      const start = result.events.find(
-        (event) => event.type === "TOOL_CALL_START",
-      );
-      assert.equal(start?.toolCallName, "get_weather");
-      if (id) assert.equal(start?.toolCallId, id);
-      assert.deepEqual(
-        callback.calls.map((call) => call.args),
-        [{ city: "Paris" }],
-      );
-      assert.equal(provider.requests.length, 2);
-      const followUp = JSON.stringify(provider.requests[1]?.body.contents);
-      assert.ok(
-        followUp.includes("SIGNATURE_MARKER"),
-        "the thought signature goes back with the call",
-      );
-      assert.ok(followUp.includes("functionResponse"));
-      const words = result.events
-        .filter((event) => event.type === "TEXT_MESSAGE_CONTENT")
-        .map((event) => event.delta)
-        .join("");
-      assert.equal(words, "Paris: 17 C (W-1).");
-    } finally {
-      await provider.close();
-      await callback.close();
-    }
-  });
-}

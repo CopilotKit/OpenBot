@@ -1,6 +1,6 @@
 /**
- * The thread as the model is shown it: no dangling tool call ever reaches a provider, the built-in
- * Bot's full prompt is the system prompt, and only the server's own rows carry its authority.
+ * The thread as the model is shown it: no dangling tool call ever reaches a provider, and the
+ * thread's system messages are the system prompt (every one of them, in order: hand-back.test.ts).
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -115,7 +115,7 @@ test("No dangling call reaches the provider, whatever the thread held", async ()
   }
 });
 
-test("The built-in Bot's full prompt is the system prompt, in place of the standing role", async () => {
+test("A context entry that repeats a system message is said once", async () => {
   const provider = await fakeProvider(always({ text: "ok" }));
   try {
     const env = {
@@ -123,56 +123,25 @@ test("The built-in Bot's full prompt is the system prompt, in place of the stand
       ANTHROPIC_API_KEY: "sk-ant-test",
       ANTHROPIC_BASE_URL: provider.base,
     };
-    const fullPrompt =
-      "<identity>\nYou are Test Bot. FULL_PROMPT_MARKER\n</identity>\n\n<how_to_work>\nUse what you already have first.\n</how_to_work>";
+    // OpenBot sends a Bot's quoted personal memory both as a system message and as context.
+    const memory = "Quoted memory records: MEMORY_MARKER";
     const input = conversation({
-      forwardedProps: { openbotSystemPrompt: fullPrompt },
-      context: [
-        { description: "The page the person is on", value: "CONTEXT_MARKER" },
-      ],
+      context: [{ description: "OpenBot personal memory", value: memory }],
     });
-    // A skill picked for the latest message, as the browser inserts it.
-    (input.messages as unknown[]).splice(4, 0, {
-      id: "skill-1",
+    (input.messages as unknown[]).unshift({
+      id: "openbot:personal-memory",
       role: "system",
-      content: "Answer in bullets. SKILL_MARKER",
+      content: memory,
     });
     await withEngine({ env }, (base) => run(base, input));
-    const { body } = provider.requests[0]!;
-    const system = JSON.stringify(body.system);
-    assert.ok(
-      system.includes("FULL_PROMPT_MARKER"),
-      "the full prompt is the system prompt",
-    );
-    assert.ok(
-      system.indexOf("FULL_PROMPT_MARKER") <
-        system.indexOf("GRANTED_TOOLS_MARKER"),
-      "and comes first",
-    );
-    assert.ok(
-      !JSON.stringify(body).includes("STANDING_ROLE_MARKER"),
-      "the standing role it supersedes is not sent too",
-    );
-    assert.ok(
-      system.includes("GRANTED_TOOLS_MARKER") &&
-        system.includes("CONTEXT_MARKER"),
-    );
-    assert.ok(
-      !system.includes("SKILL_MARKER"),
-      "a picked skill is conversation, not the system prompt",
-    );
-    const messages = JSON.stringify(body.messages);
-    assert.ok(
-      messages.includes("SKILL_MARKER") &&
-        messages.includes("LATEST_QUESTION_MARKER") &&
-        messages.includes("EARLIER_ANSWER_MARKER"),
-    );
+    const system = JSON.stringify(provider.requests[0]!.body.system);
+    assert.equal(system.split("MEMORY_MARKER").length - 1, 1);
   } finally {
     await provider.close();
   }
 });
 
-test("Without a full prompt, the standing role and holdings are the system prompt, as on the Python harness", async () => {
+test("The standing role and holdings are the system prompt, and the rest is the conversation", async () => {
   const provider = await fakeProvider(always({ text: "ok" }));
   try {
     const env = {

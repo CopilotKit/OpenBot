@@ -105,6 +105,13 @@ engine that runs elsewhere through this address.
 `OPENBOT_DEFAULT_BOT_ENGINE=built-in` puts every Bot back on the server's built-in agent, for a
 deployment that does not run the engine.
 
+That engine speaks plain AG-UI, as a Bot somebody connects does. Its instructions are the run's
+system messages, and every OpenBot tool it calls ends its run with the call unanswered, for the
+server to answer and carry on, so it reads neither `AGENT_TOOL_TOKEN` nor `OPENBOT_TOOL_URL`. The one
+OpenBot extension it reads is the model for the run, in `forwardedProps` (`openbotModel`,
+`openbotModelRoute`, `openbotOrganization`, `openbotSendOnce`), which an agent that brings its own
+model ignores.
+
 ## General variables
 
 | Variable             | Default                            | Meaning                                                             |
