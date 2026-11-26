@@ -27,15 +27,20 @@ import type {
   InvalidRoutineResponse,
   ListRoutineRunsParams,
   ListRoutinesParams,
+  ModelFailedResponse,
+  ModelNotConfiguredResponse,
   OrganizationNotFoundResponse,
   PauseRoutineHeaders,
   PlanRequiredResponse,
+  ReadRoutineSentenceHeaders,
   ResumeRoutineHeaders,
   RoutineNotFoundResponse,
   RoutinePage,
+  RoutineReading,
   RoutineResponse,
   RoutineRunAccepted,
   RoutineRunPage,
+  RoutineSentence,
   RoutineSwitch,
   RunRoutineHeaders,
   ServerErrorResponse,
@@ -431,6 +436,160 @@ export const useCreateRoutine = <
   TContext
 > => {
   return useMutation(getCreateRoutineMutationOptions(options), queryClient);
+};
+export const getReadRoutineSentenceUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/routines/read`;
+};
+
+/**
+ * Read a sentence in English as New routine's answers: what the Bot does, when it starts, the schedule and what ends it. It writes nothing. createRoutine, createGoal or createCheckIn makes what it read. A repeated request with the same Idempotency-Key and body returns the first reading without asking the model again.
+ * @summary Read a sentence as a routine's answers
+ */
+export const readRoutineSentence = async (
+  organizationId: string,
+  routineSentence: RoutineSentence,
+  headers: ReadRoutineSentenceHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<RoutineReading> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<RoutineReading>(getReadRoutineSentenceUrl(organizationId), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(routineSentence),
+  });
+};
+
+export const getReadRoutineSentenceMutationKey = () =>
+  ["readRoutineSentence"] as const;
+
+export const getReadRoutineSentenceMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | OrganizationNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | ModelFailedResponse
+    | ModelNotConfiguredResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof readRoutineSentence>>,
+    TError,
+    ReadRoutineSentenceMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof readRoutineSentence>>,
+  TError,
+  ReadRoutineSentenceMutationVariables,
+  TContext
+> => {
+  const mutationKey = getReadRoutineSentenceMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof readRoutineSentence>>,
+    ReadRoutineSentenceMutationVariables
+  > = (props) => {
+    const { organizationId, data, headers } = props ?? {};
+
+    return readRoutineSentence(organizationId, data, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReadRoutineSentenceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof readRoutineSentence>>
+>;
+export type ReadRoutineSentenceMutationBody = RoutineSentence;
+export type ReadRoutineSentenceMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | OrganizationNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | ModelFailedResponse
+  | ModelNotConfiguredResponse
+  | UnexpectedErrorResponse;
+export type ReadRoutineSentenceMutationVariables = {
+  organizationId: string;
+  data: RoutineSentence;
+  headers: ReadRoutineSentenceHeaders;
+};
+
+/**
+ * @summary Read a sentence as a routine's answers
+ */
+export const useReadRoutineSentence = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | OrganizationNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | ModelFailedResponse
+    | ModelNotConfiguredResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof readRoutineSentence>>,
+      TError,
+      ReadRoutineSentenceMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof readRoutineSentence>>,
+  TError,
+  ReadRoutineSentenceMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getReadRoutineSentenceMutationOptions(options),
+    queryClient,
+  );
 };
 export const getUpdateRoutineUrl = (
   organizationId: string,
