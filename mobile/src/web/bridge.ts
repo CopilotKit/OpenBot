@@ -35,6 +35,15 @@ export type PageMessage =
   | { type: "registered"; ok: boolean; status?: number }
   | { type: "removed"; ok: boolean };
 
+/**
+ * The API's addresses the script asks, written as the API's spec writes them. The page has no generated client, so
+ * they are named here, and tests/web-bridge.test.ts holds each one to the client generated from the spec
+ * (../api/generated): an address the API moves fails there, not on a phone.
+ */
+export const ORGANIZATIONS_PATH = "/api/v2/people/me/organizations";
+export const DEVICE_PATH =
+  "/api/v2/organizations/{organizationId}/people/me/devices/{deviceId}";
+
 /** The name the page's side goes by, on `window`. */
 const GLOBAL = "__openbotMobile";
 
@@ -97,15 +106,15 @@ export function bridgeScript(options: {
   // No callout on a long press and no bounce past the page's ends: the page sits in an app, not a browser tab.
   const css = `${hidden}{display:none!important}html{-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}body{-webkit-touch-callout:none;overscroll-behavior:none}`;
   return `(function(){
-var ORIGIN=${JSON.stringify(options.origin)},CLIENT=${JSON.stringify(options.client ?? "")},CSS=${JSON.stringify(css)};
+var ORIGIN=${JSON.stringify(options.origin)},CLIENT=${JSON.stringify(options.client ?? "")},CSS=${JSON.stringify(css)},LIST=${JSON.stringify(ORGANIZATIONS_PATH)},DEVICE=${JSON.stringify(DEVICE_PATH)};
 if(window.${GLOBAL}||location.origin!==ORIGIN||typeof window.fetch!=="function")return;
 var send=window.fetch.bind(window),device=null;
 function post(m){try{m.openbot=1;window.ReactNativeWebView.postMessage(JSON.stringify(m));}catch(e){}}
 function key(){try{return crypto.randomUUID();}catch(e){return Date.now()+"-"+Math.random().toString(16).slice(2);}}
 function headers(write){var h={accept:"application/json"};if(CLIENT)h["OpenBot-Client"]=CLIENT;if(write){h["content-type"]="application/json";h["idempotency-key"]=key();}return h;}
-function page(cursor){return send("/api/v2/organizations"+(cursor?"?cursor="+encodeURIComponent(cursor):""),{credentials:"include",headers:headers(false)}).then(function(r){if(!r.ok)throw new Error(String(r.status));return r.json();});}
+function page(cursor){return send(LIST+(cursor?"?cursor="+encodeURIComponent(cursor):""),{credentials:"include",headers:headers(false)}).then(function(r){if(!r.ok)throw new Error(String(r.status));return r.json();});}
 function organizations(){var all=[];function next(cursor,left){return page(cursor).then(function(b){if(b&&Array.isArray(b.organizations))all=all.concat(b.organizations);return b&&typeof b.nextCursor==="string"&&b.nextCursor&&left>0?next(b.nextCursor,left-1):all;});}return next(null,20);}
-function place(organization,id){return "/api/v2/organizations/"+encodeURIComponent(organization)+"/people/me/devices/"+encodeURIComponent(id);}
+function place(organization,id){return DEVICE.replace("{organizationId}",encodeURIComponent(organization)).replace("{deviceId}",encodeURIComponent(id));}
 function probe(){return send("/api/me",{credentials:"include",headers:headers(false)}).then(function(r){if(r.status===401){post({type:"session",signedIn:false});return;}if(!r.ok)return;return r.json().then(function(b){var id=b&&b.user&&typeof b.user.id==="string"?b.user.id:null;post(id?{type:"session",signedIn:true,person:id}:{type:"session",signedIn:false});});}).catch(function(){});}
 function register(phone){device=phone.id;return organizations().then(function(list){var one=null;for(var i=0;i<list.length;i++)if(list[i]&&list[i].active){one=list[i];break;}one=one||list[0];if(!one||typeof one.id!=="string")throw new Error("none");return send(place(one.id,phone.id),{method:"PUT",credentials:"include",headers:headers(true),body:JSON.stringify({token:phone.token,projectId:phone.projectId,platform:phone.platform})});}).then(function(r){post({type:"registered",ok:r.ok,status:r.status});}).catch(function(){post({type:"registered",ok:false});});}
 function remove(){var id=device;if(!id)return Promise.resolve();return organizations().then(function(list){return Promise.all(list.map(function(one){return send(place(one.id,id),{method:"DELETE",credentials:"include",headers:headers(true)}).catch(function(){});}));}).then(function(){device=null;post({type:"removed",ok:true});}).catch(function(){post({type:"removed",ok:false});});}

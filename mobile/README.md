@@ -73,8 +73,8 @@ The web view sends `OpenBotMobile/<release>` at the end of its browser name, so 
 server can tell it from a browser.
 
 `tests/web-navigation.test.ts` and `tests/web-bridge.test.ts` hold the rules. The second runs the
-script in a page made of fakes. The first also fails when the web app renames a page that a
-notification opens.
+script in a page made of fakes, and fails when the API moves an address the script asks. The first
+also fails when the web app renames a page that a notification opens.
 
 Not done yet:
 

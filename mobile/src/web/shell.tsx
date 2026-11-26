@@ -233,6 +233,8 @@ export function WebShell({ address }: { address: string }) {
           allowsInlineMediaPlayback
           allowsBackForwardNavigationGestures
           allowsLinkPreview={false}
+          // No bar of form arrows over the keyboard: that is a browser's, and the page's fields are not a form.
+          hideKeyboardAccessoryView
           bounces={false}
           overScrollMode="never"
           decelerationRate="normal"

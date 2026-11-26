@@ -4,15 +4,26 @@
  */
 
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   bridgeScript,
+  DEVICE_PATH,
   holdCall,
+  ORGANIZATIONS_PATH,
   type PageMessage,
   PROBE,
   readPageMessage,
   registerCall,
 } from "../src/web/bridge";
 import { PURCHASE_PATHS } from "../src/web/navigation";
+
+/** A generated client's own source, where the API's addresses are written from its spec. */
+const generated = (file: string) =>
+  readFileSync(
+    join(import.meta.dir, "..", "src", "api", "generated", file),
+    "utf8",
+  );
 
 const WEB = "https://my.open.bot";
 const PHONE = {
@@ -99,7 +110,7 @@ function page(origin: string, answer: (sent: Sent) => Answer) {
 const SIGNED_IN = (sent: Sent): Answer => {
   if (sent.path === "/api/me")
     return { status: 200, body: { user: { id: "person-1" } } };
-  if (sent.path === "/api/v2/organizations")
+  if (sent.path === "/api/v2/people/me/organizations")
     return {
       status: 200,
       body: {
@@ -206,7 +217,7 @@ test("the phone is taken off every organization before the sign-out is sent", as
   const signOut = order.indexOf("POST /api/auth/sign-out");
   expect(signOut).toBeGreaterThan(0);
   expect(order.slice(0, signOut)).toEqual([
-    "GET /api/v2/organizations",
+    "GET /api/v2/people/me/organizations",
     "DELETE /api/v2/organizations/org-first/people/me/devices/phone-1",
     "DELETE /api/v2/organizations/org%2Factive/people/me/devices/phone-1",
   ]);
@@ -235,7 +246,9 @@ test("a page loaded after the registration still takes the phone off: the app te
 
 test("a sign-out is sent even when the phone can't be taken off first", async () => {
   const web = page(WEB, (sent) =>
-    sent.path === "/api/v2/organizations" ? { status: 500 } : SIGNED_IN(sent),
+    sent.path === "/api/v2/people/me/organizations"
+      ? { status: 500 }
+      : SIGNED_IN(sent),
   );
   web.run(script);
   web.run(holdCall(PHONE.id));
@@ -299,4 +312,21 @@ test("only the page's own three messages are read", () => {
   ])
     expect(readPageMessage(refused)).toBeNull();
   expect(readPageMessage({ openbot: 1 })).toBeNull();
+});
+
+test("the addresses the script asks are the ones the API's generated client asks", () => {
+  // The script runs in a page, with no generated client to call. These fail when the API moves an address.
+  expect(generated("organizations/organizations.ts")).toContain(
+    `\`${ORGANIZATIONS_PATH}\``,
+  );
+  // How the generated client writes a part of an address that is filled in: a dollar sign, then braces.
+  const filled = (name: string) =>
+    ["$", "{encodeURIComponent(String(", name, "))}"].join("");
+  const device = DEVICE_PATH.replace(
+    "{organizationId}",
+    filled("organizationId"),
+  )
+    .replace("/people/me/", `/people/${filled("personId")}/`)
+    .replace("{deviceId}", filled("deviceId"));
+  expect(generated("devices/devices.ts")).toContain(`\`${device}\``);
 });
