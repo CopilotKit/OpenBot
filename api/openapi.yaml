@@ -23871,6 +23871,52 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/conversations/{conversationId}/approvals:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/ApprovalConversationId'
+    get:
+      tags:
+        - Approvals
+      operationId: listConversationApprovals
+      summary: List a person's approvals in one conversation
+      description: 'Return one page of the actions a person''s Bots asked them about in one of their conversations, however long ago: the ones still waiting and every one already decided, newest first. Unlike the person''s whole list, which keeps only the last hundred, this reaches every approval the conversation has, so an old conversation can still show what the person answered. What an action was called with is cut short for showing, with values that look like secrets masked. Only the person themselves may read them, and only the approvals they were asked: anybody else''s conversation, and one that does not exist, reads as an empty list. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - approvals:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the conversation's approvals.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalPage'
+              examples:
+                answered:
+                  $ref: '#/components/examples/ConversationApprovalPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ApprovalsOwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -54351,3 +54397,33 @@ components:
           id: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
           outcome: succeeded
           endedAt: '2026-11-14T12:04:10.000Z'
+    ConversationApprovalPageExample:
+      summary: One conversation's only approval, answered, on the last page.
+      value:
+        approvals:
+          - id: 6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b
+            status: completed
+            decision: allow_once
+            result: null
+            createdAt: '2026-08-03T09:12:44.501Z'
+            decidedAt: '2026-08-03T09:13:02.118Z'
+            consumedAt: '2026-08-03T09:13:02.640Z'
+            completedAt: '2026-08-03T09:13:09.902Z'
+            action:
+              botId: research-assistant
+              toolRef: mcp/gmail/send_email
+              effect: write
+              scope: gmail
+              threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+              toolCallId: call_8c1f
+              args:
+                to: sam.okafor@acme.com
+                subject: Q4 numbers
+              target:
+                app: gmail
+              policy:
+                behaviour: ask
+                source: safety
+                reason: Sending a message asks first.
+                kind: sending
+        nextCursor: null

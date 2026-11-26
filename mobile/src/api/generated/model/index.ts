@@ -374,6 +374,7 @@ export * from "./listCheckInItemsParams";
 export * from "./listCheckInsParams";
 export * from "./listComputerActionsParams";
 export * from "./listComputersParams";
+export * from "./listConversationApprovalsParams";
 export * from "./listConversationGrantsParams";
 export * from "./listConversationMembersParams";
 export * from "./listConversationMessagesParams";
