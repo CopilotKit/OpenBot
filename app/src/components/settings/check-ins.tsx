@@ -65,7 +65,7 @@ export function CheckInsSection({
           <div className="flex items-center justify-end gap-2">
             <span className="text-muted-foreground text-sm">
               Check-ins from all Bots
-              {byAdmin ? " Turned off by your admin." : ""}
+              {byAdmin ? " · Turned off by your admin." : ""}
             </span>
             <Switch
               aria-label="Check-ins for all your Bots"
