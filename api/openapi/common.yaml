@@ -533,6 +533,7 @@ paths:
   /api/v2/organizations/{organizationId}/imports/{importId}/apply: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1apply' }
   /api/v2/organizations/{organizationId}/imports/{importId}/verification: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1verification' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/runs/{runId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1runs~1{runId}' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/runs/{runId}/stop: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1runs~1{runId}~1stop' }
 components:
   securitySchemes:
     webSession:

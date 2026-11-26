@@ -23734,6 +23734,65 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/runs/{runId}/stop:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+      - $ref: '#/components/parameters/ConversationRunId'
+    post:
+      tags:
+        - Conversations
+      operationId: stopConversationRun
+      summary: Stop a Bot's run in a conversation
+      description: 'Stop one of a Bot''s runs in the conversation, as Stop beside the message box does: the Bot stops writing, what it wrote so far stays, and the run ends as cancelled, which its last event on the threadStream channel of api/asyncapi.yaml says. The run is named by the runId its events carry. A run that is going answers 202 with outcome null, since it ends on the replica that runs it a moment later. A run that has ended already answers 200, saying how it ended, so asking twice is harmless. A run this server keeps no record of, or one of another conversation, is not found. Only a person in the conversation may stop a run in it. A client offers Stop only where getDeployment says runStop.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The run had ended already, and how it ended.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationRunResponse'
+              examples:
+                finished:
+                  $ref: '#/components/examples/ConversationRunResponseExample'
+        '202':
+          description: The run is being stopped. Its outcome is null until it ends.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationRunResponse'
+              examples:
+                stopping:
+                  $ref: '#/components/examples/ConversationRunStoppingExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationRunNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -26080,6 +26139,12 @@ components:
         voice:
           type: boolean
           description: Whether a person can talk to a Bot.
+        runStop:
+          type: boolean
+          description: Whether a person can stop a Bot's run from an app with stopConversationRun. Absent from a server older than it.
+        mobileConnections:
+          type: boolean
+          description: Whether an app's sign-in page can send the person back to OpenBot Mobile (returnTo mobile on connectApp), so the phone can connect their apps. Absent from a server older than it.
         durableHistory:
           type: boolean
           description: Whether conversations are kept between restarts.
@@ -28297,6 +28362,27 @@ components:
         personId:
           type: string
           description: The person who is now in the conversation.
+    DrawnComponent:
+      type: object
+      description: One gallery component a Bot drew in a message.
+      required:
+        - toolCallId
+        - name
+        - arguments
+      properties:
+        toolCallId:
+          type: string
+          minLength: 1
+          description: The tool call that drew it, as the run's TOOL_CALL events name it.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: 'The component, as listComponents names it: showBarChart, showTable, askChoice and so on.'
+        arguments:
+          type: object
+          additionalProperties: true
+          description: What the Bot gave the component, as it sent it. An object the Bot's arguments could not be read into is empty.
     Attachment:
       type: object
       description: A file held for a message, or sent with one.
@@ -28393,6 +28479,12 @@ components:
           type: integer
           minimum: 0
           description: How many tools the Bot called in this message, when it called any.
+        components:
+          type: array
+          maxItems: 50
+          description: 'The gallery components the Bot drew in this message (a chart, a table, a card, a question), in the order it drew them. Each is one of the Bot''s tool calls, named as listComponents names a component, with the arguments the Bot gave it, so a client draws it again with its own renderer for that name. A client skips a name it does not know, and draws a component''s arguments only as far as it can read them: they are the Bot''s, and may be partial. Absent when the Bot drew none, and from a server older than this field.'
+          items:
+            $ref: '#/components/schemas/DrawnComponent'
         files:
           type: array
           maxItems: 20
@@ -30294,8 +30386,9 @@ components:
         - connections
         - apps
         - desktop
+        - mobile
       default: connections
-      description: 'Which of OpenBot''s own pages the app sends the person back to: connections, the person''s own page for the app; apps, the app''s page for administrators; desktop, back to OpenBot Desktop. Never an address.'
+      description: 'Which of OpenBot''s own pages the app sends the person back to: connections, the person''s own page for the app; apps, the app''s page for administrators; desktop, back to OpenBot Desktop; mobile, back to OpenBot Mobile, which then calls confirmConnection. Never an address. A client sends mobile only where getDeployment says mobileConnections.'
     ConnectionValues:
       type: object
       description: What the person typed into the boxes a form answer asked for, by each box's name. Sent once to the app and never logged or kept here.
@@ -53898,3 +53991,10 @@ components:
           id: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
           outcome: succeeded
           endedAt: '2026-11-14T12:04:10.000Z'
+    ConversationRunStoppingExample:
+      summary: A run being stopped
+      value:
+        run:
+          id: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          outcome: null
+          endedAt: null
