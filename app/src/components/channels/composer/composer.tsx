@@ -5,6 +5,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import {
   IconArrowUp,
+  IconLoader2,
   IconPlayerStopFilled,
   IconPlus,
 } from "@tabler/icons-react";
@@ -334,6 +335,11 @@ export type ComposerProps = {
   placeholder?: string;
   /** False leaves the microphone out, for a box whose words are not a message (Routines). */
   dictates?: boolean;
+  /**
+   * True turns the send arrow into a spinner while `onSubmit` is out, for a box with no Stop to
+   * show that it is working (Routines). A conversation has Stop, so it leaves this off.
+   */
+  spinsWhileSending?: boolean;
 };
 
 /**
@@ -414,6 +420,7 @@ const LAPSED_REASON =
 export function Composer({
   placeholder: emptyPlaceholder = "Ask anything",
   dictates = true,
+  spinsWhileSending = false,
   className,
   editorClassName,
   compact = false,
@@ -1807,7 +1814,14 @@ export function Composer({
       size="icon"
       type="submit"
     >
-      <IconArrowUp className="size-3.5" />
+      {spinsWhileSending && isSubmitting ? (
+        <IconLoader2
+          className="size-3.5 animate-spin motion-reduce:animate-none"
+          data-testid="composer-sending"
+        />
+      ) : (
+        <IconArrowUp className="size-3.5" />
+      )}
     </Button>
   );
 
