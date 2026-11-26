@@ -38,7 +38,7 @@ export default function TabsLayout() {
       badgeBackgroundColor={danger}
       labelVisibilityMode="unlabeled"
     >
-      <NativeTabs.Trigger name="(conversations)">
+      <NativeTabs.Trigger name="(conversations)" accessibilityLabel="Chats">
         <NativeTabs.Trigger.Icon
           sf={{
             default: "bubble.left.and.bubble.right",
@@ -48,14 +48,14 @@ export default function TabsLayout() {
         />
         <NativeTabs.Trigger.Label hidden>Chats</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="(bots)">
+      <NativeTabs.Trigger name="(bots)" accessibilityLabel="Bots">
         <NativeTabs.Trigger.Icon
           src={{ default: ORB, selected: ORB_FILLED }}
           renderingMode="template"
         />
         <NativeTabs.Trigger.Label hidden>Bots</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="(account)">
+      <NativeTabs.Trigger name="(account)" accessibilityLabel="Account">
         <NativeTabs.Trigger.Icon
           sf={{
             default: "person.crop.circle",
@@ -65,7 +65,13 @@ export default function TabsLayout() {
         />
         <NativeTabs.Trigger.Label hidden>Account</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="(needs-you)">
+      <NativeTabs.Trigger
+        name="(needs-you)"
+        // Icons only, so a screen reader is told what each tab is, and how many wait here.
+        accessibilityLabel={
+          waiting > 0 ? `Needs you, ${waiting} waiting` : "Needs you"
+        }
+      >
         <NativeTabs.Trigger.Icon
           sf={{ default: "bell", selected: "bell.fill" }}
           md="notifications"
@@ -77,7 +83,7 @@ export default function TabsLayout() {
           </NativeTabs.Trigger.Badge>
         ) : null}
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="(more)">
+      <NativeTabs.Trigger name="(more)" accessibilityLabel="More">
         <NativeTabs.Trigger.Icon sf="ellipsis.circle" md="more_horiz" />
         <NativeTabs.Trigger.Label hidden>More</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>

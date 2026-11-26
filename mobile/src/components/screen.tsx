@@ -1,7 +1,9 @@
+import { useFocusEffect } from "expo-router";
 import { HeaderHeightContext } from "expo-router/react-navigation";
 import {
   type ComponentRef,
   type ReactNode,
+  useCallback,
   useContext,
   useRef,
   useState,
@@ -33,6 +35,19 @@ export function TopFade() {
   const headerBottom = useContext(HeaderHeightContext) ?? 0;
   const [screenTop, setScreenTop] = useState<number | null>(null);
   const probe = useRef<ComponentRef<typeof View>>(null);
+  // Measured again once the screen has settled and each time it comes back into view: its first layout can come
+  // before the stack has put it below the header, and a later move doesn't lay this view out again.
+  const measure = useCallback(() => {
+    probe.current?.measureInWindow((_, y) => setScreenTop(Math.round(y)));
+  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      const timers = [0, 250, 600, 1200].map((ms) => setTimeout(measure, ms));
+      return () => {
+        for (const timer of timers) clearTimeout(timer);
+      };
+    }, [measure]),
+  );
   if (!background) return null;
   const top = screenTop === null ? null : Math.max(0, headerBottom - screenTop);
   return (
@@ -42,9 +57,7 @@ export function TopFade() {
         collapsable={false}
         pointerEvents="none"
         className="absolute top-0 left-0 h-px w-px"
-        onLayout={() =>
-          probe.current?.measureInWindow((_, y) => setScreenTop(Math.round(y)))
-        }
+        onLayout={measure}
       />
       {top === null ? null : (
         <View
