@@ -40,7 +40,11 @@ import {
   type JustConnected,
   useProviderPaths,
 } from "@/lib/ai-connection/paths";
-import { AI_PROVIDERS, isSignIn } from "@/lib/ai-connection/providers";
+import {
+  AI_PROVIDERS,
+  isSignIn,
+  providerById,
+} from "@/lib/ai-connection/providers";
 import {
   type AiConnectionEntry,
   type AiConnections,
@@ -461,11 +465,26 @@ function ProviderDetails({
   );
 }
 
-/** Connect one more AI beside the others: the shared chooser, on its own page. */
+/**
+ * Connect one more AI beside the others: the shared chooser, on its own page.
+ *
+ * Each connection goes back to the list, where what was connected has a check, as onboarding's
+ * Connect your AI does: the person may connect another, or leave with Done. A provider's own page
+ * is where a connection is changed, made the default or disconnected, not where adding one ends.
+ * The chooser is drawn again from the list the connection refreshed (its mutation waits for that),
+ * and a line only a screen reader hears says what was connected, since the form it was in is gone.
+ */
 export function ConnectProviderPage({ scope }: { scope: ConnectionScope }) {
   const paths = useProviderPaths();
   const navigate = useNavigate();
   const providers = useProviders(scope);
+  const [lastConnected, setLastConnected] = useState<{
+    provider: Connected["connection"]["provider"];
+    round: number;
+  }>();
+  const connectedName = lastConnected
+    ? (providerById(lastConnected.provider)?.name ?? "Your AI")
+    : null;
   const back = { label: AI_PROVIDERS_TITLE, linkProps: paths.list() };
   const list = providers.list.data;
   const first = list?.connections.length === 0;
@@ -502,6 +521,9 @@ export function ConnectProviderPage({ scope }: { scope: ConnectionScope }) {
     >
       <ChooserCard>
         <ChooseConnection
+          connectedHere={lastConnected !== undefined}
+          initialFocusProvider={lastConnected?.provider ?? undefined}
+          key={lastConnected?.round ?? 0}
           mode={{
             kind: "adding",
             scope,
@@ -510,17 +532,17 @@ export function ConnectProviderPage({ scope }: { scope: ConnectionScope }) {
             owner: providers.owner,
           }}
           onBack={() => void navigate(paths.list())}
-          onConnected={(next) =>
-            void navigate(
-              paths.provider(
-                next.connection.provider ?? "",
-                scope,
-                next.isDefault === false ? "added" : "in-use",
-              ),
-            )
+          onConnected={({ connection }) =>
+            setLastConnected((previous) => ({
+              provider: connection.provider,
+              round: (previous?.round ?? 0) + 1,
+            }))
           }
         />
       </ChooserCard>
+      <p aria-live="polite" className="sr-only" role="status">
+        {connectedName ? `${connectedName} is connected.` : ""}
+      </p>
     </PageShell>
   );
 }

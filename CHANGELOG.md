@@ -8,8 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### Smaller changes
-
+- **OpenBot's icon in the browser and on a phone.** The web app shows OpenBot's orb, the icon
+  OpenBot Desktop uses, in a browser's tab, on a phone's home screen when it is added there, and as
+  an installed app's icon. Added to an iPhone's home screen it used to show a grey square with a
+  letter in it, and a tab showed no icon at all.
+- **A provider's sign-in asks for no model name.** Signing in to Google Gemini, xAI or Unbiased AI
+  no longer asks for a model name typed in. Once connected, a conversation's model picker offers
+  the models the provider lists for that sign-in, as it does for a key or a plan. A sign-in that
+  already names a model keeps it, also when it is signed in to again.
+- **Connect another AI goes back to its list.** In Settings and in Admin, each connection goes back
+  to the provider list with a check on what was connected, as onboarding's Connect your AI does. It
+  no longer opens the new connection's own page. Done leaves the list. Changing a connection still
+  goes back to that connection's page.
 - **Settings and Admin call the place you connect your AI "AI providers".** It was "Providers",
   which didn't say what it provides, and people looking for where to set up their AI didn't find
   it. Its pages, their Back links and the model picker's provider list say the same. The addresses
