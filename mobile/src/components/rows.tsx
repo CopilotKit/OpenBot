@@ -54,11 +54,14 @@ export function Row({
   trailing,
   onPress,
   tone = "default",
+  alert,
   accessibilityLabel,
 }: {
   icon?: TablerIcon;
   title: string;
   description?: string;
+  /** A line under the description, in the color of what failed: "Last run failed". */
+  alert?: string;
   trailing?: ReactNode;
   onPress?: () => void;
   tone?: "default" | "danger";
@@ -76,12 +79,21 @@ export function Row({
         </View>
       ) : null}
       <View className="flex-1 gap-0.5">
-        <Text variant="label" tone={tone === "danger" ? "danger" : "default"}>
+        <Text
+          variant="label"
+          tone={tone === "danger" ? "danger" : "default"}
+          numberOfLines={2}
+        >
           {title}
         </Text>
         {description ? (
           <Text variant="caption" tone="muted" numberOfLines={2}>
             {description}
+          </Text>
+        ) : null}
+        {alert ? (
+          <Text variant="caption" tone="danger" numberOfLines={2}>
+            {alert}
           </Text>
         ) : null}
       </View>

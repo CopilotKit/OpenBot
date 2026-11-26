@@ -15,6 +15,7 @@ import {
   Message,
   MessageDay,
   MessageEvent,
+  MessageWorking,
   Notice,
   PersonAvatar,
   Row,
@@ -24,10 +25,12 @@ import {
   SearchField,
   Section,
   Segmented,
+  SheetTitle,
   Text,
   Toggle,
 } from "../src/components";
 import {
+  IconAlertCircle,
   IconBell,
   IconBook,
   IconBrain,
@@ -274,12 +277,12 @@ export default function Gallery() {
           </View>
         </Part>
 
-        <Part only={params.only} title="Bot tiles">
-          <View className="flex-row gap-1">
+        <Part only={params.only} title="Bot rows">
+          <View className="-mx-4">
             <BotTile
               name="Research"
               seed="research"
-              title="Finds things out"
+              title="Finds things out, reads the sources, and writes up what it found with links."
               onPress={() => {}}
             />
             <BotTile name="Analyst" seed="analyst" onPress={() => {}} />
@@ -309,7 +312,50 @@ export default function Gallery() {
               text="Your pizza analysis in San Francisco is complete!"
             />
             <Message from="person" text="Sending…" pending />
+            <MessageWorking seed="research" name="Research" label="Working…" />
+            <Notice
+              tone="warning"
+              message="Waiting for your approval to pay $24.00 on tonys.com."
+              action={
+                <Button size="sm" variant="outline" className="self-start">
+                  Review
+                </Button>
+              }
+            />
+            <MessageEvent
+              icon={IconAlertCircle}
+              tone="danger"
+              text="This reply stopped before it finished."
+            />
           </View>
+        </Part>
+
+        <Part only={params.only} title="A Bot's Markdown">
+          <Message
+            from="bot"
+            text={[
+              "## Three picks",
+              "",
+              "1. **Tony's** in North Beach, *the* classic: $24 a pie",
+              "2. **Golden Boy**, by the slice, cash only",
+              "3. ~~Delfina~~ closed on Mondays",
+              "",
+              "- [x] Checked the hours",
+              "- [ ] Booked a table",
+              "",
+              "> Get there before 6, the line is long.",
+              "",
+              "Run `pizza --near me` or see https://tonys.com.",
+              "",
+              "```",
+              '{ "open": "5pm", "close": "11pm" }',
+              "```",
+            ].join("\n")}
+          />
+        </Part>
+
+        <Part only={params.only} title="Sheet title (Android)">
+          <SheetTitle title="New conversation" />
         </Part>
 
         <Part only={params.only} title="Message box">

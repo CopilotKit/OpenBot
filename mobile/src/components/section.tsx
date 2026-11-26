@@ -8,10 +8,13 @@ import { Text } from "./text";
  */
 export function Section({
   title,
+  leading,
   action,
   children,
 }: {
   title?: string;
+  /** What stands before the label: the orb of the Bot a group is for. */
+  leading?: ReactNode;
   action?: ReactNode;
   children: ReactNode;
 }) {
@@ -20,14 +23,18 @@ export function Section({
       {title || action ? (
         <View className="flex-row items-center justify-between px-1">
           {title ? (
-            <Text
-              variant="caption"
-              tone="muted"
-              accessibilityRole="header"
-              className="font-medium"
-            >
-              {title}
-            </Text>
+            <View className="flex-1 flex-row items-center gap-1.5">
+              {leading}
+              <Text
+                variant="caption"
+                tone="muted"
+                accessibilityRole="header"
+                numberOfLines={1}
+                className="flex-1 font-medium"
+              >
+                {title}
+              </Text>
+            </View>
           ) : null}
           {action}
         </View>

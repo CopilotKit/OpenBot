@@ -2,7 +2,14 @@ import { useCallback, useState } from "react";
 import { FlatList, Pressable, View } from "react-native";
 import { everyBot } from "../src/api";
 import { authClient } from "../src/auth";
-import { BotOrb, EmptyState, Notice, Screen, Text } from "../src/components";
+import {
+  BotOrb,
+  EmptyState,
+  Notice,
+  Screen,
+  SheetTitle,
+  Text,
+} from "../src/components";
 import { IconRobot } from "../src/icons";
 import { openConversationWith } from "../src/open-conversation";
 import { useLoad } from "../src/use-load";
@@ -24,11 +31,10 @@ export default function NewConversation() {
         contentInsetAdjustmentBehavior="automatic"
         contentContainerClassName="py-2"
         ListHeaderComponent={
-          error || bots.error ? (
-            <View className="px-4 pb-2">
-              <Notice message={error || bots.error} />
-            </View>
-          ) : undefined
+          <View className="gap-2 px-4 pb-2">
+            <SheetTitle title="New conversation" />
+            <Notice message={error || bots.error} />
+          </View>
         }
         renderItem={({ item: bot }) => (
           <Pressable

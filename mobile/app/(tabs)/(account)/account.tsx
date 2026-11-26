@@ -1,8 +1,8 @@
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
-import { chooseOrganization, organizationChoices } from "../src/api";
-import { authClient, serverUrl } from "../src/auth";
+import { chooseOrganization, organizationChoices } from "../../../src/api";
+import { authClient, serverUrl } from "../../../src/auth";
 import {
   Icon,
   Notice,
@@ -12,17 +12,22 @@ import {
   ScrollScreen,
   Section,
   Text,
-} from "../src/components";
-import { IconBell, IconBuilding, IconCheck, IconLogout } from "../src/icons";
+} from "../../../src/components";
+import {
+  IconBell,
+  IconBuilding,
+  IconCheck,
+  IconLogout,
+} from "../../../src/icons";
 import {
   pushTurnedOn,
   registerPush,
   unregisterPush,
-} from "../src/notifications";
-import { useLoad } from "../src/use-load";
+} from "../../../src/notifications";
+import { useLoad } from "../../../src/use-load";
 
 /**
- * Your account, opened from the initials at the top of each tab and from More: who is signed in, the organization they work in
+ * Your account, a tab of its own: who is signed in, the organization they work in
  * (and the others they can switch to), notifications on this phone, and signing out.
  */
 export default function Account() {

@@ -22,11 +22,7 @@ export function BotIntro({
         <Text variant="title" className="font-bold" numberOfLines={2}>
           {name}
         </Text>
-        {about ? (
-          <Text tone="muted" numberOfLines={3}>
-            {about}
-          </Text>
-        ) : null}
+        {about ? <Text tone="muted">{about}</Text> : null}
       </View>
     </View>
   );

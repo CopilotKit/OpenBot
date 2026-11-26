@@ -1,38 +1,68 @@
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback } from "react";
-import { organizationChoices } from "../../../src/api";
+import { View } from "react-native";
+import { loadApprovalInbox } from "../../../src/api";
 import { authClient } from "../../../src/auth";
 import {
+  Icon,
   Row,
   Rows,
   ScrollScreen,
   Section,
-  TabTitle,
+  Text,
 } from "../../../src/components";
 import {
   IconBook,
   IconBrain,
   IconChecks,
+  IconChevronRight,
+  IconClock,
   IconPlug,
-  IconSettings,
 } from "../../../src/icons";
 import { useLoad } from "../../../src/use-load";
 
 /**
- * More: the parts of the app that don't have a tab. What every Bot remembers, knows and connects
- * to, the approval inbox, and the person's account.
+ * More: the parts of the app that don't have a tab. The routines Bots run, what every Bot
+ * remembers, knows and connects to, and the approval inbox.
  */
 export default function More() {
   const { data: session } = authClient.useSession();
-  const loadOrganizations = useCallback(() => organizationChoices(), []);
-  const organizations = useLoad(loadOrganizations, Boolean(session));
-  const workingIn = organizations.data?.organizations.find(
-    (organization) => organization.id === organizations.data?.currentId,
+  // How many approvals and questions wait on the person, read again each time More comes to the front.
+  const loadInbox = useCallback(() => loadApprovalInbox(), []);
+  const inbox = useLoad(loadInbox, Boolean(session));
+  const { refresh: refreshInbox } = inbox;
+  useFocusEffect(
+    useCallback(() => {
+      void refreshInbox();
+    }, [refreshInbox]),
   );
-  const person = session?.user.name || session?.user.email || "";
+  const waiting =
+    (inbox.data?.requests.filter((request) => request.status === "pending")
+      .length ?? 0) + (inbox.data?.questions.length ?? 0);
   return (
     <ScrollScreen>
-      <TabTitle title="More" className="-mt-2 -mb-3" />
+      <Rows>
+        <Row
+          icon={IconClock}
+          title="Routines"
+          description="What your Bots do for you on a schedule"
+          onPress={() => router.push("/routines")}
+        />
+        <Row
+          icon={IconChecks}
+          title="Approval inbox"
+          description={
+            waiting
+              ? `${waiting} waiting for you`
+              : "What your Bots asked you to approve"
+          }
+          accessibilityLabel={
+            waiting ? `Approval inbox, ${waiting} waiting` : "Approval inbox"
+          }
+          trailing={waiting ? <WaitingCount count={waiting} /> : undefined}
+          onPress={() => router.push("/approvals")}
+        />
+      </Rows>
       <Section title="Your Bots">
         <Rows>
           <Row
@@ -55,24 +85,20 @@ export default function More() {
           />
         </Rows>
       </Section>
-      <Rows>
-        <Row
-          icon={IconChecks}
-          title="Approval inbox"
-          description="What your Bots asked you to approve"
-          onPress={() => router.push("/approvals")}
-        />
-      </Rows>
-      <Rows>
-        <Row
-          icon={IconSettings}
-          title="Your account"
-          description={
-            [person, workingIn?.name].filter(Boolean).join(" · ") || undefined
-          }
-          onPress={() => router.push("/account")}
-        />
-      </Rows>
     </ScrollScreen>
+  );
+}
+
+/** How many wait on the person, in the color of what waits on them, before the row's chevron. */
+function WaitingCount({ count }: { count: number }) {
+  return (
+    <View className="flex-row items-center gap-2">
+      <View className="h-5 min-w-5 items-center justify-center rounded-full bg-warning/15 px-1.5">
+        <Text className="font-semibold text-warning text-xs">
+          {count > 99 ? "99+" : count}
+        </Text>
+      </View>
+      <Icon icon={IconChevronRight} size={16} color="accent-muted" />
+    </View>
   );
 }

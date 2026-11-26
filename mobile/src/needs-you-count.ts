@@ -14,7 +14,7 @@ export function showNeedsYouCount(count: number) {
 
 /**
  * How many things Needs you lists: what the Bots' check-ins found and the tasks that wait on the
- * person. The dock's badge. Read when the tabs open, each time the person moves to another tab,
+ * person. The Needs you tab's badge. Read when the tabs open, each time the person moves to another tab,
  * and when the app comes back to the front; it doesn't poll, as the badge is a hint and Needs you
  * itself reads the full list, and says its count here as it changes ({@link showNeedsYouCount}).
  * A count that fails to read keeps the last one.

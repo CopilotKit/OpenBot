@@ -15,7 +15,13 @@ export { EmptyState } from "./empty-state";
 export { Icon } from "./icon";
 export { IconButton } from "./icon-button";
 export { KeyboardBar } from "./keyboard-bar";
-export { Message, MessageDay, MessageEvent } from "./message";
+export { Markdown } from "./markdown";
+export {
+  Message,
+  MessageDay,
+  MessageEvent,
+  MessageWorking,
+} from "./message";
 export { Notice } from "./notice";
 export { PersonAvatar } from "./person-avatar";
 export { Row, Rows } from "./rows";
@@ -24,6 +30,6 @@ export { SearchBar } from "./search-bar";
 export { SearchField } from "./search-field";
 export { Section } from "./section";
 export { Segmented } from "./segmented";
-export { TabTitle } from "./tab-title";
+export { SheetTitle } from "./sheet-title";
 export { Text, type TextVariant } from "./text";
 export { Toggle } from "./toggle";

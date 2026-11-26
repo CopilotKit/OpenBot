@@ -20,14 +20,12 @@ import { companySignInTicket } from "../../../src/company-sign-in-ticket";
 import {
   ConversationRow,
   EmptyState,
-  IconButton,
   Notice,
   Refresh,
   Screen,
   SearchField,
-  TabTitle,
 } from "../../../src/components";
-import { plainHeaderRight } from "../../../src/header";
+import { tabRoot } from "../../../src/header";
 import { homeView } from "../../../src/home-view";
 import { IconBuilding, IconMessages, IconPlus } from "../../../src/icons";
 import { linkCompanyAccount, onCompanyLinked } from "../../../src/link-company";
@@ -221,19 +219,20 @@ export default function Conversations() {
             Platform.OS === "ios"
               ? {
                   placeholder: "Search conversations",
-                  // Under the title: iOS 26 would otherwise float it at the bottom, over the dock.
+                  // Under the title: iOS 26 would otherwise float it at the bottom, by the tab bar.
                   placement: "stacked",
                   onChangeText: (event) => setQuery(event.nativeEvent.text),
                   onCancelButtonPress: () => setQuery(""),
                 }
               : undefined,
-          ...plainHeaderRight(() => (
-            <IconButton
-              icon={IconPlus}
-              label="New conversation"
-              onPress={() => router.push("/new-conversation")}
-            />
-          )),
+          ...tabRoot("Conversations", [
+            {
+              label: "New conversation",
+              sf: "square.and.pencil",
+              icon: IconPlus,
+              onPress: () => router.push("/new-conversation"),
+            },
+          ]),
         }}
       />
       <FlatList
@@ -241,6 +240,8 @@ export default function Conversations() {
         data={listed}
         keyExtractor={(item) => item.id}
         contentInsetAdjustmentBehavior="automatic"
+        // Room between the search field and the first conversation, and under the last one.
+        contentContainerClassName="pt-3 pb-6"
         keyboardDismissMode="on-drag"
         refreshControl={
           <Refresh refreshing={pull.refreshing} onRefresh={pull.onRefresh} />
@@ -248,7 +249,6 @@ export default function Conversations() {
         ListHeaderComponent={
           Platform.OS === "android" || problem || renewal ? (
             <View className="gap-2 px-4 pt-2 pb-2">
-              <TabTitle title="Conversations" />
               {Platform.OS === "android" ? (
                 <SearchField
                   value={query}

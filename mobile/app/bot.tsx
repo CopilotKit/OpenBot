@@ -43,11 +43,11 @@ import {
   IconPlus,
 } from "../src/icons";
 import { openConversationWith } from "../src/open-conversation";
-import { ADD_ROUTINE_DRAFT, lastRunLine, when } from "../src/routines";
+import { ADD_ROUTINE_DRAFT, routineLines } from "../src/routines";
 import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
 import { usePull } from "../src/use-pull";
-import { dayHeading, shortWhen } from "../src/when";
+import { dayHeading, timeOfDay } from "../src/when";
 
 type Showing = "conversations" | "settings";
 
@@ -207,8 +207,9 @@ export default function BotScreen() {
                         item.lastMessage ?? item.summary ?? undefined
                       }
                       trailing={
+                        // Under its day's heading, only the time: "Yesterday" twice says nothing.
                         <Text variant="caption" tone="muted">
-                          {shortWhen(item.lastMessageAt ?? item.createdAt)}
+                          {timeOfDay(item.lastMessageAt ?? item.createdAt)}
                         </Text>
                       }
                       onPress={() =>
@@ -284,42 +285,30 @@ export default function BotScreen() {
             </Section>
             <Section title="Routines">
               <Rows>
-                {(mine ?? []).map((routine) => {
-                  const last = routine.lastRun
-                    ? lastRunLine(routine.lastRun.status)
-                    : null;
-                  return (
-                    <Row
-                      key={routine.id}
-                      icon={IconClock}
-                      title={routine.instruction}
-                      description={[
-                        routine.enabled
-                          ? `Next run ${when(routine.nextRunAt)}`
-                          : "Paused",
-                        last,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                      trailing={
-                        <Toggle
-                          label={`${routine.title || routine.instruction} is active`}
-                          value={routine.enabled}
-                          disabled={Boolean(action.busy)}
-                          onValueChange={(enabled) =>
-                            void setActive(routine, enabled)
-                          }
-                        />
-                      }
-                      onPress={() =>
-                        router.push({
-                          pathname: "/routine",
-                          params: { routineId: routine.id },
-                        })
-                      }
-                    />
-                  );
-                })}
+                {(mine ?? []).map((routine) => (
+                  <Row
+                    key={routine.id}
+                    icon={IconClock}
+                    title={routine.title || routine.instruction}
+                    {...routineLines(routine)}
+                    trailing={
+                      <Toggle
+                        label={`${routine.title || routine.instruction} is active`}
+                        value={routine.enabled}
+                        disabled={Boolean(action.busy)}
+                        onValueChange={(enabled) =>
+                          void setActive(routine, enabled)
+                        }
+                      />
+                    }
+                    onPress={() =>
+                      router.push({
+                        pathname: "/routine",
+                        params: { routineId: routine.id },
+                      })
+                    }
+                  />
+                ))}
                 <Row
                   icon={IconPlus}
                   title="Add routine"

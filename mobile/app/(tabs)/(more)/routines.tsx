@@ -20,11 +20,10 @@ import {
   Rows,
   ScrollScreen,
   Section,
-  TabTitle,
   Toggle,
 } from "../../../src/components";
 import { IconClock } from "../../../src/icons";
-import { lastRunLine, when } from "../../../src/routines";
+import { routineLines } from "../../../src/routines";
 import { useAction } from "../../../src/use-action";
 import { useLoad } from "../../../src/use-load";
 import { usePull } from "../../../src/use-pull";
@@ -65,7 +64,6 @@ export default function Routines() {
   }
   return (
     <ScrollScreen refreshing={pull.refreshing} onRefresh={pull.onRefresh}>
-      <TabTitle title="Routines" className="-mt-2 -mb-3" />
       <Notice message={action.error || routines.error || bots.error} />
       {byBot.map(([botId, list]) => {
         const bot = bots.data?.find((item) => item.id === botId);
@@ -73,7 +71,7 @@ export default function Routines() {
           <Section
             key={botId}
             title={bot?.name ?? "Bot"}
-            action={
+            leading={
               <BotOrb
                 seed={bot?.avatarSeed || botId}
                 name={bot?.name ?? "Bot"}
@@ -81,22 +79,12 @@ export default function Routines() {
               />
             }
           >
-            <Rows>
+            <Rows iconless>
               {list.map((routine) => (
                 <Row
                   key={routine.id}
-                  icon={IconClock}
                   title={routine.title || routine.instruction}
-                  description={[
-                    routine.enabled
-                      ? `Next run ${when(routine.nextRunAt)}`
-                      : "Paused",
-                    routine.lastRun
-                      ? lastRunLine(routine.lastRun.status)
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  {...routineLines(routine)}
                   trailing={
                     <Toggle
                       label={`${routine.title || routine.instruction} is active`}

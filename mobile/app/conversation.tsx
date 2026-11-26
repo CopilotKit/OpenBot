@@ -7,6 +7,7 @@ import {
   useFocusEffect,
   useLocalSearchParams,
 } from "expo-router";
+import { Button } from "heroui-native/button";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, FlatList, Pressable, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
@@ -27,17 +28,22 @@ import {
   BotOrb,
   Composer,
   cn,
-  IconButton,
   KeyboardBar,
   Message,
   MessageDay,
   MessageEvent,
+  MessageWorking,
   Notice,
   Screen,
   Text,
 } from "../src/components";
-import { plainHeaderRight } from "../src/header";
-import { IconDeviceDesktop, IconSettings, IconTool } from "../src/icons";
+import { headerActions } from "../src/header";
+import {
+  IconAlertCircle,
+  IconDeviceDesktop,
+  IconSettings,
+  IconTool,
+} from "../src/icons";
 import { conversationOf, showConversation } from "../src/on-screen";
 import { useLoad } from "../src/use-load";
 import { dayAndTime } from "../src/when";
@@ -80,8 +86,10 @@ export default function ConversationScreen() {
   const conversation = channels.data?.conversation;
   const loadBots = useCallback(() => everyBot(), []);
   const bots = useLoad(loadBots, Boolean(session));
+  // The Bot the next message goes to is always one in this conversation: opening another conversation on this screen
+  // (a link, a notification) picks again rather than keep the last one's Bot.
   useEffect(() => {
-    if (conversation && !agentId)
+    if (conversation && !conversation.botIds.includes(agentId))
       setAgentId(
         requestedAgentId && conversation.botIds.includes(requestedAgentId)
           ? requestedAgentId
@@ -146,6 +154,9 @@ export default function ConversationScreen() {
   });
   const current = botsHere.find((bot) => bot.id === agentId);
   const working = Boolean(conversation?.work?.length);
+  const replyUnderway = (history.data?.messages ?? []).some(
+    (message) => message.status === "queued" || message.status === "running",
+  );
   // Newest first, as the API answers and as an inverted list draws from the bottom up.
   const items = useMemo<Item[]>(() => {
     const oldestFirst = (history.data?.messages ?? []).slice().reverse();
@@ -198,48 +209,42 @@ export default function ConversationScreen() {
     <Screen>
       <Stack.Screen
         options={{
-          headerTitle: () => (
-            <View className="flex-row items-center gap-2">
-              <BotOrb
-                seed={current?.seed ?? ""}
-                name={current?.name ?? "Bot"}
-                size={28}
-                state={working ? "working" : "idle"}
+          // Who the conversation is with, as iMessage heads one: their orbs, and their names under them.
+          title: conversation?.name ?? current?.name ?? "",
+          headerTitleAlign: "center",
+          headerTitle: () =>
+            botsHere.length ? (
+              <ConversationHeading
+                bots={botsHere}
+                working={working}
+                conversationName={conversation?.name}
               />
-              <Text variant="label" numberOfLines={1} className="max-w-48">
-                {conversation?.name ?? current?.name ?? ""}
-              </Text>
-            </View>
-          ),
-          // Plain icons, as the web app's conversation header has: the Bot's computer, and its settings.
-          ...plainHeaderRight(() =>
-            agentId ? (
-              <View className="flex-row items-center">
-                <IconButton
-                  icon={IconDeviceDesktop}
-                  label={`${current?.name ?? "Bot"}'s computer`}
-                  onPress={() =>
+            ) : null,
+          // The Bot's computer and its settings, as the platform draws a header's buttons.
+          ...(agentId
+            ? headerActions([
+                {
+                  label: `${current?.name ?? "Bot"}'s computer`,
+                  sf: "desktopcomputer",
+                  icon: IconDeviceDesktop,
+                  onPress: () =>
                     router.push({
                       pathname: "/computer",
                       params: { botId: agentId },
-                    })
-                  }
-                />
-                <IconButton
-                  icon={IconSettings}
-                  label={`${current?.name ?? "Bot"} settings`}
-                  onPress={() =>
+                    }),
+                },
+                {
+                  label: `${current?.name ?? "Bot"} settings`,
+                  sf: "gearshape",
+                  icon: IconSettings,
+                  onPress: () =>
                     router.push({
                       pathname: "/bot",
                       params: { botId: agentId },
-                    })
-                  }
-                />
-              </View>
-            ) : (
-              <View />
-            ),
-          ),
+                    }),
+                },
+              ])
+            : headerActions([])),
         }}
       />
       <KeyboardAvoidingView
@@ -261,7 +266,7 @@ export default function ConversationScreen() {
                   className={cn(
                     "flex-row items-center gap-1.5 rounded-full border py-1 pr-3 pl-1",
                     selected
-                      ? "border-foreground/30 bg-fill"
+                      ? "border-foreground bg-fill"
                       : "border-border bg-surface",
                   )}
                 >
@@ -282,22 +287,41 @@ export default function ConversationScreen() {
           keyExtractor={(item) => item.key}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          contentContainerClassName="gap-3 px-4 py-4"
+          // Drawn bottom up, so a long conversation opens at its newest message; a short one is pushed to the top
+          // rather than hanging at the bottom over an empty page.
+          contentContainerClassName="grow justify-end gap-3 px-4 py-4"
           ListHeaderComponent={
             sending ? (
               <Message from="person" text={sending} pending />
+            ) : working && current && !replyUnderway ? (
+              // The Bot is at work in this conversation with no reply of its own on screen yet.
+              <MessageWorking
+                seed={current.seed}
+                name={current.name}
+                label="Working…"
+              />
             ) : undefined
           }
           renderItem={({ item }) =>
             item.kind === "day" ? (
               <MessageDay label={item.label} />
             ) : (
-              <MessageLine message={item.message} />
+              <MessageLine
+                message={item.message}
+                bot={{
+                  seed: current?.seed ?? "",
+                  name: current?.name ?? "Bot",
+                }}
+                onReview={() =>
+                  router.push({ pathname: "/approvals", params: { channelId } })
+                }
+              />
             )
           }
-          // The list is drawn bottom up, so its footer is the top of the conversation: the Bot it is with.
+          // The list is drawn bottom up, so its footer is the top of the conversation. Only an empty one says who
+          // the Bot is and what it does: once there is something said, the header names who it is with.
           ListFooterComponent={
-            history.data && current ? (
+            history.data && current && items.length === 0 && !sending ? (
               <BotIntro
                 seed={current.seed}
                 name={current.name}
@@ -333,24 +357,138 @@ export default function ConversationScreen() {
   );
 }
 
-/** One line of the conversation, by who said it. A role this app doesn't know reads as an event. */
-function MessageLine({ message }: { message: ConversationMessage }) {
+/** The Bot a line of the conversation is from, for its orb while it works. */
+type Speaker = { seed: string; name: string };
+
+/**
+ * One line of the conversation, by who said it. A role this app doesn't know reads as an event. A
+ * Bot's reply says where it stands: still being written, waiting on the person, or stopped; a status
+ * this app doesn't know reads as finished.
+ */
+function MessageLine({
+  message,
+  bot,
+  onReview,
+}: {
+  message: ConversationMessage;
+  bot: Speaker;
+  /** Opens what the Bot is waiting on: the approval inbox, where its request or question is. */
+  onReview: () => void;
+}) {
   if (message.role === "person")
     return <Message from="person" text={message.text} />;
-  if (message.role === "bot" && message.text)
-    return <Message from="bot" text={message.text} />;
-  if (message.role === "bot" || message.role === "tool")
-    return (
-      <MessageEvent
-        icon={IconTool}
-        text={
-          message.role === "tool" && message.text
-            ? message.text
-            : message.toolCalls && message.toolCalls > 1
-              ? `Used ${message.toolCalls} tools.`
-              : "Used a tool."
-        }
-      />
+  if (message.role === "bot") {
+    const unfinished =
+      message.status === "queued" || message.status === "running";
+    if (unfinished && !message.text)
+      return (
+        <MessageWorking
+          seed={bot.seed}
+          name={bot.name}
+          label={message.status === "queued" ? "Starting…" : "Working…"}
+        />
+      );
+    const said = message.text ? (
+      <Message from="bot" text={message.text} />
+    ) : message.toolCalls ? (
+      <ToolLine count={message.toolCalls} />
+    ) : null;
+    if (message.status === "waiting")
+      return (
+        <View className="gap-2">
+          {said}
+          <Notice
+            tone="warning"
+            message={message.reason || `${bot.name} is waiting for you.`}
+            action={
+              <Button
+                size="sm"
+                variant="outline"
+                className="self-start"
+                onPress={onReview}
+              >
+                Review
+              </Button>
+            }
+          />
+        </View>
+      );
+    if (message.status === "failed" && !message.declined)
+      return (
+        <View className="gap-2">
+          {said}
+          <MessageEvent
+            icon={IconAlertCircle}
+            tone="danger"
+            text="This reply stopped before it finished."
+          />
+        </View>
+      );
+    if (message.declined && message.text)
+      return <MessageEvent text={message.text} />;
+    return said ?? <ToolLine count={0} />;
+  }
+  if (message.role === "tool")
+    return message.text ? (
+      <MessageEvent icon={IconTool} text={message.text} />
+    ) : (
+      <ToolLine count={0} />
     );
   return message.text ? <MessageEvent text={message.text} /> : null;
+}
+
+/** A Bot's turn that used tools and said nothing. */
+function ToolLine({ count }: { count: number }) {
+  return (
+    <MessageEvent
+      icon={IconTool}
+      text={count > 1 ? `Used ${count} tools.` : "Used a tool."}
+    />
+  );
+}
+
+/**
+ * The header's title in a conversation, as iMessage heads one: the orb of each Bot in it, side by
+ * side and overlapping when there are several, and their names under them. The lead Bot's orb
+ * breathes while the conversation is at work.
+ */
+function ConversationHeading({
+  bots,
+  working,
+  conversationName,
+}: {
+  bots: { id: string; name: string; seed: string }[];
+  working: boolean;
+  conversationName?: string;
+}) {
+  const names =
+    bots.length > 2
+      ? `${bots[0]?.name}, ${bots[1]?.name} and ${bots.length - 2} more`
+      : bots.map((bot) => bot.name).join(" & ");
+  return (
+    <View
+      accessible
+      accessibilityRole="header"
+      accessibilityLabel={[conversationName, `with ${names}`]
+        .filter(Boolean)
+        .join(", ")}
+      className="items-center gap-0.5"
+    >
+      <View className="flex-row">
+        {bots.slice(0, 3).map((bot, index) => (
+          <View key={bot.id} className={cn(index > 0 && "-ml-2")}>
+            <BotOrb
+              seed={bot.seed}
+              name={bot.name}
+              size={26}
+              state={working && index === 0 ? "working" : "idle"}
+            />
+          </View>
+        ))}
+      </View>
+      <Text numberOfLines={1} className="max-w-56 font-medium text-xs">
+        {names}
+      </Text>
+    </View>
+  );
 }

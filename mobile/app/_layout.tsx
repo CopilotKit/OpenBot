@@ -1,5 +1,6 @@
 import "../global.css";
 import { Inter_400Regular } from "@expo-google-fonts/inter/400Regular";
+import { Inter_400Regular_Italic } from "@expo-google-fonts/inter/400Regular_Italic";
 import { Inter_500Medium } from "@expo-google-fonts/inter/500Medium";
 import { Inter_600SemiBold } from "@expo-google-fonts/inter/600SemiBold";
 import { Inter_700Bold } from "@expo-google-fonts/inter/700Bold";
@@ -8,7 +9,7 @@ import * as Notifications from "expo-notifications";
 import { router, Stack } from "expo-router";
 import { HeroUINativeProvider } from "heroui-native/provider";
 import { useEffect, useRef } from "react";
-import { View } from "react-native";
+import { Platform, StatusBar, useColorScheme, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { setSignedInPerson } from "../src/api";
@@ -38,6 +39,21 @@ Notifications.setNotificationHandler({
     };
   },
 });
+
+/**
+ * How a sheet opens. iOS: the system's page sheet, with its grabber and swipe to put it away (iOS's
+ * form sheet leaves its content unlaid-out on this React Native Screens). Android: Material's bottom
+ * sheet, with its corners, its handle and title drawn by the screen (`SheetTitle`).
+ */
+const SHEET =
+  Platform.OS === "ios"
+    ? ({ presentation: "modal", ...NO_HEADER_LEFT } as const)
+    : ({
+        presentation: "formSheet",
+        ...NO_HEADER_LEFT,
+        sheetGrabberVisible: true,
+        sheetCornerRadius: 28,
+      } as const);
 
 function Layout() {
   const { data: session, isPending, refetch } = authClient.useSession();
@@ -90,48 +106,40 @@ function Layout() {
     verdict !== "checking" && verdict.kind !== "ok",
   );
   const header = useHeaderOptions();
-  if (!answered.current) return <View className="flex-1 bg-background" />;
+  // The status bar's clock and icons in the text color: dark on the light scheme, light on the dark. Android draws
+  // them light on its own, which on OpenBot's light background could hardly be read.
+  const scheme = useColorScheme();
+  const statusBar = (
+    <StatusBar
+      barStyle={scheme === "dark" ? "light-content" : "dark-content"}
+    />
+  );
+  if (!answered.current)
+    return <View className="flex-1 bg-background">{statusBar}</View>;
   return (
     <View className="flex-1 bg-background">
+      {statusBar}
       <Stack screenOptions={header}>
         {/*
          * Each guard says where it sends a person. Without one, expo-router picks the first screen no guard
          * covers by file name, which is the gallery: a signed-out start opened there rather than on Welcome.
          */}
         <Stack.Protected guard={signedIn} redirectTo="/sign-in">
-          {/* The tabs, with the dock: everything below opens over them. */}
+          {/* The tabs, in the platform's tab bar: everything below opens over them. */}
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="conversation" options={{ title: "" }} />
           <Stack.Screen name="bot" options={{ title: "" }} />
           <Stack.Screen
-            name="account"
-            options={{
-              title: "Your account",
-              presentation: "formSheet",
-              ...NO_HEADER_LEFT,
-              sheetAllowedDetents: [0.6, 1],
-              sheetGrabberVisible: true,
-            }}
-          />
-          <Stack.Screen
             name="new-conversation"
             options={{
               title: "New conversation",
-              presentation: "formSheet",
-              ...NO_HEADER_LEFT,
+              ...SHEET,
               sheetAllowedDetents: [0.6, 1],
-              sheetGrabberVisible: true,
             }}
           />
           <Stack.Screen
             name="new-bot"
-            options={{
-              title: "New Bot",
-              presentation: "formSheet",
-              ...NO_HEADER_LEFT,
-              sheetAllowedDetents: [1],
-              sheetGrabberVisible: true,
-            }}
+            options={{ title: "New Bot", ...SHEET, sheetAllowedDetents: [1] }}
           />
           <Stack.Screen
             name="approvals"
@@ -166,9 +174,10 @@ function Layout() {
 const SecuredLayout = withSecurityFloor(Layout);
 
 export default function RootLayout() {
-  // Inter, the web app's face, at the four weights the type scale uses (global.css names them).
+  // Inter, the web app's face, at the four weights the type scale uses and its italic (global.css names them).
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
+    Inter_400Regular_Italic,
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,

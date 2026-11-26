@@ -15,7 +15,6 @@ import {
   Notice,
   ScrollScreen,
   Section,
-  TabTitle,
 } from "../../../src/components";
 import { IconBell } from "../../../src/icons";
 import { showNeedsYouCount } from "../../../src/needs-you-count";
@@ -54,7 +53,7 @@ export default function NeedsYouScreen() {
   const bots = useLoad(loadBots, Boolean(session));
   const waiting = waitingTasks(tasks.data?.tasks ?? []);
   const found = items.data ?? [];
-  // The dock's badge follows what this list shows, once both halves of it have been read.
+  // The tab's badge follows what this list shows, once both halves of it have been read.
   const count =
     items.data && tasks.data ? found.length + waiting.length : undefined;
   useEffect(() => {
@@ -73,7 +72,6 @@ export default function NeedsYouScreen() {
         void tasks.refresh();
       }}
     >
-      <TabTitle title="Needs you" className="-mt-2" />
       <Notice
         message={
           action.error || items.error || tasks.error || bots.error || undefined

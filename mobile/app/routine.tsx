@@ -26,6 +26,7 @@ import { IconClock } from "../src/icons";
 import { runLabel, runTone, when } from "../src/routines";
 import { useAction } from "../src/use-action";
 import { useLoad } from "../src/use-load";
+import { took } from "../src/when";
 
 /**
  * One routine: whether it is active, when it runs, what it does and where it reports, Run now, and
@@ -165,13 +166,22 @@ export default function RoutineScreen() {
                       </Text>
                     ) : null}
                     <Text variant="caption" tone="muted">
-                      Started {when(run.startedAt)}
-                      {run.finishedAt
-                        ? ` · finished ${when(run.finishedAt)}`
-                        : ""}
+                      {[
+                        when(run.startedAt),
+                        // A skipped run did no work, so it took no time worth saying.
+                        run.status !== "skipped" &&
+                          took(run.startedAt, run.finishedAt) &&
+                          `took ${took(run.startedAt, run.finishedAt)}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </Text>
                     {run.error ? (
-                      <Text variant="caption" tone="danger">
+                      // What stopped a failed run is in the color of what failed; why a run was skipped is not an error.
+                      <Text
+                        variant="caption"
+                        tone={run.status === "failed" ? "danger" : "muted"}
+                      >
                         {run.error}
                       </Text>
                     ) : null}

@@ -46,7 +46,7 @@ export function ScrollScreen({
     <View className="flex-1 bg-background">
       <AwareScrollView
         className="flex-1"
-        contentContainerClassName={cn("gap-6 px-4 pt-4 pb-12", className)}
+        contentContainerClassName={cn("gap-6 px-4 pt-5 pb-12", className)}
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
