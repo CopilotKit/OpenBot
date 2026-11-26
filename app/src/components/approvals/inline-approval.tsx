@@ -1,3 +1,4 @@
+import { useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { offersStandingRule } from "@openbot/shared/standing-rule";
 import { approvalPhrase } from "@openbot/shared/tool-name";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,7 +15,9 @@ import {
 import { settingsApprovalBodyFor } from "@/components/settings-tools/settings-tool-card";
 import {
   type ApprovalDecision,
+  type ApprovalRequest,
   approvalInboxOptions,
+  conversationApprovalsQueryOptions,
   decideApproval,
 } from "@/lib/approvals";
 import { noteAnswered } from "@/lib/computers/activity";
@@ -32,6 +35,7 @@ import { EASE_OUT } from "@/lib/motion";
  * answered ("Allowed once: Click Submit"), which opens to the card as it was answered, as a Bot's
  * work folds (`ToolLine`). It used to fold away altogether, so scrolling back, or opening the
  * conversation again, nothing said a Bot had asked or what the person said; only Activity did.
+ * However old the conversation is: its own approvals are read too (`useRequestsHere`).
  */
 /** What each answer does, as the row under it says it. */
 const CHOICE_WORDS: Record<
@@ -71,6 +75,31 @@ const CHOICE_WORDS: Record<
   },
 };
 
+/**
+ * The requests a conversation's cards and answered lines are drawn from: the inbox, and the
+ * conversation's own list.
+ *
+ * The inbox is read again every few seconds, so a decision made on the Approvals page shows here
+ * too, but it keeps only the person's last hundred, across every conversation. In an older
+ * conversation those were all elsewhere and its answered lines never showed. The conversation's own
+ * list reaches back past them. Where both hold a request, the inbox's copy is the newer.
+ */
+function useRequestsHere(): ApprovalRequest[] {
+  const inbox = useQuery(approvalInboxOptions());
+  // The conversation this is drawn in, where it is drawn in one.
+  const threadId = useCopilotChatConfiguration()?.threadId;
+  const here = useQuery({
+    ...conversationApprovalsQueryOptions(threadId ?? ""),
+    enabled: Boolean(threadId),
+  });
+  const recent = inbox.data?.requests ?? [];
+  const known = new Set(recent.map((request) => request.id));
+  return [
+    ...recent,
+    ...(here.data ?? []).filter((request) => !known.has(request.id)),
+  ];
+}
+
 export function InlineApproval({
   toolCallId,
   fallback,
@@ -79,7 +108,7 @@ export function InlineApproval({
   fallback: ReactNode;
 }) {
   const cache = useQueryClient();
-  const inbox = useQuery(approvalInboxOptions());
+  const requests = useRequestsHere();
   const reduceMotion = useReducedMotion();
   /*
    * The answer given here: the card folds into it at once, and then, when the inbox says the request
@@ -98,9 +127,7 @@ export function InlineApproval({
     },
   });
   const request = toolCallId
-    ? inbox.data?.requests.find(
-        (candidate) => candidate.action.toolCallId === toolCallId,
-      )
+    ? requests.find((candidate) => candidate.action.toolCallId === toolCallId)
     : undefined;
   const pending = request?.status === "pending";
   const handOff = request?.action.policy?.behaviour === "hand_off";
@@ -273,13 +300,13 @@ export function PendingApprovals({
 }: {
   toolCallIds: readonly string[];
 }) {
-  const inbox = useQuery(approvalInboxOptions());
+  const requests = useRequestsHere();
   /*
    * And one already decided: the person's answer is said beside the group as its own line, since the
    * folded line ("Used Slack") says nothing of what they were asked or what they said. One whose
    * conversation could not be carried on after it was decided (`left`) says what came of it too.
    */
-  const asked = (inbox.data?.requests ?? []).filter(
+  const asked = requests.filter(
     (request) =>
       request.action.toolCallId &&
       (request.status === "pending" || request.decision || request.left),
