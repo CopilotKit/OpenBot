@@ -1569,3 +1569,51 @@ export const CreateTranscriptionBody = zod.object({
 export const CreateTranscriptionResponse = zod.object({
   text: zod.string().describe("What was said."),
 });
+
+/**
+ * Say how one of a Bot's runs in the conversation ended, as the run's own last event said: it finished, it stopped to ask a person, it was stopped, or it failed. The run is named by the runId its events carry (RUN_STARTED on the threadStream channel of api/asyncapi.yaml). A client that stopped hearing a run before its end asks this, once createConversationJoinToken says the conversation has no run going, to tell a run that finished from one that stopped part way. outcome is null while the run is going, and for a run that ended without saying how (its server stopped under it). A run this server keeps no record of, or one of another conversation, is not found. Only a person in the conversation may ask, about the thread they see there.
+ * @summary See how a Bot's run in a conversation ended
+ */
+
+export const getConversationRunPathConversationIdRegExp = new RegExp("\\S");
+export const getConversationRunPathRunIdMax = 256;
+
+export const getConversationRunPathRunIdRegExp = new RegExp("\\S");
+
+export const GetConversationRunParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  conversationId: zod
+    .string()
+    .min(1)
+    .regex(getConversationRunPathConversationIdRegExp)
+    .describe("The conversation's id."),
+  runId: zod
+    .string()
+    .min(1)
+    .max(getConversationRunPathRunIdMax)
+    .regex(getConversationRunPathRunIdRegExp)
+    .describe("The run's id, as its events carry it."),
+});
+
+export const GetConversationRunResponse = zod.object({
+  run: zod
+    .object({
+      id: zod.string().min(1).describe("The run's id, as its events carry it."),
+      outcome: zod
+        .string()
+        .nullable()
+        .describe(
+          "How the run ended, as its own last event said. succeeded: it finished. interrupted: it stopped to ask a person (an approval, a missing value). cancelled: it was stopped. failed: it ended with an error, or its stream failed, or its server ended it on the way down. Null while the run is going, and for a run that ended without saying how.",
+        ),
+      endedAt: zod.iso
+        .datetime({ offset: true })
+        .nullable()
+        .describe("When the run ended, or null while outcome is null."),
+    })
+    .describe("One of a Bot's runs in a conversation, and how it ended."),
+});

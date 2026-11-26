@@ -3,9 +3,17 @@ import { createContext, useContext } from "react";
 import type { ConnectionScope } from "./queries";
 
 /**
- * Where the Providers screens live: Settings → Providers for everyone who sets an AI, and Admin →
- * Providers for an admin. Both draw the same pages (`components/settings/provider-pages.tsx`), so
- * every link between them goes through here rather than naming `/settings` or `/admin`.
+ * What a person reads as the name of these screens: the Settings and Admin entries, the page's
+ * heading and every Back link to it. "Providers" alone didn't say what they provide, and people
+ * looking for where to connect their AI didn't find it. The addresses keep `providers`.
+ */
+export const AI_PROVIDERS_TITLE = "AI providers";
+
+/**
+ * Where the AI providers screens live: Settings → AI providers for everyone who sets an AI, and
+ * Admin → AI providers for an admin. Both draw the same pages
+ * (`components/settings/provider-pages.tsx`), so every link between them goes through here rather
+ * than naming `/settings` or `/admin`.
  *
  * A provider's page is named by its connection's id (its provider) and whose list it is in: on
  * OpenBot Cloud a person's own and the organization's may share an id, so a person's own carries
@@ -94,7 +102,7 @@ export function providerPaths(place: ProvidersPlace) {
 
 export type ProviderPaths = ReturnType<typeof providerPaths>;
 
-/** Settings unless a page says otherwise: Admin → Providers wraps its screens in the admin paths. */
+/** Settings unless a page says otherwise: Admin → AI providers wraps its screens in the admin paths. */
 export const ProviderPathsContext = createContext<ProviderPaths>(
   providerPaths("settings"),
 );

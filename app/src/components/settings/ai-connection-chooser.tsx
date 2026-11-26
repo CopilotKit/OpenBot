@@ -374,6 +374,7 @@ const wait = (seconds: number) =>
 
 export function ChooseConnection({
   connection,
+  connectedHere = false,
   initialFocusProvider,
   mode,
   onBack,
@@ -386,6 +387,11 @@ export function ChooseConnection({
   mode: ChooserMode;
   /** Back from a chosen provider, or Cancel from the list. Absent: the list has no way back. */
   onBack?: () => void;
+  /**
+   * Something was connected from this list already, and the list is drawn again with it checked:
+   * leaving it is Done, since there is nothing to cancel.
+   */
+  connectedHere?: boolean;
   onConnected: (connected: ConnectedResult) => void;
 }) {
   const initialFocusRow = useRef<HTMLButtonElement>(null);
@@ -546,6 +552,18 @@ export function ChooseConnection({
   const usingSaved = Boolean(savedKey && useSaved);
   const typedKey = apiKey.trim();
   const typedModel = model.trim();
+  /*
+   * A sign-in asks for no model, as a key or a plan doesn't: once connected, the conversation's
+   * model picker offers every model the provider lists for it. The connection still names one, the
+   * model a run uses when nobody picked: the one this sign-in already names where it is being
+   * signed in again, so an upgrade changes nothing, and otherwise the provider's usual one.
+   */
+  const signInModel = (
+    (provider && login === "oauth" ? ownModel(provider.id) : null) ??
+    kept?.model ??
+    preset?.model ??
+    ""
+  ).trim();
 
   const ready =
     !!provider &&
@@ -558,8 +576,19 @@ export function ChooseConnection({
           typedModel.length > 0 &&
           (!preset || usingSaved || typedKey.length > 0)
         : login === "oauth"
-          ? signedIn && typedModel.length > 0
+          ? signedIn && signInModel.length > 0
           : signedIn);
+
+  /** The model this provider's sign-in already names, in the list or as the connection in use. */
+  function ownModel(id: AiProvider["id"]): string | null {
+    const listed = adding?.connected.find(
+      (entry) => entry.provider === id && entry.login === "oauth",
+    );
+    if (listed) return listed.model;
+    return connection?.provider === id && connection.login === "oauth"
+      ? connection.model
+      : null;
+  }
 
   function input(): AiConnectionInput | null {
     if (!provider || !login) return null;
@@ -580,7 +609,7 @@ export function ChooseConnection({
             : {}),
       };
     if (login === "oauth")
-      return { provider: provider.id, login, model: typedModel };
+      return { provider: provider.id, login, model: signInModel };
     return { provider: provider.id, login };
   }
 
@@ -1084,7 +1113,7 @@ export function ChooseConnection({
               </Field>
             ) : null}
 
-            {login === "endpoint" || login === "oauth" ? (
+            {login === "endpoint" ? (
               <Field>
                 <FieldLabel htmlFor="ai-connection-model">
                   Model name
@@ -1158,7 +1187,7 @@ export function ChooseConnection({
               type="button"
               variant="ghost"
             >
-              {provider ? "Back" : "Cancel"}
+              {provider ? "Back" : connectedHere ? "Done" : "Cancel"}
             </Button>
           ) : null}
           {provider ? (

@@ -5,17 +5,17 @@ import {
 } from "../src/components/settings/settings-sidebar";
 
 describe("settings sidebar", () => {
-  test("Providers leads Every Bot, then Computer at /settings/computer before Approvals, and Browsers is part of it", () => {
+  test("AI providers leads Every Bot, then Computer at /settings/computer before Approvals, and Browsers is part of it", () => {
     const titles = SETTINGS_SIDEBAR_ITEMS.map((item) => item.title);
     const computer = SETTINGS_SIDEBAR_ITEMS[titles.indexOf("Computer")];
-    const providers = SETTINGS_SIDEBAR_ITEMS[titles.indexOf("Providers")];
+    const providers = SETTINGS_SIDEBAR_ITEMS[titles.indexOf("AI providers")];
 
     expect(providers?.linkOptions).toEqual({ to: "/settings/providers" });
     expect(computer?.linkOptions).toEqual({ to: "/settings/computer" });
     expect(
       SETTINGS_SIDEBAR_ITEMS.find((item) => item.group === "every-bot")?.title,
-    ).toBe("Providers");
-    expect(titles.indexOf("Computer")).toBe(titles.indexOf("Providers") + 1);
+    ).toBe("AI providers");
+    expect(titles.indexOf("Computer")).toBe(titles.indexOf("AI providers") + 1);
     expect(titles.indexOf("Approvals")).toBe(titles.indexOf("Computer") + 1);
     expect(titles).not.toContain("Browsers");
     expect(titles).not.toContain("This computer");

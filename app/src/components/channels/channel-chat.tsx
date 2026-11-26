@@ -91,10 +91,12 @@ import { isBrokenStream, STREAM_BROKE } from "@/lib/copilot/broken-stream";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import {
+  askRunEnding,
   askRunLiveness,
   quietRunPeriod,
   RUN_ENDED_UNHEARD,
   RUN_UNREACHABLE,
+  startedRunId,
   watchQuietRun,
 } from "@/lib/copilot/quiet-run";
 import {
@@ -805,6 +807,8 @@ export function ChannelChat({
       let joined: "connected" | "deadline" | "gave up" = "deadline";
       // How a kept join's turn was found to have ended, and how to stop watching it.
       let keptEnded: "over" | "unreachable" | null = null;
+      // The run the join last heard start, to ask how it ended.
+      let keptRunId: string | null = null;
       let stopKept = () => {};
       try {
         // Bounded, and finished when it returns; `join-thread.ts` has why that matters.
@@ -879,16 +883,25 @@ export function ChannelChat({
         unanswered.current = true;
       } finally {
         stopKept();
+        keptRunId = lastRun.runId();
         lastRun.stop();
         if (current) setReplaying(false);
         openJoined.current();
       }
-      // The turn the join was kept for had ended without a word reaching here: say so.
+      /*
+       * The turn the join was kept for had ended without a word reaching here: say so, unless the
+       * server says its run finished. Its reply is then the one the history read below brings in.
+       */
       if (keptEnded !== null && current && turnsRef.current === 0) {
         setRestoring(false);
-        setRunError({
-          message: keptEnded === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,
-        });
+        const finished =
+          keptEnded === "over" &&
+          keptRunId !== null &&
+          (await askRunEnding(channel.id, keptRunId)) === "finished";
+        if (!finished && current && turnsRef.current === 0)
+          setRunError({
+            message: keptEnded === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,
+          });
       }
       /*
        * The last run failed, so say so again, as the turn did when it failed. Only from a replay
@@ -1575,6 +1588,8 @@ export function ChannelChat({
           ask: () => askRunLiveness(channel.id),
           quietMs: quietRunPeriod.ms,
         });
+        // The run this browser last heard start, to ask how it ended if its end is never heard.
+        let heardRunId: string | null = null;
         const hearing = target.subscribe({
           /*
            * The browser starting the turn's next run (with a step's result) ends the rest, before a
@@ -1582,8 +1597,14 @@ export function ChannelChat({
            * sent: nothing of it ever came, the watch was still resting from the run before, and the
            * server saying it had no run going read as the step still being taken. "Thinking" for good.
            */
-          onRunInitialized: () => quiet.heard(),
+          onRunInitialized: () => {
+            // A new run: how the last one ended says nothing about this one.
+            heardRunId = null;
+            quiet.heard();
+          },
           onEvent: ({ event }) => {
+            if (event.type === EventType.RUN_STARTED)
+              heardRunId = startedRunId(event) ?? heardRunId;
             // Between the server's runs the turn is this browser's (a step it takes, a card the
             // person answers), and quiet there is not a run gone missing.
             if (
@@ -1627,8 +1648,23 @@ export function ChannelChat({
           awaitingReply.current = false;
           // What the thread holds is what was saved: read back when the runtime can be asked.
           if (ended === "over") {
+            const ending = heardRunId
+              ? await askRunEnding(channel.id, heardRunId)
+              : "unknown";
             const whole = await readBackFromThread(target, existingMessageIds);
             if (whole) reportReadBack(target);
+            /*
+             * A RUN THAT FINISHED IS SHOWN AS FINISHED, though its end never reached here. Its reply
+             * is the one read back whole from the thread, and nothing is left for this browser to
+             * do. A run that stopped part way, or one the server can't say about, keeps the notice
+             * and its Carry on. See `askRunEnding`.
+             */
+            if (
+              ending === "finished" &&
+              whole &&
+              unansweredToolCalls(target.messages).size === 0
+            )
+              break;
           }
           setRunError({
             message: ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,

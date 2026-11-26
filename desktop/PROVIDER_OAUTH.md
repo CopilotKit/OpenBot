@@ -61,7 +61,7 @@ References: [xAI's OpenCode integration](https://x.ai/news/grok-opencode) and
 ## Unbiased AI
 
 Unbiased AI stops serving models November 27, 2026 at noon EST. Use **Change AI
-connection** in Desktop setup or **Settings → Providers** to choose a replacement.
+connection** in Desktop setup or **Settings → AI providers** to choose a replacement.
 For an installation configured through its environment, update the provider’s endpoint,
 model, and credential together. Your conversations stay with the installation.
 

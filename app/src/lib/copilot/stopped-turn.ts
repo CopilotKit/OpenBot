@@ -1,6 +1,7 @@
 import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
 import { botNoLongerUsable } from "@/lib/agents/queries";
+import { startedRunId } from "@/lib/copilot/quiet-run";
 import { problemRequestId, recordProblem } from "@/lib/desktop/problems";
 import { useClearWhenHoldEnds } from "@/lib/held-ends";
 import { type Failure, isHeld } from "@/lib/load-failure";
@@ -356,15 +357,19 @@ export function followLastRun(agent: Pick<AbstractAgent, "subscribe">): {
   failure: () => string | null;
   /** Whether the last run the join has heard of started and has not ended yet. */
   running: () => boolean;
+  /** The id of the last run the join heard start, to ask the server how it ended. */
+  runId: () => string | null;
   stop: () => void;
 } {
   let failure: string | null = null;
   let broken = false;
   let running = false;
+  let runId: string | null = null;
   const subscription = agent.subscribe({
-    onRunStartedEvent: () => {
+    onRunStartedEvent: ({ event }) => {
       failure = null;
       running = true;
+      runId = startedRunId(event) ?? runId;
     },
     onRunFinishedEvent: () => {
       failure = null;
@@ -382,6 +387,7 @@ export function followLastRun(agent: Pick<AbstractAgent, "subscribe">): {
   return {
     failure: () => (broken ? null : failure),
     running: () => !broken && running,
+    runId: () => runId,
     stop: () => subscription.unsubscribe(),
   };
 }
