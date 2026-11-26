@@ -152,6 +152,61 @@ test("OpenAI: COPILOTKIT_OPENAI_API=chat keeps even a Responses model on Chat Co
   }
 });
 
+// FOUND BEHIND AN OPENAI-COMPATIBLE GATEWAY: with tools bound, a model LangChain prefers on the
+// Responses API went there anyway, because ChatOpenAI rebuilds itself as a plain ChatOpenAI when
+// tools are bound, and only Chat Completions was served. Every Bot has tools, so every run broke.
+for (const [where, extra] of [
+  ["with a key", {}],
+  [
+    "through the model gateway",
+    {
+      OPENBOT_MODEL_GATEWAY_URL: "GATEWAY",
+      // The deployment's own key is never used on a route.
+      OPENAI_API_KEY: "",
+    },
+  ],
+] as const) {
+  test(`OpenAI ${where}: COPILOTKIT_OPENAI_API=chat keeps a Responses model on Chat Completions with its tools`, async () => {
+    const provider = await fakeProvider(answer);
+    try {
+      const env: Record<string, string> = {
+        BOT_PROVIDER: "openai",
+        OPENAI_API_KEY: "sk-test",
+        OPENAI_BASE_URL: `${provider.base}/v1`,
+        COPILOTKIT_OPENAI_API: "chat",
+        ...extra,
+      };
+      if (env.OPENBOT_MODEL_GATEWAY_URL)
+        env.OPENBOT_MODEL_GATEWAY_URL = provider.base;
+      await withEngine({ env }, async (base) => {
+        const result = await run(
+          base,
+          conversation({
+            tools: [WEATHER_TOOL],
+            forwardedProps: {
+              openbotModel: { model: "gpt-5.6-terra" },
+              ...(env.OPENBOT_MODEL_GATEWAY_URL
+                ? { openbotModelRoute: { via: "openai", token: "run-token" } }
+                : {}),
+            },
+          }),
+        );
+        assert.equal(result.events.at(-1)!.type, "RUN_FINISHED");
+      });
+      const { path, body } = provider.requests[0]!;
+      assert.equal(path, "/v1/chat/completions");
+      assert.deepEqual(
+        (body.tools as { function: { name: string } }[]).map(
+          (tool) => tool.function.name,
+        ),
+        ["get_weather", "recall_earlier_results"],
+      );
+    } finally {
+      await provider.close();
+    }
+  });
+}
+
 test("Anthropic: one top-level system prompt, output_config.effort, the tools", async () => {
   const provider = await fakeProvider(answer);
   try {
