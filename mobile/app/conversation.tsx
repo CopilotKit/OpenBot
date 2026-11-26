@@ -362,11 +362,11 @@ export default function ConversationScreen() {
                 >
                   <BotOrb seed={current.seed} name={current.name} size={88} />
                 </View>
-                {/* A group shows each of its Bots, the one the flight carries up first. */}
+                {/* A group shows up to four of its Bots, the one the flight carries up first. */}
                 {isGroup
                   ? botsHere
                       .filter((bot) => bot.id !== current.id)
-                      .slice(0, 2)
+                      .slice(0, 3)
                       .map((bot) => (
                         <View key={bot.id} className="-ml-6">
                           <BotOrb seed={bot.seed} name={bot.name} size={88} />
@@ -377,7 +377,7 @@ export default function ConversationScreen() {
               <View className="items-center gap-1.5">
                 <Text variant="title" className="text-center">
                   {isGroup
-                    ? botsHere.map((bot) => bot.name).join(" & ")
+                    ? botsHere.map((bot) => bot.name).join(", ")
                     : current.name}
                 </Text>
                 {isGroup ? (
@@ -567,10 +567,7 @@ function ConversationHeading({
   revealed: boolean;
   orbRef: RefObject<ViewHandle | null>;
 }) {
-  const names =
-    bots.length > 2
-      ? `${bots[0]?.name}, ${bots[1]?.name} and ${bots.length - 2} more`
-      : bots.map((bot) => bot.name).join(" & ");
+  const names = bots.map((bot) => bot.name).join(", ");
   const shown = useSharedValue(revealed ? 1 : 0);
   useEffect(() => {
     shown.value = revealed ? withTiming(1, { duration: 220 }) : 0;
@@ -593,7 +590,7 @@ function ConversationHeading({
       className="items-center gap-0.5 active:opacity-60"
     >
       <Animated.View style={orbs} className="flex-row">
-        {bots.slice(0, 3).map((bot, index) => (
+        {bots.slice(0, 4).map((bot, index) => (
           <View
             key={bot.id}
             ref={bot.id === current ? orbRef : undefined}

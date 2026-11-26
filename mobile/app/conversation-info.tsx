@@ -37,7 +37,7 @@ export default function ConversationInfo() {
       title: bot?.title,
     };
   });
-  const names = members.map((bot) => bot.name).join(" & ");
+  const names = members.map((bot) => bot.name).join(", ");
   return (
     <ScrollScreen>
       <Notice message={conversation.error || bots.error} />
