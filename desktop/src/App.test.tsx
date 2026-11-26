@@ -7784,8 +7784,9 @@ test("leftover data is a choice the Start step waits on, on its page under its r
   expect(
     content.contains(view.getByRole("button", { name: "Start fresh" })),
   ).toBe(true);
+  // A first run's last row: OpenBot opens on Open OpenBot, once it has started.
   const opening = within(
-    view.getByRole("listitem", { name: "Opening OpenBot" }),
+    view.getByRole("listitem", { name: "Starting OpenBot" }),
   );
   expect(opening.queryByText("Failed")).toBeNull();
   expect(opening.queryByText("OpenBot did not start.")).toBeNull();

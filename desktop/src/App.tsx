@@ -14,6 +14,7 @@ import { handover, leaveFor } from "./handover";
 import { currentChoice, DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
+  firstRunRows,
   LocalIntelligence,
   type LocalStartable,
   LocalStatus,
@@ -2031,9 +2032,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
             <div className="setup-content">
               {freshInstall || (
                 <LocalIntelligence
-                  sequence={
-                    startFailure ? { ...local, problem: startFailure } : local
-                  }
+                  sequence={firstRunRows(
+                    startFailure ? { ...local, problem: startFailure } : local,
+                  )}
                   offerStart
                   handOff={handOff}
                   open={steps}
@@ -2090,13 +2091,24 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           {/* The last setup choice stays separate while progress and recovery details change. */}
           <footer className="setup-footer">
             {!returning && <UsageDataChoice />}
-            {/* Under the usage-data choice, so it is read before OpenBot opens. */}
-            {(readyToOpen || handingOver !== null) && (
-              <div className="row">
+            {/* Under the usage-data choice, so it is read before OpenBot opens. Its room is kept
+                while the steps run: the choice never moves when the button arrives, as it did on
+                Windows K when rows arrived above it. */}
+            {!returning && (
+              <div
+                className="row"
+                style={
+                  readyToOpen || handingOver !== null
+                    ? undefined
+                    : { visibility: "hidden" }
+                }
+              >
                 <button
                   type="button"
                   onClick={openWhenReady}
-                  disabled={busy || showing || handingOver !== null}
+                  disabled={
+                    !readyToOpen || busy || showing || handingOver !== null
+                  }
                 >
                   Open OpenBot
                 </button>
