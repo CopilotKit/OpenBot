@@ -123,7 +123,7 @@ test("a failed last run reads as a warning", async () => {
   ]);
 
   const fact = await view.findByText(/^Failed /);
-  expect(fact.className).toContain("text-amber-600");
+  expect(fact.className).toContain("text-warning");
 });
 
 test("a paused routine reads Paused, at 60% opacity", async () => {

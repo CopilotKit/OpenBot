@@ -25,7 +25,7 @@ const ROW_CLASS =
 
 const FACT_CLASS: Record<RowTone, string> = {
   running: "text-foreground",
-  warning: "text-amber-600 dark:text-amber-500",
+  warning: "text-warning",
   muted: "text-muted-foreground",
   normal: "text-muted-foreground",
 };
