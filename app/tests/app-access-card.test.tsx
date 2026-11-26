@@ -21,6 +21,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useRouterState,
 } from "@tanstack/react-router";
 import {
   act,
@@ -114,7 +115,11 @@ function mount(children: ReactNode) {
   const settings = createRoute({
     getParentRoute: () => root,
     path: "/connections/$key",
-    component: () => null,
+    // Where a Reconnect lands, read back by a test as the address it reached.
+    component: function AppPage() {
+      const at = useRouterState({ select: (state) => state.location.href });
+      return <p data-testid="app-page">{at}</p>;
+    },
   });
   const router = createRouter({
     routeTree: root.addChildren([page, settings]),
@@ -213,9 +218,10 @@ test("an account the vendor lost: Reconnect, though the server still reads ready
   expect(drawn.textContent).toContain(
     "Your Gmail connection needs reconnecting.",
   );
-  expect(
-    (await view.findByText("Reconnect")).closest("a")?.getAttribute("href"),
-  ).toBe("/connections/composio-gmail");
+  fireEvent.click(await view.findByRole("button", { name: "Reconnect Gmail" }));
+  expect((await view.findByTestId("app-page")).textContent).toBe(
+    "/connections/composio-gmail",
+  );
 });
 
 test("an account lost and then connected again: the newer connection wins", async () => {

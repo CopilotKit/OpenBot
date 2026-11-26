@@ -102,6 +102,53 @@ describe("the apps a move left to connect again", () => {
     expect(cloudAppFor("slack", here)).toBeUndefined();
   });
 
+  /*
+   * FOUND IN DOGFOODING: Fireflies moved as its key app's slug, and here it had been added as its
+   * sign-in, the vendor's own server. The list never found it: Reconnect added it again, was
+   * refused three times as already added, and never reached the connect.
+   */
+  test("a key app added here as its sign-in is the same app: the vendor's server, or the _mcp app", () => {
+    const vendor = [
+      {
+        id: "fireflies-mcp",
+        directoryEntryId: null,
+        source: "address" as const,
+      },
+    ];
+    expect(cloudAppFor("fireflies", vendor)?.id).toBe("fireflies-mcp");
+    // A name that is not an id here comes out the way the server makes the vendor's id.
+    expect(
+      cloudAppFor("_1password", [
+        { id: "1password-mcp", directoryEntryId: null, source: "address" },
+      ])?.id,
+    ).toBe("1password-mcp");
+    const sibling = [
+      {
+        id: "composio-posthog_mcp",
+        directoryEntryId: "directory:posthog_mcp",
+        source: "directory" as const,
+      },
+    ];
+    expect(cloudAppFor("posthog", sibling)?.id).toBe("composio-posthog_mcp");
+    // The key app itself, where it is here, is still the one it is.
+    expect(
+      cloudAppFor("posthog", [
+        { id: "composio-posthog", directoryEntryId: "directory:posthog" },
+        ...sibling,
+      ])?.id,
+    ).toBe("composio-posthog");
+    // Only a server added by its address is a vendor's server: an app of the catalogue is not.
+    expect(
+      cloudAppFor("fireflies", [
+        {
+          id: "fireflies-mcp",
+          directoryEntryId: "catalogue:fireflies-mcp",
+          source: "catalogue",
+        },
+      ]),
+    ).toBeUndefined();
+  });
+
   test("a connected app is marked, a dismissed one leaves", () => {
     const here = [
       { id: "composio-gmail", directoryEntryId: "directory:gmail" },
