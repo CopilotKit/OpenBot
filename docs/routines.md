@@ -13,7 +13,45 @@ outcome to reach. A check-in is a routine that only tells you. They stay three s
 (routines, goals in `responsibilities`, check-ins in `proactive` settings), and the page reads all
 three and draws them together (`app/src/lib/routines/merged.ts`).
 
-Every row is the same sentence in four parts:
+**Routines in the main menu is a box and the routines grouped by Bot.** Under its heading sits one
+box (`RoutineBox`): pick a Bot, say what it should do and when in a sentence, and press Send or
+Enter. Below the box are the person's routines, goals and check-ins in one group per Bot
+(`BotGroupSection`), and last the one switch for check-ins from all your Bots. A page with no routine
+on it also offers three example sentences; pressing one only types it into the box. The page has no
+title row and no New routine button: the box is how a routine is made, and **Use the form** under it
+opens New routine for the chosen Bot. If one of the reads fails, the groups that did load stay and a
+line above them says which part is missing ("Couldn't load your goals").
+
+A group is the Bot's orb, its name (a link to that Bot's own Routines page) and how many rows it has.
+Bots you have hidden come after the ones you haven't, and a Bot a row names that no list knows is
+drawn as "A Bot", without a link. A Bot that is in both lists for a moment after being hidden or
+unhidden is one group, in the shown position (`routinesByBot`, `app/src/lib/routines/by-bot.ts`).
+A Bot with nothing to show has no group.
+
+Each row is one line: an icon (a clock for a routine, a target for a goal, an eye for a check-in; a
+spinner while it is running, a pause mark while it is off), its name, and **one fact** about it. The
+fact is the first of these that applies (`rowFact`):
+
+1. **Running now**, while it is working: a run that has started and not finished, or for a goal, one
+   of the routines that run it; for a check-in, while it is checking.
+2. **What went wrong last time**, in amber: a failed or skipped run, "Its conversation was deleted",
+   or "Couldn't check last time" for a check-in. A goal has none of its own.
+3. **Paused**, or for a goal **Completed**, dimmed.
+4. **When it starts**: a routine's schedule (with its time zone when that is not the reader's), a
+   goal's starts in words, or "Checks" and how often for a check-in.
+
+Inside a group the rows run in five bands (`band`), and a tie keeps the order the lists came in:
+
+1. Running.
+2. Warning.
+3. On and with a next start, soonest first. For a goal, its soonest enabled routine.
+4. On with no start: a goal that only runs when asked or when an event wakes it.
+5. Off: paused, or a goal that is completed.
+
+A row opens the record it came from: `/routines/schedules/<id>`, `/routines/goals/<id>` or
+`/routines/check-ins/<id>`.
+
+A Bot's own Routines page keeps its rows, every one the same sentence in four parts:
 
 - **What** it is: the routine's instruction, the goal's title, or the Bot's check-in.
 - **Starts**: a routine's schedule; for a goal, the routines that run it and the events that wake
@@ -31,10 +69,11 @@ Old addresses redirect here: `/responsibilities` to Routines, and
 
 ## Creating one
 
-Two ways, and either way a routine or a goal is written by the same store calls.
+Three ways, and either of the first two writes a routine or a goal with the same store calls.
 
-- **New routine.** Routines and a Bot's Routines page both have **New routine**, which
-  opens one screen (`/routines/new`). It asks, in order: **Bot**, **What to do**, **It should** (Act
+- **The box**, on Routines in the main menu. See [The box](#the-box).
+- **New routine.** A Bot's Routines page has **New routine**, and the box has **Use the form**;
+  either opens one screen (`/routines/new`). It asks, in order: **Bot**, **What to do**, **It should** (Act
   for you or Only tell you), **Starts** (On a schedule, When something happens, or Now, once), **Done
   when** (optional), **Posts in**, and **Name**. It does not ask whether you want a routine, a goal
   or a check-in; the answers decide: `planRoutine` (`app/src/lib/routines/plan.ts`) turns them into a
@@ -55,6 +94,70 @@ Two ways, and either way a routine or a goal is written by the same store calls.
 - **Ask a Bot**, in a conversation: "every weekday at 9, post the standup notes here." Anything the
   form's schedules do not cover ("every other Tuesday") goes this way. The same Bot can list what is
   standing, change one, or delete one, all by being asked. There is no edit form.
+
+### The box
+
+The box makes what the sentence says, or says in a line under it why it didn't. Nothing is written
+until the server has read the sentence and the answers pass the form's own rules.
+
+**The read.** The box sends the Bot, the sentence (at most 2,000 characters) and the browser's time
+zone to `readRoutineSentence` (`POST /api/v2/organizations/{organizationId}/routines/read`, in
+`api/openapi/schedules.yaml`). It is a read: it **writes nothing**. It asks the model to put the
+sentence into the same answers as New routine (What to do, a name, It should, Starts, the schedule as
+five cron fields, Done when, Posts in, How often, a time zone) and says which of four things came
+back, in `outcome`:
+
+- `ready`: the answers are complete.
+- `needsMore`: a routine, with something left out. `missing` is `time`, `event` or `once`.
+- `refused`: the sentence asks for something a routine can't do. `detail` is the sentence for the
+  person, and `fix` is `connectApp` or null.
+- `notRoutine`: the sentence isn't a request for one.
+
+A repeated request with the same `Idempotency-Key` and body returns the first reading without asking
+the model again. A web session, an API key, or an app with `routines:read` may call it.
+
+**What it makes.** A ready reading goes through `planRoutine` and `createFromPlanMutationOptions`,
+the two calls New routine makes, so the same rules decide what kind of thing it is:
+
+- A sentence that acts on a schedule is a **routine**.
+- One that acts on a schedule toward an outcome ("until the contract is signed") is a **goal on a
+  schedule**: a goal that ends when met, with **Done when** the outcome, and a routine that runs it.
+- One that only tells you is a **check-in**, with how often it checks.
+
+The schedule and time zone the sentence gave are written as given, so "every other Tuesday" or "9am
+Eastern" is not turned into the picker's nearest shape. When the Bot is not told where to post, a new
+conversation is made and named after the routine, as the form does. The line then says "*Bot* took
+"*name*" · *when it runs*", and **Open** goes to the new routine, goal or check-in.
+
+**What it sends to the form.** When the sentence is a routine but isn't enough to make one, the line
+says what is missing in the Bot's words and **Finish** opens New routine with the answers so far and
+the Bot already chosen:
+
+- **No when**: "*Bot* needs to know when for "*name*"".
+- **An event**: it starts when something happens, and the sentence didn't say which: "*Bot* needs to
+  know which event starts "*name*"".
+- **Now, once**: the sentence is something to do once, at once, which the form does and the box
+  doesn't: ""*name*" is something to do once, now. Finish it on the form."
+
+A sentence that isn't a routine ("Couldn't read that as a routine."), one the server couldn't read at
+all (no model set up, or no answer), and one whose answers break one of the form's own rules say so
+with **Use the form**, which opens the same screen with the answers where there are any. The rules
+are the form's (`brokenRules`, `app/src/lib/routines/rules.ts`), so the box and the form refuse the
+same things.
+
+**The refusals.** The line is amber, says why, and keeps the sentence in the box so it can be changed.
+The server refuses, in a sentence of its own, what a routine can't do: a routine more often than every 15 minutes, a check-in at
+an interval that isn't offered, a web page to watch, an app the Bot can't read (with **Connect**,
+which opens Connections), something that happens once at a set time ("tomorrow at 9"), a schedule five
+cron fields can't say. It never moves a sentence to the nearest thing allowed, because a moved time
+is a guessed time. The box refuses two more before it writes anything: an admin has turned check-ins
+off ("Your admin turned check-ins off, so *Bot* can only act for you."), and the Bot already has a check-in on
+that subject ("*Bot* already checks in on "*subject*"."). The 20-enabled cap and the 15-minute floor
+(see below) still apply at the write, and so does taking back a goal whose schedule is refused. A
+write that fails says why and keeps the sentence. A write that may have been saved (its answer never
+came back, or a goal whose schedule was refused could not be taken back) says "It may have been
+made. Check the list before sending it again.", clears the sentence, and sends nothing a second
+time.
 
 Connections > Routines points to the Routines page, and the New Bot form shows an example beside
 Routines under "Apps it can use".
