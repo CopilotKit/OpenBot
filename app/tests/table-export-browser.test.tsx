@@ -414,7 +414,8 @@ describe.skipIf(!asked)("a table whose one cell wraps to many lines", () => {
                   `wrapping-${engine}-${theme}-${surface}-${width}-${view}`,
                 );
                 const cells = await readRow(page, view);
-                // The People cell does wrap, or the row would show nothing either way.
+                // The People cell does wrap, on any system's font, or the row would show nothing
+                // either way.
                 expect(
                   Math.max(...cells.map((cell) => cell.lines)),
                 ).toBeGreaterThanOrEqual(3);

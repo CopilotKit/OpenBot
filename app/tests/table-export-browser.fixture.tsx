@@ -46,7 +46,7 @@ const WRAPPING = [
   "",
   "| Company | Employees | People |",
   "|---|---|---|",
-  "| Northwind | 200 in your team's | Ada Lovelace (founder), Grace Hopper (engineering), Alan Turing (research), Katherine Johnson (flight), Edsger Dijkstra (platform), Barbara Liskov (systems), Donald Knuth (typesetting), Frances Allen (compilers) |",
+  "| Northwind | 200 in your team's | Ada Lovelace (founder), Grace Hopper (engineering), Alan Turing (research), Katherine Johnson (flight), Edsger Dijkstra (platform), Barbara Liskov (systems), Donald Knuth (typesetting), Frances Allen (compilers), John Backus (languages), Margaret Hamilton (software), Ken Thompson (operating systems), Radia Perlman (networking), Leslie Lamport (distributed systems), Tim Berners-Lee (the web) |",
   "| Fabrikam | 12 | Linus Pauling |",
 ].join("\n");
 
