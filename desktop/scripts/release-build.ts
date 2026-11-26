@@ -1,28 +1,20 @@
 import { readFileSync } from "node:fs";
 
 /**
- * The release build config: the window's build-time values a release or a candidate installer is
- * built with, which an internal or a pull request build is not. Every release installer, unsigned
- * (`desktop-build.yml` with the `release` channel) or signed (the signing workflows on a tag), runs
- * `desktop-version.ts release` before `tauri build`, so `build-version.json` names its channel when
- * Vite builds the window (`vite.config.ts`).
- *
- * `VITE_OPENBOT_CLOUD_ENABLED`: OpenBot Cloud on the first screen, first and picked
- * (`CloudSignIn.tsx`, `Welcome.tsx`).
- *
- * A value already in the build's environment wins, so a release build can still turn a switch off:
- * `VITE_OPENBOT_CLOUD_ENABLED=false`.
+ * Release and internal installers offer OpenBot Cloud on the first screen. The channel comes
+ * from build-version.json, written by desktop-version.ts before Vite builds the window.
+ * An explicit VITE_OPENBOT_CLOUD_ENABLED value still wins, including false.
  */
 export const RELEASE_BUILD_ENV: Readonly<Record<string, string>> = {
   VITE_OPENBOT_CLOUD_ENABLED: "true",
 };
 
-/** What to add to a build's environment: the release build config for a release, and nothing else. */
+/** Defaults for release and internal installers; unversioned development keeps its own choices. */
 export function releaseBuildEnv(
   channel: string | undefined,
   environment: Readonly<Record<string, string | undefined>>,
 ): Record<string, string> {
-  if (channel !== "release") return {};
+  if (channel !== "release" && channel !== "internal") return {};
   return Object.fromEntries(
     Object.entries(RELEASE_BUILD_ENV).filter(
       ([name]) => environment[name] === undefined,

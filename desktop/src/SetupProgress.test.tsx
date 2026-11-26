@@ -396,7 +396,7 @@ test("the background row says a setup paused for room calmly, with Try again", a
   );
   const item = within(
     view.getByRole("listitem", {
-      name: "Installing OpenBot in the background",
+      name: "Preparing OpenBot",
     }),
   );
   expect(item.getByText("Step 3 of 4 · Paused")).toBeTruthy();
@@ -406,3 +406,214 @@ test("the background row says a setup paused for room calmly, with Try again", a
   await userEvent.click(item.getByRole("button", { name: "Try again" }));
   expect(looked).toBe(1);
 });
+
+/*
+ * At most one spinner on the screen: a quiet list (the background install in the sidebar, the
+ * Start's rows under its journey) marks its running row without one, since something else on the
+ * screen is the wait. Everything else a row says is as it was.
+ */
+test("a quiet list marks its running row without a spinner, and says the rest as before", () => {
+  const steps = [
+    {
+      step: "install",
+      ok: true,
+      running: true,
+      detail: "Setting up OpenBot on this computer.",
+      position: { at: 3, of: 4 },
+      startedAt: Date.now() - 5_000,
+    },
+  ];
+  const loud = render(<SetupProgress steps={steps} label="Loud" />);
+  const spun = loud.getByRole("list", { name: "Loud" });
+  expect(spun.querySelector(".step-spinner")).not.toBeNull();
+  expect(spun.querySelector(".step-current")).toBeNull();
+  const said = spun.querySelector(".step-status")?.textContent;
+  cleanup();
+
+  const quiet = render(<SetupProgress steps={steps} label="Quiet" quiet />);
+  const marked = quiet.getByRole("list", { name: "Quiet" });
+  expect(marked.querySelector(".step-spinner")).toBeNull();
+  expect(marked.querySelector(".step-current")).not.toBeNull();
+  // Marked as the one it is on, not as done or failed.
+  expect(marked.querySelector(".mark")?.className).toBe("mark active");
+  expect(marked.querySelector(".step-status")?.textContent).toBe(said);
+  expect(marked.textContent).toContain("Step 3 of 4");
+  expect(marked.textContent).toContain("Setting up OpenBot on this computer.");
+});
+
+test("a quiet list still shows a finished row's tick and a waiting row's mark", () => {
+  const view = render(
+    <SetupProgress
+      quiet
+      steps={[
+        { step: "prepare", ok: true, running: false, detail: "" },
+        { step: "install", ok: true, running: true, waiting: true, detail: "" },
+      ]}
+    />,
+  );
+  expect(view.container.querySelector(".step-spinner")).toBeNull();
+  expect(view.container.querySelector(".step-current")).toBeNull();
+  expect(view.container.querySelector(".mark.good")?.textContent).toBe("✓");
+  expect(view.container.querySelector(".step-waiting")).not.toBeNull();
+});
+
+for (const state of ["running", "waiting", "paused", "failed"] as const) {
+  test(`focus leads with the ${state} row and preserves its status and actions`, async () => {
+    let retried = 0;
+    const steps = [
+      { step: "Prepared", ok: true, detail: "" },
+      {
+        step: "Current operation",
+        ok: state !== "failed",
+        running: state !== "failed",
+        waiting: state === "waiting",
+        paused: state === "paused",
+        detail: "Directions for this operation.",
+        onTryAgain: () => {
+          retried += 1;
+        },
+      },
+      { step: "Earlier milestone", ok: true, detail: "" },
+      {
+        step: "Another failure",
+        ok: false,
+        detail: "Keep this failure visible.",
+      },
+      { step: "Next operation", ok: true, pending: true, detail: "" },
+    ];
+    const view = render(<SetupProgress steps={steps} showElapsed={false} />);
+    const original = view.getByRole("listitem", { name: "Current operation" });
+    const names = () =>
+      view
+        .getAllByRole("listitem")
+        .map((row) => row.getAttribute("aria-label"));
+    expect(names()).toEqual(steps.map((step) => step.step));
+    view.rerender(
+      <SetupProgress steps={steps} showElapsed={false} presentation="focus" />,
+    );
+    expect(names()).toEqual([
+      "Current operation",
+      "Prepared",
+      "Earlier milestone",
+      "Another failure",
+      "Next operation",
+    ]);
+    expect(view.getByRole("listitem", { name: "Current operation" })).toBe(
+      original,
+    );
+    const list = view.getByRole("list", { name: "Setup progress" });
+    expect(list.classList.contains("setup-progress-focus")).toBe(true);
+    expect(list.getAttribute("aria-live")).toBe("polite");
+    const current = within(original);
+    expect(
+      current.getByText(
+        state === "running"
+          ? "In progress"
+          : state === "waiting"
+            ? "Waiting for you"
+            : state === "paused"
+              ? "Paused"
+              : "Failed",
+      ),
+    ).toBeTruthy();
+    expect(current.getByText("Directions for this operation.")).toBeTruthy();
+    expect(view.getByText("Keep this failure visible.")).toBeTruthy();
+    expect(list.querySelectorAll(".step-spinner").length).toBe(
+      state === "running" ? 1 : 0,
+    );
+    if (state === "paused") {
+      await userEvent.click(current.getByRole("button", { name: "Try again" }));
+      expect(retried).toBe(1);
+    }
+    view.rerender(
+      <SetupProgress steps={steps} showElapsed={false} presentation="list" />,
+    );
+    expect(names()).toEqual(steps.map((step) => step.step));
+    expect(list.className).toBe("steps");
+  });
+}
+
+test("milestones preserves all supplied rows and their order with quiet running marks", () => {
+  const steps = [
+    { step: "Prepared", ok: true, detail: "" },
+    {
+      step: "Current operation",
+      ok: true,
+      running: true,
+      detail: "Still working.",
+    },
+  ];
+  const view = render(
+    <SetupProgress
+      steps={steps}
+      presentation="milestones"
+      quiet
+      showElapsed={false}
+    />,
+  );
+  const list = view.getByRole("list", { name: "Setup progress" });
+  expect(list.className).toBe("steps setup-milestones");
+  expect(
+    view.getAllByRole("listitem").map((row) => row.getAttribute("aria-label")),
+  ).toEqual(steps.map((step) => step.step));
+  expect(list.querySelector(".step-spinner")).toBeNull();
+  expect(list.querySelector(".step-current")).not.toBeNull();
+});
+
+test("focus keeps other running rows visible with only the leading spinner", () => {
+  const view = render(
+    <SetupProgress
+      presentation="focus"
+      showElapsed={false}
+      steps={[
+        { step: "Optional update", ok: false, note: "Not updated", detail: "" },
+        { step: "Prepared", ok: true, detail: "" },
+        { step: "Current operation", ok: true, running: true, detail: "" },
+        {
+          step: "Parallel operation",
+          ok: true,
+          running: true,
+          detail: "Still downloading.",
+        },
+      ]}
+    />,
+  );
+  expect(view.getAllByRole("listitem")[0]?.getAttribute("aria-label")).toBe(
+    "Current operation",
+  );
+  expect(view.container.querySelectorAll(".step-spinner").length).toBe(1);
+  expect(
+    within(
+      view.getByRole("listitem", { name: "Parallel operation" }),
+    ).getByText("In progress"),
+  ).toBeTruthy();
+  expect(view.getByText("Still downloading.")).toBeTruthy();
+});
+
+for (const downloads of [
+  { bytes: 52_000_000, done: 1, total: 5 },
+  { bytes: 52_000_000, size: 100_000_000, done: 1, total: 5 },
+  { bytes: 100_000_000, size: 100_000_000, done: 3, total: 5 },
+]) {
+  test(`focus preserves download measurements with ${downloads.size ?? "unknown"} total bytes and ${downloads.done} parts done`, () => {
+    setSystemTime(new Date("2026-11-10T03:05:00Z"));
+    const steps = [
+      { step: "Prepared", ok: true, detail: "" },
+      ...installing(downloads),
+    ];
+    const view = render(<SetupProgress steps={steps} showElapsed={false} />);
+    const bar = view.getByRole("progressbar");
+    const value = bar.getAttribute("value");
+    const summary = bar.getAttribute("aria-valuetext");
+    const said = view.getByRole("listitem", {
+      name: "Downloading OpenBot",
+    }).textContent;
+    view.rerender(
+      <SetupProgress steps={steps} showElapsed={false} presentation="focus" />,
+    );
+    expect(view.getByRole("progressbar")).toBe(bar);
+    expect(bar.getAttribute("value")).toBe(value);
+    expect(bar.getAttribute("aria-valuetext")).toBe(summary);
+    expect(view.getAllByRole("listitem")[0]?.textContent).toBe(said);
+  });
+}

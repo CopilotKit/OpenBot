@@ -75,8 +75,14 @@ mock.module("@tauri-apps/api/event", () => ({
 
 mock.module("./Mark", () => ({
   Mark: ({ name }: { name: string }) => <span>{name}</span>,
-  ButtonMark: () => null,
-  MarkImage: () => null,
+  // The mark a "Sign in with" button carries, by the id it was given. The real one draws that
+  // vendored file, which needs Vite's glob.
+  ButtonMark: ({ id }: { id: string | null }) =>
+    id ? <img alt="" data-mark={id} /> : null,
+  // A cloud's mark, named, as OpenBot for Business's Self-Hosted row lists them.
+  MarkImage: ({ id, name }: { id: string; name: string }) => (
+    <img alt={name} data-mark={id} />
+  ),
 }));
 
 const { App } = await import("./App");
@@ -158,7 +164,7 @@ test("the big downloads start with Install, before anyone signs in, and never be
   await steadied(account);
   const row = within(
     view.getByRole("listitem", {
-      name: "Installing OpenBot in the background",
+      name: "Preparing OpenBot",
     }),
   );
   expect(
@@ -195,6 +201,11 @@ test("on the first screen, the line says how far the downloads are, with one bar
     "Downloading OpenBot. About 3 minutes left.",
   );
   const bar = view.getByRole("progressbar", { name: "Download progress" });
+  expect(bar.closest(".rail-foot")).not.toBeNull();
+  expect(
+    bar.closest(".rail-foot")?.querySelectorAll(".step-spinner").length,
+  ).toBe(0);
+  expect(bar.closest("main > .sheet")).toBeNull();
   expect(Number(bar.getAttribute("value"))).toBeCloseTo(1.2 / 2.9, 3);
   expect(bar.getAttribute("aria-valuetext")).toBe("1.2 GB of 2.9 GB");
 });
@@ -333,7 +344,7 @@ test("a download paused for space says so, with no bar and no time running on", 
   );
   const item = within(
     view.getByRole("listitem", {
-      name: "Installing OpenBot in the background",
+      name: "Preparing OpenBot",
     }),
   );
   expect(item.getByText("Step 2 of 4 · Paused")).toBeTruthy();
@@ -566,4 +577,36 @@ test("after a move, the same summary offers no second move", async () => {
   await said({ ...SHORT_ON_C });
   expect(view.queryByRole("button", { name: MOVE_TO_F })).toBeNull();
   expect(called("move_engine_here")).toHaveLength(1);
+});
+
+/*
+ * One spinner at a time. The native side offers the move only while the disk is short
+ * (`Summary::move_to` is kept only in the short state), and starts no download while the disk
+ * moves (`early_downloads::moving`). So a download that starts drops the move's line with its
+ * offer: the line downloading and the move running never spin side by side.
+ */
+test("a download that starts ends the move's line: one spinner, the download's", async () => {
+  const view = await lineSaying(SHORT_ON_C);
+  await userEvent.click(view.getByRole("button", { name: MOVE_TO_F }));
+  expect(view.container.querySelectorAll(".step-spinner")).toHaveLength(1);
+  await said({ state: "downloading", bytes: 0, size: 2.9 * GB });
+  expect(view.queryByText("Moving OpenBot's storage to F:…")).toBeNull();
+  expect(view.container.querySelectorAll(".step-spinner")).toHaveLength(1);
+});
+
+/*
+ * Install's own row spins beside the line when it runs with no download of its own (checking the
+ * release, before the images): the line keeps its words and its bar, and does not spin as well.
+ */
+test("a quiet line says how far the downloads are, with no spinner of its own", async () => {
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(<EarlyDownloadsLine quiet />);
+  });
+  await said({ state: "downloading", bytes: 1.2 * GB, size: 2.9 * GB });
+  expect(view.getByRole("status").textContent).toBe("Downloading OpenBot.");
+  expect(
+    view.getByRole("progressbar", { name: "Download progress" }),
+  ).toBeTruthy();
+  expect(view.container.querySelector(".step-spinner")).toBeNull();
 });
