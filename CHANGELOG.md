@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Smaller changes
+
+- **Settings and Admin call the place you connect your AI "AI providers".** It was "Providers",
+  which didn't say what it provides, and people looking for where to set up their AI didn't find
+  it. Its pages, their Back links and the model picker's provider list say the same. The addresses
+  stay `/settings/providers` and `/admin/providers`.
+
 ## 1.2.0
 
 **Before upgrading.**

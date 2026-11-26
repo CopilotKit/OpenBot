@@ -237,7 +237,7 @@ test("Approvals and Automatic learning link to where the person sets their own",
   ).toBe("/skills");
 });
 
-test("Providers shows who serves the models and what the Bots ran on, without the team's settings", async () => {
+test("AI providers shows who serves the models and what the Bots ran on, without the team's settings", async () => {
   const view = await draw(ProvidersPage);
   expect(await view.findByText("OpenAI")).toBeTruthy();
   expect(

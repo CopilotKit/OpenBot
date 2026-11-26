@@ -42,7 +42,7 @@ import type { OnboardingStep } from "./onboarding-wizard";
  * server says a connection is in use, the step's button is disabled and there is no Not now.
  *
  * THE CHOOSER IS SETTINGS' OWN, ON THE PAGE. The same provider list, ways in and checks as
- * Settings → Providers → Connect another AI (ai-connection-chooser.tsx), drawn in a card where the
+ * Settings → AI providers → Connect another AI (ai-connection-chooser.tsx), drawn in a card where the
  * other steps draw their picture: beside the words on a desktop, under them on a phone.
  *
  * SEVERAL, ONE AFTER ANOTHER. Each connection brings the person back to the list, where what they
