@@ -20,7 +20,6 @@ import {
   BUSINESS_FEATURE_GROUPS,
   BUSINESS_FEATURES_MORE,
 } from "../../shared/openbot-for-business";
-import { forgetBusinessOpened } from "./BusinessBooker";
 import { DEFAULT_HARNESS } from "./harness";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
@@ -112,6 +111,8 @@ mock.module("./Mark", () => ({
   ),
 }));
 
+// Load after the Mark mock: BusinessBooker uses marks that Vite loads with import.meta.glob.
+const { forgetBusinessOpened } = await import("./BusinessBooker");
 const { App } = await import("./App");
 // No page replaces this one here, so the running screen comes once the window was sent to OpenBot.
 // The test of the handover itself holds it as the app does.
