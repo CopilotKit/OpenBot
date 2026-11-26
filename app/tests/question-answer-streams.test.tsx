@@ -423,6 +423,36 @@ test("the Bot's work on an answer streams in the conversation, and Stop stops it
 });
 
 /*
+ * The answer carries on the turn the Bot asked in; it is not a new prompt. Counted as one, a
+ * conversation of one question drew the turn rail's two marks in the margin, which read as a stray
+ * dash left of the transcript.
+ */
+test("answering the Bot's question keeps the conversation at one turn, with no rail beside it", async () => {
+  const view = conversation();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await view.findByRole("region", {
+    name: `${channel.name} is waiting on your answer`,
+  });
+  await view.findByText("Find weekend plans");
+
+  await user.type(
+    await view.findByRole("textbox", { name: "Message" }),
+    "Chicago",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(runs).toHaveLength(1));
+  await view.findByText(WORKING);
+  expect(view.getByText("Chicago")).toBeTruthy();
+  finishRun?.();
+  await waitFor(() =>
+    expect(view.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+
+  expect(view.container.querySelector('[data-slot="rail-mark"]')).toBeNull();
+  expect(view.queryByRole("navigation", { name: "Turns" })).toBeNull();
+});
+
+/*
  * The person answered the moment the Bot asked, before the inbox that lists the question was read
  * again, and then stopped the turn their answer started. Their answer went as a plain message, so the
  * question stayed open: once the inbox and the badge were read again, the card asked for an answer
