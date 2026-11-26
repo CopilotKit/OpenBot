@@ -147,7 +147,7 @@ function appFrames(): Plugin {
   };
 }
 
-// `bun run workbench` lands on the workbench: "/" (outside a frame) answers 302 to "/workbench/" with
+// `bun run ui-workbench` lands on the workbench: "/" (outside a frame) answers 302 to "/workbench/" with
 // the same query, and the startup output names /workbench/ as the link to open. An iframe still
 // gets the app at "/" (appFrames), so the app's own home route keeps working.
 const HOME = "/workbench/";
@@ -202,8 +202,8 @@ function killGroup(pid: number): void {
   } catch {}
 }
 
-// Starts the app server (`bun run workbench` in app/) when it does not answer, so
-// `bun run workbench` in desktop/ is still the one command. The app server stops when this server
+// Starts the app server (`bun run ui-workbench` in app/) when it does not answer, so
+// `bun run ui-workbench` in desktop/ is still the one command. The app server stops when this server
 // closes or this process ends. When the app server does not start, the desktop scenes still work.
 //
 // It starts only after this server listens: a second run on a busy port must not touch the app
@@ -247,7 +247,7 @@ async function startAppServer(server: ViteDevServer): Promise<void> {
     return;
   }
 
-  const child: ChildProcess = spawn("bun", ["run", "workbench"], {
+  const child: ChildProcess = spawn("bun", ["run", "ui-workbench"], {
     cwd: join(desktopDir, "..", "app"),
     env: {
       ...process.env,

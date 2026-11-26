@@ -51,7 +51,7 @@ describe("buildPrompt, element", () => {
     expect(prompt).toContain("> This should be centered");
     expect(prompt).toContain("Row · desktop/src/Row.tsx:12");
     expect(prompt).toContain(
-      "cd desktop && bun run workbench:shot --url 'http://localhost:5173/#abc'",
+      "cd desktop && bun run ui-workbench:shot --url 'http://localhost:5173/#abc'",
     );
     expect(prompt).not.toContain("--at");
   });
@@ -233,7 +233,7 @@ describe("buildPrompt, app scenes", () => {
       { kind: "element", element },
       appContext("browser"),
     );
-    expect(prompt).toContain(`workbench:shot --url '${context.link}'`);
+    expect(prompt).toContain(`ui-workbench:shot --url '${context.link}'`);
     expect(prompt).not.toContain("--at");
   });
 

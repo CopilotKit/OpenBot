@@ -4,11 +4,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "workbench": "vite --config vite.workbench.config.ts",
+    "ui-workbench": "vite --config vite.workbench.config.ts",
     "build": "vite build",
-    "workbench:shot": "bun workbench/shot.ts",
+    "ui-workbench:shot": "bun workbench/shot.ts",
     "typecheck": "tsc --noEmit",
-    "typecheck:workbench": "tsc --noEmit -p workbench",
+    "typecheck:ui-workbench": "tsc --noEmit -p workbench",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -15,7 +15,7 @@ import { ensureServer } from "./server";
 import { DEFAULT_WINDOW, decodeState, encodeState } from "./urlState";
 
 const USAGE =
-  "Usage: bun run workbench:shot [preset] [--url <workbench-link>] [--route </path>] [--size <w>x<h>] [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--role member|admin|owner] [--skin <skin>] [--sidebar open|closed] [--grid] [--out <dir>]";
+  "Usage: bun run ui-workbench:shot [preset] [--url <workbench-link>] [--route </path>] [--size <w>x<h>] [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--role member|admin|owner] [--skin <skin>] [--sidebar open|closed] [--grid] [--out <dir>]";
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const catalog = await loadScenesInBun();
   const params = new URLSearchParams();

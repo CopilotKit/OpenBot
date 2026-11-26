@@ -62,7 +62,7 @@ function cell(text: string): string {
 }
 
 function shotCommand(context: CommentContext): string {
-  return `cd desktop && bun run workbench:shot --url '${context.link.replaceAll("'", "'\\''")}'`;
+  return `cd desktop && bun run ui-workbench:shot --url '${context.link.replaceAll("'", "'\\''")}'`;
 }
 
 function describeElement(el: PickedElement): string[] {
@@ -223,7 +223,7 @@ export function buildPrompt(
     `- Link: ${context.link}`,
     "",
     `To see it: \`${command}\``,
-    "Or open the link with `bun run workbench` running.",
+    "Or open the link with `bun run ui-workbench` running.",
     "",
   ];
 

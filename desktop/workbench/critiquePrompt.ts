@@ -125,9 +125,9 @@ export function critiqueTarget(
   return mainSourceFile(report.elements) ?? context.route ?? context.scene.id;
 }
 
-/** The workbench:shot command that renders the same frame. */
+/** The ui-workbench:shot command that renders the same frame. */
 export function shotCommand(context: CritiqueContext): string {
-  return `cd desktop && bun run workbench:shot --url '${context.link.replaceAll("'", "'\\''")}'`;
+  return `cd desktop && bun run ui-workbench:shot --url '${context.link.replaceAll("'", "'\\''")}'`;
 }
 
 function round(value: number): string {
@@ -265,7 +265,7 @@ export function buildCritiquePrompt(
     if (context.route) lines.push(`- Route: ${context.route}`);
   }
   lines.push(
-    `- Link: ${context.link} (open it with \`cd desktop && bun run workbench\` running)`,
+    `- Link: ${context.link} (open it with \`cd desktop && bun run ui-workbench\` running)`,
     "",
     "## Layout warnings to check",
     "",

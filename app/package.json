@@ -12,8 +12,8 @@
     "predev": "bun run --cwd .. generate:app-config",
     "pretypecheck": "bun run --cwd .. generate:app-config",
     "typecheck": "tsc --noEmit",
-    "workbench": "bun run --cwd .. generate:app-config && bun --bun node_modules/vite/bin/vite.js --config vite.workbench.config.ts",
-    "typecheck:workbench": "bun run --cwd .. generate:app-config && tsc --noEmit -p workbench"
+    "ui-workbench": "bun run --cwd .. generate:app-config && bun --bun node_modules/vite/bin/vite.js --config vite.workbench.config.ts",
+    "typecheck:ui-workbench": "bun run --cwd .. generate:app-config && tsc --noEmit -p workbench"
   },
   "dependencies": {
     "@ag-ui/core": "1.0.2",
