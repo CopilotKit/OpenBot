@@ -604,6 +604,11 @@ type OwnTool = {
    * step did not happen, so its line says what was tried. Without it the line keeps `done`.
    */
   attempted?: string;
+  /**
+   * What a step that did not work says, where `done` would claim it happened: "Didn't draw an
+   * interface". Without it the line says "<done>, didn't work", as a command that ran and failed does.
+   */
+  failed?: string;
   /** The argument naming what the step acted on, said beside its words: a file's path. */
   subject?: "path";
   /**
@@ -718,7 +723,12 @@ const OWN_TOOLS: Record<string, OwnTool> = {
    * Drawing a generated interface in the conversation. The runtime offers it, not an OpenBot
    * registration, so `built-in-tool-labels.test.ts` cannot find it; its words go here by hand.
    */
-  render_ui: { running: "Drawing an interface", done: "Drew an interface" },
+  render_ui: {
+    running: "Drawing an interface",
+    done: "Drew an interface",
+    attempted: "Draw an interface",
+    failed: "Didn't draw an interface",
+  },
 
   // Making a Bot from a conversation.
   list_bots: {
@@ -909,6 +919,15 @@ export function ownToolLabel(name: string, running = false): string | null {
 export function ownToolAttempt(name: string): string | null {
   const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
   return own?.attempted ?? null;
+}
+
+/**
+ * What one of OpenBot's own steps says when it did not work and so did not happen ("Didn't draw an
+ * interface"), or null when it has no words of its own for that.
+ */
+export function ownToolFailedLabel(name: string): string | null {
+  const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
+  return own?.failed ?? null;
 }
 
 /**
