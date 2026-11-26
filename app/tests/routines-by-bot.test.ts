@@ -320,6 +320,21 @@ describe("routinesByBot", () => {
     ]);
   });
 
+  test("a Bot in both lists is one group, in the shown position", () => {
+    const rows = [
+      routineRow("r1", { botId: "s1" }),
+      routineRow("r2", { botId: "h1" }),
+    ];
+    const groups = routinesByBot(
+      rows,
+      [bot("s1", "Sam")],
+      [bot("h1", "Hal"), bot("s1", "Sam")],
+    );
+    expect(groups.map((group) => group.botId)).toEqual(["s1", "h1"]);
+    expect(groups[0]).toMatchObject({ hidden: false, known: true });
+    expect(ids(groups[0]?.rows ?? [])).toEqual(["r1"]);
+  });
+
   test("a Bot with no rows has no group", () => {
     const groups = routinesByBot(
       [routineRow("r1", { botId: "s1" })],

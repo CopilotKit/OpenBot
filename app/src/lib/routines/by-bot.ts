@@ -169,9 +169,14 @@ export function routinesByBot(
   const strays = [...new Set(rows.map((row) => row.agentId))]
     .filter((botId) => !listed.has(botId))
     .map((botId) => ({ id: botId, name: "A Bot", avatarSeed: botId }));
+  // Right after a hide or an unhide a Bot can be in both lists for a moment: it is one group, in
+  // the shown position.
+  const shownIds = new Set(shown.map((bot) => bot.id));
   const ordered = [
     ...shown.map((bot) => ({ bot, hidden: false, known: true })),
-    ...hidden.map((bot) => ({ bot, hidden: true, known: true })),
+    ...hidden
+      .filter((bot) => !shownIds.has(bot.id))
+      .map((bot) => ({ bot, hidden: true, known: true })),
     ...strays.map((bot) => ({ bot, hidden: false, known: false })),
   ];
   return ordered.flatMap(({ bot, hidden, known }) => {
