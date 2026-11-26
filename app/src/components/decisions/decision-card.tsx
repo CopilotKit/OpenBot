@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { Badge, type Tone } from "@/components/gallery/frame";
 import { Button } from "@/components/ui/button";
+import { isComposing } from "@/lib/composing";
 import { type Failure, failureSaid } from "@/lib/load-failure";
 import { EASE_OUT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -254,7 +255,7 @@ export function DecisionCard({
                     onChange={(event) => setText(event.target.value)}
                     onFocus={() => setPicked(OTHER)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") {
+                      if (event.key === "Enter" && !isComposing(event)) {
                         event.preventDefault();
                         send();
                       }

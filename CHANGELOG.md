@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Confirming a character with an input method editor no longer submits a free-text answer to a
+  Bot question.
+
 ## 1.2.0
 
 **Before upgrading.**
