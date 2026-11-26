@@ -141,7 +141,9 @@ fn main() {
     if SCENARIO == "stop-ipc" && (joined.starts_with("ps ") || joined.contains("stop supervisor")) {
         return;
     }
-    if SCENARIO == "stop-ipc" && joined == "compose -f docker-compose.yml --profile harness --profile openbot down" {
+    if SCENARIO == "stop-ipc"
+        && joined == "compose -f docker-compose.yml --profile harness --profile openbot down"
+    {
         let mut barrier = std::net::TcpStream::connect(
             std::fs::read_to_string("stop-barrier-address")
                 .unwrap()
@@ -188,7 +190,11 @@ fn main() {
             std::process::exit(125);
         }
         if joined == "machine inspect openbot" {
-            let state = if SCENARIO == "machine-stalled" { "running" } else { "stopped" };
+            let state = if SCENARIO == "machine-stalled" {
+                "running"
+            } else {
+                "stopped"
+            };
             println!("[{{\"Name\":\"openbot\",\"State\":\"{state}\"}}]");
             return;
         }
@@ -238,10 +244,10 @@ fn main() {
             ) && value.contains(" --filter label=com.docker.compose.service=") => {}
         "compose ps --format {{.Ports}}" => {
             if SCENARIO == "harness" {
-                // The default Bot's port (4215) among them, so a Start in these tests keeps it as
-                // the stack's own rather than probing it while another test's Start probes it too.
+                // The default Bot and both plan SDK Bots are already published by this stack.
+                // Keep their ports without probing real listeners or Windows excluded ranges.
                 println!(
-                    "127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp, 127.0.0.1:4215->4215/tcp"
+                    "127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp, 127.0.0.1:4215->4215/tcp, 127.0.0.1:4216->4216/tcp"
                 );
             }
         }
