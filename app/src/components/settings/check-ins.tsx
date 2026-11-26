@@ -27,8 +27,15 @@ import { queryClient } from "@/query-client";
  * says who turned it off. Their own choice is kept underneath for when the admin turns it back on.
  *
  * No section heading: the page is Routines, and a check-in is one kind of routine on it.
+ *
+ * `variant="row"` draws it as a row of its own; `variant="line"` draws one quiet right-aligned line,
+ * for a page that keeps it under its list.
  */
-export function CheckInsSection() {
+export function CheckInsSection({
+  variant = "row",
+}: {
+  variant?: "row" | "line";
+}) {
   const preferences = useUserPreferences();
   const allowed = useQuery(proactiveAllowedQueryOptions());
   const save = useMutation(
@@ -40,6 +47,40 @@ export function CheckInsSection() {
     preferences.data?.proactive;
   const byAdmin = allowed.data === false;
   const on = chosen === "on" && !byAdmin;
+  const failed = save.error ? (
+    <p className="mt-4 text-destructive text-sm" role="alert">
+      {failureSaid(save.error)}
+    </p>
+  ) : null;
+  if (variant === "line") {
+    return (
+      <div>
+        {preferences.isPending ? null : preferences.error ? (
+          unavailableSaid(preferences.error) ? null : (
+            <p className="text-destructive text-sm" role="alert">
+              Couldn't load your check-ins. Try again in a moment.
+            </p>
+          )
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-muted-foreground text-sm">
+              Check-ins from all Bots
+              {byAdmin ? " Turned off by your admin." : ""}
+            </span>
+            <Switch
+              aria-label="Check-ins for all your Bots"
+              checked={on}
+              disabled={byAdmin || save.isPending}
+              onCheckedChange={(next) =>
+                save.mutate({ proactive: next ? "on" : "off" })
+              }
+            />
+          </div>
+        )}
+        {failed}
+      </div>
+    );
+  }
   return (
     <PageSection>
       {preferences.isPending ? null : preferences.error ? (
@@ -78,11 +119,7 @@ export function CheckInsSection() {
           </Item>
         </PageRows>
       )}
-      {save.error ? (
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          {failureSaid(save.error)}
-        </p>
-      ) : null}
+      {failed}
     </PageSection>
   );
 }
