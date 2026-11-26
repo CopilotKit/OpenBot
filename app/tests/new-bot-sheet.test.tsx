@@ -362,7 +362,8 @@ test("instructions up to 5000 characters are sent whole, and the field takes no 
   await user.click(view.getByRole("button", { name: "Create Bot" }));
   await waitFor(() => expect(creates).toHaveLength(1));
   expect(creates[0]?.roleDescription).toBe(most);
-});
+  // Typing 5000 characters a key at a time takes seconds on a busy runner.
+}, 60_000);
 
 test("refuses an empty or unreachable custom endpoint without creating", async () => {
   verdict = { ok: false, reason: "Nothing answered at that address." };

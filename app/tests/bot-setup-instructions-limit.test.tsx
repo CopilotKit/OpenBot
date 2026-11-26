@@ -67,6 +67,9 @@ const BOT: AgentProfile = {
   mine: true,
 };
 
+/** Typing 10,000 characters a key at a time takes seconds on a busy runner. */
+const TYPING = 60_000;
+
 let stored: AgentProfile = BOT;
 let patches: UpdateBotRequest[] = [];
 
@@ -154,39 +157,57 @@ test("the form holds a Bot's instructions to the API's limit", () => {
   }
 });
 
-test("What it does saves 5000 characters, and 5001 is refused with nothing sent", async () => {
-  const view = draw(BOT);
-  const most = `${"Check every receipt. ".repeat(238)}Done.`.slice(0, 5000);
-  expect(most).toHaveLength(5000);
+test(
+  "What it does saves 5000 characters, and 5001 is refused with nothing sent",
+  async () => {
+    const view = draw(BOT);
+    const most = `${"Check every receipt. ".repeat(238)}Done.`.slice(0, 5000);
+    expect(most).toHaveLength(5000);
 
-  const tooLong = await save(view, /^What it does/, "What it does", `${most}!`);
-  expect(within(tooLong).getByRole("alert").textContent).toBe(
-    "What it does must be 5000 characters or fewer.",
-  );
-  expect(patches).toEqual([]);
-  fireEvent.click(within(tooLong).getByRole("button", { name: "Cancel" }));
-  await settleReactWork();
+    const tooLong = await save(
+      view,
+      /^What it does/,
+      "What it does",
+      `${most}!`,
+    );
+    expect(within(tooLong).getByRole("alert").textContent).toBe(
+      "What it does must be 5000 characters or fewer.",
+    );
+    expect(patches).toEqual([]);
+    fireEvent.click(within(tooLong).getByRole("button", { name: "Cancel" }));
+    await settleReactWork();
 
-  await save(view, /^What it does/, "What it does", most);
-  expect(view.queryByRole("dialog")).toBeNull();
-  expect(patches).toHaveLength(1);
-  expect(patches[0]?.roleDescription).toBe(most);
-  expect(stored.roleDescription).toBe(most);
-});
+    await save(view, /^What it does/, "What it does", most);
+    expect(view.queryByRole("dialog")).toBeNull();
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.roleDescription).toBe(most);
+    expect(stored.roleDescription).toBe(most);
+  },
+  TYPING,
+);
 
-test("the starter Bot's Instructions save 5000 characters, and 5001 is refused", async () => {
-  const view = draw({ ...BOT, instructions: "Help with everyday work." });
-  const most = "i".repeat(5000);
+test(
+  "the starter Bot's Instructions save 5000 characters, and 5001 is refused",
+  async () => {
+    const view = draw({ ...BOT, instructions: "Help with everyday work." });
+    const most = "i".repeat(5000);
 
-  const tooLong = await save(view, /^Instructions/, "Instructions", `${most}i`);
-  expect(within(tooLong).getByRole("alert").textContent).toBe(
-    "Instructions must be 5000 characters or fewer.",
-  );
-  expect(patches).toEqual([]);
-  fireEvent.click(within(tooLong).getByRole("button", { name: "Cancel" }));
-  await settleReactWork();
+    const tooLong = await save(
+      view,
+      /^Instructions/,
+      "Instructions",
+      `${most}i`,
+    );
+    expect(within(tooLong).getByRole("alert").textContent).toBe(
+      "Instructions must be 5000 characters or fewer.",
+    );
+    expect(patches).toEqual([]);
+    fireEvent.click(within(tooLong).getByRole("button", { name: "Cancel" }));
+    await settleReactWork();
 
-  await save(view, /^Instructions/, "Instructions", most);
-  expect(patches).toHaveLength(1);
-  expect(patches[0]?.instructions).toBe(most);
-});
+    await save(view, /^Instructions/, "Instructions", most);
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.instructions).toBe(most);
+  },
+  TYPING,
+);
