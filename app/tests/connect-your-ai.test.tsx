@@ -309,6 +309,32 @@ function signInStatus(
   });
 }
 
+/** One of the person's own connections, as their list answers it. */
+function connectedEntry(
+  provider: AiConnectionProvider,
+  login: AiConnectionEntry["login"],
+  model: string | null,
+  isDefault: boolean,
+): AiConnectionEntry {
+  return ListPersonalAiConnectionsResponse.parse({
+    connections: [
+      {
+        id: provider,
+        provider,
+        login,
+        model,
+        endpointHost: null,
+        isDefault,
+        ready: true,
+        problem: null,
+        connectedAt: "2026-11-25T09:00:00.000Z",
+      },
+    ],
+    signIns: [],
+    nextCursor: null,
+  }).connections[0] as AiConnectionEntry;
+}
+
 /**
  * The organization's own AI, as an admin reads it, agreeing with what the person's answer says of
  * it: none on OpenBot Cloud until one is set.
@@ -2900,9 +2926,12 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           .click();
         await chooser.getByText("MQ7T-WD4X").waitFor();
         await chooser.getByText("Signed in to xAI.").waitFor();
-        expect(await chooser.getByLabel("Model name").inputValue()).toBe(
-          "grok-4.7",
-        );
+        /*
+         * Nothing to type: a sign-in asks for no model, as a key or a plan doesn't. The picker
+         * offers what xAI lists for it; the connection names xAI's usual one for runs nobody picked.
+         */
+        expect(await chooser.getByLabel("Model name").count()).toBe(0);
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
         await chooser.getByRole("button", { name: "Connect" }).click();
         const connected = chooser.getByRole("status");
         await connected.waitFor();
@@ -2945,6 +2974,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           0,
         );
         await chooser.getByText("Signed in to Google Gemini.").waitFor();
+        expect(await chooser.getByLabel("Model name").count()).toBe(0);
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
         expect(google.signIns).toEqual([{ provider: "google" }]);
         expect(google.finishes).toEqual([]);
         expect(google.opened[0]).toStartWith(
@@ -2961,6 +2992,129 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         );
       } finally {
         await second.close();
+      }
+    }, 90_000);
+
+  /*
+   * Settings → AI providers → Connect another AI, as it was reported on 1.2.0: xAI's sign-in asked for
+   * a model name typed in raw, and once connected the page went on to xAI's own page. Now nothing is
+   * typed, and Connect goes back to the list with xAI checked, as onboarding's Connect your AI does.
+   */
+  for (const engine of engines)
+    for (const theme of THEMES)
+      for (const window of [WIDE, PHONE])
+        test(`Settings' Connect another AI signs in to xAI with nothing to type, and goes back to its list with xAI checked, in ${engine}, ${theme}, ${window.width}`, async () => {
+          // Their organization has an AI, so the app doesn't hold them at Connect your AI.
+          const server = new FakeServer("organization", true);
+          server.list = [connectedEntry("anthropic", "api-key", null, true)];
+          const page = await open(
+            "/settings/providers/new?owner=personal",
+            server,
+            engine,
+            theme,
+            window,
+          );
+          try {
+            await heading(page, "Connect another AI");
+            const chooser = page.locator("[data-ai-chooser]");
+            await chooser.getByRole("button", { name: /^xAI/ }).click();
+            await chooser
+              .getByRole("button", { name: "Sign in with xAI", exact: true })
+              .click();
+            await chooser.getByText("Signed in to xAI.").waitFor();
+            await shoot(page, "settings-xai-signed-in", engine, theme, window);
+            expect(await measured(page)).toEqual(FINE);
+            // Read now, said after Connect, so both screens are seen whatever they hold.
+            const fields = await chooser.getByRole("textbox").count();
+
+            await chooser.getByRole("button", { name: "Connect" }).click();
+            const xai = chooser.getByRole("button", { name: /^xAI/ });
+            const checked = xai.getByRole("img", { name: "Connected" });
+            // Wherever Connect leads, it is seen first, then held to where it should lead.
+            await checked
+              .or(page.getByText(/Pick one of its models in a conversation/))
+              .waitFor();
+            await shoot(page, "settings-xai-connected", engine, theme, window);
+            // Nothing to type: no model name, no field at all.
+            expect(fields).toBe(0);
+            expect(new URL(page.url()).pathname).toBe(
+              "/settings/providers/new",
+            );
+            expect(await checked.count()).toBe(1);
+            expect(await xai.textContent()).toContain(
+              "Signed in with your xAI account.",
+            );
+            // Two now: the first stays the default, and says so.
+            expect(
+              await chooser
+                .getByRole("button", { name: /^Anthropic/ })
+                .textContent(),
+            ).toContain("Default");
+            expect(
+              await page
+                .getByRole("status")
+                .filter({ hasText: "xAI is connected." })
+                .count(),
+            ).toBe(1);
+            expect(await measured(page)).toEqual(FINE);
+            expect(server.connects).toEqual([
+              { provider: "xai", login: "oauth", model: "grok-4.7" },
+            ]);
+
+            // Nothing to cancel: Done goes back to AI providers, xAI listed there.
+            expect(
+              await chooser.getByRole("button", { name: "Cancel" }).count(),
+            ).toBe(0);
+            await chooser.getByRole("button", { name: "Done" }).click();
+            await page.waitForURL(
+              (url) => url.pathname === "/settings/providers",
+            );
+            await page.getByRole("link", { name: /^xAI/ }).waitFor();
+            await shoot(page, "settings-providers", engine, theme, window);
+          } finally {
+            await page.close();
+          }
+        }, 90_000);
+
+  for (const engine of engines)
+    test(`signing in again to a sign-in that names its own model keeps that model, in ${engine}`, async () => {
+      const server = new FakeServer("organization", true);
+      server.list = [
+        connectedEntry("anthropic", "api-key", null, true),
+        {
+          ...connectedEntry("xai", "oauth", "grok-4.3", false),
+          ready: false,
+          problem: {
+            code: "sign-in-ended",
+            detail: "Your xAI sign-in ended. Sign in again.",
+          },
+        },
+      ];
+      const page = await open(
+        "/settings/providers/xai/change?owner=personal",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser
+          .getByRole("button", { name: "Sign in with xAI", exact: true })
+          .click();
+        await chooser.getByText("Signed in to xAI.").waitFor();
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        // Changing one still goes back to its own page, where the person started.
+        await page.waitForURL(
+          (url) => url.pathname === "/settings/providers/xai",
+        );
+        // The model it named before, not xAI's usual one: an upgrade changes nothing it runs on.
+        expect(server.connects).toEqual([
+          { provider: "xai", login: "oauth", model: "grok-4.3" },
+        ]);
+      } finally {
+        await page.close();
       }
     }, 90_000);
 

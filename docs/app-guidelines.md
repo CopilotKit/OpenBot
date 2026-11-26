@@ -54,6 +54,7 @@ copy, and the copies are written, never edited:
 | `desktop/src/styles.css`, `desktop/src-tauri/src/connected/sign_in.rs` (OpenBot Desktop's setup window and sign-in page) | CSS custom properties, the tokens each uses |
 | `desktop/src-tauri/src/first_paint.rs` (the window's color before the page draws) | RGB |
 | `mobile/src/scheme.ts` (the phone app) | Hex, since React Native draws no `oklch()` |
+| `app/public/manifest.webmanifest` (the web app on a phone's home screen or installed) | Hex, the light `background` only |
 
 To change a color: change it in `tokens/src/scheme.ts`, run `bun run tokens:generate`, and commit
 the scheme with every copy it rewrites. A copy inside a hand-written file sits between two marker

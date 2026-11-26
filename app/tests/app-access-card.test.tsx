@@ -21,6 +21,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useRouterState,
 } from "@tanstack/react-router";
 import {
   act,
@@ -48,6 +49,7 @@ import {
   botAppResponse,
 } from "./bot-grants-api";
 import { botPath, botResponse } from "./bots-api";
+import { startResponse } from "./connections-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -96,6 +98,11 @@ function serving(live: AppAccess | null, open?: { owner: boolean }) {
         : Response.json({ error: "nope" }, { status: 500 });
     if (url.includes("/api/plugins/connections"))
       return Response.json({ connections: [], redirectUri: null });
+    // The connect route, answering a sign-in as it does for an app that signs in.
+    if (url.endsWith("/connect"))
+      return startResponse({
+        authorizationUrl: "https://accounts.gmail.test/consent",
+      });
     return Response.json({});
   }) as unknown as typeof fetch;
   return asked;
@@ -114,7 +121,11 @@ function mount(children: ReactNode) {
   const settings = createRoute({
     getParentRoute: () => root,
     path: "/connections/$key",
-    component: () => null,
+    // Where a Reconnect lands, read back by a test as the address it reached.
+    component: function AppPage() {
+      const at = useRouterState({ select: (state) => state.location.href });
+      return <p data-testid="app-page">{at}</p>;
+    },
   });
   const router = createRouter({
     routeTree: root.addChildren([page, settings]),
@@ -199,23 +210,49 @@ test("a Shared app with no team account: Request access, not a sentence", async 
   ).toBeTruthy();
 });
 
-test("an account the vendor lost: Reconnect, though the server still reads ready", async () => {
-  serving(
+test("an account the vendor lost: Reconnect, though the server still reads ready, starts its sign-in in one press", async () => {
+  const asked = serving(
     appAccess({ state: "ready", connectedAt: "2026-10-01T00:00:00.000Z" }),
   );
-  const view = mount(
-    <AppAccessCard
-      prompt={prompt({ reason: "reconnect", at: "2026-10-20T12:00:00.000Z" })}
-    />,
-  );
-  const drawn = await card(view);
-  expect(drawn.getAttribute("data-state")).toBe("reconnect");
-  expect(drawn.textContent).toContain(
-    "Your Gmail connection needs reconnecting.",
-  );
-  expect(
-    (await view.findByText("Reconnect")).closest("a")?.getAttribute("href"),
-  ).toBe("/connections/composio-gmail");
+  // The sign-in's tab, as the browser hands it over, and where it was sent.
+  const opened: string[] = [];
+  const originalOpen = window.open;
+  window.open = (() => ({
+    opener: {},
+    closed: false,
+    location: { replace: (next: string) => opened.push(next) },
+    close: () => {},
+  })) as unknown as typeof window.open;
+  try {
+    const view = mount(
+      <AppAccessCard
+        prompt={prompt({ reason: "reconnect", at: "2026-10-20T12:00:00.000Z" })}
+      />,
+    );
+    const drawn = await card(view);
+    expect(drawn.getAttribute("data-state")).toBe("reconnect");
+    expect(drawn.textContent).toContain(
+      "Your Gmail connection needs reconnecting.",
+    );
+    fireEvent.click(
+      await view.findByRole("button", { name: "Reconnect Gmail" }),
+    );
+    await waitFor(() =>
+      expect(opened).toEqual(["https://accounts.gmail.test/consent"]),
+    );
+    expect(
+      asked.some((url) =>
+        url.endsWith("/people/me/connections/composio-gmail/connect"),
+      ),
+    ).toBe(true);
+    // The card stays where it is: the sign-in is in the tab that opened.
+    expect(view.queryByTestId("app-page")).toBeNull();
+    expect(
+      await view.findByText("Finish in the tab that opened."),
+    ).toBeTruthy();
+  } finally {
+    window.open = originalOpen;
+  }
 });
 
 test("an account lost and then connected again: the newer connection wins", async () => {

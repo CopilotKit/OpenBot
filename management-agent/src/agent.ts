@@ -39,7 +39,7 @@ import {
 import { BackupTargetRefused, confirmBackupTarget } from "./backup-target";
 import type { ManagementClient } from "./client";
 import { heartbeatIntervalMs, type ReadyAgent, upgradesOn } from "./config";
-import { Flux } from "./flux";
+import { ChartRefused, Flux } from "./flux";
 import { operationId, runJob } from "./jobs";
 import { CommandFailed, type Kube, run } from "./kube";
 import { internalStatusPins } from "./pins";
@@ -105,6 +105,9 @@ export class ManagementAgent {
   private stateLock: Promise<unknown> = Promise.resolve();
   /** The release whose last attempt was undone, and when. */
   private lastFailure: { digest: string; at: number; error: string } | null =
+    null;
+  /** The chart Flux last refused for its signature, and when: not checked again at once. */
+  private refusedChart: { digest: string; at: number; message: string } | null =
     null;
 
   constructor(
@@ -290,6 +293,7 @@ export class ManagementAgent {
       return;
     }
     if (state.rolledBackFrom === desired.version) return;
+    if (this.chartRefused(candidate.digest)) return;
     if (state.accepted?.digest === candidate.digest) {
       await this.converge(state.accepted, candidate.manifest);
       return;
@@ -370,6 +374,7 @@ export class ManagementAgent {
     if (this.retryLater(accepted)) return;
     this.start(accepted.version, () =>
       this.remembering(accepted, async () => {
+        await this.checkChart(accepted);
         const target = {
           ...productTarget(this.config),
           timeoutSeconds: PROMOTION_TIMEOUT_SECONDS,
@@ -487,6 +492,44 @@ export class ManagementAgent {
           { once: true },
         );
       });
+    }
+  }
+
+  /** After Flux refused `digest`'s signature, says so and waits before checking it again. */
+  private chartRefused(digest: string) {
+    const refused = this.refusedChart;
+    if (
+      refused?.digest !== digest ||
+      this.clock().getTime() - refused.at >= RETRY_AFTER_FAILURE_MS
+    )
+      return false;
+    this.message = refused.message;
+    return true;
+  }
+
+  /**
+   * Before anything is touched for `release`: Flux checks its chart's signature (Flux.checkSignature).
+   * A refused chart is remembered, so the status keeps saying why and the next heartbeats do not
+   * pull it again at once.
+   */
+  private async checkChart(release: AcceptedRelease) {
+    try {
+      await this.flux.checkSignature(release.digest);
+    } catch (error) {
+      if (error instanceof ChartRefused) {
+        this.refusedChart = {
+          digest: release.digest,
+          at: this.clock().getTime(),
+          message: `${release.version} refused, nothing was changed: ${error.message}`,
+        };
+        this.log("chart refused", {
+          version: release.version,
+          digest: release.digest,
+          reason: error.reason,
+        });
+        throw new Error(this.refusedChart.message);
+      }
+      throw error;
     }
   }
 
@@ -671,6 +714,8 @@ export class ManagementAgent {
     manifest: ReleaseManifest,
     mode: "install" | "adopt",
   ) {
+    // Before the first install is recorded or Flux moved: a refused chart leaves no trace.
+    await this.checkChart(release);
     const journal = this.newJournal(
       mode === "adopt" ? release.version : "none",
       release.version,
@@ -737,6 +782,8 @@ export class ManagementAgent {
     release: AcceptedRelease,
     candidate: ReleaseManifest,
   ) {
+    // Before anything is quiesced or backed up: a refused chart changes nothing.
+    await this.checkChart(release);
     const target = {
       ...productTarget(this.config),
       timeoutSeconds: PROMOTION_TIMEOUT_SECONDS,

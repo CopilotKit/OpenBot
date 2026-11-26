@@ -134,6 +134,15 @@ you set one in the agent's `window` value. Before an upgrade that changes the da
 that the backup settings name the database OpenBot actually uses, then takes a verified backup. If
 the check fails, it changes nothing and stops for a person. It never rolls back by itself.
 
+**Every chart is signature-checked first.** OpenBot signs each release's charts with its own cosign
+key (the public key is [`docs/cosign.pub`](cosign.pub)), and the `openbot-agent` chart carries that
+key, so the check is on with nothing to set up. Before an upgrade touches anything, the agent has Flux
+verify the new chart's signature; a chart that is unsigned or signed with another key is refused, and
+the agent's one-line status says which chart and why. Flux checks it again each time it pulls the
+chart. For a mirror whose charts you sign with your own key, set `product.verify.publicKey` (or
+`product.verify.secretRef`, a Secret holding `cosign.pub`); to turn the check off for a mirror whose
+charts carry no signature you can check, set `product.verify.enabled=false`.
+
 1. **Your product values in a Secret.** Flux installs your release from these values, not from the
    ones Helm keeps, so put the values you install OpenBot with in a Secret in `openbot-system`
    (default name `openbot-values`, key `values.yaml`).

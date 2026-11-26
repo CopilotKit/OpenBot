@@ -50,11 +50,13 @@ export interface HelmRelease {
   };
 }
 export interface OCIRepository {
-  metadata: { name: string };
+  metadata: { name: string; generation?: number };
   spec: { suspend?: boolean; ref?: { digest?: string } };
   status?: {
     artifact?: { revision?: string; digest?: string };
     conditions?: Condition[];
+    /** The last `reconcile.fluxcd.io/requestedAt` value source-controller acted on. */
+    lastHandledReconcileAt?: string;
   };
 }
 
@@ -63,6 +65,40 @@ export function ready(object: { status?: { conditions?: Condition[] } }) {
     (condition) => condition.type === "Ready",
   );
 }
+
+/** Flux's verdict on the chart's signature, when the OCIRepository checks one. */
+function signatureCondition(object: { status?: { conditions?: Condition[] } }) {
+  return object.status?.conditions?.find(
+    (condition) => condition.type === "SourceVerified",
+  );
+}
+
+/** Flux refused the chart because its signature does not verify with the keys it was given. */
+function refusedForSignature(object: OCIRepository) {
+  const conditions = [ready(object), signatureCondition(object)];
+  return conditions.find(
+    (condition) =>
+      condition?.status === "False" && condition.reason === "VerificationError",
+  );
+}
+
+/**
+ * A chart whose signature Flux does not verify with the keys the chart gave it: unsigned, or signed
+ * with another key. Nothing was touched for it.
+ */
+export class ChartRefused extends Error {
+  constructor(
+    readonly digest: string,
+    readonly reason: string,
+  ) {
+    super(
+      `the chart ${digest} is refused: its signature does not verify with this install's chart key (${reason})`,
+    );
+  }
+}
+
+/** How long Flux is given to pull a chart and check its signature. */
+export const SIGNATURE_CHECK_SECONDS = 300;
 
 /** Labels on both objects. The agent owns them; Helm's release annotations, left by a chart that
  * once rendered them, are taken off. */
@@ -218,6 +254,106 @@ export class Flux {
     return digest && digest !== PLACEHOLDER_DIGEST ? digest : null;
   }
 
+  /** The OCIRepository the agent has Flux check a chart's signature with, beside the product's. */
+  get signatureCheckName() {
+    return `${this.config.product.ociRepository}-signature-check`;
+  }
+
+  /**
+   * Has Flux check `digest`'s signature BEFORE anything is touched for it: no quiescing, no backup,
+   * no pin. Flux's own verifier, with the chart's keys, registry and sign-in, on an OCIRepository of
+   * its own (the product's stays where it is): the same check the product's source makes when it is
+   * pinned, made first. Throws `ChartRefused` for a chart that is unsigned or signed with another
+   * key, and an error when Flux does not finish the check in time. Returns at once when the chart
+   * turns verification off (`verify: null`).
+   *
+   * The check object is suspended once it has answered, so it pulls nothing between upgrades.
+   */
+  async checkSignature(
+    digest: string,
+    timeoutSeconds = SIGNATURE_CHECK_SECONDS,
+  ) {
+    const settings = sourceSettings(this.config);
+    if (!settings.verify) return;
+    const name = this.signatureCheckName;
+    const spec = { ...settings, ref: { digest }, suspend: false };
+    const live = await this.kube.get<OCIRepository>(
+      this.namespace,
+      OCI_REPOSITORY,
+      name,
+    );
+    if (live)
+      await this.kube.patch(this.namespace, OCI_REPOSITORY, name, {
+        metadata: OWNED_METADATA,
+        spec,
+      });
+    else
+      await this.kube.create(
+        JSON.stringify({
+          apiVersion: "source.toolkit.fluxcd.io/v1",
+          kind: "OCIRepository",
+          metadata: {
+            name,
+            namespace: this.namespace,
+            labels: OWNED_METADATA.labels,
+          },
+          spec: withoutNulls(spec),
+        }),
+      );
+    const token = new Date().toISOString();
+    await this.kube.annotate(
+      this.namespace,
+      OCI_REPOSITORY,
+      name,
+      `reconcile.fluxcd.io/requestedAt=${token}`,
+    );
+    try {
+      const deadline = Date.now() + timeoutSeconds * 1000;
+      let last = "not checked yet";
+      while (Date.now() < deadline) {
+        const source = await this.kube.get<OCIRepository>(
+          this.namespace,
+          OCI_REPOSITORY,
+          name,
+        );
+        const condition = source ? ready(source) : undefined;
+        // Only an answer to this request about this spec counts: Ready's own observedGeneration
+        // (Flux moves status.observedGeneration only on success) and the token it last handled.
+        const current =
+          source !== null &&
+          condition !== undefined &&
+          condition.observedGeneration === source.metadata.generation &&
+          source.status?.lastHandledReconcileAt === token;
+        if (source && condition)
+          last = `${condition.reason ?? ""}: ${condition.message ?? ""}`;
+        if (current && source) {
+          const refused = refusedForSignature(source);
+          if (refused)
+            throw new ChartRefused(
+              digest,
+              refused.message ?? refused.reason ?? "",
+            );
+          if (
+            condition.status === "True" &&
+            signatureCondition(source)?.status === "True" &&
+            source.status?.artifact?.revision?.includes(digest)
+          )
+            return;
+        }
+        await Bun.sleep(2_000);
+      }
+      throw new Error(
+        `Flux did not finish checking the signature of the chart ${digest} in time: ${last}`,
+      );
+    } finally {
+      await this.kube
+        .patch(this.namespace, OCI_REPOSITORY, name, {
+          spec: { suspend: true },
+        })
+        .catch(() => undefined);
+    }
+  }
+
   /**
    * Creates whichever of the two objects is missing and brings an existing one to the chart's
    * settings, leaving its digest and suspension as they are. Returns the kinds it created.
@@ -340,6 +476,15 @@ export class Flux {
       last = condition
         ? `${condition.reason ?? ""}: ${condition.message ?? ""}`
         : "no Ready condition yet";
+      // The product's source refused the chart's signature (its key changed after the check, say):
+      // Helm never reads it, so there is nothing to wait for.
+      const source = await this.ociRepository().catch(() => null);
+      const refused =
+        source?.spec.ref?.digest === digest
+          ? refusedForSignature(source)
+          : undefined;
+      if (refused)
+        throw new ChartRefused(digest, refused.message ?? refused.reason ?? "");
       if (attempted && current && condition?.status === "True") return;
       if (
         attempted &&

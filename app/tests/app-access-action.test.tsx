@@ -88,10 +88,14 @@ function mounted(
     personal?: boolean;
     /** Holds the connect route's answer until it settles, so a test can refetch first. */
     connectGate?: Promise<void>;
+    /** Holds the apps list's answer, which an app's page waits for before it draws. */
+    appsGate?: Promise<void>;
     /** The service this OpenBot's directory comes from, as app-setup says. Composio's unless named. */
     directory?: "composio" | "arcade";
     /** What the server says the app is now, when the press reads it again after turning it on. */
     readAgain?: () => AppAccess;
+    /** Holds that read's answer until it settles: the seconds between the turn-on and the rest. */
+    readAgainGate?: Promise<void>;
     /**
      * Apps open, and whether the Bot is the person's own. Locked down unless given: every test here
      * that pins Request access pins it locked down.
@@ -122,6 +126,10 @@ function mounted(
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
     if (url === APPS_SETTING_PATH) return appsSettingResponse(!options.open);
+    if (method === "GET" && url.startsWith(APPS_PATH)) {
+      await options.appsGate;
+      return Response.json({ apps: [], nextCursor: null });
+    }
     if (options.open && url === botPath("expenses"))
       return Response.json({
         bot: { id: "expenses", name: "Expenses", mine: options.open.owner },
@@ -138,8 +146,10 @@ function mounted(
       options.readAgain &&
       method === "GET" &&
       url === botAppPath("expenses", access.key)
-    )
+    ) {
+      await options.readAgainGate;
       return botAppResponse(options.readAgain());
+    }
     if (answer && method !== "GET")
       return Response.json(answer.body, { status: answer.status });
     if (connectionsCall(url, { method })?.operation === "connect") {
@@ -430,30 +440,129 @@ test("an app connected with a typed key goes to its page in Settings, with the k
   const { view } = mounted(
     appAccess({ state: "not_connected", connect: "key" }),
   );
-  // Drawn as a button (`Button` over a `Link`), and an anchor underneath with the address.
-  const link = (await view.findByText("Connect")).closest("a");
-  expect(link?.getAttribute("href")).toBe(
+  fireEvent.click(await view.findByRole("button", { name: "Connect Gmail" }));
+  expect((await view.findByTestId("app-page")).textContent).toBe(
     "/connections/composio-gmail?connect=true",
   );
 });
 
-test("a brokered app to reconnect goes to its page in Settings, on Composio and on Arcade alike", async () => {
-  /*
-   * ONE DESTINATION FOR BOTH BROKERS, Composio's. A Composio row that stands is refused by the
-   * connect route until it is disconnected on that page. An Arcade row is not, and the same page
-   * offers Reconnect over it in one press, so the card sends both people to the same place.
-   */
-  const composio = mounted(appAccess({ state: "reconnect" }));
-  const toComposio = (await composio.view.findByText("Reconnect")).closest("a");
-  expect(toComposio?.getAttribute("href")).toBe("/connections/composio-gmail");
-  cleanup();
+/*
+ * FOUND AFTER KEY APPS WERE MADE ONE PRESS: Reconnect on an app that signs in through the directory
+ * opened its page as it was, where a second press began the sign-in. Every app that signs in now
+ * starts its sign-in from the press, and the button says so until the sign-in opens.
+ */
+test.each([
+  ["Composio's directory", "composio-gmail", "Gmail", "consent", "composio"],
+  ["Arcade's directory", "arcade-Gmail", "Gmail", "consent", "arcade"],
+  ["OpenBot's own sign-in", "notion", "Notion", "oauth", "composio"],
+  [
+    "an app's own sign-in server",
+    "fireflies-mcp",
+    "Fireflies",
+    "oauth",
+    "composio",
+  ],
+  [
+    "an MCP server that signs people in",
+    "mcp-linear",
+    "Linear",
+    "oauth",
+    "composio",
+  ],
+] as const)(
+  "Reconnect on a sign-in app through %s starts its sign-in in one press",
+  async (_, key, name, connect, directory) => {
+    let release: () => void = () => {};
+    const connectGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { view, sent, opened } = mounted(
+      appAccess({ key, displayName: name, state: "reconnect", connect }),
+      undefined,
+      { connectGate, directory },
+    );
+    fireEvent.click(
+      await view.findByRole("button", { name: `Reconnect ${name}` }),
+    );
+    // Asked for the sign-in from the press, and saying so where it was pressed until it opens.
+    await waitFor(() =>
+      expect(
+        sent.some(
+          (call) =>
+            call.method === "POST" &&
+            call.url === myConnectionPath(key, "connect"),
+        ),
+      ).toBe(true),
+    );
+    const working = await view.findByText("Opening sign-in…");
+    expect(working.closest("button")?.hasAttribute("disabled")).toBe(true);
+    expect(view.getByText(/connection needs reconnecting/)).toBeTruthy();
+    release();
+    await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+    // The screen stays: the sign-in is in the tab that opened.
+    expect(view.queryByTestId("app-page")).toBeNull();
+    expect(
+      await view.findByText("Finish in the tab that opened."),
+    ).toBeTruthy();
+  },
+);
 
-  const arcade = mounted(
-    appAccess({ key: "arcade-Gmail", state: "reconnect" }),
+/*
+ * FOUND IN DOGFOODING: Reconnect on Fireflies, whose key the app didn't take, opened its page as it
+ * was, where nothing reconnected it. Every app that takes a key now reconnects in the key form.
+ */
+test.each([
+  ["composio-fireflies", "Fireflies"],
+  ["composio-_1password", "1Password"],
+  ["composio-pipedrive", "Pipedrive"],
+])(
+  "Reconnect on %s, a key the app didn't take, opens its key form",
+  async (key, name) => {
+    const { view, opened } = mounted(
+      appAccess({
+        key,
+        displayName: name,
+        state: "reconnect",
+        connect: "key",
+      }),
+    );
+    fireEvent.click(
+      await view.findByRole("button", { name: `Reconnect ${name}` }),
+    );
+    expect((await view.findByTestId("app-page")).textContent).toBe(
+      `/connections/${key}?connect=true`,
+    );
+    expect(opened).toEqual([]);
+  },
+);
+
+test("Reconnect stays on the screen it was pressed on, saying so, until the app's page can draw", async () => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { view } = mounted(
+    appAccess({
+      key: "composio-fireflies",
+      displayName: "Fireflies",
+      state: "reconnect",
+      connect: "key",
+    }),
+    undefined,
+    { appsGate: held },
   );
-  const toArcade = (await arcade.view.findByText("Reconnect")).closest("a");
-  expect(toArcade?.getAttribute("href")).toBe("/connections/arcade-Gmail");
-  expect(arcade.opened).toEqual([]);
+  fireEvent.click(
+    await view.findByRole("button", { name: "Reconnect Fireflies" }),
+  );
+  // The page's reads are still out: the row is where it was, and its button says it is working.
+  const working = await view.findByText("Connecting…");
+  expect(working.closest("button")?.hasAttribute("disabled")).toBe(true);
+  expect(view.queryByTestId("app-page")).toBeNull();
+  expect(view.getByText(/connection needs reconnecting/)).toBeTruthy();
+  release();
+  expect((await view.findByTestId("app-page")).textContent).toBe(
+    "/connections/composio-fireflies?connect=true",
+  );
 });
 
 test("this deployment's own OAuth app reconnects in place, with a fresh consent", async () => {
@@ -947,10 +1056,16 @@ test("an admin already signed in to Notion gives it in one press, with no sign-i
 });
 
 test.each([
+  // The shared account's sign-in starts as its page opens: one press.
   [
     { state: "shared_not_connected", requestKind: "connect_shared" },
     "Connect the shared Gmail account",
-    "/admin/plugins/composio-gmail",
+    "/admin/plugins/composio-gmail?connect=true",
+  ],
+  [
+    { state: "shared_not_connected", requestKind: null },
+    "Reconnect the shared Gmail account",
+    "/admin/plugins/composio-gmail?connect=true",
   ],
   [
     { state: "disabled", unavailable: "token_missing", requestKind: "enable" },
@@ -1246,3 +1361,81 @@ test("an app already connected that only needs giving is given in one press, for
     cleanup();
   }
 });
+
+/*
+ * FOUND IN DOGFOODING: Connect on an app nobody had turned on went back to rest once the app was
+ * on, and only a few seconds later went on to the sign-in. For those seconds the card looked done.
+ * From the press until the sign-in opens, or the key form, the button says it is still working.
+ */
+test.each([
+  { who: "the personal edition's one person", edition: "personal" as const },
+  { who: "a team edition admin", edition: "team" as const },
+])(
+  "$who's Connect keeps saying it is working until the sign-in opens, and until the key form for a key app",
+  async ({ edition }) => {
+    for (const connect of [null, "key"] as const) {
+      const before = appAccess({
+        key: "composio-fireflies",
+        displayName: "Fireflies",
+        source: "directory",
+        connect,
+        account: "personal",
+        accountHolder: "you",
+        state: "disabled",
+        unavailable: "absent",
+        granted: false,
+        connectedAt: null,
+        requestKind: "enable",
+      });
+      const afterOn = appAccess({
+        ...before,
+        connect: connect ?? "consent",
+        state: "not_connected",
+        unavailable: null,
+        granted: true,
+        requestKind: null,
+      });
+      let release: () => void = () => {};
+      const readAgainGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const { view, sent, opened } = mounted(before, undefined, {
+        ...(edition === "personal" ? { personal: true } : { admin: true }),
+        readAgain: () => afterOn,
+        readAgainGate,
+      });
+      const resting =
+        edition === "personal"
+          ? "Connect Fireflies"
+          : "Connect Fireflies and give it to Expenses";
+      fireEvent.click(await view.findByRole("button", { name: resting }));
+      // Turned on; what is left is still being read.
+      await waitFor(() =>
+        expect(
+          sent.some(
+            (call) =>
+              call.method === "POST" &&
+              call.url ===
+                `${botAppPath("expenses", "composio-fireflies")}/approve`,
+          ),
+        ).toBe(true),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const working = connect === "key" ? "Connecting…" : "Opening sign-in…";
+      const button = await view.findByText(working);
+      expect(button.closest("button")?.hasAttribute("disabled")).toBe(true);
+      expect(view.queryByRole("button", { name: resting })).toBeNull();
+
+      release();
+      if (connect === "key")
+        expect((await view.findByTestId("app-page")).textContent).toBe(
+          "/connections/composio-fireflies?connect=true",
+        );
+      else
+        await waitFor(() =>
+          expect(opened).toEqual(["https://gmail.test/consent"]),
+        );
+      cleanup();
+    }
+  },
+);
