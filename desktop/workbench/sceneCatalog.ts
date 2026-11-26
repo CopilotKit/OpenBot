@@ -13,7 +13,7 @@ export const APP_SCENES_URL = "/__app/workbench/scenes/index.ts";
 
 /** What to do when the app scenes did not load. The workbench starts the app server itself. */
 export const APP_SERVER_HINT =
-  "The app server did not start or does not answer. Look in the workbench server's log (the terminal of bun run ui-workbench, or <tmpdir>/openbot-workbench-<port>/server.log when the CLI or a test started it), then stop and start the workbench.";
+  "The app server did not start or does not answer. Look in the workbench server's log (the terminal of bun run desktop-workbench, or <tmpdir>/openbot-workbench-<port>/server.log when the CLI or a test started it), then stop and start the workbench.";
 
 export function isApp(scene: SceneEntry): scene is AppScene {
   return scene.kind === "app";

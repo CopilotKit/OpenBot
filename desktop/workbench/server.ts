@@ -14,7 +14,7 @@
 // the app server that another process started after it.
 //
 // The process that starts the server writes the server's pid in `server.pid`. A server without
-// that file was started by a person (`bun run ui-workbench`), and stop() never stops it. A pid file
+// that file was started by a person (`bun run desktop-workbench`), and stop() never stops it. A pid file
 // also holds the start time of its process, so that a pid that the system gave to another process
 // later is never signalled.
 //
@@ -125,8 +125,8 @@ export function busyPortMessage(
   server: "workbench" | "app",
 ): string {
   return server === "workbench"
-    ? `Workbench: port ${port} is busy. Stop the program that uses it, or pick another port: WORKBENCH_PORT=<port> bun run ui-workbench, or bun run ui-workbench --port <port>.`
-    : `Workbench: port ${port} for the app server is busy. Stop the program that uses it (another workbench's app server, for example), or pick another port: WORKBENCH_APP_PORT=<port> bun run ui-workbench.`;
+    ? `Workbench: port ${port} is busy. Stop the program that uses it, or pick another port: WORKBENCH_PORT=<port> bun run desktop-workbench, or bun run desktop-workbench --port <port>.`
+    : `Workbench: port ${port} for the app server is busy. Stop the program that uses it (another workbench's app server, for example), or pick another port: WORKBENCH_APP_PORT=<port> bun run desktop-workbench.`;
 }
 
 /** The folder of the leases, `server.pid` and the start lock of one port. */

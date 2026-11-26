@@ -226,7 +226,7 @@ test("Ask for an impeccable command copies a scoped impeccable prompt, without w
   expect(prompt).toContain(
     'Review only this part of the frame: the element "span',
   );
-  expect(prompt).toContain("ui-workbench:shot --url");
+  expect(prompt).toContain("desktop-workbench:shot --url");
   // The choice is kept for the next comment.
   expect(window.localStorage.getItem("workbench.commentAsk")).toBe('"typeset"');
 });

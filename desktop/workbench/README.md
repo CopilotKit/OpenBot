@@ -4,7 +4,7 @@ Open the real web app or Desktop setup UI in a browser, without building an inst
 
 ```sh
 cd desktop
-bun run ui-workbench
+bun run desktop-workbench
 ```
 
 The page starts on Home. Eight app presets and three setup presets provide small starting points.
@@ -44,8 +44,8 @@ OpenBot server.
 Copy a link, then capture its route and configuration:
 
 ```sh
-bun run ui-workbench:shot --url 'http://localhost:3021/workbench/?scene=app-home&route=%2Fconnections'
-bun run ui-workbench:shot app-home --route /settings --theme light --size 1000x800
+bun run desktop-workbench:shot --url 'http://localhost:3021/workbench/?scene=app-home&route=%2Fconnections'
+bun run desktop-workbench:shot app-home --route /settings --theme light --size 1000x800
 ```
 
 The command writes a PNG and JSON report to `workbench-shots/` (`--out` changes the directory).
@@ -62,11 +62,11 @@ All Workbench checks are manual. No CI job runs its browser, unit or type checks
 
 ```sh
 # From desktop/
-bun run typecheck:ui-workbench
+bun run typecheck:desktop-workbench
 bun test workbench/urlState.test.ts workbench/CommentLayer.test.tsx workbench/commentPrompt.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/live.browser.test.ts
 # From app/
-bun run typecheck:ui-workbench
+bun run typecheck:desktop-workbench
 bun test workbench/preboot.test.ts workbench/session.test.ts workbench/api
 ```
 

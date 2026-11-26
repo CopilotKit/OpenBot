@@ -96,7 +96,7 @@ describe("the Ask for choice", () => {
     expect(prompt).toContain("## Surface mode");
     expect(prompt).toContain("Operate.");
     expect(prompt).toContain("Do NOT use impeccable's own `shot`");
-    expect(prompt).toContain("cd desktop && bun run ui-workbench:shot --url");
+    expect(prompt).toContain("cd desktop && bun run desktop-workbench:shot --url");
     // No image comes with a copied prompt: the agent renders the frame first.
     expect(prompt).toContain("No image comes with this prompt.");
     expect(prompt).not.toContain("frame.png in this folder");
