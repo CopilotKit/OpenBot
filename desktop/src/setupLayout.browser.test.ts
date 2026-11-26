@@ -6934,3 +6934,82 @@ describe.skipIf(!asked)("the window under its Content Security Policy", () => {
     }
   });
 });
+
+/** Hold both startup phases so a one-frame legacy card cannot hide between them. */
+describe.skipIf(!asked)("Cloud startup panel", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const)
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`${width}x${height} ${colorScheme}: checking and opening retain the inset panel`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        try {
+          await page.addInitScript(`
+            let control;
+            Object.defineProperty(globalThis, "__workbench", {
+              configurable: true,
+              get: () => control,
+              set: (next) => {
+                control = next;
+                next.setAnswer("connection", { mode: "never" });
+                next.setAnswer("show_connected", { mode: "never" });
+              },
+            });
+          `);
+          await open(page);
+          await page
+            .getByText("Checking your saved setup…", { exact: true })
+            .waitFor();
+          const geometry = () =>
+            page.evaluate(() => {
+              const pane = document.querySelector<HTMLElement>(
+                "main > .rail + .launch-layout",
+              )!;
+              const box = pane.getBoundingClientRect();
+              return {
+                top: box.top,
+                left: box.left,
+                right: box.right,
+                bottom: box.bottom,
+                inset:
+                  box.top >= 9 &&
+                  box.right <= innerWidth - 9 &&
+                  getComputedStyle(pane).borderTopWidth === "1px" &&
+                  Number.parseFloat(getComputedStyle(pane).borderRadius) > 0,
+                fits:
+                  document.documentElement.scrollHeight <= innerHeight &&
+                  document.documentElement.scrollWidth <= innerWidth,
+                headings: document.querySelectorAll("h1").length,
+              };
+            });
+          await settled(page);
+          const checking = await geometry();
+          expect(checking.inset).toBe(true);
+          expect(checking.fits).toBe(true);
+          expect(checking.headings).toBe(1);
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("connection", {
+              mode: "value",
+              value: {
+                mode: "connected",
+                address: "https://api.open.bot",
+                signedIn: true,
+              },
+            }),
+          );
+          await page.getByText("Opening OpenBot…", { exact: true }).waitFor();
+          await settled(page);
+          expect(await geometry()).toEqual(checking);
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/cloud-startup-${width}x${height}-${colorScheme}.png`,
+            });
+        } finally {
+          await page.close();
+        }
+      });
+});

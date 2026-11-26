@@ -1537,6 +1537,42 @@ test("Cancel while the browser is waited on stops the sign-in and gives the form
   expect(document.activeElement).toBe(field);
 });
 
+test("Cloud startup keeps one sidebar and inset pane while checking and opening", async () => {
+  const connection = deferred<{
+    mode: string;
+    address: string;
+    signedIn: boolean;
+  }>();
+  const opening = deferred<void>();
+  const strays = connectedShell({
+    connection: connection.promise,
+    show_connected: opening.promise,
+  });
+  const view = await renderApp();
+  const status = view.getByRole("status");
+  expect(status.textContent).toBe("Checking your saved setup…");
+  const pane = status.closest(".sheet.launch-layout");
+  expect(pane).not.toBeNull();
+  const sidebar = pane?.previousElementSibling;
+  expect(sidebar?.matches("aside.rail")).toBe(true);
+  expect(sidebar?.querySelector("h1")?.textContent).toBe(
+    "Getting OpenBot ready",
+  );
+  expect(pane?.closest("main")?.children).toHaveLength(2);
+  await act(async () =>
+    connection.resolve({
+      mode: "connected",
+      address: "https://api.open.bot",
+      signedIn: true,
+    }),
+  );
+  expect(view.getByRole("status").textContent).toBe("Opening OpenBot…");
+  expect(view.getByRole("status").closest(".sheet")).toBe(pane);
+  expect(view.queryAllByRole("button")).toEqual([]);
+  expect(strays).toEqual([]);
+  await act(async () => opening.resolve());
+});
+
 test("a launch that is connected and signed in opens OpenBot and asks nothing of this computer", async () => {
   const strays = connectedShell({
     connection: { mode: "connected", address: ELSEWHERE, signedIn: true },
