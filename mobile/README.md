@@ -81,9 +81,10 @@ To start a build from GitHub, run the **OpenBot Mobile build** workflow (Actions
 Mobile build, then Run workflow). Pick the branch to build, a profile and a platform. It starts
 the same build as a robot user and prints the link.
 
-The first Android build, and the first iOS build for a phone, must be started by a person from a
-terminal. EAS asks then to create the Android keystore and the iOS certificate, and it keeps both.
-After that the workflow builds without questions.
+EAS creates the Android keystore by itself at the first Android build, from the workflow too, and
+keeps it. The first iOS build for a phone must be started by a person from a terminal. EAS asks
+then to create the iOS certificate, and it keeps it. After that the workflow builds without
+questions.
 
 ## Builds for the stores
 
@@ -137,10 +138,10 @@ An update reaches an app only when two things are the same for both:
   dependency changes it, and then the installed apps need a new build. Nobody sets it by hand.
   `fingerprint.config.js` says what is left out of it.
 
-On Android the Firebase settings file is part of the runtime version. Publish an update for Android
-only from a checkout that has the same `google-services.json` the build had (see Push notifications
-on Android). Without the file the update gets another runtime version, and no installed app takes
-it.
+Android's Firebase settings file is left out of the runtime version (see Push notifications on
+Android). The file is not in the repository: a build on EAS has it, and the machine that starts the
+build does not. With the file in, the two compute different runtime versions and EAS stops the
+build. So a checkout with the file and a checkout without it get the same runtime version.
 
 To see the runtime version of your checkout:
 
