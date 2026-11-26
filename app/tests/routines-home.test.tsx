@@ -155,8 +155,12 @@ test("the empty page shows three examples, and pressing one fills the box and se
     "Every Friday at 4, summarize what changed in my projects this week",
     "Keep an eye on my inbox and tell me when a customer writes",
   ];
-  for (const example of examples)
-    expect(view.getByRole("button", { name: example })).toBeTruthy();
+  for (const example of examples) {
+    const button = view.getByRole("button", { name: example });
+    // A long example wraps inside the column instead of scrolling the page sideways.
+    expect(button.className).toContain("whitespace-normal");
+    expect(button.className).not.toContain("whitespace-nowrap");
+  }
 
   const user = userEvent.setup({ document });
   await user.click(view.getByRole("button", { name: examples[1] as string }));

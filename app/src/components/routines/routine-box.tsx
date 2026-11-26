@@ -194,6 +194,7 @@ export function RoutineBox({ examples }: { examples?: readonly string[] }) {
         <div className="flex flex-wrap gap-2">
           {examples?.map((example) => (
             <Button
+              className="h-auto max-w-full whitespace-normal py-1 text-left"
               key={example}
               onClick={() => {
                 setSentence(example);
