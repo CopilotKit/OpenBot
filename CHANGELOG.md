@@ -8,15 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- **Routines is one box.** Routines in the main menu opens on a box: pick a Bot, say what it should
-  do and when ("Every weekday at 9, send me yesterday's new leads"), and the Bot makes the routine, a
-  goal on a schedule when you give it an outcome, or a check-in when it should only tell you. If the
-  sentence leaves out when, which event, or says it is something to do once, the line under the box
-  says so and Finish opens New routine with what it read. If it asks for what a routine can't do,
-  such as more often than every 15 minutes, the line says why and keeps your sentence. Under the box
-  your routines, goals and check-ins are grouped by Bot, one line each with the one thing worth
-  knowing: running now, what went wrong, paused, or when it starts next. The New routine button on
-  that page is gone; Use the form under the box opens the same form. Behind it,
+- **Routines is one box.** Routines in the main menu opens on a box: say what a Bot should do and
+  when ("Every weekday at 9, send me yesterday's new leads"), naming the Bot with @, or leaving
+  OpenBot to pick it as Home does, and the Bot makes the routine, a goal on a schedule when you give
+  it an outcome, or a check-in when it should only tell you. The line under the box says when it
+  starts and offers Open and Undo, which takes back what was just made. If the sentence leaves out
+  when, which event, or says it is something to do once, the line says so and Finish opens New
+  routine with what it read. If it asks for what a routine can't do, such as more often than every
+  15 minutes, the line says why and keeps your sentence. Under the box your routines, goals and
+  check-ins are grouped by Bot, one line each with the one thing worth knowing: running now, what
+  went wrong, paused, or when it starts next. The New routine button on that page is gone, and so is
+  the check-ins switch: it is now Check-ins at the top of Settings → Notifications. Behind it,
   `POST /api/v2/organizations/{organizationId}/routines/read` (`readRoutineSentence`) reads a
   sentence as a routine's answers and writes nothing.
 - **The management agent checks a release's chart signature before it touches anything.** With

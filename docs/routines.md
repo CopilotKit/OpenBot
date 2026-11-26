@@ -14,13 +14,14 @@ outcome to reach. A check-in is a routine that only tells you. They stay three s
 three and draws them together (`app/src/lib/routines/merged.ts`).
 
 **Routines in the main menu is a box and the routines grouped by Bot.** Under its heading sits one
-box (`RoutineBox`): pick a Bot, say what it should do and when in a sentence, and press Send or
-Enter. Below the box are the person's routines, goals and check-ins in one group per Bot
-(`BotGroupSection`), and last the one switch for check-ins from all your Bots. A page with no routine
-on it also offers three example sentences; pressing one only types it into the box. The page has no
-title row and no New routine button: the box is how a routine is made, and **Use the form** under it
-opens New routine for the chosen Bot. If one of the reads fails, the groups that did load stay and a
-line above them says which part is missing ("Couldn't load your goals").
+box (`RoutineBox`): say what a Bot should do and when in a sentence, and press Send or Enter. It is
+a taller rectangle, a few lines high, and it is Home's message box with only its `@` menu. Name the
+Bot with **@**; with no @, OpenBot picks the Bot as Home does (see [The box](#the-box)). Below the
+box are the person's routines, goals and check-ins in one group per Bot (`BotGroupSection`). A page
+with no routine on it also offers three example sentences; pressing one only types it into the box.
+The page has no title row and no New routine button: the box is how a routine is made. If one of
+the reads fails, the groups that did load stay and a line above them says which part is missing
+("Couldn't load your goals").
 
 A group is the Bot's orb, its name (a link to that Bot's own Routines page) and how many rows it has.
 Bots you have hidden come after the ones you haven't, and a Bot a row names that no list knows is
@@ -60,9 +61,10 @@ A Bot's own Routines page keeps its rows, every one the same sentence in four pa
 - **Until**: until you stop it, or, for a goal, the outcome that completes it.
 
 A routine that runs a goal is not a row of its own: it is one of that goal's starts, so the goal's
-row carries it. Rows that are working (on, active, not paused) come first. The every-Bot list also
-holds the switch for check-ins from all your Bots. In the team edition an admin turns check-ins on
-or off for everybody, and limits them, in Admin → Routines.
+row carries it. Rows that are working (on, active, not paused) come first. The switch for check-ins
+from all your Bots is not on Routines: it is **Check-ins**, the first section of Settings →
+Notifications (`CheckInsSection`), in every edition. In the team edition an admin turns check-ins
+on or off for everybody, and limits them, in Admin → Routines.
 
 Old addresses redirect here: `/responsibilities` to Routines, and
 `/bots/<id>/responsibilities` to the Bot's Routines page.
@@ -72,11 +74,11 @@ Old addresses redirect here: `/responsibilities` to Routines, and
 Three ways, and either of the first two writes a routine or a goal with the same store calls.
 
 - **The box**, on Routines in the main menu. See [The box](#the-box).
-- **New routine.** A Bot's Routines page has **New routine**, and the box has **Use the form**;
-  either opens one screen (`/routines/new`). It asks, in order: **Bot**, **What to do**, **It
-  should** (Act for you or Only tell you), **Starts** (On a schedule, When something happens, or
-  Now, once), **Done when** (optional), **Posts in**, and **Name**. It does not ask whether you
-  want a routine, a goal or a check-in; the answers decide: `planRoutine`
+- **New routine.** A Bot's Routines page has **New routine**, and the box's **Finish** opens it
+  when a sentence needs more; either opens one screen (`/routines/new`). It asks, in order: **Bot**,
+  **What to do**, **It should** (Act for you or Only tell you), **Starts** (On a schedule, When
+  something happens, or Now, once), **Done when** (optional), **Posts in**, and **Name**. It does
+  not ask whether you want a routine, a goal or a check-in; the answers decide: `planRoutine`
   (`app/src/lib/routines/plan.ts`) turns them into a plan, and `createFromPlanMutationOptions`
   writes it:
   - Act on a schedule with nothing in Done when is a routine
@@ -100,6 +102,13 @@ Three ways, and either of the first two writes a routine or a goal with the same
 
 The box makes what the sentence says, or says in a line under it why it didn't. Nothing is written
 until the server has read the sentence and the answers pass the form's own rules.
+
+**The Bot.** There is no Bot picker. The box is Home's message box (`Composer`) with only its `@`
+menu and no `/` skills; `@` lists your Bots, one per sentence, as a chip, and the sentence sent to
+the read is the words without the chip. A sentence with no @ goes to the Bot OpenBot picks, as it
+does on Home (`pickBotFor` with `routeMessage`, falling back to the default Bot the same way), and
+the line then names the Bot that took it, so a wrong pick shows. When two Bots share the name the
+sentence used, routing refuses, and the line says so in its own words and keeps the sentence.
 
 **The read.** The box sends the Bot, the sentence (at most 2,000 characters) and the browser's time
 zone to `readRoutineSentence` (`POST /api/v2/organizations/{organizationId}/routines/read`, in
@@ -128,7 +137,15 @@ the two calls New routine makes, so the same rules decide what kind of thing it 
 The schedule and time zone the sentence gave are written as given, so "every other Tuesday" or "9am
 Eastern" is not turned into the picker's nearest shape. When the Bot is not told where to post, a new
 conversation is made and named after the routine, as the form does. The line then says "*Bot* took
-"*name*" · *when it runs*", and **Open** goes to the new routine, goal or check-in.
+"*name*" · *when it starts*", with when it starts in the words its row uses ("Weekdays at 09:00",
+with the time zone when it isn't the reader's), read from what the server made. It offers **Open**,
+which goes to the new routine, goal or check-in, and **Undo**.
+
+**Undo** deletes what was just made: the routine; a goal and the routine that runs it; or the
+check-in (`undoMadeMutationOptions`). The line then reads "Removed." Undo is offered only on that
+line; later, a routine is deleted from its own page as before.
+
+No line has a close button. A line goes when the next sentence is sent or the page is left.
 
 **What it sends to the form.** When the sentence is a routine but isn't enough to make one, the line
 says what is missing in the Bot's words and **Finish** opens New routine with the answers so far and
@@ -140,11 +157,11 @@ the Bot already chosen:
 - **Now, once**: the sentence is something to do once, at once, which the form does and the box
   doesn't: ""*name*" is something to do once, now. Finish it on the form."
 
-A sentence that isn't a routine ("Couldn't read that as a routine."), one the server couldn't read at
-all (no model set up, or no answer), and one whose answers break one of the form's own rules say so
-with **Use the form**, which opens the same screen with the answers where there are any. The rules
-are the form's (`brokenRules`, `app/src/lib/routines/rules.ts`), so the box and the form refuse the
-same things.
+A sentence that isn't a routine ("Couldn't read that as a routine.") and one the server couldn't read
+at all (no model set up, or no answer) are said in a line with no action. **Finish** stays only for
+a sentence that needs a time, an event or a once-only start. Answers that break one of the form's
+own rules are refused in the line; the rules are the form's (`brokenRules`,
+`app/src/lib/routines/rules.ts`), so the box and the form refuse the same things.
 
 **The refusals.** The line is amber, says why, and keeps the sentence in the box so it can be
 changed. The server refuses, each in a sentence of its own, what a routine can't do: running more
