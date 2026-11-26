@@ -154,19 +154,19 @@ main.with-progress-rail {
   grid-template-columns: 300px minmax(0, 1fr);
 }
 
-main.with-progress-rail > .sheet.update-layout {
+/* Progress tasks use the same inset card as the other setup steps. */
+main.with-progress-rail > .sheet:is(.update-layout, .quit-layout) {
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
   max-width: none;
   max-height: none;
-  margin: 0;
+  margin: 10px 10px 10px 0;
   padding: 48px 40px 32px;
-  border: 0;
-  border-left: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.4);
+  background: var(--card);
   box-shadow: none;
   overflow: hidden;
 }
@@ -315,7 +315,7 @@ main.with-progress-rail > .sheet.update-layout {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
-  main.with-progress-rail > .sheet.update-layout {
+  main.with-progress-rail > .sheet:is(.update-layout, .quit-layout) {
     padding: 32px 26px 24px;
   }
 }
@@ -373,54 +373,20 @@ main:has(> .sheet.welcome.page-first) .rail .tile.with-marks > .cloud-marks {
   padding-inline: 0;
 }
 
-/* Local shutdown uses the selected Progress rail; connected sessions never open this page. */
-.standalone-layout.quit-layout
-> :is(.setup-header-block, .setup-body, .setup-footer) {
-  max-width: 840px;
-}
-
+/* Local shutdown shares the update sidebar; only its current operation is in the inset pane. */
 .quit-layout > .setup-body > .setup-content {
   height: 100%;
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 48px;
-}
-
-.quit-rail {
   display: flex;
-  align-items: safe center;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.quit-rail > .steps {
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  flex-direction: column;
+  justify-content: safe center;
 }
 
 .quit-rail .step {
-  grid-template-columns: 16px minmax(0, 1fr);
   grid-template-areas: "mark label" ". status" ". detail";
-  gap: 4px 10px;
-  padding: 14px 0;
-  border: 0;
-  font-size: var(--text-sm);
-  line-height: 20px;
 }
 
-.quit-rail .step-status {
-  justify-self: start;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.quit-rail .step:has(> .mark.good) > :is(.step-label, .step-status) {
-  color: var(--text-secondary);
+.quit-rail .step:has(> .mark.bad) > .detail {
+  display: block;
 }
 
 .quit-rail .step:has(> .mark.active) > .detail,
@@ -444,13 +410,6 @@ main:has(> .sheet.welcome.page-first) .rail .tile.with-marks > .cloud-marks {
   margin: 0;
   color: var(--text-secondary);
   font-size: var(--text-sm);
-}
-
-@media (max-width: 860px) {
-  .quit-layout > .setup-body > .setup-content {
-    grid-template-columns: 180px minmax(0, 1fr);
-    gap: 28px;
-  }
 }
 
 /* Short windows keep the same groups, with only the generous intervals reduced. */

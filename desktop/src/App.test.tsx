@@ -249,6 +249,21 @@ function expectStandardSheet(heading: HTMLElement) {
   expect(sheet?.querySelector(".lede, [role=status]")).not.toBeNull();
 }
 
+/** Shutdown's one heading is in the progress sidebar, beside the current task's inset pane. */
+function expectShutdownSheet(heading: HTMLElement) {
+  const rail = heading.closest("aside.rail.quit-rail");
+  expect(rail).not.toBeNull();
+  expect(rail?.parentElement?.tagName).toBe("MAIN");
+  expect(rail?.parentElement?.classList.contains("with-progress-rail")).toBe(
+    true,
+  );
+  const sheet = rail?.nextElementSibling;
+  expect(sheet?.matches(".sheet.connection-sheet.quit-layout")).toBe(true);
+  expect(sheet?.querySelector("h1")).toBeNull();
+  expect(sheet?.querySelector(".quit-current")).not.toBeNull();
+  expect(rail?.parentElement?.children).toHaveLength(2);
+}
+
 const running = (step: string) => ({
   step,
   ok: true,
@@ -4333,7 +4348,7 @@ test("Quit shows Shutting down with each part's row as it starts and ends", asyn
 
   await emitQuit({ seq: 2, steps: [running("stop-openbot")] });
   const heading = view.getByRole("heading", { name: "Shutting down OpenBot" });
-  expectStandardSheet(heading);
+  expectShutdownSheet(heading);
   expect(
     rowStatus(view, "Stopping OpenBot").getByText("In progress"),
   ).toBeTruthy();
@@ -4391,7 +4406,7 @@ test("a window sent to the Shutting down page catches up, then follows the rows"
   const heading = await view.findByRole("heading", {
     name: "Shutting down OpenBot",
   });
-  expectStandardSheet(heading);
+  expectShutdownSheet(heading);
   await waitFor(() =>
     expect(
       rowStatus(view, "Stopping OpenBot").getByText("Complete"),

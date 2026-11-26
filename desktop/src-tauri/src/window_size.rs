@@ -11,7 +11,7 @@
 //! OpenBot's own page it can be resized again, and it gets back the size the person last gave
 //! OpenBot: the one the window-state plugin saved at the last quit, or the one it had when setup
 //! came back in this session (a stop, a change of connection). A first install has no such size and
-//! keeps the setup size.
+//! opens at 1120 by 860, or smaller to fit the screen, so onboarding has room for its two columns.
 //!
 //! The window-state plugin saves the window as it is when OpenBot quits. Quit while setup shows, that
 //! is setup's size, not OpenBot's, so the size kept for OpenBot is written back over it

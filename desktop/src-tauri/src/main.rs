@@ -12585,6 +12585,16 @@ fn match_window_size<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::
                 if maximized {
                     let _ = window.maximize();
                 }
+            } else {
+                // First launch: enough width for onboarding's desktop layout, capped to the
+                // screen's work area. Later launches restore the person's own dimensions above.
+                let room = screen_room(&window);
+                let (width, height) = window_size::setup_size(
+                    (1120.0, 860.0),
+                    room.map(|(area, _)| (area.size.width, area.size.height)),
+                    room.map_or(0.0, |(_, frame)| frame),
+                );
+                resize_in_place(&window, width, height);
             }
         }
     }

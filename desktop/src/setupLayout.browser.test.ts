@@ -2890,7 +2890,8 @@ describe.skipIf(!asked)("approved layout: shutdown Progress rail", () => {
         const check = async (operation: string, count: number) => {
           const seen = await page.evaluate(() => {
             const sheet = document.querySelector<HTMLElement>(".quit-layout")!;
-            const rail = sheet.querySelector<HTMLElement>(".quit-rail")!;
+            const rail =
+              document.querySelector<HTMLElement>("main > .quit-rail")!;
             const current = sheet.querySelector<HTMLElement>(".quit-current")!;
             const body = sheet.querySelector<HTMLElement>(".setup-body")!;
             const footer = sheet.querySelector<HTMLElement>(".setup-footer")!;
@@ -2911,9 +2912,13 @@ describe.skipIf(!asked)("approved layout: shutdown Progress rail", () => {
               ),
               columns:
                 r.right <= c.left && r.left >= 0 && c.right <= innerWidth,
+              insetPanel:
+                sheet.getBoundingClientRect().top >= 9 &&
+                sheet.getBoundingClientRect().right <= innerWidth - 9 &&
+                getComputedStyle(sheet).borderTopWidth === "1px" &&
+                Number.parseFloat(getComputedStyle(sheet).borderRadius) > 0,
               footerFits: b.bottom <= f.top + 1 && f.bottom <= innerHeight,
-              headingTop: sheet.querySelector("h1")!.getBoundingClientRect()
-                .top,
+              headingTop: rail.querySelector("h1")!.getBoundingClientRect().top,
               footerTop: f.top,
               stages: rail.querySelectorAll(".step").length,
               operation: current.querySelector(".journey-said")?.textContent,
@@ -2931,6 +2936,7 @@ describe.skipIf(!asked)("approved layout: shutdown Progress rail", () => {
           expect(seen.pageFits).toBe(true);
           expect(seen.horizontal).toBe(false);
           expect(seen.columns).toBe(true);
+          expect(seen.insetPanel).toBe(true);
           expect(seen.footerFits).toBe(true);
           if (headingTop === undefined) headingTop = seen.headingTop;
           else expect(seen.headingTop).toBe(headingTop);
@@ -3032,7 +3038,8 @@ describe.skipIf(!asked)("approved layout: shutdown Progress rail", () => {
           ).toBe(1);
           const failed = await page.evaluate(() => {
             const sheet = document.querySelector<HTMLElement>(".quit-layout")!;
-            const rail = sheet.querySelector<HTMLElement>(".quit-rail")!;
+            const rail =
+              document.querySelector<HTMLElement>("main > .quit-rail")!;
             const detail = rail.querySelector<HTMLElement>(
               ".step:has(.mark.bad) .detail",
             )!;
@@ -3081,6 +3088,11 @@ function updateScreen(page: Page) {
         : null;
     };
     return {
+      insetPanel:
+        sheet.getBoundingClientRect().top >= 9 &&
+        sheet.getBoundingClientRect().right <= innerWidth - 9 &&
+        getComputedStyle(sheet).borderTopWidth === "1px" &&
+        Number.parseFloat(getComputedStyle(sheet).borderRadius) > 0,
       heading: heading?.textContent,
       headingBox: box(heading),
       rightHeadings: sheet.querySelectorAll("h1").length,
@@ -3135,6 +3147,7 @@ describe.skipIf(!asked)("approved layout: update Progress rail", () => {
             .waitFor();
           const seen = await updateScreen(page);
           expect(seen.heading).toBe("Updating OpenBot");
+          expect(seen.insetPanel).toBe(true);
           expect(seen.sidebars).toBe(1);
           expect(seen.pageHeadings).toBe(1);
           expect(seen.rightHeadings).toBe(0);

@@ -9,6 +9,7 @@ import {
   position,
   steadyLeft,
 } from "./journey";
+import { Lockup } from "./Sections";
 import { SetupPage } from "./SetupPage";
 import { formatElapsed, type Progress, SetupProgress } from "./SetupProgress";
 
@@ -235,6 +236,25 @@ export function ShuttingDown({ status }: { status: QuitStatus | null }) {
     <SetupPage
       className="quit-layout"
       heading="Shutting down OpenBot"
+      rail={
+        <aside
+          className="rail update-history quit-rail"
+          aria-label="Shutdown stages"
+        >
+          <Lockup />
+          <header>
+            <h1 className="rail-title">Shutting down OpenBot</h1>
+            <p className="update-scope">On this computer</p>
+          </header>
+          <SetupProgress
+            steps={steps}
+            label="Shutdown progress"
+            showElapsed={false}
+            quiet
+          />
+          <div className="rail-foot">OpenBot (Self-Contained)</div>
+        </aside>
+      }
       footer={
         !failed && (
           <p className="quit-explanation" role="status">
@@ -243,14 +263,6 @@ export function ShuttingDown({ status }: { status: QuitStatus | null }) {
         )
       }
     >
-      <aside className="quit-rail" aria-label="Shutdown stages">
-        <SetupProgress
-          steps={steps}
-          label="Shutdown progress"
-          showElapsed={false}
-          quiet
-        />
-      </aside>
       <div className="quit-current">
         {running && <QuitJourney steps={steps} clock={clock} />}
         {failed && (
