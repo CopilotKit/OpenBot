@@ -153,11 +153,7 @@ function Layout() {
             />
             <Stack.Screen
               name="conversation-info"
-              options={{
-                title: "Chat",
-                ...SHEET,
-                sheetAllowedDetents: [0.6, SHEET_FULL],
-              }}
+              options={{ title: "Chat" }}
             />
             <Stack.Screen
               name="new-bot"
@@ -172,6 +168,13 @@ function Layout() {
               options={{ title: "Approval inbox" }}
             />
             <Stack.Screen name="computer" options={{ title: "Computer" }} />
+            <Stack.Screen name="routines" options={{ title: "Routines" }} />
+            <Stack.Screen name="memory" options={{ title: "Memory" }} />
+            <Stack.Screen name="skills" options={{ title: "Skills" }} />
+            <Stack.Screen
+              name="connections"
+              options={{ title: "Connections" }}
+            />
             <Stack.Screen name="routine" options={{ title: "Routine" }} />
             <Stack.Screen name="rules" options={{ title: "Custom rules" }} />
             <Stack.Screen name="plugins" options={{ title: "Apps" }} />

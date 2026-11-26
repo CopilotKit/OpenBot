@@ -10,14 +10,13 @@ import {
   Notice,
   ScrollScreen,
   Section,
-  SheetTitle,
   Text,
 } from "../src/components";
 import { useLoad } from "../src/use-load";
 
 /**
- * A group conversation's details, opened by tapping its header as iMessage opens a group's: the
- * Bots in it, side by side, and a row for each that opens its page.
+ * A group chat's details, pushed from its header as iMessage pushes a group's: the Bots in it, side by
+ * side, and a row for each that opens its page.
  */
 export default function ConversationInfo() {
   const { channelId = "" } = useLocalSearchParams<{ channelId: string }>();
@@ -41,7 +40,6 @@ export default function ConversationInfo() {
   const names = members.map((bot) => bot.name).join(" & ");
   return (
     <ScrollScreen>
-      <SheetTitle title="Chat" className="-mt-2" />
       <Notice message={conversation.error || bots.error} />
       <View className="items-center gap-3">
         <View className="flex-row">

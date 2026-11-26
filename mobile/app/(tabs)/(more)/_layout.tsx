@@ -1,18 +1,14 @@
 import { Stack } from "expo-router";
 import { tabRoot, useHeaderOptions } from "../../../src/header";
 
-/** The app's way back to More, when one of its screens was opened by itself from a link. */
-export const unstable_settings = { initialRouteName: "more" };
-
-/** More's stack: the list, and Routines, Memory, Skills and Connections opened from it. */
+/**
+ * More's stack: the list. What it opens (Routines, Memory, Skills, Connections, the approval inbox)
+ * lives in the app's own stack, so a Bot's page opens the same screens, and nothing stacks.
+ */
 export default function MoreLayout() {
   return (
     <Stack screenOptions={useHeaderOptions()}>
       <Stack.Screen name="more" options={tabRoot("More")} />
-      <Stack.Screen name="routines" options={{ title: "Routines" }} />
-      <Stack.Screen name="memory" options={{ title: "Memory" }} />
-      <Stack.Screen name="skills" options={{ title: "Skills" }} />
-      <Stack.Screen name="connections" options={{ title: "Connections" }} />
     </Stack>
   );
 }

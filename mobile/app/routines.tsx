@@ -1,17 +1,12 @@
 import { router, Stack, useFocusEffect } from "expo-router";
 import { useCallback, useMemo } from "react";
-import {
-  everyBot,
-  everyPage,
-  ORGANIZATION_ID,
-  type Routine,
-} from "../../../src/api";
+import { everyBot, everyPage, ORGANIZATION_ID, type Routine } from "../src/api";
 import {
   listRoutines,
   pauseRoutine,
   resumeRoutine,
-} from "../../../src/api/generated/routines/routines";
-import { authClient } from "../../../src/auth";
+} from "../src/api/generated/routines/routines";
+import { authClient } from "../src/auth";
 import {
   BotOrb,
   EmptyState,
@@ -21,13 +16,13 @@ import {
   ScrollScreen,
   Section,
   Toggle,
-} from "../../../src/components";
-import { headerActions } from "../../../src/header";
-import { IconClock, IconPlus } from "../../../src/icons";
-import { routineLines } from "../../../src/routines";
-import { useAction } from "../../../src/use-action";
-import { useLoad } from "../../../src/use-load";
-import { usePull } from "../../../src/use-pull";
+} from "../src/components";
+import { headerActions } from "../src/header";
+import { IconClock, IconPlus } from "../src/icons";
+import { routineLines } from "../src/routines";
+import { useAction } from "../src/use-action";
+import { useLoad } from "../src/use-load";
+import { usePull } from "../src/use-pull";
 
 /** Routines: the work every Bot starts by itself for you, under the Bot that does it. */
 export default function Routines() {

@@ -4,15 +4,15 @@ import { TextArea } from "heroui-native/text-area";
 import { TextField } from "heroui-native/text-field";
 import { useCallback, useState } from "react";
 import { Alert, View } from "react-native";
-import { everyPage, ME, type Memory, ORGANIZATION_ID } from "../../../src/api";
+import { everyPage, ME, type Memory, ORGANIZATION_ID } from "../src/api";
 import {
   createMemory,
   deleteMemory,
   listMemories,
   updateMemory,
-} from "../../../src/api/generated/memory/memory";
-import type { UpdateMemoryRequest } from "../../../src/api/generated/model";
-import { authClient } from "../../../src/auth";
+} from "../src/api/generated/memory/memory";
+import type { UpdateMemoryRequest } from "../src/api/generated/model";
+import { authClient } from "../src/auth";
 import {
   Card,
   cn,
@@ -22,10 +22,10 @@ import {
   Section,
   Text,
   Toggle,
-} from "../../../src/components";
-import { IconBrain } from "../../../src/icons";
-import { useAction } from "../../../src/use-action";
-import { useLoad } from "../../../src/use-load";
+} from "../src/components";
+import { IconBrain } from "../src/icons";
+import { useAction } from "../src/use-action";
+import { useLoad } from "../src/use-load";
 
 const ORIGIN: Record<Memory["formedBy"], string> = {
   person: "You wrote this",
