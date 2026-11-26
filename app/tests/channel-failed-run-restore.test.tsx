@@ -14,7 +14,7 @@ import {
   type RefusedTurn,
 } from "@/lib/channels/queries";
 import { quietRunPeriod, RUN_ENDED_UNHEARD } from "@/lib/copilot/quiet-run";
-import { TURN_CUT_OFF } from "@/lib/copilot/stopped-turn";
+import { TURN_CUT_OFF, UNREADABLE_REPLY } from "@/lib/copilot/stopped-turn";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
@@ -704,6 +704,44 @@ test("a turn the server says to carry on offers Carry on, live and after a reloa
   const restored = await back.findByTestId("transcript-stopped");
   expect(within(restored).getByRole("alert").textContent).toBe(DROPPED);
   within(restored).getByRole("button", { name: "Carry on" });
+});
+
+/*
+ * FOUND BY THE AG-UI CONFORMANCE SUITE. A connected Bot's adapter streamed a tool call's start twice,
+ * the AG-UI client refused the stream, and the run ended in that client's own words, which the
+ * conversation showed word for word. The words are for whoever debugs it; the person is told what
+ * happened and how to go on.
+ */
+test("a run a connected Bot broke with a malformed stream says so plainly, live and after a reload, with Carry on", async () => {
+  const RAW =
+    "Cannot send 'TOOL_CALL_START' event: A tool call with ID 'call_0f3' is already in progress. Complete it with 'TOOL_CALL_END' first.";
+  const warned: unknown[][] = [];
+  const warn = console.warn;
+  console.warn = (...said: unknown[]) => {
+    warned.push(said);
+  };
+  try {
+    plans = [{ kind: "fails", message: RAW }];
+    const live = open();
+    await send(live, "Chart our quarterly revenue");
+    const shown = await live.findByTestId("transcript-stopped");
+    expect(within(shown).getByRole("alert").textContent).toBe(UNREADABLE_REPLY);
+    within(shown).getByRole("button", { name: "Carry on" });
+    expect(live.queryByText(/already in progress/)).toBeNull();
+    // Kept for whoever debugs it.
+    expect(warned.some((said) => said.includes(RAW))).toBe(true);
+
+    live.unmount();
+    const back = open();
+    await settled(back, "Chart our quarterly revenue");
+    const restored = await back.findByTestId("transcript-stopped");
+    expect(within(restored).getByRole("alert").textContent).toBe(
+      UNREADABLE_REPLY,
+    );
+    expect(back.queryByText(/already in progress/)).toBeNull();
+  } finally {
+    console.warn = warn;
+  }
 });
 
 test("a failure that a later run answered is not shown after a reload", async () => {
