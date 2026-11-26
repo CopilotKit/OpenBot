@@ -90,9 +90,18 @@ at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 
 `LANGGRAPH_TS_AG_UI_URL` is where the server finds the TypeScript LangGraph engine,
 `agent-langgraph-ts`, which new Bots run on. It is called with `MANAGED_AGENT_TOKEN`, like the managed
-Bot. Unset, and with no picked harness that is that engine, new Bots run on the server's built-in
-engine. `scripts/start.sh` points it at the engine on 4215 on a laptop, and Compose's `server`
-service reaches it by name. OpenBot Desktop needs neither: its picked harness is that engine.
+Bot, and reaches the model through the server's model gateway with `MODEL_GATEWAY_TOKEN` where one
+is set. The engine is required for new Bots: a server that cannot find it refuses them, with a
+sentence telling the person to ask an admin, and logs why. It does not run them on its built-in
+agent instead. The server looks in this order: `LANGGRAPH_TS_AG_UI_URL`; then the picked harness,
+when it is that engine (OpenBot Desktop's); then `LANGGRAPH_TS_COMPOSE_AG_UI_URL`, which
+`docker-compose.yml` always sets to its own `agent-langgraph-ts` service. So Compose and
+`scripts/start.sh` run the engine and wire it in every edition, the personal edition included, and
+OpenBot Desktop needs neither setting. The one-container image does not carry the engine: run
+`agent-langgraph-ts` beside it and set this address (see [deployment.md](deployment.md)).
+
+`OPENBOT_DEFAULT_BOT_ENGINE=built-in` puts every Bot back on the server's built-in agent, for a
+deployment that does not run the engine.
 
 ## General variables
 
@@ -334,7 +343,7 @@ Who decides what is offered depends on who uses the deployment. With `OPENBOT_SI
 | -------------- | ------------------ | -------------------- |
 | OpenAI key | `GET https://api.openai.com/v1/models`, chat models only, dropping any past its `shutdown_date` | models.dev |
 | Anthropic key | `GET https://api.anthropic.com/v1/models` | Anthropic's own `capabilities.effort` |
-| Google key or sign-in | Google's model list (the OpenAI-compatible `/models` for a key, the native list for a sign-in) | models.dev |
+| Google key | Google's model list (the OpenAI-compatible `/models`) | models.dev |
 | xAI key or sign-in | `GET https://api.x.ai/v1/language-models` | xAI's own `capabilities.reasoning_effort` and default |
 | ChatGPT plan | the plan's own Codex listing, read by the LangGraph harness that holds the sign-in | the plan's `supported_reasoning_levels` and default |
 | Claude plan | `GET https://api.anthropic.com/v1/models` with the plan's token | Anthropic's own `capabilities.effort` |
@@ -391,7 +400,7 @@ Joining includes recent thread messages and previous voice chats, capped at 12,0
 Ending a nonempty call saves its text transcript to the database and creates a compact, expandable
 Voice chat card in the same channel. A separate summary request uses the deployment's default chat
 model and its existing credential: OpenAI-compatible or Anthropic API keys, Claude or ChatGPT plan
-sign-in, or the deployment's Google/xAI OAuth proxy. It does not need a separate OpenAI key when
+sign-in, or the deployment's xAI OAuth proxy. It does not need a separate OpenAI key when
 another provider is selected. Plan summaries use an isolated conversation with no tools. A failed
 summary leaves the saved transcript available with a retry button. A successful retry updates the
 sidebar preview only while that call is still the latest activity. Interrupted answers are marked

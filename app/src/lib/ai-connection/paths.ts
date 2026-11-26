@@ -120,4 +120,10 @@ export function providerAddress(id: string, owner?: string): string {
   return `/settings/providers/${encodeURIComponent(id)}${whose}`;
 }
 
+/** Where a provider's connection is changed in Settings, as a plain address (providerAddress). */
+export function providerChangeAddress(id: string, owner?: string): string {
+  const whose = owner === "personal" ? "?owner=personal" : "";
+  return `/settings/providers/${encodeURIComponent(id)}/change${whose}`;
+}
+
 export const PROVIDERS_ADDRESS = "/settings/providers";

@@ -50,8 +50,8 @@ const cloudProviders = [
   {
     id: "google",
     name: "Google Gemini",
-    // Google's guidelines allow only "Sign in with Google" beside its G.
-    signsInWith: "Google",
+    // Gemini takes an API key only: no sign-in.
+    signsInWith: null,
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     model: "gemini-3.8-flash",
     keyUrl: "https://aistudio.google.com/apikey",
@@ -425,14 +425,6 @@ test("every Sign in with button carries its provider's mark", async () => {
     { ...providers[0], mark: "openai" },
     { ...providers[1], mark: "anthropic" },
     {
-      id: "google",
-      name: "Google Gemini",
-      summary: "Use an API key or sign in.",
-      logins: ["endpoint", "oauth"],
-      mark: "google-color",
-      caution: null,
-    },
-    {
       id: "xai",
       name: "xAI",
       summary: "Use an API key or sign in.",
@@ -456,9 +448,7 @@ test("every Sign in with button carries its provider's mark", async () => {
     const name =
       provider.id === "anthropic"
         ? "Sign in again with Anthropic"
-        : provider.id === "google"
-          ? "Sign in with Google"
-          : `Sign in with ${provider.name}`;
+        : `Sign in with ${provider.name}`;
     const button = view.getByRole("button", { name });
     expect(button.querySelector("img")?.getAttribute("data-mark")).toBe(
       provider.mark,
@@ -1413,7 +1403,7 @@ test("OAuth tab switch cancels a late authorization before opening the browser",
   );
 });
 
-for (const provider of cloudProviders) {
+for (const provider of cloudProviders.filter((row) => row.signsInWith)) {
   test(`${provider.name} OAuth completes through native storage without exposing tokens`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers")
@@ -1468,6 +1458,59 @@ for (const provider of cloudProviders) {
     });
   });
 }
+
+/*
+ * Gemini takes an API key only. A Google sign-in saved before that is not resumed: the screen says
+ * it ended, and its one button opens Google Gemini's API key, which then goes on as any key does.
+ */
+test("a saved Google sign-in says it ended and its button opens Gemini's API key", async () => {
+  const { recordedModel } = await import("./ProviderPicker");
+  const held: HeldConfiguration = {
+    OPENAI_BASE_URL: "http://127.0.0.1:3001/api/model-provider/v1",
+    BOT_MODEL: "gemini-3-pro",
+    saved: { model: "google-oauth", modelSessions: { google: true } },
+  };
+  expect(recordedModel(held)).toBeNull();
+  invokeHandler = async (command) => {
+    if (command === "providers") return allProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const choices: unknown[] = [];
+  const view = await renderPickerWithHeld(held, (choice) =>
+    choices.push(choice),
+  );
+  const notice = await view.findByRole("alert");
+  expect(notice.textContent).toContain("Google sign-in for Gemini has ended");
+  expect(notice.textContent).toContain(
+    "Add a Gemini API key to keep your Bots running on Gemini.",
+  );
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(
+    await view.findByRole("button", { name: "Add a Gemini API key" }),
+  );
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByRole("tab", { name: "Sign in" })).toBeNull();
+  expect(view.getByLabelText("Model name")).toHaveProperty(
+    "value",
+    "gemini-3.8-flash",
+  );
+  await user.type(
+    view.getByLabelText("Google Gemini API key"),
+    "synthetic-gemini-key",
+  );
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  expect(choices).toEqual([
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+      model: "gemini-3.8-flash",
+      apiKey: "synthetic-gemini-key",
+    },
+  ]);
+  // Nothing about a Google sign-in reached the native side.
+  expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
+});
 
 for (const provider of [...cloudProviders, unbiased, trustedRouter]) {
   test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {

@@ -7,10 +7,10 @@
  *
  * WHICH CREDENTIAL, BY SIGN-IN:
  *  - An API key (Anthropic, OpenAI, Google, any OpenAI-compatible endpoint): the provider directly.
- *  - A Gemini sign-in: `BOT_PROVIDER=openai`, `OPENAI_BASE_URL` = the server's provider OAuth proxy
+ *  - An xAI sign-in: `BOT_PROVIDER=openai`, `OPENAI_BASE_URL` = the server's provider OAuth proxy
  *    (`/api/model-provider/v1`) and `OPENAI_API_KEY` = its local bearer. Ordinary Chat Completions,
- *    which the server turns into Google's API with the person's token, exactly as for the Python
- *    harness. Nothing here knows it is Google.
+ *    which the server sends to xAI with the person's token, exactly as for the Python harness.
+ *    Nothing here knows it is xAI. Gemini takes an API key only.
  *  - A ChatGPT plan: `CHATGPT_PLAN_HARNESS_URL` names agent-langgraph-agui, which holds the Codex
  *    transport, and every model call goes there (`plan-model.ts`). Selected by its presence.
  *

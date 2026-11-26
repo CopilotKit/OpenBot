@@ -6,6 +6,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { CompanySignInSection } from "@/components/settings/company-sign-in";
+import { DeleteAccountSection } from "@/components/settings/delete-account";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { NameRow } from "@/components/settings/profile";
 import { StandingInstructionsRow } from "@/components/settings/standing-instructions";
@@ -97,8 +98,10 @@ function RouteComponent() {
           ))}
         </PageRows>
       </PageSection>
-      {/* Last: OpenBot itself rather than this person's OpenBot. Gone when the deployment says so. */}
+      {/* OpenBot itself rather than this person's OpenBot. Gone when the deployment says so. */}
       <StarOnGitHubSection />
+      {/* Last, as GitHub and every settings page put it: deleting the account. */}
+      <DeleteAccountSection />
     </PageShell>
   );
 }

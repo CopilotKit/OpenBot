@@ -1,4 +1,5 @@
 import {
+  IconAlertTriangle,
   IconChevronRight,
   IconPlugConnectedX,
   IconSparkles,
@@ -42,8 +43,10 @@ import {
 } from "@/lib/ai-connection/paths";
 import {
   AI_PROVIDERS,
+  GOOGLE_SIGN_IN_ENDED,
   isSignIn,
   providerById,
+  signInRetired,
 } from "@/lib/ai-connection/providers";
 import {
   type AiConnectionEntry,
@@ -265,6 +268,7 @@ function ProviderDetails({
   const busy = makeDefault.isPending || remove.isPending;
   const name = connectionName(entry);
   const described = describeConnection(entry, owner);
+  const retired = signInRetired(entry);
 
   /**
    * After a removal, back to the list. A person whose runs now have no AI, where one is required, is
@@ -301,15 +305,44 @@ function ProviderDetails({
               : "Connected. Your next message runs on it. Anything already running finishes on the connection it started with."}
         </p>
       ) : null}
-      {entry.ready ? null : (
+      {retired ? (
+        /*
+         * A Google sign-in OpenBot no longer offers: what happened, and the one way on, which opens
+         * Google Gemini's API key on this same connection.
+         */
+        <PageRows>
+          <Item role="alert" size="sm">
+            <ItemMedia variant="icon">
+              <IconAlertTriangle className="text-destructive" />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{GOOGLE_SIGN_IN_ENDED.title}</ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                {GOOGLE_SIGN_IN_ENDED.body}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Button
+                render={(props) => (
+                  <Link {...paths.change(entry.id, scope)} {...props} />
+                )}
+                size="sm"
+              >
+                {GOOGLE_SIGN_IN_ENDED.action}
+              </Button>
+            </ItemActions>
+          </Item>
+        </PageRows>
+      ) : entry.ready ? null : (
         <p className="text-destructive text-sm" role="alert">
           {entry.problem?.detail}
         </p>
       )}
       <PageSection title="Connection">
         <PageRows>
-          {(described?.details ?? []).map((detail) => (
+          {(described?.details ?? []).map((detail, index) => (
             <Fragment key={detail.label}>
+              {index > 0 ? <Separator /> : null}
               <Item size="sm">
                 <ItemContent>
                   <ItemTitle>{detail.label}</ItemTitle>
@@ -320,28 +353,36 @@ function ProviderDetails({
                   </span>
                 </ItemActions>
               </Item>
-              <Separator />
             </Fragment>
           ))}
-          <Item render={<Link {...paths.change(entry.id, scope)} />} size="sm">
-            <ItemContent>
-              <ItemTitle>
-                {entry.ready
-                  ? "Change"
-                  : isSignIn(entry.login)
-                    ? "Sign in again"
-                    : "Replace key"}
-              </ItemTitle>
-              <ItemDescription>
-                {changesInPlace
-                  ? "Switch to another provider, plan or key. Runs that start after that use it."
-                  : "Sign in again, or use another key."}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <IconChevronRight className="size-4 text-muted-foreground" />
-            </ItemActions>
-          </Item>
+          {/* A retired sign-in's way on is the notice's button above: it is the change. */}
+          {retired ? null : (
+            <>
+              {described?.details.length ? <Separator /> : null}
+              <Item
+                render={<Link {...paths.change(entry.id, scope)} />}
+                size="sm"
+              >
+                <ItemContent>
+                  <ItemTitle>
+                    {entry.ready
+                      ? "Change"
+                      : isSignIn(entry.login)
+                        ? "Sign in again"
+                        : "Replace key"}
+                  </ItemTitle>
+                  <ItemDescription>
+                    {changesInPlace
+                      ? "Switch to another provider, plan or key. Runs that start after that use it."
+                      : "Sign in again, or use another key."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <IconChevronRight className="size-4 text-muted-foreground" />
+                </ItemActions>
+              </Item>
+            </>
+          )}
         </PageRows>
       </PageSection>
       {entry.isDefault ? null : (
@@ -577,15 +618,19 @@ export function ChangeProviderPage({
     linkProps: paths.provider(id, scope),
   };
   const name = entry ? connectionName(entry) : nameFromAddress(id);
+  // A Google sign-in OpenBot no longer offers: this page takes its Gemini API key.
+  const retired = signInRetired(entry);
   const title = !entry
     ? `Change ${name}`
-    : changesInPlace
-      ? providers.organizationWide
-        ? "Change your organization's AI"
-        : "Change AI connection"
-      : entry.ready
-        ? `Change ${name}`
-        : `Reconnect ${name}`;
+    : retired
+      ? GOOGLE_SIGN_IN_ENDED.action
+      : changesInPlace
+        ? providers.organizationWide
+          ? "Change your organization's AI"
+          : "Change AI connection"
+        : entry.ready
+          ? `Change ${name}`
+          : `Reconnect ${name}`;
   if (done)
     return (
       <PageShell
@@ -632,6 +677,7 @@ export function ChangeProviderPage({
                   kind: "organization",
                   inDesktop: providers.inDesktop,
                   organizationWide: providers.organizationWide,
+                  ...(retired ? { provider: entry.provider } : {}),
                 }
               : {
                   kind: "adding",

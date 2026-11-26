@@ -118,6 +118,7 @@ and the fix would not be available.
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `CPK_INTELLIGENCE_API_KEY` | CopilotKit Intelligence. A free plan is available and it can be self-hosted. The older `INTELLIGENCE_API_KEY` is still read |
 | `COPILOTKIT_LICENSE_TOKEN` | optional. Managed Intelligence issues none; set it for a self-hosted Intelligence, which needs the same license on its own deployment too |
 | a model key | `OPENAI_API_KEY`, or the provider you configured |
+| `LANGGRAPH_TS_AG_UI_URL`, `MANAGED_AGENT_TOKEN` | the TypeScript LangGraph engine new Bots run on, which this image does not carry. See below |
 
 **A license, or a key Intelligence accepts, is required.** The server checks before it starts. With
 `COPILOTKIT_LICENSE_TOKEN` set, the license must be valid and current; one that is not refuses to
@@ -136,9 +137,18 @@ against a host that is not there. Set it, with `MANAGED_AGENT_TOKEN`, only when 
 reachable from this container. Unset it if your `.env` still has the laptop default
 `http://127.0.0.1:4201/`.
 
-`LANGGRAPH_TS_AG_UI_URL` is the same for the TypeScript LangGraph engine (`agent-langgraph-ts`),
-which new Bots run on: the image does not carry it either. Set it, with `MANAGED_AGENT_TOKEN`, only
-when that engine is reachable from this container; unset, new Bots run on the built-in engine.
+**The TypeScript LangGraph engine is required for new Bots.** New Bots run on
+`agent-langgraph-ts`, and this image does not carry it. Run the engine beside the container (its
+image is `ghcr.io/copilotkit/openbot-agent-langgraph-ts`) and set `LANGGRAPH_TS_AG_UI_URL` to its
+address, with `MANAGED_AGENT_TOKEN` on both: the server sends it on every call and the engine
+refuses a call without it. The engine needs a way to the model as well: the deployment's provider
+key, or `MODEL_GATEWAY_TOKEN` on both with the server's model gateway as the engine's base URL, the
+way `docker-compose.yml` wires them, so no provider key sits in the engine.
+
+Without the engine the server refuses new Bots, with a sentence telling the person to ask an admin,
+and logs why. It does not run them on its built-in agent instead. To put every Bot on the built-in
+agent, set `OPENBOT_DEFAULT_BOT_ENGINE=built-in`. A Compose deployment needs none of this:
+`docker-compose.yml` runs the engine and tells the server where it is.
 
 **Authentication is required.** With no identity provider configured, the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.
