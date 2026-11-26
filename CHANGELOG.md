@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **The management agent checks a release's chart signature before it touches anything.** With
+  the chart's signature check on, the agent has Flux verify the chart a new version names before it
+  records an install, stops the server, takes a backup or moves Flux. A chart that is unsigned or
+  signed with another key is refused: nothing changes, the agent's status says which chart and why,
+  and it is not pulled again for 30 minutes. Before, the check ran only once Flux was moved, after
+  the server was stopped and backed up, and the upgrade then waited out its timeout with the server
+  down and no reason given.
 - **OpenBot's icon in the browser and on a phone.** The web app shows OpenBot's orb, the icon
   OpenBot Desktop uses, in a browser's tab, on a phone's home screen when it is added there, and as
   an installed app's icon. Added to an iPhone's home screen it used to show a grey square with a
