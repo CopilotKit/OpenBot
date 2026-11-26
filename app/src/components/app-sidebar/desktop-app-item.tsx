@@ -6,7 +6,7 @@ import { desktopShell } from "@/lib/desktop/shell";
 
 /**
  * Where OpenBot Desktop is downloaded, for Mac and Windows: the website's own download buttons.
- * downloads.copilotkit.ai/latest/ holds the installers themselves and has no page of its own.
+ * The address the installers are served from holds only the files and has no page of its own.
  */
 export const DESKTOP_DOWNLOAD_URL = "https://open.bot/";
 
