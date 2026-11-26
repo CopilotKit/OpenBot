@@ -2376,6 +2376,116 @@ describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
 });
 
 /*
+ * Seen on a clean Mac's first install: Finishing setup, with its usage-data checkbox, was on screen
+ * for about 10 seconds before OpenBot opened by itself, too short to read the choice or untick it.
+ * Once OpenBot is up it stays now, saying OpenBot is ready, with Open OpenBot under the choice, in
+ * view at both window sizes, light and dark. `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of it.
+ */
+describe.skipIf(!asked)("Finishing setup once OpenBot is ready", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const)
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`at ${width}x${height} (${colorScheme}), waits for Open OpenBot under the choice, which an untick before it keeps`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        try {
+          await toTheAiStep(page);
+          await page.getByText("Anthropic", { exact: true }).click();
+          await page
+            .getByRole("tab", { name: "Use an API key", exact: true })
+            .click();
+          await page
+            .getByLabel("Anthropic API key", { exact: true })
+            .fill("a-key-for-this-test");
+          await page
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Finishing setup" })
+            .waitFor();
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { __fake: { finishSetUp: () => void } }
+            ).__fake.finishSetUp(),
+          );
+          await page.locator(".cannot-cancel").waitFor();
+          const working = await page.locator(".lede").textContent();
+          expect(working).toBe(
+            "OpenBot is setting up on this computer. This can take a few minutes.",
+          );
+          await settled(page);
+          const before = await page.getByRole("checkbox").boundingBox();
+          // OpenBot comes up: the screen stays, and says so.
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { __fake: { finishStart: () => void } }
+            ).__fake.finishStart(),
+          );
+          const open = page.getByRole("button", {
+            name: "Open OpenBot",
+            exact: true,
+          });
+          await open.waitFor();
+          await settled(page);
+          await page.waitForTimeout(400);
+          const shots = process.env.OPENBOT_APP_SHOTS;
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/finishing-setup-ready-${width}x${height}-${colorScheme}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}.png`,
+            });
+          const calls = () =>
+            page.evaluate(
+              () =>
+                (globalThis as unknown as { __fake: { calls: string[] } })
+                  .__fake.calls,
+            );
+          expect(await calls()).not.toContain("show_openbot");
+          expect(await page.locator(".lede").textContent()).toBe(
+            "OpenBot is ready on this computer.",
+          );
+          expect(await page.locator(".cannot-cancel").count()).toBe(0);
+          expect(await page.locator(".step-spinner").count()).toBe(0);
+          // The choice, then the button, both in the window as it is, nothing to scroll to.
+          const box = await page.getByRole("checkbox").boundingBox();
+          const button = await open.boundingBox();
+          expect(box).not.toBeNull();
+          expect(button).not.toBeNull();
+          // The button arriving never moves the choice a click may be aimed at.
+          expect(box).toEqual(before);
+          expect(button?.y ?? 0).toBeGreaterThan(box?.y ?? 0);
+          expect((button?.y ?? 0) + (button?.height ?? 0)).toBeLessThanOrEqual(
+            height,
+          );
+          expect(
+            await page.evaluate(
+              () =>
+                document.documentElement.scrollWidth <=
+                document.documentElement.clientWidth,
+            ),
+          ).toBe(true);
+
+          // Untick, then Open OpenBot: the untick is saved before OpenBot opens.
+          await page.getByRole("checkbox").click();
+          await page.waitForTimeout(200);
+          await open.click();
+          await page.waitForTimeout(400);
+          const made = await calls();
+          const untick = made.lastIndexOf(
+            "plugin:openbot-desktop|set_usage_data",
+          );
+          expect(untick).toBeGreaterThan(-1);
+          expect(made.indexOf("show_openbot")).toBeGreaterThan(untick);
+        } finally {
+          await page.close();
+        }
+      }, 40_000);
+});
+
+/*
  * Seen on a Mac's first install: on Finishing setup, "Connecting OpenBot" stopped with "Setup
  * stopped partway through with an error. Retry. If it stops again, copy the logs below.", and the
  * card had nothing below it but Retry. The logs it names are in the card now, and in view.

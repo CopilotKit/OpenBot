@@ -1,6 +1,6 @@
 # Desktop telemetry
 
-Telemetry is enabled by default. The last setup screen, Finishing setup, ends with a checkbox, checked by default: "Help make OpenBot better by sharing diagnostics like errors, hangs, updates and available memory, never any content. OpenBot is built to respect your privacy." It links this document. That checkbox and the Settings switch below are one setting.
+Telemetry is enabled by default. The last setup screen, Finishing setup, ends with a checkbox, checked by default, and stays until the person selects Open OpenBot: "Help make OpenBot better by sharing diagnostics like errors, hangs, updates and available memory, never any content. OpenBot is built to respect your privacy." It links this document. That checkbox and the Settings switch below are one setting.
 
 **Settings > General > Privacy > Share usage data**, or the checkbox on Finishing setup, turns it off. Off is the same opt-out as `COPILOTKIT_TELEMETRY_DISABLED=1`, kept in `usage-data.json` in the app's configuration folder for every later launch. It takes effect at once for the desktop emitter (its identity, account binding and queue are deleted) and the bundled CLI (every call gets `COPILOTKIT_TELEMETRY_DISABLED=1`, and no `telemetry link` runs). The server reads it the next time OpenBot starts, through the suppression override below; the row says changes apply then. Turning it back on starts a fresh identity with nothing from before the opt-out.
 
