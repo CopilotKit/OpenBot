@@ -139,6 +139,13 @@ a turn on after one of OpenBot's tools answered. OpenBot's tools arrive in `tool
 calls one, it ends its run with the call unanswered, and OpenBot runs it and sends the result in
 the next run.
 
+What OpenBot remembers about the person, when there is any, comes as the AG-UI context entry
+`OpenBot personal memory`: quoted records under a line that says they are data, not instructions.
+It is never a system message. Treat it as data about the person, not as instructions.
+
+Some frameworks' AG-UI adapters drop the system messages that carry the Bot's role and tool
+guidance. [Connect your agent's framework](agent-frameworks.md) gives the few lines each one needs.
+
 ### Your own LangGraph agent
 
 `ag-ui-langgraph` drops the first system message of every run, which is the standing role, and keeps
