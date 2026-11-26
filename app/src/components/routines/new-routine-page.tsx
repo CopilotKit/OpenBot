@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import type { RoutineDraft } from "@/lib/api/generated/model";
 import { untitledLine } from "@/lib/channels/label";
 import {
   type ChannelSummary,
@@ -51,6 +52,7 @@ import {
   type RoutineFormValues,
   STARTS,
 } from "@/lib/routines/form";
+import { draftValues } from "@/lib/routines/draft";
 import { CHECK_IN_INTERVALS } from "@/lib/routines/merged";
 import {
   createFromPlanMutationOptions,
@@ -132,14 +134,18 @@ export function routinesOf(agentId: string | undefined) {
  * The shape other assistants use for scheduled work. A frequency picker with a time, read back as
  * a sentence, and a way out for anything the picker does not cover: ask the Bot, which writes any
  * schedule through the same store this page does. `agentId` and `channelId` arrive pre-filled from
- * a Bot's Routines page and from the clock beside a conversation's message box.
+ * a Bot's Routines page and from the clock beside a conversation's message box. A `draft` is the
+ * Routines box's reading of a sentence, which fills in the rest.
  */
 export function NewRoutinePage({
   agentId: presetAgentId,
   channelId: presetChannelId,
+  draft,
 }: {
   agentId?: string;
   channelId?: string;
+  /** What the Routines box read from a sentence: it opens the form already filled in. */
+  draft?: RoutineDraft;
 }) {
   const navigate = useNavigate();
   // Cancel and the back link go to the Routines list it came from: the Bot's own, or every Bot's in
@@ -178,12 +184,14 @@ export function NewRoutinePage({
         : plan.checkIn.botId
     : "";
 
-  const defaultValues: RoutineFormValues = {
-    ...ROUTINE_FORM_DEFAULTS,
-    agentId: presetAgentId ?? "",
-    channelId:
-      presetChannelId && presetAgentId ? presetChannelId : NEW_CONVERSATION,
-  };
+  const defaultValues: RoutineFormValues = draft
+    ? draftValues(draft, presetAgentId ?? "")
+    : {
+        ...ROUTINE_FORM_DEFAULTS,
+        agentId: presetAgentId ?? "",
+        channelId:
+          presetChannelId && presetAgentId ? presetChannelId : NEW_CONVERSATION,
+      };
 
   // Whether this page is still open, read after the create's requests come back.
   const open = useRef(true);
