@@ -1,7 +1,4 @@
-import {
-  lastRunLabel,
-  scheduleWords,
-} from "@/components/routines/routine-page";
+import { lastRunLabel, scheduleWords } from "./words";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { intervalLabel, type MergedRoutine, routineDoes } from "./merged";
 

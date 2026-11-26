@@ -19,7 +19,7 @@ import {
   runRoutine,
   updateRoutine,
 } from "@/lib/api/generated/routines/routines";
-import { scheduleWords } from "@/components/routines/routine-page";
+import { scheduleWords } from "./words";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { ClientError } from "@/lib/client";
