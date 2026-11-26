@@ -1023,6 +1023,7 @@ export * from "./listComputerFilesHeaders";
 export * from "./listComputersParams";
 export * from "./listConnectedAccountsParams";
 export * from "./listConnectionsParams";
+export * from "./listConversationApprovalsParams";
 export * from "./listConversationGrantsParams";
 export * from "./listConversationMembersParams";
 export * from "./listConversationMessagesParams";
