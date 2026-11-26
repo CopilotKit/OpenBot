@@ -153,6 +153,7 @@
         "mobile/src/api/request.ts",
         "mobile/src/auth.ts",
         "mobile/app/computer.tsx",
+        "mobile/src/watch-conversation.ts",
         "mobile/src/security-floor.ts",
         "extension/src/shared/openbot-client.ts",
         "extension/src/main-world/network-hook.ts"

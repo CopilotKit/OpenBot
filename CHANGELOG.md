@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **OpenBot Mobile shows a Bot's answer as it is written.** A conversation open on the phone shows
+  "Working…" as soon as the Bot starts, then its words as they come, as the web app does. Before,
+  the answer appeared all at once up to 10 seconds after it was finished. The phone joins the
+  conversation's live updates (`createConversationJoinToken`, already in the API), so a server
+  doesn't change. On an OpenBot too old to offer them the phone reloads every 10 seconds as before.
+  It reaches installed phones as an update, with no new store build.
 - **The management agent checks a release's chart signature before it touches anything.** With
   the chart's signature check on, the agent has Flux verify the chart a new version names before it
   records an install, stops the server, takes a backup or moves Flux. A chart that is unsigned or

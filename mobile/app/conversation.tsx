@@ -70,9 +70,17 @@ import {
   IconClock,
   IconTool,
 } from "../src/icons";
+import {
+  asMessages,
+  caughtUp,
+  type LiveRuns,
+  reduce,
+  settle,
+} from "../src/live-run";
 import { conversationOf, showConversation } from "../src/on-screen";
 import { measure, useOrbFlight, type ViewHandle } from "../src/orb-flight";
 import { useLoad } from "../src/use-load";
+import { watchConversationLive } from "../src/watch-conversation";
 import { dayAndTime } from "../src/when";
 
 /** Messages this far apart get the day and time over the later one. */
@@ -125,6 +133,11 @@ export default function ConversationScreen() {
   const [text, setText] = useState(draft ?? "");
   const [error, setError] = useState("");
   const [sending, setSending] = useState<string | null>(null);
+  // A message the server took, drawn until the messages read back hold it: a Bot can start on it before they do.
+  const [delivered, setDelivered] = useState<{
+    id: string;
+    text: string;
+  } | null>(null);
   const list = useRef<FlatList<Item>>(null);
   // The orb an empty conversation opens with, and its place in the header: the first message flies it up.
   const introOrb = useRef<ViewHandle>(null);
@@ -175,6 +188,58 @@ export default function ConversationScreen() {
     loadHistory,
     Boolean(session && conversation && (isGroup || agentId)),
   );
+  /*
+   * The Bot's runs as they happen (../src/watch-conversation.ts): "Working…" the moment one starts, and its words as they
+   * come, where the reloads above would show them all at once some seconds after. When a run ends its messages are read
+   * again at once, and the live copy goes. A server or a connection that can't do this leaves the reloads as they were.
+   */
+  const [live, setLive] = useState<LiveRuns>([]);
+  const liveNow = useRef(live);
+  liveNow.current = live;
+  const watcher = useRef<{ reconnect(): void } | null>(null);
+  // Read through a ref, so the socket isn't opened again each time the reloads change who they read for.
+  const reload = useRef({
+    history: history.refresh,
+    conversation: channels.refresh,
+  });
+  reload.current = { history: history.refresh, conversation: channels.refresh };
+  const person = session?.user.id;
+  useEffect(() => {
+    if (!channelId || !person) return;
+    setLive([]);
+    setDelivered(null);
+    const refreshHistory = () => reload.current.history();
+    const refreshConversation = () => reload.current.conversation();
+    // What the thread replays when the socket joins is gathered and drawn once, not event by event.
+    let replay: LiveRuns | null = null;
+    const ended = () =>
+      void Promise.all([refreshHistory(), refreshConversation()]).then(() =>
+        setLive(settle),
+      );
+    const watch = watchConversationLive(channelId, {
+      onEvent(event, replayed) {
+        if (replayed) {
+          replay = reduce(replay ?? liveNow.current, event);
+          return;
+        }
+        setLive((runs) => reduce(runs, event));
+        if (event.type === "RUN_STARTED") void refreshConversation();
+        if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR")
+          ended();
+      },
+      onCaughtUp() {
+        setLive(caughtUp(replay ?? liveNow.current));
+        replay = null;
+        // Whatever ended while the socket was away is in the messages now.
+        void refreshHistory();
+      },
+    });
+    watcher.current = watch;
+    return () => {
+      watcher.current = null;
+      watch.stop();
+    };
+  }, [channelId, person]);
   /*
    * In front of the person: a notification about this conversation shows nothing and brings what it
    * says in at once, and what the Bot said is marked read, as the web app marks the conversation it
@@ -231,9 +296,11 @@ export default function ConversationScreen() {
     return { seed: bot?.seed ?? "", name: bot?.name ?? "Bot" };
   };
   const working = Boolean(conversation?.work?.length);
-  const replyUnderway = (history.data?.messages ?? []).some(
-    (message) => message.status === "queued" || message.status === "running",
-  );
+  const replyUnderway =
+    live.some((run) => !run.ended) ||
+    (history.data?.messages ?? []).some(
+      (message) => message.status === "queued" || message.status === "running",
+    );
   // What a Bot asked the person to approve in this chat, decided right here as on the web app.
   const loadInbox = useCallback(() => loadApprovalInbox(), []);
   const inbox = useLoad(loadInbox, Boolean(session));
@@ -267,7 +334,24 @@ export default function ConversationScreen() {
   }
   // Newest first, as the API answers and as an inverted list draws from the bottom up.
   const items = useMemo<Item[]>(() => {
-    const oldestFirst = (history.data?.messages ?? []).slice().reverse();
+    const read = history.data?.messages ?? [];
+    // While the person's own message is still on its way it is drawn last; the Bot's reply joins after it.
+    const writing = sending ? [] : asMessages(live, read);
+    const mine: ConversationMessage[] =
+      delivered && !read.some((message) => message.id === delivered.id)
+        ? [
+            {
+              id: delivered.id,
+              role: "person",
+              personId: null,
+              botId: null,
+              text: delivered.text,
+              status: "completed",
+              createdAt: null,
+            },
+          ]
+        : [];
+    const oldestFirst = [...writing, ...mine, ...read].slice().reverse();
     const out: Item[] = [];
     let previous = 0;
     for (const message of oldestFirst) {
@@ -290,7 +374,12 @@ export default function ConversationScreen() {
     for (const request of waitingHere)
       out.push({ kind: "approval", key: `approval:${request.id}`, request });
     return out.reverse();
-  }, [history.data, waitingHere]);
+  }, [history.data, waitingHere, live, sending, delivered]);
+  // A live reply doesn't say which Bot in a group is writing it: it is named once it is read back.
+  const liveIds = useMemo(
+    () => new Set(asMessages(live, []).map((message) => message.id)),
+    [live],
+  );
   // A conversation with something in it shows who it is with in the header from the start.
   useEffect(() => {
     if (items.length > 0 && !flying) setRevealed(true);
@@ -324,13 +413,17 @@ export default function ConversationScreen() {
     setError("");
     setText("");
     try {
+      const id = Crypto.randomUUID();
       await sendConversationMessage(ORGANIZATION_ID, channelId, {
-        id: Crypto.randomUUID(),
+        id,
         text: pendingText,
         // A group's message goes to every Bot in it; another conversation's to its one Bot.
         ...(isGroup ? {} : { botId: agentId }),
       });
+      setDelivered({ id, text: pendingText });
       chatFiles.sent();
+      // A conversation's first message gives its socket something to join.
+      watcher.current?.reconnect();
       await history.refresh();
     } catch (failure) {
       // What they wrote goes back in the box, so nothing is lost; a first message that didn't go leaves the
@@ -429,7 +522,7 @@ export default function ConversationScreen() {
                 <MessageLine
                   message={item.message}
                   bot={speakerOf(item.message)}
-                  named={isGroup}
+                  named={isGroup && !liveIds.has(item.message.id)}
                   decidingHere={waitingHere.length > 0}
                   onReview={() =>
                     router.push({
