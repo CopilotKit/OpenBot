@@ -404,7 +404,9 @@ export function RoutinePage({
               <IconPlayerPlay />
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>Run now</ItemTitle>
+              <ItemTitle>
+                {runNow.isPending ? "Starting…" : "Run now"}
+              </ItemTitle>
               <ItemDescription>
                 {routine.enabled
                   ? "Runs it now, for real. The Bot does the work and posts in the conversation."
@@ -511,6 +513,28 @@ export function RoutinePage({
         {setEnabled.error || runNow.error ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
             {failureSaid(setEnabled.error ?? runNow.error)}
+          </p>
+        ) : null}
+        {/*
+         * The press is answered here, as the check-in page answers its own Run now: it started, and
+         * where to watch it. The link sits outside the Run now row, which is a button.
+         */}
+        {runNow.isSuccess ? (
+          <p className="mt-3 text-sm" role="status">
+            {routine.conversation.gone ? (
+              "Started. It shows under Runs."
+            ) : (
+              <>
+                Started. The Bot posts in the conversation as it works.{" "}
+                <Link
+                  className="underline"
+                  params={{ channelId: routine.conversation.id }}
+                  to="/channel/$channelId"
+                >
+                  Open conversation
+                </Link>
+              </>
+            )}
           </p>
         ) : null}
       </PageSection>
