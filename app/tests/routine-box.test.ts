@@ -6,13 +6,18 @@ import type {
 } from "../src/lib/api/generated/model";
 import { ClientError } from "../src/lib/client";
 import {
-  describeDraftWhen,
   lineForMade,
+  lineForReadError,
   lineForReading,
+  lineForRoutingRefusal,
+  lineForUndo,
   lineForWriteError,
 } from "../src/lib/routines/box";
 import { draftValues } from "../src/lib/routines/draft";
-import { SavedButRefused } from "../src/lib/routines/mutations";
+import {
+  type MadeRoutine,
+  SavedButRefused,
+} from "../src/lib/routines/mutations";
 
 const draft: RoutineDraft = {
   does: "act",
@@ -48,39 +53,12 @@ const needsMore = (missing: string, from = draft): RoutineReading => ({
   missing,
 });
 
-describe("describeDraftWhen", () => {
-  test("a check-in says how often it looks", () => {
-    expect(describeDraftWhen(tellDraft)).toBe("Checks every 4 hours");
-  });
-
-  test("a check-in with no interval looks daily", () => {
-    expect(describeDraftWhen({ ...tellDraft, intervalMinutes: null })).toBe(
-      "Checks once a day",
-    );
-  });
-
-  test("a schedule the form can say is said as the form says it", () => {
-    expect(describeDraftWhen(draft)).toBe("Every weekday at 9:00 AM");
-  });
-
-  test("a schedule the form cannot say is the cron", () => {
-    expect(describeDraftWhen({ ...draft, cron: "*/5 * * * *" })).toBe(
-      "*/5 * * * *",
-    );
-  });
-
-  test("no schedule says nothing", () => {
-    expect(describeDraftWhen({ ...draft, starts: "now", cron: null })).toBe("");
-  });
-});
-
 describe("lineForReading", () => {
-  test("notRoutine: use the form with no draft", () => {
+  test("notRoutine: unread, with no draft and no action", () => {
     expect(lineForReading({ outcome: "notRoutine" }, ctx)).toEqual({
-      kind: "useForm",
+      kind: "unread",
       botId: "b1",
       text: "Couldn't read that as a routine.",
-      draft: null,
     });
   });
 
@@ -144,12 +122,11 @@ describe("lineForReading", () => {
     });
   });
 
-  test("needsMore, an unknown missing: use the form with the draft", () => {
+  test("needsMore, an unknown missing: unread", () => {
     expect(lineForReading(needsMore("somethingNew"), ctx)).toEqual({
-      kind: "useForm",
+      kind: "unread",
       botId: "b1",
       text: "Couldn't read that as a routine.",
-      draft,
     });
   });
 
@@ -231,23 +208,100 @@ describe("lineForReading", () => {
     });
   });
 
-  test("ready, any other broken rule: use the form with the draft and its message", () => {
+  test("ready, any other broken rule: finish, with the draft and the rule's message", () => {
     const empty = { ...draft, instruction: "   " };
     const line = lineForReading({ outcome: "ready", draft: empty }, ctx);
-    expect(line).toMatchObject({ kind: "useForm", botId: "b1", draft: empty });
-    if (line.kind !== "useForm") throw new Error("expected useForm");
+    expect(line).toMatchObject({ kind: "finish", botId: "b1", draft: empty });
+    if (line.kind !== "finish") throw new Error("expected finish");
     expect(line.text.length).toBeGreaterThan(0);
   });
 });
 
 describe("lineForMade", () => {
-  test("says who took what, and when", () => {
-    const made = { kind: "routine", id: "r1" } as const;
+  test("says who took what, and when, in the row's words", () => {
+    const made: MadeRoutine = {
+      kind: "routine",
+      id: "r1",
+      when: "Weekdays at 09:00",
+    };
     expect(lineForMade(made, draft, "b1", "Ada")).toEqual({
       kind: "made",
       botId: "b1",
-      text: "Ada took “Weekly numbers” · Every weekday at 9:00 AM",
+      text: "Ada took “Weekly numbers” · Weekdays at 09:00",
       open: made,
+    });
+  });
+
+  test("a check-in says how often it looks", () => {
+    const made: MadeRoutine = {
+      kind: "check-in",
+      id: "ci1",
+      when: "Checks every 4 hours",
+    };
+    expect(lineForMade(made, tellDraft, "b1", "Ada")).toMatchObject({
+      text: "Ada took “Inbox” · Checks every 4 hours",
+    });
+  });
+
+  test("a goal that nothing starts says no when, and no dot", () => {
+    const made: MadeRoutine = {
+      kind: "goal",
+      id: "g1",
+      when: "",
+      routineId: null,
+    };
+    expect(lineForMade(made, draft, "b1", "Ada")).toMatchObject({
+      text: "Ada took “Weekly numbers”",
+    });
+  });
+});
+
+describe("lineForReadError", () => {
+  test("a failed read says the error's sentence, with no action", () => {
+    expect(lineForReadError(new Error("Model is down."), "b1")).toEqual({
+      kind: "unread",
+      botId: "b1",
+      text: "Model is down.",
+    });
+  });
+
+  test("an error with no message says the fallback", () => {
+    expect(lineForReadError(new Error(""), "b1")).toEqual({
+      kind: "unread",
+      botId: "b1",
+      text: "Couldn't read that. Try again.",
+    });
+  });
+
+  test("a held 503 says the server's sentence", () => {
+    const said = "OpenBot is moving this organization. Try again in a moment.";
+    const held = new ClientError(said, 503, undefined, { error: said }, 1000);
+    expect(lineForReadError(held, "b1")).toMatchObject({
+      kind: "unread",
+      text: said,
+    });
+  });
+});
+
+describe("lineForUndo", () => {
+  test("says Removed.", () => {
+    expect(lineForUndo("b1")).toEqual({
+      kind: "removed",
+      botId: "b1",
+      text: "Removed.",
+    });
+  });
+});
+
+describe("lineForRoutingRefusal", () => {
+  test("is a refusal with the message and nothing to fix", () => {
+    expect(
+      lineForRoutingRefusal("Two Bots are called Ada. Pick one.", "b1"),
+    ).toEqual({
+      kind: "refused",
+      botId: "b1",
+      text: "Two Bots are called Ada. Pick one.",
+      fix: null,
     });
   });
 });

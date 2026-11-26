@@ -1,25 +1,25 @@
 import type { RoutineDraft, RoutineReading } from "@/lib/api/generated/model";
 import { loadFailureText } from "@/lib/load-failure";
 import type { ProactiveSetting } from "@/lib/proactive";
-import { type RoutineFormValues, scheduleFrom, scheduleSentence } from "./form";
 import { draftValues } from "./draft";
-import { intervalLabel } from "./merged";
+import type { RoutineFormValues } from "./form";
 import { type MadeRoutine, SavedButRefused } from "./mutations";
 import { checkInSubject } from "./plan";
 import { brokenRules, SAME_CHECK_IN } from "./rules";
 
-/** What the line under the Routines box says, and what it offers beside the words. */
+/**
+ * What the line under the Routines box says, and what it offers beside the words. No line has a
+ * close button: the next sentence sent, or leaving the page, clears it. `made` offers Open and Undo,
+ * `finish` offers Finish, a refusal that needs an app offers Connect, and `unread`, `removed` and
+ * `maybeMade` offer nothing.
+ */
 export type BoxLine =
   | { kind: "made"; botId: string; text: string; open: MadeRoutine }
   | { kind: "finish"; botId: string; text: string; draft: RoutineDraft }
   | { kind: "refused"; botId: string; text: string; fix: "connectApp" | null }
   | { kind: "maybeMade"; botId: string; text: string }
-  | {
-      kind: "useForm";
-      botId: string;
-      text: string;
-      draft: RoutineDraft | null;
-    };
+  | { kind: "unread"; botId: string; text: string }
+  | { kind: "removed"; botId: string; text: "Removed." };
 
 /** A reading that broke no rule: the box writes it, with the schedule and zone the sentence gave. */
 export type BoxWrite = {
@@ -30,15 +30,6 @@ export type BoxWrite = {
 };
 
 const NOT_A_ROUTINE = "Couldn't read that as a routine.";
-
-/** When a drafted routine runs, in a few words: how often it checks, or its schedule. */
-export function describeDraftWhen(draft: RoutineDraft): string {
-  if (draft.does === "tell")
-    return `Checks ${intervalLabel(draft.intervalMinutes ?? 1440).toLowerCase()}`;
-  const schedule = draft.cron ? scheduleFrom(draft.cron) : null;
-  if (schedule) return scheduleSentence(schedule);
-  return draft.cron ?? "";
-}
 
 /** What the line says, or the write to make, for what the server read from the sentence. */
 export function lineForReading(
@@ -53,7 +44,7 @@ export function lineForReading(
   const { botId, botName, allowed, checkIns } = ctx;
 
   if (reading.outcome === "notRoutine")
-    return { kind: "useForm", botId, text: NOT_A_ROUTINE, draft: null };
+    return { kind: "unread", botId, text: NOT_A_ROUTINE };
 
   if (reading.outcome === "refused")
     return {
@@ -90,7 +81,7 @@ export function lineForReading(
           draft,
         };
       default:
-        return { kind: "useForm", botId, text: NOT_A_ROUTINE, draft };
+        return { kind: "unread", botId, text: NOT_A_ROUTINE };
     }
   }
 
@@ -111,7 +102,7 @@ export function lineForReading(
       fix: null,
     };
   const [message] = Object.values(messages);
-  if (message) return { kind: "useForm", botId, text: message, draft };
+  if (message) return { kind: "finish", botId, text: message, draft };
   return {
     kind: "write",
     values,
@@ -130,8 +121,38 @@ export function lineForMade(
   return {
     kind: "made",
     botId,
-    text: `${botName} took “${draft.title}” · ${describeDraftWhen(draft)}`,
+    text: `${botName} took “${draft.title}”${made.when ? ` · ${made.when}` : ""}`,
     open: made,
+  };
+}
+
+/** What the line says once Undo has taken back what was made. */
+export function lineForUndo(botId: string): BoxLine {
+  return { kind: "removed", botId, text: "Removed." };
+}
+
+/**
+ * What the line says when OpenBot could not pick a Bot for the sentence, for instance because two
+ * Bots share the name the sentence used. Nothing was read or written, and there is nothing to fix
+ * from the line.
+ */
+export function lineForRoutingRefusal(message: string, botId: string): BoxLine {
+  return { kind: "refused", botId, text: message, fix: null };
+}
+
+/**
+ * What the line says when the read failed: the error's own sentence, or a held 503's, with no
+ * action. Plain words from `loadFailureText`, as for a failed write.
+ */
+export function lineForReadError(error: unknown, botId: string): BoxLine {
+  return {
+    kind: "unread",
+    botId,
+    text: loadFailureText(
+      error,
+      (error instanceof Error && error.message) ||
+        "Couldn't read that. Try again.",
+    ),
   };
 }
 
