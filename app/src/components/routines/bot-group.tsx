@@ -109,7 +109,8 @@ function GoalRow({ row }: { row: Extract<MergedRoutine, { kind: "goal" }> }) {
   );
 }
 
-function GroupRow({ row }: { row: MergedRoutine }) {
+/** One row as the Routines page draws it, opening the routine, goal or check-in it is. */
+export function GroupRow({ row }: { row: MergedRoutine }) {
   switch (row.kind) {
     case "routine":
       return (

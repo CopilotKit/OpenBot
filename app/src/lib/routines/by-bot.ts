@@ -1,6 +1,6 @@
-import { lastRunLabel, scheduleWords } from "./words";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { intervalLabel, type MergedRoutine, routineDoes } from "./merged";
+import { lastRunLabel, scheduleWords } from "./words";
 
 export type RowTone = "running" | "warning" | "muted" | "normal";
 
@@ -150,6 +150,25 @@ function sortedRows(rows: readonly MergedRoutine[]): MergedRoutine[] {
         a.index - b.index,
     )
     .map(({ row }) => row);
+}
+
+/**
+ * One Bot's routines that are running or lined up to start, in the Routines page's order: running
+ * first, then those with a warning, then by when they next start. Paused and completed ones, and
+ * goals nothing starts but asking, are left out. What a Bot's page shows under Routines.
+ */
+export function runningAndScheduled(
+  rows: readonly MergedRoutine[],
+  botId: string,
+): MergedRoutine[] {
+  return sortedRows(
+    rows.filter(
+      (row) =>
+        row.agentId === botId &&
+        !isOff(row) &&
+        (isRunning(row) || nextStart(row) !== null),
+    ),
+  );
 }
 
 /**

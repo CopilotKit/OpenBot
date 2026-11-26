@@ -46,8 +46,9 @@ import {
   useNotificationPermission,
 } from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
-import { BotActivityGlance, BotActivityRow } from "./activity";
+import { BotActivityRow } from "./activity";
 import { BotPausedBanner } from "./pause-banner";
+import { BotRoutinesSummary } from "./routines-summary";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
   all: "Everything",
@@ -248,7 +249,7 @@ export function BotProfile({
         )}
       </PageSection>
 
-      <BotActivityGlance agentId={agent.id} />
+      <BotRoutinesSummary agentId={agent.id} />
       <DoneTasks done={done} />
       {settings}
       {manage}
