@@ -68,59 +68,56 @@ export function useChatFiles(channelId: string) {
     }));
   }
 
-  const attach = useCallback(
-    async (from: AttachFrom) => {
-      setError("");
-      let picked: Picked[];
+  // A plain function, made again on each render: it reads the files held now, through pick.
+  async function attach(from: AttachFrom) {
+    setError("");
+    let picked: Picked[];
+    try {
+      picked = await pick(from);
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : "Couldn't open your files. Try again.",
+      );
+      return;
+    }
+    for (const file of picked) {
+      const key = `${file.uri}#${Math.random()}`;
+      setFiles((now) => [
+        ...now,
+        {
+          key,
+          name: file.name,
+          image: file.image,
+          preview: file.image ? file.uri : undefined,
+          uploading: true,
+        },
+      ]);
       try {
-        picked = await pick(from);
+        // Expo's fetch sends a file it can read as a Blob: expo-file-system's File, at the picked file's address.
+        const held = await uploadConversationAttachment(
+          ORGANIZATION_ID,
+          channelId,
+          { file: new File(file.uri) },
+        );
+        setFiles((now) =>
+          now.map((item) =>
+            item.key === key
+              ? { ...item, id: held.id, uploading: false }
+              : item,
+          ),
+        );
       } catch (failure) {
+        setFiles((now) => now.filter((item) => item.key !== key));
         setError(
           failure instanceof Error
             ? failure.message
-            : "Couldn't open your files. Try again.",
+            : `Couldn't attach ${file.name}. Try again.`,
         );
-        return;
       }
-      for (const file of picked) {
-        const key = `${file.uri}#${Math.random()}`;
-        setFiles((now) => [
-          ...now,
-          {
-            key,
-            name: file.name,
-            image: file.image,
-            preview: file.image ? file.uri : undefined,
-            uploading: true,
-          },
-        ]);
-        try {
-          // Expo's fetch sends a file it can read as a Blob: expo-file-system's File, at the picked file's address.
-          const held = await uploadConversationAttachment(
-            ORGANIZATION_ID,
-            channelId,
-            { file: new File(file.uri) },
-          );
-          setFiles((now) =>
-            now.map((item) =>
-              item.key === key
-                ? { ...item, id: held.id, uploading: false }
-                : item,
-            ),
-          );
-        } catch (failure) {
-          setFiles((now) => now.filter((item) => item.key !== key));
-          setError(
-            failure instanceof Error
-              ? failure.message
-              : `Couldn't attach ${file.name}. Try again.`,
-          );
-        }
-      }
-    },
-    // biome-ignore lint/correctness/useExhaustiveDependencies: pick reads the files held now
-    [channelId, files.length],
-  );
+    }
+  }
 
   const remove = useCallback(
     (key: string) => {
