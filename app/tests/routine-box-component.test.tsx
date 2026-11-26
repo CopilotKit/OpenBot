@@ -465,6 +465,19 @@ test("there is no form link, no Bot picker, and no menu but @", async () => {
   // No attachments, no model picker, no routine clock, no voice call.
   expect(view.queryByRole("button", { name: "Attach a file" })).toBeNull();
   expect(view.queryByRole("button", { name: "Start voice call" })).toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="composer-dictate"]'),
+  ).toBeNull();
+});
+
+test("the empty box says what to write and how to choose a Bot", async () => {
+  serving();
+  const view = draw();
+  await box(view);
+  expect(view.container.innerHTML).toContain(
+    "What should it do, and when? Type @ to choose a Bot.",
+  );
+  expect(view.container.innerHTML).not.toContain("Ask anything");
 });
 
 test("pressing an example fills the box and reads nothing", async () => {

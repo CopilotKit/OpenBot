@@ -207,15 +207,15 @@ export function RoutineBox({
     <div className="flex flex-col gap-3">
       <Composer
         agents={toAgentOptions(bots)}
-        // No dictation either: the Composer draws its microphone whenever the browser or the server
-        // can transcribe, and has no switch for it.
-        className="w-full [&_[data-slot=composer-dictate]]:hidden"
+        className="w-full"
         commands={[]}
+        dictates={false}
         disabled={!bots}
         // A few lines tall before anything is typed, like a note, not a one-line pill.
         editorClassName="[&_.prompt-area-editor]:min-h-18"
         key={filled?.times ?? 0}
         onSubmit={send}
+        placeholder="What should it do, and when? Type @ to choose a Bot."
         // Sending waits for the check-ins read, which the rules for a check-in need.
         pending={busy || checkIns.isPending}
         {...(filled ? { initialValue: filled.text, autoFocus: true } : {})}

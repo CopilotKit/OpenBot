@@ -330,6 +330,10 @@ export type ComposerProps = {
    * nothing, as before.
    */
   draftKey?: string;
+  /** What the empty box says. "Ask anything" unless a screen asks something else of it. */
+  placeholder?: string;
+  /** False leaves the microphone out, for a box whose words are not a message (Routines). */
+  dictates?: boolean;
 };
 
 /**
@@ -408,6 +412,8 @@ const LAPSED_REASON =
   "was removed after a day without being sent. Attach it again.";
 
 export function Composer({
+  placeholder: emptyPlaceholder = "Ask anything",
+  dictates = true,
   className,
   editorClassName,
   compact = false,
@@ -1725,7 +1731,9 @@ export function Composer({
     promptAreaRef.current?.setCursorToEnd();
   }, []);
   const placeholder =
-    dictation.live.state.phase === "listening" ? "Listening…" : "Ask anything";
+    dictation.live.state.phase === "listening"
+      ? "Listening…"
+      : emptyPlaceholder;
   const canSendRecording =
     !disabled &&
     !tooManyStaged &&
@@ -1976,11 +1984,13 @@ export function Composer({
                 {modelPicker}
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <DictationButton
-                  dictation={dictation}
-                  disabled={disabled || voiceCall?.active === true}
-                  onStarted={focusForDictation}
-                />
+                {dictates ? (
+                  <DictationButton
+                    dictation={dictation}
+                    disabled={disabled || voiceCall?.active === true}
+                    onStarted={focusForDictation}
+                  />
+                ) : null}
                 {primaryAction}
               </div>
             </div>
@@ -2066,11 +2076,13 @@ export function Composer({
 
             <div className="flex items-center gap-1">
               {modelPicker}
-              <DictationButton
-                dictation={dictation}
-                disabled={disabled || voiceCall?.active === true}
-                onStarted={focusForDictation}
-              />
+              {dictates ? (
+                <DictationButton
+                  dictation={dictation}
+                  disabled={disabled || voiceCall?.active === true}
+                  onStarted={focusForDictation}
+                />
+              ) : null}
               {primaryAction}
             </div>
           </div>
