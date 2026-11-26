@@ -61,6 +61,9 @@ CREDENTIALS = Credentials(
 )
 # Every model request's body, without its headers, one JSON line each, when a test asks for it.
 REQUEST_LOG = (os.environ.get("OPENBOT_MODEL_REQUEST_LOG") or "").strip()
+# Where the Responses requests go: OpenAI's public API, the only address the plan route serves. A
+# test points it at a recording proxy that passes the bearer through to that same API.
+API_BASE = (os.environ.get("OPENBOT_CHATGPT_API_BASE") or "").strip().rstrip("/") or RESOURCE
 
 # Traces go to OpenAI's tracing API with an API key, which a plan has none of.
 set_tracing_disabled(True)
@@ -93,7 +96,7 @@ def _client() -> AsyncOpenAI:
     # (https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery).
     return AsyncOpenAI(
         api_key=CREDENTIALS.access_token,
-        base_url=RESOURCE,
+        base_url=API_BASE,
         max_retries=0,
         http_client=DefaultAsyncHttpxClient(event_hooks={"request": [_log_request]}),
     )
@@ -115,7 +118,7 @@ class PlanModels(ModelProvider):
             return self.default
         async with httpx.AsyncClient(timeout=30) as http:
             response = await http.get(
-                f"{RESOURCE}/models",
+                f"{API_BASE}/models",
                 headers={"Authorization": f"Bearer {await CREDENTIALS.access_token()}"},
             )
         response.raise_for_status()
