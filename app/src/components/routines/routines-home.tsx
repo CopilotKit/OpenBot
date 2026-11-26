@@ -76,12 +76,11 @@ export function RoutinesHome() {
       <PageColumn bar={showToggle}>
         <div className="pt-4 pb-6 text-center">
           <h1 className="font-semibold text-3xl leading-tight tracking-tight">
-            <span className="block text-muted-foreground">Say it once.</span>{" "}
-            Your Bots keep doing it.
+            Give your Bots some work
           </h1>
           <p className="mt-3 text-muted-foreground text-sm">
-            On a schedule, toward a goal, or by checking in when something
-            changes.
+            Routines run on a schedule, towards a goal or wake up the Bot if
+            they expect something from the outside.
           </p>
         </div>
 

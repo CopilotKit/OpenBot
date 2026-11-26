@@ -9,8 +9,8 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { RoutinesHome } from "@/components/routines/routines-home";
 import { viewerTimeZone } from "@/components/routines/routine-page";
+import { RoutinesHome } from "@/components/routines/routines-home";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
@@ -114,14 +114,14 @@ function draw() {
 const groupNames = (view: ReturnType<typeof draw>) =>
   view.getAllByRole("region").map((group) => group.getAttribute("aria-label"));
 
-test("the heading reads both lines", async () => {
+test("the heading and the line under it", async () => {
   serving({ shown: [bot("atlas", "Atlas")] });
   const view = draw();
   const heading = await view.findByRole("heading", { level: 1 });
-  expect(heading.textContent).toBe("Say it once. Your Bots keep doing it.");
+  expect(heading.textContent).toBe("Give your Bots some work");
   expect(
     view.getByText(
-      "On a schedule, toward a goal, or by checking in when something changes.",
+      "Routines run on a schedule, towards a goal or wake up the Bot if they expect something from the outside.",
     ),
   ).toBeTruthy();
 });
