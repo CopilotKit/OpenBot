@@ -56,8 +56,9 @@ export function Strip({
       >
         {children}
       </nav>
+      {/* The strip's width, as the sections' list is, so what it holds can wrap to the strip. */}
       {footer ? (
-        <div className="flex shrink-0 flex-col items-center gap-1 py-1">
+        <div className="flex w-full shrink-0 flex-col items-center gap-1 py-1">
           {footer}
         </div>
       ) : null}

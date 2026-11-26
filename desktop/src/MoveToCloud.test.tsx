@@ -53,6 +53,7 @@ mock.module("./Mark", () => ({
 }));
 
 const { App } = await import("./App");
+const { forgetBusinessOpened } = await import("./BusinessBooker");
 const { countLines, formatSpace, reconnectPage } = await import(
   "./MoveToCloud"
 );
@@ -86,6 +87,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  // A new window: no OpenBot for Business booker has come on screen in it yet.
+  forgetBusinessOpened();
   if (before === undefined) delete process.env.VITE_OPENBOT_CLOUD_ENABLED;
   else process.env.VITE_OPENBOT_CLOUD_ENABLED = before;
   answers = {};
@@ -335,7 +338,35 @@ test("the move screen offers OpenBot for Business between Cloud and Self-Contain
     ),
   ).toBeTruthy();
   expect(view.getByRole("heading", { name: "Book a demo" })).toBeTruthy();
-  expect(view.getByTitle("Booking calendar")).toBeTruthy();
+  const calendar = view.getByTitle("Booking calendar") as HTMLIFrameElement;
+  // Tagged and counted as Move to Cloud's, which Calendly keeps on the booking.
+  expect(
+    new URL(calendar.getAttribute("src") ?? "").searchParams.get("utm_content"),
+  ).toBe("move_to_cloud");
+  const businessEvents = () =>
+    calls
+      .filter((call) => call.command === "record_setup_event")
+      .map(
+        (call) =>
+          (call.args as { event: { kind: string; place?: string } }).event,
+      )
+      .filter((event) => event.kind.startsWith("business_"));
+  expect(businessEvents()).toEqual([
+    { kind: "business_opened", place: "move_to_cloud" },
+  ]);
+  await act(async () => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "https://calendly.com",
+        source: calendar.contentWindow,
+        data: { event: "calendly.event_scheduled", payload: {} },
+      }),
+    );
+  });
+  expect(businessEvents()).toEqual([
+    { kind: "business_opened", place: "move_to_cloud" },
+    { kind: "business_booked", place: "move_to_cloud" },
+  ]);
   expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
   expect(
     view.queryByRole("button", { name: "Keep OpenBot on this computer" }),

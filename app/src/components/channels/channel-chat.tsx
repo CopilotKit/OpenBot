@@ -53,6 +53,7 @@ import {
 } from "@/lib/approvals";
 import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import { attachmentUrl } from "@/lib/channels/attachments";
+import { runEndedIn } from "@/lib/channels/mark-read";
 import {
   recordChannelActivityMutationOptions,
   setChannelBusy,
@@ -89,10 +90,12 @@ import { isBrokenStream, STREAM_BROKE } from "@/lib/copilot/broken-stream";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import {
+  askRunEnding,
   askRunLiveness,
   quietRunPeriod,
   RUN_ENDED_UNHEARD,
   RUN_UNREACHABLE,
+  startedRunId,
   watchQuietRun,
 } from "@/lib/copilot/quiet-run";
 import {
@@ -101,6 +104,7 @@ import {
   withStoredAnswers,
 } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
+import { watchSnapshotRemovals } from "@/lib/copilot/snapshot-removed";
 import {
   asksToCarryOn,
   failedRunReason,
@@ -318,19 +322,31 @@ export function channelHistoryNotice({
  * browser steps a run asked for, its arguments cut short, so a message whose calls the store holds
  * every one of, and more of, takes the stored calls.
  *
+ * NOR DOES WHAT A RUN'S OWN SNAPSHOT TOOK AWAY COME BACK (`removed`, `snapshot-removed.ts`). A store
+ * a beat behind holds a run as it stood part way through, and a message its snapshot then removed is
+ * not missing from the screen: it is gone. Added as missing, an answer streamed under one id and
+ * handed back in the snapshot under another sat over a cut-off copy of itself.
+ *
  * Exported for its tests.
  */
 export function mergeStoredMessages(
   local: Message[],
   stored: Message[],
-  /**
-   * Reading back a run whose live stream broke (`broken-stream.ts`): the store's copy of what that
-   * stream drew is the whole of it. Only then does a longer stored reply win when the screen's is not
-   * its beginning, and a stored message with more of a step's calls take the place of the one drawn.
-   * Otherwise a stored reply that is the start of the screen's leaves the screen's copy standing: a
-   * store a beat behind holds an older version of a message this tab is still writing.
-   */
-  { readBack = false }: { readBack?: boolean } = {},
+  {
+    readBack = false,
+    removed,
+  }: {
+    /**
+     * Reading back a run whose live stream broke (`broken-stream.ts`): the store's copy of what that
+     * stream drew is the whole of it. Only then does a longer stored reply win when the screen's is
+     * not its beginning, and a stored message with more of a step's calls take the place of the one
+     * drawn. Otherwise a stored reply that is the start of the screen's leaves the screen's copy
+     * standing: a store a beat behind holds an older version of a message this tab is still writing.
+     */
+    readBack?: boolean;
+    /** The messages a run made and its own snapshot removed: never added back from the store. */
+    removed?: ReadonlySet<string>;
+  } = {},
 ): Message[] {
   const localIds = new Set(local.map((message) => message.id));
   /*
@@ -389,7 +405,7 @@ export function mergeStoredMessages(
       }
       if ((readBack || held === message.id) && !storedFor.has(held))
         storedFor.set(held, message);
-    } else {
+    } else if (!removed?.has(message.id)) {
       pending.push(message);
     }
   }
@@ -707,6 +723,15 @@ export function ChannelChat({
    */
   const agentRef = useRef(agent);
   agentRef.current = agent;
+  /**
+   * What a run's own snapshot took away in this conversation, kept across the agent `useAgent`
+   * swaps in, so no read of the store adds it back (`snapshot-removed.ts`).
+   */
+  const snapshotRemoved = useRef(new Set<string>());
+  useEffect(
+    () => watchSnapshotRemovals(agent, snapshotRemoved.current),
+    [agent],
+  );
   const voiceArchive = useVoiceArchive(channel.id);
   const [voiceContextNotice, setVoiceContextNotice] = useState<string | null>(
     null,
@@ -803,6 +828,8 @@ export function ChannelChat({
       let joined: "connected" | "deadline" | "gave up" = "deadline";
       // How a kept join's turn was found to have ended, and how to stop watching it.
       let keptEnded: "over" | "unreachable" | null = null;
+      // The run the join last heard start, to ask how it ended.
+      let keptRunId: string | null = null;
       let stopKept = () => {};
       try {
         // Bounded, and finished when it returns; `join-thread.ts` has why that matters.
@@ -877,16 +904,25 @@ export function ChannelChat({
         unanswered.current = true;
       } finally {
         stopKept();
+        keptRunId = lastRun.runId();
         lastRun.stop();
         if (current) setReplaying(false);
         openJoined.current();
       }
-      // The turn the join was kept for had ended without a word reaching here: say so.
+      /*
+       * The turn the join was kept for had ended without a word reaching here: say so, unless the
+       * server says its run finished. Its reply is then the one the history read below brings in.
+       */
       if (keptEnded !== null && current && turnsRef.current === 0) {
         setRestoring(false);
-        setRunError({
-          message: keptEnded === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,
-        });
+        const finished =
+          keptEnded === "over" &&
+          keptRunId !== null &&
+          (await askRunEnding(channel.id, keptRunId)) === "finished";
+        if (!finished && current && turnsRef.current === 0)
+          setRunError({
+            message: keptEnded === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,
+          });
       }
       /*
        * The last run failed, so say so again, as the turn did when it failed. Only from a replay
@@ -921,6 +957,7 @@ export function ChannelChat({
           const messages = mergeStoredMessages(
             withCurrentA2uiVersions(agent.messages),
             stored.messages,
+            { removed: snapshotRemoved.current },
           );
           if (messages !== agent.messages) agent.setMessages(messages);
         }
@@ -1076,6 +1113,7 @@ export function ChannelChat({
           const messages = mergeStoredMessages(
             withCurrentA2uiVersions(current.messages),
             stored.messages,
+            { removed: snapshotRemoved.current },
           );
           if (messages === current.messages) continue;
           current.setMessages(messages);
@@ -1389,6 +1427,7 @@ export function ChannelChat({
       if (stored.availability !== "ready") continue;
       const merged = mergeStoredMessages(target.messages, stored.messages, {
         readBack: true,
+        removed: snapshotRemoved.current,
       });
       if (merged !== target.messages) target.setMessages(merged);
       const drawn = merged.filter(
@@ -1573,6 +1612,8 @@ export function ChannelChat({
           ask: () => askRunLiveness(channel.id),
           quietMs: quietRunPeriod.ms,
         });
+        // The run this browser last heard start, to ask how it ended if its end is never heard.
+        let heardRunId: string | null = null;
         const hearing = target.subscribe({
           /*
            * The browser starting the turn's next run (with a step's result) ends the rest, before a
@@ -1580,8 +1621,14 @@ export function ChannelChat({
            * sent: nothing of it ever came, the watch was still resting from the run before, and the
            * server saying it had no run going read as the step still being taken. "Thinking" for good.
            */
-          onRunInitialized: () => quiet.heard(),
+          onRunInitialized: () => {
+            // A new run: how the last one ended says nothing about this one.
+            heardRunId = null;
+            quiet.heard();
+          },
           onEvent: ({ event }) => {
+            if (event.type === EventType.RUN_STARTED)
+              heardRunId = startedRunId(event) ?? heardRunId;
             // Between the server's runs the turn is this browser's (a step it takes, a card the
             // person answers), and quiet there is not a run gone missing.
             if (
@@ -1625,8 +1672,23 @@ export function ChannelChat({
           awaitingReply.current = false;
           // What the thread holds is what was saved: read back when the runtime can be asked.
           if (ended === "over") {
+            const ending = heardRunId
+              ? await askRunEnding(channel.id, heardRunId)
+              : "unknown";
             const whole = await readBackFromThread(target, existingMessageIds);
             if (whole) reportReadBack(target);
+            /*
+             * A RUN THAT FINISHED IS SHOWN AS FINISHED, though its end never reached here. Its reply
+             * is the one read back whole from the thread, and nothing is left for this browser to
+             * do. A run that stopped part way, or one the server can't say about, keeps the notice
+             * and its Carry on. See `askRunEnding`.
+             */
+            if (
+              ending === "finished" &&
+              whole &&
+              unansweredToolCalls(target.messages).size === 0
+            )
+              break;
           }
           setRunError({
             message: ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,
@@ -1844,13 +1906,16 @@ export function ChannelChat({
     const subscription = agent.subscribe?.({
       // Both surfaces fall back to the same sentence, from the same place, so a person who uses
       // both is not told two different things about the same silence.
-      onRunErrorEvent: ({ event }) =>
+      onRunErrorEvent: ({ event }) => {
+        // Seen failing here is read, though the roster never hears of it (mark-read.ts).
+        runEndedIn(channel.id);
         fail(
           stoppedReason(event?.message),
           true,
           undefined,
           refusedForPerson(event?.message),
-        ),
+        );
+      },
       onRunFailed: ({ error }) => {
         /*
          * Not the Bot failing: the run's stream reached this browser out of shape, in any run of a
@@ -1901,6 +1966,8 @@ export function ChannelChat({
         );
       },
       onRunFinishedEvent: ({ event }) => {
+        // However it finished, seen finishing here is read (mark-read.ts).
+        runEndedIn(channel.id);
         /*
          * A run the server stopped to ask the person (an app's call OpenBot asks about) draws its
          * card now, not on the inbox's next poll, as a computer step's does.

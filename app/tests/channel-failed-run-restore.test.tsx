@@ -14,7 +14,7 @@ import {
   type RefusedTurn,
 } from "@/lib/channels/queries";
 import { quietRunPeriod, RUN_ENDED_UNHEARD } from "@/lib/copilot/quiet-run";
-import { TURN_CUT_OFF } from "@/lib/copilot/stopped-turn";
+import { TURN_CUT_OFF, UNREADABLE_REPLY } from "@/lib/copilot/stopped-turn";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
@@ -75,7 +75,13 @@ type RunPlan =
   /** The run request never reaches a back end at all. */
   | { kind: "unreachable" }
   /** The run request is taken and nothing of it ever comes back: its server died under it. */
-  | { kind: "silent" };
+  | { kind: "silent" }
+  /**
+   * The run goes on to the end on the server, and this browser hears only its start: the phone it
+   * runs on slept through the rest. The thread holds the whole reply, and the server keeps the run's
+   * ending as it ended: `succeeded` when it finished, `failed` when it ended on a RUN_ERROR.
+   */
+  | { kind: "endsUnheard"; text: string; ends: "finished" | "fails" };
 
 let originalFetch: typeof fetch;
 let plans: RunPlan[] = [];
@@ -84,6 +90,14 @@ let recorded = new Map<string, unknown[]>();
 /** The thread's stored messages: what was said, and nothing about how a run ended. */
 let stored = new Map<string, Message[]>();
 let stopRequests: string[] = [];
+/**
+ * How each run ended, as the server keeps it (its `bot_runs` row) and getConversationRun answers:
+ * by run id, the outcome its last event said and when. A run with no row is not found.
+ */
+let endings = new Map<
+  string,
+  { threadId: string; outcome: "succeeded" | "failed"; endedAt: string }
+>();
 /** The turns the server refused, as it keeps them: what `listRefusedTurns` answers, oldest first. */
 let refusedTurns: RefusedTurn[] = [];
 /**
@@ -256,6 +270,47 @@ function run(input: RunAgentInput): Response {
     return sse(events);
   }
   const messageId = `reply-${input.runId}`;
+  if (plan.kind === "endsUnheard") {
+    const cut = Math.floor(plan.text.length / 2);
+    const head = plan.text.slice(0, cut);
+    const said = plan.ends === "finished" ? plan.text : head;
+    // The run as it went on the server, recorded and stored whole.
+    record(input.threadId, [
+      started,
+      { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
+      { type: "TEXT_MESSAGE_CONTENT", messageId, delta: said },
+      { type: "TEXT_MESSAGE_END", messageId },
+      plan.ends === "finished"
+        ? { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId }
+        : {
+            type: "RUN_ERROR",
+            message: "Model connection dropped.",
+            code: "agent_error",
+          },
+    ]);
+    remember(input.threadId, [
+      { id: messageId, role: "assistant", content: said },
+    ]);
+    endings.set(input.runId, {
+      threadId: input.threadId,
+      outcome: plan.ends === "finished" ? "succeeded" : "failed",
+      endedAt: new Date().toISOString(),
+    });
+    // What reached this browser: the start, the first half of the reply, and then nothing.
+    const heard = [
+      started,
+      { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
+      { type: "TEXT_MESSAGE_CONTENT", messageId, delta: head },
+    ];
+    return new NativeResponse(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(frames(heard)));
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  }
   const reply = [
     { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
     { type: "TEXT_MESSAGE_CONTENT", messageId, delta: plan.text },
@@ -431,6 +486,46 @@ beforeAll(() => {
           },
           { status: 201 },
         );
+      /*
+       * How a run in this conversation ended (getConversationRun, api/openapi/conversations.yaml):
+       * the run with its outcome and when it ended, or the API's 404 for a run it keeps no ending of.
+       */
+      const asked = url.pathname.match(
+        /^\/api\/v2\/organizations\/default\/conversations\/([^/]+)\/runs\/([^/]+)$/,
+      );
+      if (asked) {
+        const conversation = [channel, other].find(
+          (row) => row.id === decodeURIComponent(asked[1] ?? ""),
+        );
+        const runId = decodeURIComponent(asked[2] ?? "");
+        const ending = endings.get(runId);
+        if (conversation && ending && ending.threadId === conversation.threadId)
+          return NativeResponse.json(
+            {
+              run: {
+                id: runId,
+                outcome: ending.outcome,
+                endedAt: ending.endedAt,
+              },
+            },
+            { headers: { "cache-control": "private, no-store" } },
+          );
+        return NativeResponse.json(
+          {
+            type: "https://open.bot/errors/conversation-run-not-found",
+            title: "Run not found.",
+            status: 404,
+            detail: "Couldn't find that run in this conversation.",
+            code: "CONVERSATION_RUN_NOT_FOUND",
+            category: "not_found",
+            retryable: false,
+          },
+          {
+            status: 404,
+            headers: { "content-type": "application/problem+json" },
+          },
+        );
+      }
       // The turns the server refused in this conversation, newest first, on one page.
       if (
         /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/refused-turns$/.test(
@@ -462,6 +557,7 @@ afterEach(() => {
   recorded = new Map();
   stored = new Map();
   stopRequests = [];
+  endings = new Map();
   refusedTurns = [];
   stalled = null;
   stepsRun = 0;
@@ -608,6 +704,44 @@ test("a turn the server says to carry on offers Carry on, live and after a reloa
   const restored = await back.findByTestId("transcript-stopped");
   expect(within(restored).getByRole("alert").textContent).toBe(DROPPED);
   within(restored).getByRole("button", { name: "Carry on" });
+});
+
+/*
+ * FOUND BY THE AG-UI CONFORMANCE SUITE. A connected Bot's adapter streamed a tool call's start twice,
+ * the AG-UI client refused the stream, and the run ended in that client's own words, which the
+ * conversation showed word for word. The words are for whoever debugs it; the person is told what
+ * happened and how to go on.
+ */
+test("a run a connected Bot broke with a malformed stream says so plainly, live and after a reload, with Carry on", async () => {
+  const RAW =
+    "Cannot send 'TOOL_CALL_START' event: A tool call with ID 'call_0f3' is already in progress. Complete it with 'TOOL_CALL_END' first.";
+  const warned: unknown[][] = [];
+  const warn = console.warn;
+  console.warn = (...said: unknown[]) => {
+    warned.push(said);
+  };
+  try {
+    plans = [{ kind: "fails", message: RAW }];
+    const live = open();
+    await send(live, "Chart our quarterly revenue");
+    const shown = await live.findByTestId("transcript-stopped");
+    expect(within(shown).getByRole("alert").textContent).toBe(UNREADABLE_REPLY);
+    within(shown).getByRole("button", { name: "Carry on" });
+    expect(live.queryByText(/already in progress/)).toBeNull();
+    // Kept for whoever debugs it.
+    expect(warned.some((said) => said.includes(RAW))).toBe(true);
+
+    live.unmount();
+    const back = open();
+    await settled(back, "Chart our quarterly revenue");
+    const restored = await back.findByTestId("transcript-stopped");
+    expect(within(restored).getByRole("alert").textContent).toBe(
+      UNREADABLE_REPLY,
+    );
+    expect(back.queryByText(/already in progress/)).toBeNull();
+  } finally {
+    console.warn = warn;
+  }
 });
 
 test("a failure that a later run answered is not shown after a reload", async () => {
@@ -975,6 +1109,68 @@ test("a run started after a browser step that never answers ends the turn once t
       "transcript-stopped",
       {},
       // The quiet period, and then the stored thread read back (up to five and a half seconds).
+      { timeout: 15_000 },
+    );
+    expect(within(shown).getByRole("alert").textContent).toBe(
+      RUN_ENDED_UNHEARD,
+    );
+    within(shown).getByRole("button", { name: "Carry on" });
+    await waitFor(() =>
+      expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+    );
+  } finally {
+    quietRunPeriod.ms = period;
+  }
+}, 20_000);
+
+/*
+ * FOUND ON OPENBOT CLOUD, in a phone's web view, at the highest reasoning level. A long answer
+ * finished on the server, and its last events never reached the phone, which slept through them.
+ * Awake again, the server said the conversation had no run going, and the turn ended "The Bot
+ * stopped before it finished" with Carry on, under the whole answer read back from the thread. The
+ * server keeps how each run ended, and is asked: a run that finished is shown finished.
+ */
+test("a run that finished on the server while this browser heard only its start ends with the whole reply and no notice", async () => {
+  const period = quietRunPeriod.ms;
+  quietRunPeriod.ms = 200;
+  try {
+    const WHOLE =
+      "Here is the plan in full: the market, the three options, and the one I recommend.";
+    plans = [{ kind: "endsUnheard", text: WHOLE, ends: "finished" }];
+    const live = open();
+    await send(live, "Think hard about the launch plan");
+    await live.findByText(WHOLE, {}, { timeout: 15_000 });
+    await waitFor(
+      () =>
+        expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+      { timeout: 15_000 },
+    );
+    expect(live.queryByTestId("transcript-stopped")).toBeNull();
+    expect(live.queryByText(RUN_ENDED_UNHEARD)).toBeNull();
+    expect(live.queryByRole("button", { name: "Carry on" })).toBeNull();
+    // The message was answered, so it is not handed back to send again.
+    expect(typed(live)).toBe("");
+  } finally {
+    quietRunPeriod.ms = period;
+  }
+}, 20_000);
+
+test("a run that failed on the server while this browser heard only its start still says it stopped, with Carry on", async () => {
+  const period = quietRunPeriod.ms;
+  quietRunPeriod.ms = 200;
+  try {
+    plans = [
+      {
+        kind: "endsUnheard",
+        text: "Here is the plan in full: the market, the three options, and the one I recommend.",
+        ends: "fails",
+      },
+    ];
+    const live = open();
+    await send(live, "Think hard about the launch plan");
+    const shown = await live.findByTestId(
+      "transcript-stopped",
+      {},
       { timeout: 15_000 },
     );
     expect(within(shown).getByRole("alert").textContent).toBe(

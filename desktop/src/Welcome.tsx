@@ -411,7 +411,7 @@ export function Welcome({
             <CloudSignIn connecting={signingIn} focus={pickedNow} />
           </div>
         ) : shown === "business" ? (
-          <BusinessBooker key={way} way={way} head={pageHead} />
+          <BusinessBooker key={way} way={way} head={pageHead} place="welcome" />
         ) : (
           <SelfContained
             startDownloads={startDownloads}

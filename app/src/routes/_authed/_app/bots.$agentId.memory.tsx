@@ -25,7 +25,7 @@ function MemoryPage() {
   return (
     <BotSubpage
       agentId={agentId}
-      description="Choose which apps this Bot learns from."
+      description="Choose which apps this Bot keeps records from."
       title="Memory"
     >
       {(agent) => (

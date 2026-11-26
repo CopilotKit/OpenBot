@@ -8,13 +8,41 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **The management agent checks a release's chart signature before it touches anything.** With
+  the chart's signature check on, the agent has Flux verify the chart a new version names before it
+  records an install, stops the server, takes a backup or moves Flux. A chart that is unsigned or
+  signed with another key is refused: nothing changes, the agent's status says which chart and why,
+  and it is not pulled again for 30 minutes. Before, the check ran only once Flux was moved, after
+  the server was stopped and backed up, and the upgrade then waited out its timeout with the server
+  down and no reason given.
+- **OpenBot's icon in the browser and on a phone.** The web app shows OpenBot's orb, the icon
+  OpenBot Desktop uses, in a browser's tab, on a phone's home screen when it is added there, and as
+  an installed app's icon. Added to an iPhone's home screen it used to show a grey square with a
+  letter in it, and a tab showed no icon at all.
+- **A provider's sign-in asks for no model name.** Signing in to Google Gemini, xAI or Unbiased AI
+  no longer asks for a model name typed in. Once connected, a conversation's model picker offers
+  the models the provider lists for that sign-in, as it does for a key or a plan. A sign-in that
+  already names a model keeps it, also when it is signed in to again.
+- **Connect another AI goes back to its list.** In Settings and in Admin, each connection goes back
+  to the provider list with a check on what was connected, as onboarding's Connect your AI does. It
+  no longer opens the new connection's own page. Done leaves the list. Changing a connection still
+  goes back to that connection's page.
+- **Settings and Admin call the place you connect your AI "AI providers".** It was "Providers",
+  which didn't say what it provides, and people looking for where to set up their AI didn't find
+  it. Its pages, their Back links and the model picker's provider list say the same. The addresses
+  stay `/settings/providers` and `/admin/providers`.
+
+## 1.2.0
+
 **Before upgrading.**
 
-- **Migrations run at start: twenty-eight, and none removes anything.** The database moves from
-  `0151_sign_up_switch`, where 1.1.3 left it, to `0181_organization_ai_sign_in_credentials`, and
-  from `0164_schedules_held_by_move`, where 1.2.0-rc.4 left it, through the last seventeen. Every one
-  is an expand: a 1.1.3 or 1.2.0-rc.4 server works against the new schema, so either upgrades with
-  its servers rolling one by one, with no downtime. There is no `0154` or `0155`.
+- **Migrations run at start: twenty-nine, and none removes a table or a column.** The database moves
+  from `0151_sign_up_switch`, where 1.1.3 left it, to `0182_withdraw_default_source_imports`, from
+  `0164_schedules_held_by_move`, where 1.2.0-rc.4 left it, through the last eighteen, and from
+  `0181_organization_ai_sign_in_credentials`, where 1.2.0-rc.5 left it, through the last one. Every
+  one but the last is an expand, and the last is a backfill that changes no schema: a 1.1.3 or any
+  1.2.0 candidate's server works against the new schema, so each upgrades with its servers rolling
+  one by one, with no downtime. There is no `0154` or `0155`.
   - `0152_bot_run_client_and_outcome` keeps, for each Bot run, which app asked for it (web,
     Desktop, the API or another) and how it ended.
   - `0153_personal_ai_connections` keeps a person's own AI connection (below), sealed with the
@@ -74,6 +102,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     server sees it.
   - `0181_organization_ai_sign_in_credentials` keeps, sealed, what a provider hands back when an
     admin signs the organization in to it (below).
+  - `0182_withdraw_default_source_imports` withdraws what the memory sources OpenBot made by itself
+    imported (the next item).
+- **OpenBot no longer makes an app a memory source by itself, and the upgrade withdraws what those
+  sources imported.** Memory holds facts about the person: what they tell their Bots, and what a Bot
+  notices about them. Before, each app a person connected became a memory source for the Bots they
+  talked to, and every page, file or issue its list returned became a memory waiting for review
+  ("Imported · needs review"), such as a Notion page called "Cycle 62". Now an app's records reach
+  memory only from a source a person adds on a Bot's Memory page, and a Bot reads an app when the
+  work needs it. The migration, run once in every organization: every import from those sources
+  that nobody reviewed is deleted; one the person confirmed or rewrote is kept as that Bot's own
+  memory, still recalled while the Bot holds the app; and the sources are switched off, so they read
+  nothing more, and a person can switch one on again. Sources a person added, forgotten memories,
+  facts a person added or asked a Bot to remember, and what a Bot noticed are untouched.
+  `config.memory.sourceDefaults: true` (`OPENBOT_MEMORY_SOURCE_DEFAULTS=true`) brings back the old
+  default for new connections; the migration runs either way.
 - **Product analytics are on by default.** While an install is connected to CopilotKit management,
   it sends a daily rollup of counts with its health metrics: how many people, organizations and Bots
   there are, how many people are active, how many come back, and how many Bot runs there were. It is
@@ -180,6 +223,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     first, and opens on the one in use. Its search looks through all of them, and a pick stays on
     its provider for that conversation.
   - A Bot's default model applies on any of a person's connections of its kind.
+  - Onboarding's Connect your AI on OpenBot Cloud connects several the same way: each one goes
+    back to the provider list with a check, and one is enough to go on. Connect another AI marks
+    what is connected the same way, with Default among several and Reconnect on one that stopped.
   - A turn whose picked connection stopped working says why under the message, with Reconnect for
     whoever can fix it and Choose another model. With connections and no default, it says so with
     Choose a default.
@@ -214,7 +260,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **An invitation's email brings the person back to OpenBot.** Its button opens `/accept-invite`,
   which signs the person in, or up, with the invitation and lands them working in the organization
   they were invited to, even from a browser that was working in another one. An invitation the
-  sign-in already accepted signs them straight in.
+  sign-in already accepted signs them straight in. Somebody invited who has no account yet now
+  creates one from the invitation, asked only for a name and a password (the address is the one
+  invited), and lands in the organization as a member. Before, they reached a sign-in that said
+  "User not found. If you don't have an account, sign up first to accept this invitation." with no
+  way to sign up. (#2187)
+- **OpenBot Cloud's version is on screen.** It sits under your avatar at the foot of the strip on
+  every page, as well as in the account menu, so a screenshot says which release it was taken on.
+  A long build version wraps inside the strip, which keeps its width. OpenBot Desktop signed in to
+  OpenBot Cloud shows it too; self-hosted OpenBot and the personal edition don't. (#2197)
+- **Settings, Setup's AI model row is about your own AI.** On OpenBot Cloud it said "Needs setup.
+  Without a model key, OpenBot can't answer" in every organization while Bots answered. It now
+  reads Ready when the AI your runs use can answer: "Lets OpenBot answer you, with your own AI." for
+  yours, or "Lets OpenBot answer you." for the organization's. With neither, or with your own that
+  stopped working, it says Needs setup with Providers, in the words a refused run uses. A check that
+  fails says it couldn't check. Every other OpenBot keeps the row as it was. (#2185)
+- The phone app can sign in to OpenBot Cloud and register for push notifications there.
 - **Computers on OpenBot Cloud have limits.** Each computer is held to 2 CPUs, 4 GiB of memory and a
   disk limit above what its root filesystem can hold, and one session runs at most 4 hours before it
   is restarted at a moment no run is using it (below). An operator can stop the computers of an
@@ -441,7 +502,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   - **A Bot knows OpenBot's screens.** Asked how to do something, it answers with numbered steps,
     screen by screen, a link to open the screen, and "Or ask your Bot to do it for you." where it
     can. It used to say it couldn't see OpenBot's screens. A member asking about an admin's job is
-    told which part only an admin can do. (#2158)
+    told which part only an admin can do. It knows Admin, Apps' Open apps switch, to lock apps down
+    or open them to members, and an app's Every Bot switch. (#2158)
   - **A Bot changes what another Bot can use in an app**, where you may: an admin for any Bot, a
     Bot's owner for apps that are theirs to give. The card names the Bot and the app, and each action
     before and after ("Send email: Off to On"), with Open Apps. (#2158)
@@ -454,6 +516,46 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **A Bot's work is folded, and the answer comes first.** Every step a Bot takes is now one line
+  saying what it did, which you open for the detail. New: a command on its computer ("Ran a command"
+  with the command, opening to the terminal block), and a coding harness's command, file edit, new
+  file and plan ("Edited a file greet.py +1 −1", "Updated the to-dos 2 of 4 done"), beside the
+  searches, page reads, app calls and browsing that already folded. A failed or blocked step says so
+  on its line. The reply, approvals, sign-in and connect cards, questions, a sent file, settings
+  cards and gallery components stay in view. A line you open stays open while the page is open; a
+  reload or a replayed conversation starts folded. Before, a command drew every line it printed, so
+  the answer sat below a screen of output. A running step's line has a soft band of light sweeping
+  across it, which stops when the step is done and doesn't move under reduced motion; it replaces
+  the slow pulse, "Thinking" included. (#2201)
+- **A conversation's row says Working for as long as its Bot works.** In the Conversations list, and
+  under each Bot in the Bots panel, a row whose Bot is answering keeps Working when the list is read
+  again mid-turn, as giving an app, a rename, a pin or a new conversation makes it. A conversation
+  whose Bot handed part of its work to a task reads Working until that task is done, across a reload
+  too. Before, a Bot running three subtasks showed "Working on 3 subtasks…" in the conversation while
+  its row said "1m", as if it were done. (#2204)
+- **A long task keeps going instead of stopping as too long.** A Bot on a task of a few hundred
+  steps used to stop with "…turned down the request because this conversation is too long for the
+  model. Start a new conversation, then try again.", because every earlier app result was sent with
+  every step. Now, once what a step would send passes about 100,000 tokens, each earlier tool result
+  but the last 10 is replaced, in what that step sends, by a note naming it, as long as that frees
+  at least 20,000. On Claude, Anthropic does this itself (its context editing); on every other model
+  OpenBot does it before the call. Tool search's results are never set aside, and the conversation
+  keeps every result whole. A Bot that needs one back rereads it, by the note's id or by words, and
+  its line says "Reread an earlier result". A step the model still refuses as too long is tried
+  again with more set aside, up to three times. Only a latest message too long on its own still
+  stops the run, saying "…turned down the request because the latest message is too long for the
+  model. Shorten it or send it in parts, then try again." This is on built-in Bots and Bots on the
+  LangGraph (TypeScript) engine. (#2184)
+- **Your phone tells you when a Bot finishes while you're away.** Ask a Bot something in the
+  browser or OpenBot Desktop and walk away: when the run ends with a reply, a failure, or a card
+  waiting on you (an approval, a choice or a form), and the conversation is still unread 45 seconds
+  later, your phones get a push, following your notification settings and the Bot's. A reply comes
+  in the Bot's name, and a card's push opens its conversation. A run you stopped, or one nobody
+  asked for, sends nothing. This needs push set up (`config.push`). For it, a conversation is now
+  marked read only while OpenBot is in front of you: one open in a window behind others, or in
+  OpenBot Desktop while you're away from the computer, stays unread until you come back. A run that
+  ends while you watch marks it read however it ended, a failure or a task's thread included.
+  (#2192)
 - **A refused turn stays under its message.** When OpenBot refuses a turn before it runs (a model
   your teams don't allow, a switch an admin turned off, no plan, or an AI connection that stopped
   working), the conversation keeps your message and puts the reason under it as a notice with its
@@ -514,15 +616,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   you have control, the line under "You have control." says the same. Before, the browser opened its
   own passkey window out of sight, and the page took no clicks or typing, Try another way included.
   A Bot using the Chrome on your own computer is unchanged, and your passkeys work there. (#2167)
-- **Imported memories read as words, and say where they came from.** A memory source OpenBot turns on
-  for an app no longer reads the app's accounts, users, teams or settings. Nothing is imported as raw
-  JSON any more: each record becomes its title and its readable fields, with its own link as Open
-  record. A source OpenBot turned on that finds nothing worth remembering is turned off and what it
-  imported is cleared (a memory you rewrote stays), and it isn't turned on again. Earlier imports are
-  rewritten at the source's next sync, with nothing to do. On the Memory page, each imported memory
-  says "Read in by" the Bot and its source, with Turn off or remove this source, which opens that
-  Bot's Memory page. Before, connecting an app could fill the Memory page with one raw JSON memory
-  per account. (#2123)
+- **Memory is about you, not an app's pages.** OpenBot no longer turns an app you connect into a
+  memory source by itself (Before upgrading). The Memory page says what your Bots remember: facts
+  about you, like your role and how you like to work, used in every conversation; facts you add or
+  ask a Bot to remember reach all your Bots, and one a Bot notices by itself stays with that Bot for
+  you to confirm or forget. A Bot's Memory page says a source copies an app's records into that
+  Bot's memory, to add only for records it should always have at hand, and its empty state says to
+  use Add source. Before, connecting Notion could fill the Memory page with its pages, each waiting
+  for review. (#2196)
+- **Imported memories read as words, and say where they came from.** A memory source no longer reads
+  an app's accounts, users, teams or settings, and nothing is imported as raw JSON any more: each
+  record becomes its title and its readable fields, with its own link as Open record. Earlier
+  imports are rewritten at the source's next sync, with nothing to do. On the Memory page, each
+  imported memory says "Read in by" the Bot and its source, with Turn off or remove this source,
+  which opens that Bot's Memory page. (#2123)
 - The message box's text is now the size of the conversation's, 16px instead of 14px, and still
   opens two lines tall. At 125% zoom in Safari and OpenBot Desktop, a draft no longer scrolls
   sideways. (#2165)
@@ -773,7 +880,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **A hosted OpenBot's sign-out and invitations.** `GET /api/auth/hosted/sign-out` ends the browser's
   OpenBot session and its OpenBot by CopilotKit session, and the hosted authorization server
   metadata names it as `end_session_endpoint`. `GET /api/auth/hosted/sign-in` takes
-  `invitationTicket` and `organizationId`.
+  `invitationTicket` and `organizationId`, and `invitationSignUp=true` (only with a ticket) for an
+  invited address with no account yet, which then signs up with the invitation. (#2187)
+- **The setup checklist on OpenBot Cloud.** `getSetupChecklist`'s model row there is the reader's:
+  ready when the AI their runs use, their own or else the organization's, can answer. The response
+  is unchanged. (#2185)
 - **A computer's saved copies, and restoring one.** `getWorkspaceSnapshots` lists the copies of the
   computer a Bot runs on, newest first, with the latest restore, `available` (false where this
   OpenBot keeps none) and `canRestore`. `restoreComputer` starts a restore from one (202), with an
@@ -926,6 +1037,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   their own on the `intelligence-platform` organization authority (Before upgrading). Anything but
   `true` or `false` is refused at install and at start.
 - **`config.productAnalytics`** (on) is the product analytics switch (Before upgrading).
+- **`config.memory.sourceDefaults`** is now off (it was on): only `true` makes each app a person
+  connected a memory source (Before upgrading). Under `--reuse-values` an absent value is off too.
 - **`config.cloudAnalytics`** (off) is OpenBot Cloud's own counts for CopilotKit's staff console.
   Leave it off.
 - **An upgrade that stops the server first waits for its runs to drain.** Before a backup, the
@@ -935,6 +1048,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   undone and the agent tried again 30 minutes later, after the server had served nothing meanwhile.
   The wait now lasts the server's own termination grace period plus a minute, and never less than
   that timeout. (#2171)
+- **The backup before an upgrade covers every database.** With `database.shards` set, the management
+  agent's pre-upgrade backup dumps each further database beside the first (`<id>.shard-<shard>.dump`
+  next to `<id>.dump`), all or nothing: if any dump fails or reads back wrong, none of that backup is
+  kept, and a name already used is refused before anything is written. Only each database's server,
+  port and name are read from the shard list; the backup signs in with its own login. With one
+  database it takes the one dump it always did. A new `openbot-database-restore` command in the same
+  image puts every database of a backup back into empty databases, then gives back every privilege
+  OpenBot's migrations grant its two roles, which a restore used to leave out, so the server could
+  read nothing until somebody granted them by hand.
 - **`database.shards`** (off) spreads organizations over more PostgreSQL databases. Name a Secret
   (`database.shards.existingSecret`) whose key (`shards`) holds a JSON list of each further
   database's id and address. The database above stays the global one and the first shard, the
@@ -950,6 +1072,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **A call booked inside OpenBot says which screen it came from.** The OpenBot for Business
+  calendar, in the app and in OpenBot Desktop, now adds `utm_content` to the `utm_source` and
+  `utm_medium` it already carried: the account menu, the home page, an Admin page, a Bot's computer
+  line, the self-hosting bar, OpenBot Cloud's sign-in screen, onboarding, or Desktop's first screen
+  or Move to Cloud. Calendly keeps it on the booking. Desktop's setup window didn't listen for a
+  booking before; it now counts its booker opened and a call booked in it, by place and nothing
+  else, while you share usage data ([desktop/TELEMETRY.md](desktop/TELEMETRY.md)).
 - **A sharper look, at the same sizes.** Corners come from one 8px radius, cards are flat with a
   hairline border you can see in both themes, and shadows show only on what floats: menus and
   popovers, then dialogs and sheets over the app. The grays are slate, a quiet blue-gray in dark,
@@ -1158,6 +1287,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - The memory sweep asks Intelligence whether memory is available only when it has something to
   mirror, and waits longer after each failed answer (up to 30 minutes), so an organization whose
   entitlement never becomes ready is no longer asked every minute on every replica.
+- Admin asks for managed updates only where they can apply, in the organization `default` of an
+  OpenBot a company runs itself, and the page names an empty icon, so a browser no longer asks for
+  `/favicon.ico`. On OpenBot Cloud, every Admin page used to log two failed requests. Nothing on
+  screen changes. (#2186)
 
 ## 1.1.3
 

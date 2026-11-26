@@ -11477,8 +11477,8 @@ fn main() {
                         published("openbot-agent-claude-sdk", 'c'),
                     ),
                     (
-                        "agent-langgraph-agui",
-                        published("openbot-agent-langgraph-agui", 'a'),
+                        "agent-openai-agents",
+                        published("openbot-agent-openai-agents", 'a'),
                     ),
                 ],
             ),
@@ -11502,8 +11502,8 @@ fn main() {
                         published("openbot-agent-claude-sdk", 'c'),
                     ),
                     (
-                        "agent-langgraph-agui",
-                        published("openbot-agent-langgraph-agui", digest),
+                        "agent-openai-agents",
+                        published("openbot-agent-openai-agents", digest),
                     ),
                 ],
             ),
@@ -11707,7 +11707,7 @@ fn main() {
                 running_earlier_release_with_images(&path, &engine, &format!("images-{name}"));
             let earlier = [
                 published("openbot-agent-computer", 'a'),
-                published("openbot-agent-langgraph-agui", 'a'),
+                published("openbot-agent-openai-agents", 'a'),
                 published("openbot-server", 'a'),
             ];
             let shared = published("openbot-agent-claude-sdk", 'c');
@@ -11738,7 +11738,7 @@ fn main() {
                 EARLIER_DATABASE.to_string(),
                 THIS_DATABASE.to_string(),
                 published("openbot", 'b'),
-                published("openbot-agent-langgraph-agui", 'b'),
+                published("openbot-agent-openai-agents", 'b'),
                 shared,
             ]);
             expected.sort();
@@ -11944,7 +11944,7 @@ fn main() {
                 running_earlier_release_with_images(&path, &engine, &format!("images-used-{name}"));
             let computer = published("openbot-agent-computer", 'a');
             let server = published("openbot-server", 'a');
-            let sign_in = published("openbot-agent-langgraph-agui", 'a');
+            let sign_in = published("openbot-agent-openai-agents", 'a');
             let mut containers = std::fs::read_to_string(root.join(".fixture-containers")).unwrap();
             containers.push_str("computer-ada-1\topenbot-desktop-computers\tcomputer\n");
             containers.push_str("elsewhere-1\tanother-project\tserver\n");
@@ -12080,8 +12080,8 @@ fn main() {
             [
                 published("openbot-agent-claude-sdk", 'c'),
                 published("openbot-agent-computer", 'a'),
-                published("openbot-agent-langgraph-agui", 'a'),
-                published("openbot-agent-langgraph-agui", 'b'),
+                published("openbot-agent-openai-agents", 'a'),
+                published("openbot-agent-openai-agents", 'b'),
                 published("openbot-server", 'a'),
                 published("openbot", 'b'),
             ]
@@ -12090,8 +12090,8 @@ fn main() {
             crate::superseded_images::remove(&docker, &root),
             [
                 published("openbot-agent-computer", 'a'),
-                published("openbot-agent-langgraph-agui", 'a'),
-                published("openbot-agent-langgraph-agui", 'b'),
+                published("openbot-agent-openai-agents", 'a'),
+                published("openbot-agent-openai-agents", 'b'),
                 published("openbot", 'b'),
             ]
         );
@@ -12100,7 +12100,7 @@ fn main() {
         for image in [
             server,
             published("openbot", 'd'),
-            published("openbot-agent-langgraph-agui", 'd'),
+            published("openbot-agent-openai-agents", 'd'),
             published("openbot-agent-claude-sdk", 'c'),
         ] {
             assert!(left.contains(&image), "{image} is gone");

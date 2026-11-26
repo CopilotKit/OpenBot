@@ -55,6 +55,8 @@ export type SavedConfiguration = {
   modelApiKeys?: Partial<
     Record<"openai" | "anthropic" | "compatible", boolean | null>
   >;
+  /** A ChatGPT sign-in an earlier version saved, which has to be done again. */
+  chatgptSignInChanged?: boolean;
   modelSessions?: Partial<
     Record<"openai" | "anthropic" | "google" | "xai", boolean | null>
   >;
@@ -159,7 +161,11 @@ export function recordedModel(held: HeldConfiguration): ModelChoice | null {
     case "claude-plan":
       return { provider: "anthropic", login: "plan", saved: true };
     case "chat-gpt-plan":
-      return { provider: "openai", login: "plan", saved: true };
+      return {
+        provider: "openai",
+        login: "plan",
+        saved: held.saved.chatgptSignInChanged !== true,
+      };
     case "google-oauth":
     case "xai-oauth":
       return {
@@ -885,7 +891,7 @@ export function ProviderPicker({
                       Your Bot will use{" "}
                       {row.id === "anthropic"
                         ? "Claude Agent SDK"
-                        : "LangChain"}
+                        : "OpenAI Agents SDK"}
                       . It’s the one that can use this plan.
                     </p>
                   </>
@@ -908,12 +914,17 @@ export function ProviderPicker({
                   </>
                 ) : (
                   <>
-                    {/* Says what the flow below asks for: both plans finish in the
-                    browser, with nothing typed here. */}
-                    <p className="lede">
-                      {row.name} opens in your browser. You won't type anything
-                      here or need an API key.
-                    </p>
+                    {row.id === "openai" && held.saved?.chatgptSignInChanged ? (
+                      <p className="sign-in-changed" role="status">
+                        ChatGPT's sign-in has changed. Sign in to ChatGPT again
+                        to keep using your plan.
+                      </p>
+                    ) : (
+                      <p className="lede">
+                        {row.name} opens in your browser. You won't type
+                        anything here or need an API key.
+                      </p>
+                    )}
                     <div className="provider-sign-in-actions">
                       <button
                         type="button"

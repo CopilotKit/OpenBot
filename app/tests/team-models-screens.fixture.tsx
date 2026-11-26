@@ -22,7 +22,7 @@ import { Route as ProvidersRoute } from "@/routes/_authed/admin/providers";
 import { Route as AdminTeamsRoute } from "@/routes/_authed/admin/teams";
 
 /**
- * A team's page with its Models row, Admin, Providers with the teams that have a list of their
+ * A team's page with its Models row, Admin, AI providers with the teams that have a list of their
  * own, and Admin, Activity with a change to a team's models, as a page of their own for team-models-screens-layout.test.tsx to bundle and load in a
  * browser. They are the real screens in the app's real frames: Admin's sidebar and inset panel for
  * an admin, the app's for anybody else, as `routes/_authed/admin/route.tsx` and

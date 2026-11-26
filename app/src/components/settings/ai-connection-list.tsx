@@ -38,7 +38,7 @@ export const SEVERAL_FOR_THE_ORGANIZATION =
   "Anyone who hasn't connected their own can pick a model from any of these in a conversation.";
 
 /**
- * Several AI connections at once, as one row each in Settings → Providers and Admin → Providers:
+ * Several AI connections at once, as one row each in Settings → AI providers and Admin → AI providers:
  * the organization's (`organization`) or a person's own on OpenBot Cloud (`personal`). One per
  * provider. A run with no pick uses the default; a person picks a model from any of them in a
  * conversation.

@@ -20,6 +20,7 @@ import {
   BUSINESS_FEATURE_GROUPS,
   BUSINESS_FEATURES_MORE,
 } from "../../shared/openbot-for-business";
+import { forgetBusinessOpened } from "./BusinessBooker";
 import { DEFAULT_HARNESS } from "./harness";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
@@ -147,6 +148,8 @@ beforeAll(() =>
 afterEach(() => {
   // Unmounting can still call (a running local step is cancelled), so clear the record after it.
   cleanup();
+  // A new window: no OpenBot for Business booker has come on screen in it yet.
+  forgetBusinessOpened();
   setSystemTime();
   // What the window keeps between launches (`thisComputer.ts`) is one test's own.
   localStorage.clear();
@@ -919,9 +922,18 @@ test("picking OpenBot for Business shows its way, what it adds and Book a demo, 
     surface?.firstElementChild?.classList.contains("booking-calendar"),
   ).toBe(true);
   expect(calendar.style.height).toBe("700px");
-  // Keep main's booking attribution alongside the full-height fitting assertions.
+  // Tagged as booked from inside the app, on the first screen, which Calendly keeps on the booking.
   expect(src.searchParams.get("utm_source")).toBe("openbot_app");
   expect(src.searchParams.get("utm_medium")).toBe("in_app");
+  expect(src.searchParams.get("utm_content")).toBe("welcome");
+  // Counted as opened from the first screen: by its place, and nothing else.
+  expect(
+    setupEvents().filter((event) =>
+      String((event as { event?: { kind?: string } }).event?.kind).startsWith(
+        "business_",
+      ),
+    ),
+  ).toEqual([{ event: { kind: "business_opened", place: "welcome" } }]);
   // Calendly says it is there: the spinner goes.
   await act(async () => {
     window.dispatchEvent(
@@ -957,6 +969,76 @@ test("picking OpenBot for Business shows its way, what it adds and Book a demo, 
   expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   expect(view.queryByTitle("Booking calendar")).toBeNull();
   expect(localCliCalls()).toEqual([]);
+});
+
+/*
+ * A call booked on the first screen used to say nothing: the booker didn't listen for Calendly's
+ * booking at all. It is counted from its place, once for the opening however often
+ * OpenBot for Business is picked again, and only for a booking Calendly itself says, from its own
+ * origin and this frame. The once is per page of the setup window: coming back to setup from OpenBot
+ * loads it again.
+ */
+test("a call booked on the first screen is counted as booked from there, and opening it again is not counted again", async () => {
+  setupRootConfiguration("/tmp/business-booker-booked", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    connection: THIS_COMPUTER,
+    record_setup_event: null,
+  });
+  const view = await renderApp();
+  const business = () => view.getByRole("radio", { name: /^Cloud/ });
+  const businessEvents = () =>
+    setupEvents().filter((event) =>
+      String((event as { event?: { kind?: string } }).event?.kind).startsWith(
+        "business_",
+      ),
+    );
+  await userEvent.click(business());
+  await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
+  const calendar = view.getByTitle("Booking calendar") as HTMLIFrameElement;
+  const scheduled = (origin: string) =>
+    act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin,
+          source: calendar.contentWindow,
+          data: { event: "calendly.event_scheduled", payload: {} },
+        }),
+      );
+    });
+
+  await scheduled("https://example.com");
+  // Calendly's origin, but not this calendar's frame: not a booking either.
+  await act(async () => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "https://calendly.com",
+        source: window,
+        data: { event: "calendly.event_scheduled", payload: {} },
+      }),
+    );
+  });
+  expect(businessEvents()).toEqual([
+    { event: { kind: "business_opened", place: "welcome" } },
+  ]);
+  await scheduled("https://calendly.com");
+  expect(businessEvents()).toEqual([
+    { event: { kind: "business_opened", place: "welcome" } },
+    { event: { kind: "business_booked", place: "welcome" } },
+  ]);
+
+  // Away and back: the same launch, so the opening is not said twice.
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  );
+  await userEvent.click(business());
+  await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
+  expect(view.getByTitle("Booking calendar")).toBeTruthy();
+  expect(businessEvents()).toEqual([
+    { event: { kind: "business_opened", place: "welcome" } },
+    { event: { kind: "business_booked", place: "welcome" } },
+  ]);
 });
 
 test("a calendar that can't load gives way to Book a demo, which opens the OpenBot for Business page in the browser", async () => {

@@ -3,6 +3,7 @@
  * `@openbot/shared/openbot-for-business`, which Desktop's first screen reads too.
  */
 export {
+  type AppBusinessPlace,
   BOOKING_CALENDAR_ORIGIN,
   BOOKING_CALENDAR_URL,
   type BookingCalendarColors,

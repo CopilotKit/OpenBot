@@ -880,6 +880,22 @@ function formatDate(iso: string): string {
 }
 
 /**
+ * Whether a key app's connection stands on a key that didn't pass its check: a check was spent and
+ * came back with a failure. This is the state a Bot's Apps row and a card read as Reconnect, and
+ * the one this row offers Reconnect for.
+ */
+export function keyNotTaken(
+  account: Pick<BrokeredAccount, "kind" | "connected" | "probe" | "verified">,
+): boolean {
+  return (
+    account.kind === "fields" &&
+    account.connected &&
+    Boolean(account.probe) &&
+    !account.verified
+  );
+}
+
+/**
  * The line beneath the word, which is where the three kinds actually differ.
  *
  * THEY DO NOT DIFFER IN THE WORD. A consent screen and a key somebody typed both end in a live
@@ -969,7 +985,7 @@ function accountSentence(input: {
        * is worth a second press rather than a second connection.
        */
       if (account.probe && !account.verified) {
-        return `Your key didn't pass a check with ${vendorNameOf(title)}. That may be the key, or ${vendorNameOf(title)} itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
+        return `Your key didn't pass a check with ${vendorNameOf(title)}. That may be the key, or ${vendorNameOf(title)} itself. Your account is still connected. Press Re-check to try again, or Reconnect with a new key.`;
       }
       /*
        * NOTHING WAS SPENT ON IT, WHICH IS A FACT ABOUT THE CHECK AND ABOUT THE APP AT THE TIME. The
@@ -1221,9 +1237,18 @@ export function BrokeredAccountRow({
    */
   const started = useRef(false);
   const { requestFields, connectOnArrival } = account;
+  /*
+   * A key the app didn't take is reconnected in the same form: a Reconnect pressed on a Bot's Apps
+   * row or a card in a conversation arrives here asking for it, over the account that stands.
+   */
+  const keyRefused = keyNotTaken(account);
   useEffect(() => {
     if (!startConnect || started.current) return;
-    if (!account.configured || account.connected || account.kind === "no-auth")
+    if (
+      !account.configured ||
+      (account.connected && !keyRefused) ||
+      account.kind === "no-auth"
+    )
       return;
     started.current = true;
     if (account.kind === "consent") {
@@ -1237,6 +1262,7 @@ export function BrokeredAccountRow({
     account.configured,
     account.connected,
     account.kind,
+    keyRefused,
     requestFields,
     connectOnArrival,
   ]);
@@ -1289,6 +1315,7 @@ export function BrokeredAccountRow({
     account.connected &&
     account.kind !== "no-auth" &&
     ((account.kind === "fields" && account.checkable) ||
+      keyRefused ||
       (account.reconnectsInPlace && account.kind === "consent") ||
       canAddAnother ||
       !several);
@@ -1442,6 +1469,24 @@ export function BrokeredAccountRow({
              * Arcade one press asks for everything the app needs. The arrow says it leaves
              * OpenBot for the vendor's consent page, as Connect's does.
              */}
+            {/*
+             * AND OVER A KEY THE APP DIDN'T TAKE, with a new one: the same form Connect opens, and
+             * the new key replaces the one that stands. No arrow: a key form leaves for nowhere.
+             */}
+            {keyRefused ? (
+              <Button
+                disabled={account.requestingFields || account.submittingFields}
+                onClick={() => {
+                  setAsking(true);
+                  account.requestFields();
+                }}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Reconnect
+              </Button>
+            ) : null}
             {account.reconnectsInPlace && account.kind === "consent" ? (
               <Button
                 disabled={account.connecting}

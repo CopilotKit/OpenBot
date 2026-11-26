@@ -240,7 +240,9 @@ function useBookDemoStep(): OnboardingStep {
         <p>Pick a time to see a demo or scope a proof of concept with us.</p>
       </StepIntro>
     ),
-    demo: () => <BookingCalendar onBooked={book} onFailed={fail} />,
+    demo: () => (
+      <BookingCalendar onBooked={book} onFailed={fail} place="onboarding" />
+    ),
     primaryLabel: undefined,
     onPrimary: undefined,
     primaryHidden: !booked,

@@ -2007,6 +2007,79 @@ describe.skipIf(!asked)("Connect your AI with every provider", () => {
 });
 
 /*
+ * A ChatGPT plan signed in to by an earlier version went through Codex's sign-in, which a ChatGPT
+ * plan's engine (the OpenAI Agents SDK, on OpenAI's Sign in with ChatGPT) can't use. The AI step
+ * says so above the one button that fixes it, and the saved sign-in is not offered. A saved sign-in
+ * from Sign in with ChatGPT is, and the step names the Bot it runs on.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each, light and dark.
+ */
+describe.skipIf(!asked)("Connect your AI on a ChatGPT plan", () => {
+  for (const colorScheme of ["light", "dark"] as const) {
+    test(`an earlier version's ChatGPT sign-in is asked for again, with one press (${colorScheme})`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 800 },
+        colorScheme,
+      });
+      try {
+        // The plan it was on stays chosen, so the step opens on it. The screenshot is taken before
+        // anything is asserted, so a run against an earlier window keeps one too.
+        await toTheAiStep(page, "#chatgpt-changed");
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/chatgpt-sign-in-changed-${colorScheme}.png`,
+          });
+        await page
+          .getByText(
+            "ChatGPT's sign-in has changed. Sign in to ChatGPT again to keep using your plan.",
+          )
+          .waitFor({ state: "visible" });
+        // One press: the sign-in itself. Nothing offers the saved one, and nothing says it will be
+        // checked at Start.
+        expect(
+          await page
+            .getByRole("button", { name: "Sign in with OpenAI" })
+            .count(),
+        ).toBe(1);
+        expect(
+          await page
+            .getByRole("button", { name: "Use a saved ChatGPT sign-in" })
+            .count(),
+        ).toBe(0);
+        expect(
+          await page.getByText("will be checked when you start").count(),
+        ).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+
+    test(`a saved ChatGPT sign-in runs on the OpenAI Agents SDK (${colorScheme})`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 800 },
+        colorScheme,
+      });
+      try {
+        await toTheAiStep(page, "#chatgpt-saved");
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/chatgpt-saved-sign-in-${colorScheme}.png`,
+          });
+        await page.getByText("Your Bot will use OpenAI Agents SDK.").waitFor();
+        expect(
+          await page
+            .getByText("ChatGPT's sign-in has changed", { exact: false })
+            .count(),
+        ).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+});
+
+/*
  * Seen on Windows G: the background row read "Installing OpenBot in the backgr..." beside its
  * "Step 3 of 4 · 4m 18s elapsed" badge. Its name is whole now, the badge on a line of its own, and
  * the row fits the height the sidebar's foot holds in every state, the foot where it was.

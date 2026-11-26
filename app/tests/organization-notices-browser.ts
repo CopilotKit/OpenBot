@@ -54,7 +54,12 @@ export const LOOKS = [
   { width: 390, height: 844, theme: "light" },
   { width: 390, height: 844, theme: "dark" },
 ] as const;
-export type Look = (typeof LOOKS)[number];
+/** A window: one of those, or another width a test asks for. */
+export type Look = {
+  readonly width: number;
+  readonly height: number;
+  readonly theme: "light" | "dark";
+};
 
 const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";

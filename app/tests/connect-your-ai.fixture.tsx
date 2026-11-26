@@ -12,9 +12,16 @@ import { createRoot } from "react-dom/client";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { OrganizationBoundary } from "@/components/organizations/organization-boundary";
 import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
+import {
+  ChangeProviderPage,
+  ConnectProviderPage,
+  ProviderPage,
+} from "@/components/settings/provider-pages";
 import { SettingsSidebar } from "@/components/settings/settings-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarInset } from "@/components/ui/sidebar";
+import { providerSearch, scopeOf } from "@/lib/ai-connection/paths";
+import { aiConnectionKeys } from "@/lib/ai-connection/queries";
 import {
   setCurrentOrganization,
   useCurrentOrganizationId,
@@ -26,7 +33,7 @@ import { Route as OnboardingRoute } from "@/routes/_authed/onboarding";
 import { Route as SettingsProvidersRoute } from "@/routes/_authed/settings/providers";
 
 /**
- * The signed-in gate, onboarding and Settings → Providers, for connect-your-ai.test.tsx to bundle and
+ * The signed-in gate, onboarding and Settings → AI providers, for connect-your-ai.test.tsx to bundle and
  * load in a browser. The gate is `_authed`'s own `beforeLoad`, and onboarding is its own route, so
  * where a person is sent is what the app does. The app behind the gate is a page that says Home:
  * this is about getting there. What the server answers comes from the test's routes.
@@ -34,6 +41,13 @@ import { Route as SettingsProvidersRoute } from "@/routes/_authed/settings/provi
  * Started in `default`, the organization those routes answer for, as every test does.
  */
 setCurrentOrganization("default");
+
+window.addEventListener("refresh-ai-connections", async () => {
+  await queryClient.invalidateQueries({
+    queryKey: aiConnectionKeys.list("personal"),
+  });
+  window.dispatchEvent(new Event("ai-connections-refreshed"));
+});
 
 const component = (route: { options: { component?: unknown } }) =>
   route.options.component as () => ReactNode;
@@ -117,6 +131,52 @@ const settingsRoute = createRoute({
   ),
 });
 
+/**
+ * Settings → AI providers' own screens (provider-pages.tsx): Connect another AI, a provider's page and
+ * its Change, at the addresses the app gives them, reading `owner=personal` as the app does.
+ */
+const connectRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/settings/providers/new",
+  validateSearch: providerSearch,
+  component: function Connect() {
+    return <ConnectProviderPage scope={scopeOf(connectRoute.useSearch())} />;
+  },
+});
+const providerRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/settings/providers/$provider",
+  validateSearch: providerSearch,
+  component: function Provider() {
+    const { provider } = providerRoute.useParams();
+    // This router isn't the app's registered one: read the search as the app's does.
+    const search = providerSearch(
+      providerRoute.useSearch() as Record<string, unknown>,
+    );
+    return (
+      <ProviderPage
+        connected={search.connected}
+        id={provider}
+        scope={scopeOf(search)}
+      />
+    );
+  },
+});
+const changeRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/settings/providers/$provider/change",
+  validateSearch: providerSearch,
+  component: function Change() {
+    const { provider } = changeRoute.useParams();
+    return (
+      <ChangeProviderPage
+        id={provider}
+        scope={scopeOf(changeRoute.useSearch())}
+      />
+    );
+  },
+});
+
 const router = createRouter({
   history: createBrowserHistory(),
   context: { queryClient },
@@ -130,6 +190,9 @@ const router = createRouter({
           path: "/settings/providers",
           component: component(SettingsProvidersRoute),
         }),
+        connectRoute,
+        providerRoute,
+        changeRoute,
       ]),
       createRoute({
         getParentRoute: () => authedRoute,
