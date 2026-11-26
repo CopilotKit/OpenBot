@@ -2,6 +2,7 @@ import { router, Stack } from "expo-router";
 import { Button } from "heroui-native/button";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, View } from "react-native";
+import { useCSSVariable } from "uniwind";
 import {
   type ConversationSummary,
   everyBot,
@@ -41,6 +42,10 @@ import { shortWhen } from "../../../src/when";
  */
 export default function Conversations() {
   const { data: session } = authClient.useSession();
+  const [foreground, muted] = useCSSVariable([
+    "--color-foreground",
+    "--color-muted",
+  ]) as (string | undefined)[];
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
@@ -216,6 +221,10 @@ export default function Conversations() {
           // button, which opens the field in place; on Android the toolbar's search icon.
           headerSearchBarOptions: {
             placeholder: "Search chats",
+            // Android draws its search icon and field in its own gray, which a dark page hides: the text color here.
+            headerIconColor: foreground,
+            textColor: foreground,
+            hintTextColor: muted,
             placement: "integratedButton",
             onChangeText: (event) => setQuery(event.nativeEvent.text),
             onCancelButtonPress: () => setQuery(""),
