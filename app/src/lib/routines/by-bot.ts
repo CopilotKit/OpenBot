@@ -17,6 +17,8 @@ export type BotGroup = {
   name: string;
   seed: string;
   hidden: boolean;
+  /** Whether a Bot list knows this Bot; false for "A Bot", one only a row names. */
+  known: boolean;
   rows: MergedRoutine[];
 };
 
@@ -163,16 +165,16 @@ export function routinesByBot(
   shown: readonly BotName[],
   hidden: readonly BotName[],
 ): BotGroup[] {
-  const known = new Set([...shown, ...hidden].map((bot) => bot.id));
+  const listed = new Set([...shown, ...hidden].map((bot) => bot.id));
   const strays = [...new Set(rows.map((row) => row.agentId))]
-    .filter((botId) => !known.has(botId))
+    .filter((botId) => !listed.has(botId))
     .map((botId) => ({ id: botId, name: "A Bot", avatarSeed: botId }));
   const ordered = [
-    ...shown.map((bot) => ({ bot, hidden: false })),
-    ...hidden.map((bot) => ({ bot, hidden: true })),
-    ...strays.map((bot) => ({ bot, hidden: false })),
+    ...shown.map((bot) => ({ bot, hidden: false, known: true })),
+    ...hidden.map((bot) => ({ bot, hidden: true, known: true })),
+    ...strays.map((bot) => ({ bot, hidden: false, known: false })),
   ];
-  return ordered.flatMap(({ bot, hidden }) => {
+  return ordered.flatMap(({ bot, hidden, known }) => {
     const mine = rows.filter((row) => row.agentId === bot.id);
     return mine.length
       ? [
@@ -181,6 +183,7 @@ export function routinesByBot(
             name: bot.name,
             seed: bot.avatarSeed,
             hidden,
+            known,
             rows: sortedRows(mine),
           },
         ]

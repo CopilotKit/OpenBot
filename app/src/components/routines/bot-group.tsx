@@ -143,12 +143,11 @@ function GroupRow({ row }: { row: MergedRoutine }) {
  * which has none.
  */
 export function BotGroupSection({ group }: { group: BotGroup }) {
-  const known = group.name !== "A Bot";
   return (
     <section aria-label={group.name} className="mt-6 first:mt-0">
       <div className="flex items-center gap-2 px-2 pb-1.5 text-muted-foreground text-sm">
         <BotOrb name={group.name} seed={group.seed} size={18} />
-        {known ? (
+        {group.known ? (
           <Link
             className="font-medium text-foreground hover:underline"
             params={{ agentId: group.botId }}

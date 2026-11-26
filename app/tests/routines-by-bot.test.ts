@@ -306,6 +306,12 @@ describe("routinesByBot", () => {
       "Hal",
       "A Bot",
     ]);
+    expect(groups.map((group) => group.known)).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
     expect(groups.map((group) => group.seed)).toEqual([
       "seed-s1",
       "seed-s2",

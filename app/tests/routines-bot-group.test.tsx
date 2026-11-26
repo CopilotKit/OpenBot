@@ -81,13 +81,15 @@ const checkInRow = (overrides: Partial<CheckIn> = {}): MergedRoutine => ({
   },
 });
 
-function draw(rows: MergedRoutine[]) {
+function draw(rows: MergedRoutine[], overrides: Partial<BotGroup> = {}) {
   const group: BotGroup = {
     botId: "b1",
     name: "Atlas",
     seed: "atlas",
     hidden: false,
+    known: true,
     rows,
+    ...overrides,
   };
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
@@ -113,6 +115,20 @@ test("a routine's row links to its page, and reads its name and its schedule", a
   expect(view.getByText("Atlas").closest("a")?.getAttribute("href")).toBe(
     "/bots/b1/routines",
   );
+});
+
+test("a Bot no list knows is drawn as a name, with no link", async () => {
+  const view = draw([routineRow()], { known: false, name: "A Bot" });
+
+  const name = await view.findByText("A Bot");
+  expect(name.closest("a")).toBeNull();
+});
+
+test("a Bot that is really named A Bot keeps its link", async () => {
+  const view = draw([routineRow()], { known: true, name: "A Bot" });
+
+  const name = await view.findByText("A Bot");
+  expect(name.closest("a")?.getAttribute("href")).toBe("/bots/b1/routines");
 });
 
 test("a failed last run reads as a warning", async () => {
