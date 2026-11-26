@@ -427,13 +427,7 @@ function createStates(where: Where): States {
       case "already_configured":
         return relaunch
           ? {
-              values: googleSignInEnded
-                ? {
-                    BOT_MODEL: "gemini-3-pro",
-                    OPENAI_BASE_URL:
-                      "http://127.0.0.1:3001/api/model-provider/v1",
-                  }
-                : {},
+              values: googleSignInEnded ? { BOT_MODEL: "gemini-3-pro" } : {},
               saved: googleSignInEnded
                 ? {
                     modelApiKeys: none,
