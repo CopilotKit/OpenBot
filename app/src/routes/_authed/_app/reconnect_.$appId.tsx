@@ -1,7 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
-import { PageShell } from "@/components/layout/page-shell";
 import {
   addCuratedServerMutationOptions,
   addDirectoryAppMutationOptions,
@@ -13,10 +12,12 @@ import {
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { appPageReads } from "@/lib/connections/open-app-page";
 import { useAppsOpen } from "@/lib/enterprise/apps-open";
 import { cloudAppFor } from "@/lib/moves/moved-apps";
 import { markReconnectReturn, useMovedApps } from "@/lib/moves/use-moved-apps";
 import { queryClient } from "@/query-client";
+import { ReconnectList } from "./reconnect";
 
 /**
  * Connect one moved app again: remembers the reconnect list as where to come back to, then opens
@@ -79,14 +80,21 @@ function ReconnectOne() {
         search: { notAdded: appId },
         replace: true,
       });
-    // With the connect started on arrival (`?connect=true`): one Reconnect is the whole press.
+    /*
+     * With the connect started on arrival (`?connect=true`): one Reconnect is the whole press. The
+     * page opens once it has something to draw (`appPageReads`), and the list stays until then.
+     */
     const open = (key: string) =>
-      void navigate({
-        to: "/connections/$key",
-        params: { key },
-        search: { connect: true },
-        replace: true,
-      });
+      void appPageReads(queryClient)
+        .catch(() => undefined)
+        .then(() =>
+          navigate({
+            to: "/connections/$key",
+            params: { key },
+            search: { connect: true },
+            replace: true,
+          }),
+        );
     if (apps.error) {
       started.current = true;
       return back();
@@ -104,7 +112,15 @@ function ReconnectOne() {
     if (!moved.ready || directory.isPending || catalogue.isPending) return;
     started.current = true;
     if (directory.error || catalogue.error) return back();
-    if (directory.data.some((entry) => entry.id === `directory:${appId}`))
+    const listed = directory.data.find(
+      (entry) => entry.id === `directory:${appId}`,
+    );
+    /*
+     * The directory names the app its entry was added as (`appId`), which is how an app added as its
+     * sign-in is found when its id says nothing of the key app the move named. Here already: open it.
+     */
+    if (listed?.appId) return open(listed.appId);
+    if (listed)
       return add.mutate(
         { directoryEntryId: `directory:${appId}` },
         { onSuccess: open, onError: back },
@@ -153,5 +169,6 @@ function ReconnectOne() {
     navigate,
   ]);
 
-  return <PageShell title="Reconnect your apps">{null}</PageShell>;
+  // The list stays on screen with this app's row saying it is under way.
+  return <ReconnectList working={appId} />;
 }
