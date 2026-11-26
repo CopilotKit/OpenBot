@@ -34,6 +34,7 @@ import {
   clearPendingDeletion,
   resumeDeletionAfterSignIn,
 } from "@/lib/account-deletion/pending";
+import { reauthenticationDeps } from "@/lib/account-deletion/reauthenticate";
 import type { AccountDeletionBlocker } from "@/lib/api/generated/model";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import {
@@ -109,11 +110,16 @@ let server: {
   pendingEverywhere: boolean;
   /** The operation isn't served: an OpenBot older than it. */
   older: boolean;
+  /** The sign-in providers the deployment offers, and the ones the person signed in through. */
+  providers: string[];
+  signedInWith: string[];
 };
 let requests: string[];
 let deletions: { body: unknown; key: string | null }[];
 let cancels: (string | null)[];
 let opened: string[];
+/** Each sign-in started again at the provider, as Better Auth would be asked to start it. */
+let started: Parameters<typeof reauthenticationDeps.start>[0][];
 
 function problem(status: number, code: string, detail: string, more = {}) {
   return new Response(
@@ -228,6 +234,10 @@ async function answer(
       selfHostBanner: false,
       localEvaluation: false,
       edition: "team",
+      authProviders: server.providers,
+      hostedSignIn: false,
+      ssoConfigured: false,
+      ssoRequired: false,
     });
   if (path === "/api/v2/people/me/organizations" && method === "GET")
     return checked(ListOrganizationsResponse, {
@@ -262,7 +272,7 @@ async function answer(
           image: null,
           role: "owner",
           onboarding: null,
-          providers: [],
+          providers: server.signedInWith,
           lastSignedInAt: null,
           revoked: false,
           configuredAdmin: false,
@@ -276,6 +286,7 @@ async function answer(
 const originalFetch = globalThis.fetch;
 const originalWebSocket = globalThis.WebSocket;
 const originalDeps = { ...pendingPageDeps };
+const originalReauthentication = { ...reauthenticationDeps };
 
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://openbot.invalid/" });
@@ -289,7 +300,15 @@ beforeEach(() => {
     refuse: null,
     pendingEverywhere: false,
     older: false,
+    providers: [],
+    signedInWith: [],
   };
+  started = [];
+  reauthenticationDeps.start = async (input) => {
+    started.push(input);
+    return {};
+  };
+  reauthenticationDeps.origin = () => "http://openbot.invalid";
   requests = [];
   deletions = [];
   cancels = [];
@@ -310,6 +329,7 @@ afterEach(() => {
   queryClient.clear();
   globalThis.fetch = originalFetch;
   Object.assign(pendingPageDeps, originalDeps);
+  Object.assign(reauthenticationDeps, originalReauthentication);
 });
 afterAll(async () => {
   await settleReactWork();
@@ -514,7 +534,63 @@ describe("deleting your account", () => {
     expect(requests).toContain("POST /api/auth/sign-out");
   });
 
-  test("a sign-in that is too old is sent through sign-in again, and back in the dialog", async () => {
+  test("a sign-in that is too old signs in again at its provider, never signed out, and comes back to the dialog", async () => {
+    server.refuse = "reauthenticate";
+    server.providers = ["google", "okta"];
+    server.signedInWith = ["okta"];
+    const app = await open();
+    const { dialog, later } = await confirmIn(app);
+    await app.person.click(later);
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      "To delete your account, sign in again first.",
+    );
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Sign in again" }),
+    );
+    // A new sign-in at the provider they used, which it is asked to make them do again
+    // (OpenID Connect prompt=login, max_age=0), as the same person, back to General settings.
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toEqual({
+      provider: "okta",
+      callbackURL: "http://openbot.invalid/settings",
+      loginHint: EMAIL,
+      additionalParams: { prompt: "login", max_age: "0" },
+    });
+    // Not signed out: OpenBot's sign-out would sign them out of their company's sign-in too, whose
+    // page doesn't send them back.
+    expect(requests).not.toContain("POST /api/auth/sign-out");
+    expect(
+      window.sessionStorage.getItem("openbot-delete-account-resume"),
+    ).toBeTruthy();
+    cleanup();
+
+    // Back from the provider, General settings opens the dialog again.
+    queryClient.clear();
+    setCurrentOrganization(undefined);
+    const back = await open("/settings");
+    expect(
+      await back.view.findByRole("dialog", { name: "Delete your account?" }),
+    ).toBeTruthy();
+  });
+
+  test("Google is asked to choose the account again, which it takes in place of prompt=login", async () => {
+    server.refuse = "reauthenticate";
+    server.providers = ["google"];
+    server.signedInWith = ["google"];
+    const app = await open();
+    const { dialog, later } = await confirmIn(app);
+    await app.person.click(later);
+    await app.person.click(
+      await within(dialog).findByRole("button", { name: "Sign in again" }),
+    );
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.additionalParams).toEqual({
+      prompt: "select_account",
+      max_age: "0",
+    });
+  });
+
+  test("a sign-in that is too old, with no provider to sign in again at, is signed out to sign in again, and back in the dialog", async () => {
     server.refuse = "reauthenticate";
     const app = await open();
     const { dialog, later } = await confirmIn(app);

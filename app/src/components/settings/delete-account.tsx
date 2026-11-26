@@ -55,6 +55,7 @@ import {
   samePhrase,
   settledInItsSettings,
 } from "@/lib/account-deletion/queries";
+import { signInAgainAtProvider } from "@/lib/account-deletion/reauthenticate";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { ClientError } from "@/lib/client";
@@ -255,13 +256,25 @@ function DeleteAccountDialog({
   open: boolean;
 }) {
   const formId = useId();
-  const email = useQuery(currentUserQueryOptions()).data?.email;
+  const user = useQuery(currentUserQueryOptions()).data;
+  const email = user?.email;
   const request = useMutation(
     requestAccountDeletionMutationOptions(queryClient),
   );
   const { reset } = request;
   const signOutNow = useMutation(signOutMutationOptions(queryClient));
-  const signInAgain = useSignOut();
+  const signOut = useSignOut();
+  // Signed in again at their provider without signing out, and back here (reauthenticate.ts); where
+  // there is no provider to send them to, signed out to sign in again.
+  const signInAgain = useMutation({
+    mutationFn: async () => {
+      resumeDeletionAfterSignIn();
+      const started = user
+        ? await signInAgainAtProvider(queryClient, user)
+        : false;
+      if (!started) signOut.run();
+    },
+  });
   const [typedEmail, setTypedEmail] = useState("");
   const [typedPhrase, setTypedPhrase] = useState("");
   const confirmed = sameEmail(typedEmail, email) && samePhrase(typedPhrase);
@@ -389,19 +402,20 @@ function DeleteAccountDialog({
         {request.error ? (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
             <p className="text-destructive text-sm" role="alert">
-              {failureSaid(request.error)}
+              {signInAgain.error
+                ? failureSaid(signInAgain.error)
+                : failureSaid(request.error)}
             </p>
             {reauthenticate ? (
               <Button
-                disabled={signInAgain.pending}
-                onClick={() => {
-                  resumeDeletionAfterSignIn();
-                  signInAgain.run();
-                }}
+                disabled={signInAgain.isPending || signOut.pending}
+                onClick={() => signInAgain.mutate()}
                 size="sm"
                 variant="outline"
               >
-                {signInAgain.pending ? "Signing out…" : "Sign in again"}
+                {signInAgain.isPending || signOut.pending
+                  ? "Opening sign-in…"
+                  : "Sign in again"}
               </Button>
             ) : null}
           </div>
