@@ -112,6 +112,7 @@ import {
   laterRunFailure,
   laterRunReason,
   refusedForPerson,
+  refusedRun,
   requestNotMade,
   stoppedReason,
   TURN_CUT_OFF,
@@ -1913,7 +1914,8 @@ export function ChannelChat({
           stoppedReason(event?.message),
           true,
           undefined,
-          refusedForPerson(event?.message),
+          // Or a turn the server keeps as refused: its Bot's engine couldn't take it.
+          refusedForPerson(event?.message) || refusedRun(event),
         );
       },
       onRunFailed: ({ error }) => {
@@ -1937,7 +1939,11 @@ export function ChannelChat({
          * See `laterRunFailure`.
          */
         if (!awaitingReply.current && turnsRef.current > 0) {
-          if (stoppedHere.current) return;
+          /*
+           * Nor a turn already refused in its RUN_ERROR's words: Intelligence's client fails the run
+           * after one, and said again here it was the refusal a second time, as the turn's last line.
+           */
+          if (stoppedHere.current || turnRefused.current) return;
           const said = laterRunFailure(error);
           // A request refused may be OpenBot holding off, which the server is asked about first.
           if (said)
