@@ -470,12 +470,12 @@ test("there is no form link, no Bot picker, and no menu but @", async () => {
   ).toBeNull();
 });
 
-test("the empty box says what to write and how to choose a Bot", async () => {
+test("the empty box shows a sentence that names its Bot with @", async () => {
   serving();
   const view = draw();
   await box(view);
   expect(view.container.innerHTML).toContain(
-    "What should it do, and when? Type @ to choose a Bot.",
+    "@Assistant check my email every day at 9AM",
   );
   expect(view.container.innerHTML).not.toContain("Ask anything");
 });
@@ -505,7 +505,29 @@ test("with no Bots it says to make one first, and has no box", async () => {
   expect(view.queryByRole("textbox", { name: "Message" })).toBeNull();
 });
 
-test("the box is a rounded rectangle about three lines tall, not a pill", async () => {
+test("the send button spins while the sentence is read, and is an arrow again after", async () => {
+  let release: (response: Response) => void = () => {};
+  serving({
+    read: () =>
+      new Promise<Response>((resolve) => {
+        release = resolve;
+      }),
+  });
+  const view = draw();
+  const { user } = await mention(view, "Atlas");
+  await user.keyboard("brief me");
+  await sendable(view);
+  expect(view.queryByTestId("composer-sending")).toBeNull();
+  await user.keyboard("{Enter}");
+  await view.findByTestId("composer-sending");
+
+  release(Response.json({ outcome: "notRoutine" }));
+  await waitFor(() =>
+    expect(view.queryByTestId("composer-sending")).toBeNull(),
+  );
+});
+
+test("the box is a rounded rectangle two lines tall, not a pill", async () => {
   serving();
   const view = draw();
   await box(view);
@@ -514,11 +536,11 @@ test("the box is a rounded rectangle about three lines tall, not a pill", async 
   ) as HTMLElement;
   expect(frame.className).toMatch(/\brounded-(xl|2xl)\b/);
   expect(frame.className).not.toContain("rounded-full");
-  // Three 24px lines before anything is typed.
+  // Two 24px lines before anything is typed.
   const input = view.container.querySelector(
     '[data-slot="composer-input"]',
   ) as HTMLElement;
   expect(
-    input.querySelector('[class*="prompt-area-editor]:min-h-18"]'),
+    input.querySelector('[class*="prompt-area-editor]:min-h-12"]'),
   ).not.toBeNull();
 });

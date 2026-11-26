@@ -211,11 +211,12 @@ export function RoutineBox({
         commands={[]}
         dictates={false}
         disabled={!bots}
-        // A few lines tall before anything is typed, like a note, not a one-line pill.
-        editorClassName="[&_.prompt-area-editor]:min-h-18"
+        // Two lines tall before anything is typed, not a one-line pill.
+        editorClassName="[&_.prompt-area-editor]:min-h-12"
         key={filled?.times ?? 0}
         onSubmit={send}
-        placeholder="What should it do, and when? Type @ to choose a Bot."
+        placeholder="@Assistant check my email every day at 9AM"
+        spinsWhileSending
         // Sending waits for the check-ins read, which the rules for a check-in need.
         pending={busy || checkIns.isPending}
         {...(filled ? { initialValue: filled.text, autoFocus: true } : {})}
