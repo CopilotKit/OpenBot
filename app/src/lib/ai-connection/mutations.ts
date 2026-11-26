@@ -215,7 +215,7 @@ export function removePersonalAiMutationOptions(queryClient: QueryClient) {
  * A sign-in to an AI provider that the server runs itself, for the person's own AI. Not a cached
  * read nor a write somebody asked to keep: a step on the way to connecting, so plain functions.
  * What the provider hands back never comes to the browser. Once approved, connecting uses it: a
- * plan with `login: plan`, a Google or xAI sign-in with `login: oauth`, and Unbiased AI's key with
+ * plan with `login: plan`, an xAI sign-in with `login: oauth`, and Unbiased AI's key with
  * `useSavedKey`.
  *
  * `method` only for a provider with more than one way in: ChatGPT signs in in the browser unless

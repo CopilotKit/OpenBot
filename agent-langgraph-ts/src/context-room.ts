@@ -14,7 +14,9 @@
  *     at least 20,000 tokens. `search_tools` results are never cleared, because they say which tools
  *     the Bot may call. Each call keeps a result, so no provider sees an orphan.
  *  3. If the provider still refuses as too long, the same call is retried, cleared harder, up to
- *     three times, and the stage that worked is where the rest of the run starts.
+ *     three times, and the stage that worked is where the rest of the run starts. A run is one step
+ *     and its recalls, since every other call ends it for the caller to answer, so the run that
+ *     carries the turn on starts at stage 0 again: nothing is remembered between runs.
  *
  * Only what is SENT is cut. The thread the run holds, and hands back, stays whole, and
  * `recall_earlier_results` reads a cleared result back from it.

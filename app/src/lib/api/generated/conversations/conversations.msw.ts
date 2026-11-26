@@ -16,6 +16,7 @@ import type {
   ConversationMessagePage,
   ConversationPage,
   ConversationResponse,
+  ConversationRunResponse,
   ConversationThread,
   ConversationThreadStatus,
   CreateConversationRequest,
@@ -193,6 +194,15 @@ export const getGetConversationThreadResponseMock =
 export const getCreateTranscriptionResponseMock = (): Transcription => ({
   text: "Remind me to send the forecast on Friday.",
 });
+
+export const getGetConversationRunResponseMock =
+  (): ConversationRunResponse => ({
+    run: {
+      id: "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
+      outcome: "succeeded",
+      endedAt: "2026-11-14T12:04:10.000Z",
+    },
+  });
 
 export const getCreateConversationJoinTokenMockHandler = (
   overrideResponse?:
@@ -917,6 +927,48 @@ export const getCreateTranscriptionMockHandler = (
     options,
   );
 };
+
+export const getGetConversationRunMockHandler = (
+  overrideResponse?:
+    | ConversationRunResponse
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{
+            organizationId: string;
+            conversationId: string;
+            runId: string;
+          }>
+        >[0],
+      ) => Promise<ConversationRunResponse> | ConversationRunResponse),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{
+    organizationId: string;
+    conversationId: string;
+    runId: string;
+  }>(
+    "*/api/v2/organizations/:organizationId/conversations/:conversationId/runs/:runId",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{
+          organizationId: string;
+          conversationId: string;
+          runId: string;
+        }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetConversationRunResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getConversationsMock = () => [
   getCreateConversationJoinTokenMockHandler(),
   getListConversationsMockHandler(),
@@ -940,4 +992,5 @@ export const getConversationsMock = () => [
   getCreateConversationThreadMockHandler(),
   getGetConversationThreadMockHandler(),
   getCreateTranscriptionMockHandler(),
+  getGetConversationRunMockHandler(),
 ];

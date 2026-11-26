@@ -7,10 +7,10 @@
  *
  * WHICH CREDENTIAL, BY SIGN-IN:
  *  - An API key (Anthropic, OpenAI, Google, any OpenAI-compatible endpoint): the provider directly.
- *  - A Gemini sign-in: `BOT_PROVIDER=openai`, `OPENAI_BASE_URL` = the server's provider OAuth proxy
+ *  - An xAI sign-in: `BOT_PROVIDER=openai`, `OPENAI_BASE_URL` = the server's provider OAuth proxy
  *    (`/api/model-provider/v1`) and `OPENAI_API_KEY` = its local bearer. Ordinary Chat Completions,
- *    which the server turns into Google's API with the person's token, exactly as for the Python
- *    harness. Nothing here knows it is Google.
+ *    which the server sends to xAI with the person's token, exactly as for the Python harness.
+ *    Nothing here knows it is xAI. Gemini takes an API key only.
  *  - A ChatGPT plan: `CHATGPT_PLAN_HARNESS_URL` names agent-langgraph-agui, which holds the Codex
  *    transport, and every model call goes there (`plan-model.ts`). Selected by its presence.
  *
@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 import { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatGoogle } from "@langchain/google";
-import { ChatOpenAI } from "@langchain/openai";
+import { ChatOpenAI, ChatOpenAICompletions } from "@langchain/openai";
 // The one rule every Bot in the box decides by, imported rather than copied, so a model OpenAI
 // moves to the Responses API moves here in the same change. Node loads it through the JSON hook in
 // json-modules.ts (see there for why and how).
@@ -232,13 +232,6 @@ function retries(run: RunModel): number {
   return run.sendOnce ? 0 : 2;
 }
 
-/** Chat Completions only, whatever LangChain prefers for the model name. */
-class ChatOpenAICompletionsOnly extends ChatOpenAI {
-  override _useResponsesApi(): boolean {
-    return false;
-  }
-}
-
 function openAIModel(model: string, run: RunModel, env: Env): BaseChatModel {
   const baseURL = env.OPENAI_BASE_URL?.trim() || undefined;
   // An endpoint that needs no key still needs a string for the SDK (Ollama, vLLM, LM Studio).
@@ -263,7 +256,11 @@ function openAIModel(model: string, run: RunModel, env: Env): BaseChatModel {
   // `reasoning_effort` as it is, for any model, as agent-langgraph-agui sends it: LangChain's own
   // `reasoning` is dropped for a model it does not know as OpenAI's (Gemini or Grok behind a
   // compatible endpoint, the Gemini sign-in's proxy), and those endpoints read the field too.
-  return new ChatOpenAICompletionsOnly({
+  //
+  // LangChain's own Chat Completions client, whatever it prefers for the model name. Not ChatOpenAI
+  // told never to use Responses: binding tools rebuilds a ChatOpenAI as a plain one
+  // (`ChatOpenAI.withConfig`), and that sent a model LangChain prefers on Responses there.
+  return new ChatOpenAICompletions({
     ...fields,
     ...(run.effort ? { modelKwargs: { reasoning_effort: run.effort } } : {}),
   });

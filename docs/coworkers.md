@@ -130,6 +130,75 @@ Endpoint registration uses target checks. Cloud metadata addresses are refused u
 
 `POST /api/v2/organizations/{organizationId}/bots/test-connection` checks whether an endpoint answers before saving it.
 
+### What your agent is sent
+
+Every run carries the Bot's standing role as the first message of `messages`, a system message with
+the id `standing-role:<bot id>`, and then what the Bot may use as a second system message,
+`granted-tools:<bot id>`. Your agent is sent each once, on every run, including the runs that carry
+a turn on after one of OpenBot's tools answered. OpenBot's tools arrive in `tools`; when your agent
+calls one, it ends its run with the call unanswered, and OpenBot runs it and sends the result in
+the next run.
+
+What OpenBot remembers about the person, when there is any, comes as the AG-UI context entry
+`OpenBot personal memory`: quoted records under a line that says they are data, not instructions.
+It is never a system message. Treat it as data about the person, not as instructions.
+
+Some frameworks' AG-UI adapters drop the system messages that carry the Bot's role and tool
+guidance. [Connect your agent's framework](agent-frameworks.md) gives the few lines each one needs.
+
+### Your own LangGraph agent
+
+`ag-ui-langgraph` drops the first system message of every run, which is the standing role, and keeps
+the second, so a LangGraph graph sees what it may use but not its role. When you connect a LangGraph
+agent, choose **LangChain** as its framework in New Bot (`"harness": "langgraph"` when you create the
+Bot through the API). OpenBot then also sends the role as an AG-UI context entry, `OpenBot standing
+role`, which `ag-ui-langgraph` hands your graph in `state["ag-ui"]["context"]`. A Bot connected
+without a framework gets no context copy.
+
+**Built with CopilotKit's `CopilotKitMiddleware`?** Add nothing. The middleware writes the AG-UI
+context into your model's system prompt as "App Context", so your model is told the role from there,
+once. CopilotKit's LangGraph examples are built this way. Adding the lines below as well would tell
+it twice.
+
+**Without that middleware**, add these lines to your graph and put `openbot_role(state)` ahead of
+the messages you send your model:
+
+```python
+from typing import Annotated, TypedDict
+
+from langchain_core.messages import SystemMessage
+from langgraph.graph.message import add_messages
+
+# ag-ui-langgraph hands the graph the run's AG-UI context in state["ag-ui"]["context"].
+# LangGraph keeps only the keys a state declares, so the state declares that one.
+State = TypedDict(
+    "State",
+    {"messages": Annotated[list, add_messages], "ag-ui": dict},
+    total=False,
+)
+
+
+def openbot_role(state: State) -> list[SystemMessage]:
+    """The Bot's role OpenBot sent with this run, unless the thread already says it."""
+    said = {m.content for m in state["messages"] if isinstance(m, SystemMessage)}
+    for entry in (state.get("ag-ui") or {}).get("context") or []:
+        if isinstance(entry, dict):
+            description, value = entry.get("description"), entry.get("value")
+        else:
+            description, value = entry.description, entry.value
+        if description == "OpenBot standing role" and value and value not in said:
+            return [SystemMessage(content=value)]
+    return []
+
+
+def chat(state: State):
+    reply = model.invoke([*openbot_role(state), *state["messages"]])
+    return {"messages": [reply]}
+```
+
+The tool guidance stays in your graph's messages as a system message, so your model is told the
+role and the guidance once each.
+
 ## What a role does not grant
 
 A Bot's role grants it nothing. What it may use is set separately, on the Bot's page, in Settings

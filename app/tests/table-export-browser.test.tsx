@@ -15,10 +15,16 @@ import { marksPlugin } from "./marks-plugin";
  * the browser saves has them, and that nothing a person sees changed: the table, its download and
  * copy menus, and its fullscreen view, pixel for pixel against Streamdown's.
  *
+ * And a table with one cell that wraps to many lines reads from the top of its row: the short cells
+ * beside it start on its first line, in a reply, a card's text and a generated interface, on a phone
+ * and wide, and full screen. Seen on 2026-11-26 on a phone: Streamdown sets a cell in the middle of
+ * its row, so "200 in your team's" sat halfway down beside a tall list of people.
+ *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/table-export-browser.test.tsx
  *
  * Chromium by default. OPENBOT_APP_ENGINES=chromium,webkit adds WebKit. With
- * OPENBOT_APP_SHOTS=<dir> each page is saved as table-<engine>-<theme>-<surface>-<state>.png.
+ * OPENBOT_APP_SHOTS=<dir> each page is saved as table-<engine>-<theme>-<surface>-<state>.png, and
+ * each wrapping table as wrapping-<engine>-<theme>-<surface>-<width>-<view>.png.
  */
 const asked = process.env.OPENBOT_APP_BROWSER === "1";
 const shots = process.env.OPENBOT_APP_SHOTS;
@@ -34,7 +40,17 @@ const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";
 const THEMES = ["light", "dark"] as const;
 const SURFACES = ["transcript", "ours", "streamdown"] as const;
-type Surface = (typeof SURFACES)[number];
+/** Every surface that draws a Bot's markdown with the reply's renderer. */
+const RENDERERS = ["transcript", "gallery", "a2ui"] as const;
+type Surface = (typeof SURFACES)[number] | (typeof RENDERERS)[number];
+type Reply = "links" | "wrapping";
+/** The words of each reply's last cell, there once the whole reply is drawn. */
+const LAST: Record<Reply, string> = {
+  links: "no link here",
+  wrapping: "Linus Pauling",
+};
+/** A phone's width, and a computer's. */
+const WIDTHS = [390, 900] as const;
 
 const RELEASE =
   "https://github.com/CopilotKit/OpenBot/releases/tag/v1.2.0-rc.4";
@@ -120,11 +136,15 @@ async function open(
   engine: "chromium" | "webkit",
   theme: (typeof THEMES)[number],
   surface: Surface,
-  styled = true,
+  {
+    styled = true,
+    reply = "links",
+    width = 900,
+  }: { styled?: boolean; reply?: Reply; width?: number } = {},
 ): Promise<Page> {
   const browser = await browserFor(engine);
   const page = await browser.newPage({
-    viewport: { width: 900, height: 700 },
+    viewport: { width, height: 700 },
     deviceScaleFactor: 2,
     acceptDownloads: true,
   });
@@ -145,9 +165,11 @@ async function open(
         );
     return route.fulfill({ status: 404, body: "" });
   });
-  await page.goto(`${ORIGIN}/?surface=${surface}&theme=${theme}`);
+  await page.goto(
+    `${ORIGIN}/?surface=${surface}&theme=${theme}&reply=${reply}`,
+  );
   // The reply is revealed at a reading pace in a conversation; its table's last row ends it.
-  await page.getByText("no link here").first().waitFor({ timeout: 20_000 });
+  await page.getByText(LAST[reply]).first().waitFor({ timeout: 20_000 });
   await settle(page);
   return page;
 }
@@ -193,9 +215,16 @@ beforeAll(async () => {
   if (!asked) return;
   files = await bundle();
   const classes = new Set<string>();
-  for (const surface of SURFACES)
+  const pages = [
+    ...SURFACES.map((surface) => ({ surface, reply: "links" as const })),
+    ...RENDERERS.map((surface) => ({ surface, reply: "wrapping" as const })),
+  ];
+  for (const { surface, reply } of pages)
     for (const state of STATES) {
-      const page = await open("chromium", "light", surface, false);
+      const page = await open("chromium", "light", surface, {
+        styled: false,
+        reply,
+      });
       try {
         await show(page, state);
         for (const name of await page.evaluate(() =>
@@ -333,4 +362,73 @@ describe.skipIf(!asked)("a table of links a Bot writes", () => {
         }, 60_000);
     }
   }
+});
+
+/**
+ * The row with the tall cell, read in the inline table or the fullscreen one: each cell's vertical
+ * alignment, where its first line of words starts, and how many lines it runs to.
+ */
+function readRow(page: Page, view: "inline" | "fullscreen") {
+  return page.evaluate((view) => {
+    const scope =
+      view === "fullscreen"
+        ? document.querySelector('[data-streamdown="table-fullscreen"]')
+        : document.querySelector('[data-streamdown="table-wrapper"]');
+    const row = [...(scope?.querySelectorAll("tbody tr") ?? [])].find((tr) =>
+      tr.textContent?.includes("Northwind"),
+    );
+    if (!row) throw new Error(`no row with the tall cell (${view})`);
+    return [...row.querySelectorAll("td")].map((cell) => {
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      let text = walker.nextNode();
+      while (text && !text.textContent?.trim()) text = walker.nextNode();
+      if (!text) throw new Error("a cell with no words");
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const lines = [...range.getClientRects()];
+      return {
+        cell: (cell.textContent ?? "").trim().slice(0, 20),
+        align: getComputedStyle(cell).verticalAlign,
+        top: Math.round(lines[0].top),
+        lines: new Set(lines.map((line) => Math.round(line.top))).size,
+      };
+    });
+  }, view);
+}
+
+describe.skipIf(!asked)("a table whose one cell wraps to many lines", () => {
+  for (const engine of engines)
+    for (const surface of RENDERERS)
+      for (const width of WIDTHS)
+        test(`${engine}, ${surface}, ${width}px: every cell in a row starts at its top`, async () => {
+          for (const theme of THEMES) {
+            const page = await open(engine, theme, surface, {
+              reply: "wrapping",
+              width,
+            });
+            try {
+              for (const view of ["inline", "fullscreen"] as const) {
+                if (view === "fullscreen") await show(page, "fullscreen");
+                await shoot(
+                  page,
+                  `wrapping-${engine}-${theme}-${surface}-${width}-${view}`,
+                );
+                const cells = await readRow(page, view);
+                // The People cell does wrap, on any system's font, or the row would show nothing
+                // either way.
+                expect(
+                  Math.max(...cells.map((cell) => cell.lines)),
+                ).toBeGreaterThanOrEqual(3);
+                const first = cells[0].top;
+                expect(
+                  cells.map(({ cell, align, top }) => ({ cell, align, top })),
+                ).toEqual(
+                  cells.map(({ cell }) => ({ cell, align: "top", top: first })),
+                );
+              }
+            } finally {
+              await page.close();
+            }
+          }
+        }, 120_000);
 });

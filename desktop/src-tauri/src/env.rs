@@ -1627,11 +1627,53 @@ pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<(
     result
 }
 
+/// A saved ChatGPT sign-in this version can use: a Sign in with ChatGPT credential record
+/// (`crate::chatgpt_sign_in`), not the token store an earlier version's Codex sign-in left.
 pub fn saved_chatgpt_plan_store(dir: &Path) -> bool {
     read_plan_store(dir)
         .ok()
         .flatten()
-        .is_some_and(|store| store.trim() != "{}")
+        .is_some_and(|store| is_sign_in_with_chatgpt_record(&store))
+}
+
+/// A ChatGPT sign-in an earlier version saved, which the plan's engine can no longer use: the
+/// person signs in again.
+pub fn chatgpt_sign_in_changed(dir: &Path) -> bool {
+    read_plan_store(dir)
+        .ok()
+        .flatten()
+        .is_some_and(|store| !is_sign_in_with_chatgpt_record(&store))
+}
+
+/// What the person reads when a ChatGPT sign-in saved by an earlier version is used.
+pub const CHATGPT_SIGN_IN_CHANGED: &str =
+    "ChatGPT's sign-in has changed. Sign in to ChatGPT again to keep using your plan.";
+
+/// Whether a saved store is a Sign in with ChatGPT credential record that allows plan use: an
+/// issued client id, an access and a refresh token, and the plan's scope.
+pub fn is_sign_in_with_chatgpt_record(store: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(store) else {
+        return false;
+    };
+    let text = |name: &str| {
+        value
+            .get(name)
+            .and_then(|v| v.as_str())
+            .is_some_and(|v| !v.trim().is_empty())
+    };
+    let client = value
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .is_some_and(|id| !id.trim().is_empty() && id != crate::chatgpt_sign_in::DYNAMIC_CLIENT);
+    let plan = value
+        .get("scopes")
+        .and_then(|v| v.as_array())
+        .is_some_and(|scopes| {
+            scopes
+                .iter()
+                .any(|scope| scope.as_str() == Some(crate::chatgpt_sign_in::PLAN_SCOPE))
+        });
+    client && plan && text("access_token") && text("refresh_token")
 }
 
 pub fn read_plan_store(dir: &Path) -> std::io::Result<Option<String>> {
@@ -3222,7 +3264,7 @@ mod model_tests {
         );
         assert_eq!(
             env["CHATGPT_PLAN_HARNESS_URL"],
-            "http://agent-chatgpt-plan:4206"
+            "http://agent-chatgpt-plan:4216"
         );
 
         // The same Bot on an Anthropic key runs in its own container, on the gateway.
@@ -3558,6 +3600,43 @@ mod model_tests {
             None
         );
         assert!(crate::vault::is_secret(crate::learning_model::TOKEN));
+    }
+
+    /// A ChatGPT sign-in an earlier version saved through Codex (langchain-openai's token store) is
+    /// not a saved sign-in any more: the window asks for the sign-in again, and Start says why. One
+    /// from Sign in with ChatGPT is.
+    #[test]
+    fn an_earlier_versions_chatgpt_sign_in_has_to_be_done_again() {
+        let root = crate::test_support::temp_root("chatgpt-sign-in-changed");
+        // What langchain-openai's Codex login wrote.
+        let codex = r#"{"access_token":"a.b.c","refresh_token":"r","id_token":"i","account_id":"acct","expires_at":1}"#;
+        write_plan_store(
+            &root,
+            &ModelCredential::ChatGptPlan {
+                store: codex.into(),
+            },
+        )
+        .unwrap();
+        assert!(!saved_chatgpt_plan_store(&root));
+        assert!(chatgpt_sign_in_changed(&root));
+
+        let record = serde_json::json!({
+            "client_id": "oaiapp_issued", "access_token": "a.b.c", "refresh_token": "r",
+            "id_token": "i", "scopes": ["chatgpt.tokens.use.direct", "openid", "resource.invoke"],
+        })
+        .to_string();
+        write_plan_store(&root, &ModelCredential::ChatGptPlan { store: record }).unwrap();
+        assert!(saved_chatgpt_plan_store(&root));
+        assert!(!chatgpt_sign_in_changed(&root));
+
+        // Signed in without allowing plan use: not one the engine can use either.
+        let no_plan = r#"{"client_id":"oaiapp_issued","access_token":"a","refresh_token":"r","scopes":["openid"]}"#;
+        assert!(!is_sign_in_with_chatgpt_record(no_plan));
+        // Nobody signed in: neither saved nor changed.
+        write_plan_store(&root, &ModelCredential::None).unwrap();
+        assert!(!saved_chatgpt_plan_store(&root));
+        assert!(!chatgpt_sign_in_changed(&root));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

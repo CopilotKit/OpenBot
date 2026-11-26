@@ -1,8 +1,8 @@
 /*!
 Which sign-in downloads the two plan images.
 
-- The Python LangGraph image (`plan::CHATGPT_SIGN_IN_IMAGE`) runs only on a ChatGPT plan, beside the
-  TypeScript Bot, as the plan's model service.
+- The OpenAI Agents SDK image (`plan::CHATGPT_SIGN_IN_IMAGE`) runs only on a ChatGPT plan, as its
+  Bot.
 - The Claude Agent SDK image (`plan::SIGN_IN_IMAGE`) runs only on a Claude plan, as its Bot.
 
 Both carry their vendor's sign-in. An install on an API key still downloaded both ahead of Install,
@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use crate::env::{Intelligence, Model, ModelCredential, Ports};
 use crate::harness::{HarnessChoice, DEFAULT_HARNESS};
 
-const CHATGPT_PLAN: &str = "openbot-agent-langgraph-agui@";
+const CHATGPT_PLAN: &str = "openbot-agent-openai-agents@";
 const CLAUDE_PLAN: &str = "openbot-agent-claude-sdk@";
 
 /// A release laid out as Install lays it out: this repository's Compose file and an image list
@@ -47,11 +47,13 @@ fn laid_out(label: &str) -> PathBuf {
     )
     .unwrap();
     let digest = format!("sha256:{}", "0".repeat(64));
-    manifest["images"]["agent-langgraph-ts"] = serde_json::json!({
-        "repository": "ghcr.io/copilotkit/openbot-agent-langgraph-ts",
-        "digest": digest,
-        "reference": format!("ghcr.io/copilotkit/openbot-agent-langgraph-ts@{digest}"),
-    });
+    for name in ["agent-langgraph-ts", "agent-openai-agents"] {
+        manifest["images"][name] = serde_json::json!({
+            "repository": format!("ghcr.io/copilotkit/openbot-{name}"),
+            "digest": digest,
+            "reference": format!("ghcr.io/copilotkit/openbot-{name}@{digest}"),
+        });
+    }
     std::fs::write(
         crate::deployment::images_path(&root),
         serde_json::to_string_pretty(&manifest).unwrap(),
@@ -273,7 +275,7 @@ fn an_update_downloads_a_plan_image_only_for_its_plan() {
         intelligence: "0.0.0".into(),
         images: [
             "openbot-server",
-            "openbot-agent-langgraph-agui",
+            "openbot-agent-openai-agents",
             "openbot-agent-claude-sdk",
         ]
         .iter()

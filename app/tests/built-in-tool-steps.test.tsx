@@ -155,6 +155,31 @@ test("drawing an interface reads as what the Bot did, not the tool's identifier"
  * line is drawn the moment the call starts, before any of its arguments arrive, so its words have to
  * come from the name alone.
  */
+/*
+ * A DRAWING THAT DREW NOTHING DID NOT HAPPEN. Found by the stock AG-UI suite on a Google ADK agent:
+ * it called `render_ui` with no operations beside a question, the runtime answered that nothing was
+ * rendered, and the step read "Drew an interface" for an interface nobody saw.
+ */
+test("a drawing the runtime says drew nothing reads as not drawn", async () => {
+  const view = draw([
+    { id: "u1", role: "user", content: "Which seed variety do I mean?" },
+    ...step(
+      "render_ui",
+      JSON.stringify({
+        status: "error",
+        applied: 0,
+        calls: 0,
+        rejected: [],
+        reason:
+          "operations must be a JSON array of A2UI operation objects; nothing was rendered",
+      }),
+    ),
+  ]);
+  expect(await view.findByText("Didn't draw an interface")).toBeTruthy();
+  expect(view.queryByText("Drew an interface")).toBeNull();
+  expect(view.queryByText("render_ui")).toBeNull();
+});
+
 test("a call to a name with no label reads in words from its first frame", async () => {
   const view = draw(
     [

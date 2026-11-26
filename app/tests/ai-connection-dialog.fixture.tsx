@@ -19,7 +19,7 @@ import { Route as ApiKeysRoute } from "@/routes/_authed/settings/api-keys";
 import { Route as SettingsProvidersRoute } from "@/routes/_authed/settings/providers";
 
 /**
- * Settings, Providers, in the app's real settings frame (its sidebar and inset panel, as
+ * Settings, AI providers, in the app's real settings frame (its sidebar and inset panel, as
  * `routes/_authed/settings/route.tsx` draws them), for ai-connection-dialog.test.tsx to bundle and
  * load in a browser. API keys is beside it, a Settings page from before with a dialog of its own, to
  * look at next to the AI connection dialog. What the server answers comes from the test's routes.

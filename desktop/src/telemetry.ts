@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { DesktopBusinessPlace } from "../../shared/openbot-for-business";
 import type { ModelChoice } from "./ProviderPicker";
 
 /**
@@ -47,7 +48,13 @@ export type SetupEvent =
         | "none";
       credential_path: "subscription" | "api_key" | "oauth" | "none";
       custom_base_url: boolean;
-    };
+    }
+  /*
+   * OpenBot for Business's booker came on screen because it was picked, and a call booked in its
+   * calendar: where, and nothing else (`BusinessBooker`).
+   */
+  | { kind: "business_opened"; place: DesktopBusinessPlace }
+  | { kind: "business_booked"; place: DesktopBusinessPlace };
 
 export function harnessChoiceEvent(id: string): SetupEvent | null {
   // Match values rather than indexing with an arbitrary string, including prototype keys.

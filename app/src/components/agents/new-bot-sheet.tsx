@@ -765,7 +765,7 @@ function AboutStep({
         <Textarea
           autoComplete="off"
           id="new-bot-instructions"
-          maxLength={1000}
+          maxLength={5000}
           onChange={(event) => onInstructions(event.target.value)}
           placeholder="Review receipts, categorize expenses, and prepare reimbursement reports."
           rows={5}

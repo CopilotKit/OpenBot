@@ -103,7 +103,7 @@ impl Plan {
     pub fn port(self) -> u16 {
         match self {
             Plan::Claude => 4212,
-            Plan::ChatGpt => 4206,
+            Plan::ChatGpt => 4216,
         }
     }
 
@@ -332,7 +332,7 @@ The settings Start writes that depend on the installation folder: the plan engin
 release's manifest; when the setup window's AI screen last saved a choice; and the files the server
 reads, at the paths the Compose file mounts.
 
-`OPENBOT_MODEL_OAUTH_FILE` names where a Google or xAI sign-in is kept whether or not one is the
+`OPENBOT_MODEL_OAUTH_FILE` names where an xAI sign-in is kept whether or not one is the
 connection now, so one made in the app reaches the server with no restart.
 */
 pub fn start_settings(root: &Path) -> BTreeMap<String, String> {
@@ -439,6 +439,9 @@ pub fn prepare(engine: &Address, root: &Path, provider: &str, login: &str) -> Re
             }
         }
         Plan::ChatGpt => {
+            if crate::env::chatgpt_sign_in_changed(root) {
+                return Err(Problem::plain(crate::env::CHATGPT_SIGN_IN_CHANGED));
+            }
             if !crate::env::saved_chatgpt_plan_store(root) {
                 return Err(Problem::plain("Sign in to your ChatGPT plan first."));
             }
@@ -968,7 +971,7 @@ mod tests {
         );
         assert_eq!(
             settings["CHATGPT_PLAN_HARNESS_URL"],
-            "http://agent-chatgpt-plan:4206"
+            "http://agent-chatgpt-plan:4216"
         );
         assert!(crate::env::MINTED.contains(&GATEWAY_TOKEN));
         assert!(crate::vault::is_secret(GATEWAY_TOKEN));

@@ -1,6 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { PROVIDERS_ADDRESS, providerAddress } from "@/lib/ai-connection/paths";
+import {
+  PROVIDERS_ADDRESS,
+  providerAddress,
+  providerChangeAddress,
+} from "@/lib/ai-connection/paths";
+import {
+  GOOGLE_SIGN_IN_ENDED,
+  signInRetired,
+} from "@/lib/ai-connection/providers";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { connectionOf } from "@/lib/models/connections";
@@ -19,14 +27,14 @@ export function openComposerModelPicker(): void {
 }
 
 /**
- * Where a connection is fixed: its own page in Settings → Providers. `owner` says whose list it is
+ * Where a connection is fixed: its own page in Settings → AI providers. `owner` says whose list it is
  * in: on OpenBot Cloud a person's own and the organization's may share an id.
  */
 export function reconnectPath(connectionId: string, owner?: string): string {
   return providerAddress(connectionId, owner);
 }
 
-/** Where a default is chosen: Settings → Providers, which says when there is none. */
+/** Where a default is chosen: Settings → AI providers, which says when there is none. */
 export function chooseDefaultPath(): string {
   return PROVIDERS_ADDRESS;
 }
@@ -41,7 +49,7 @@ export function chooseDefaultPath(): string {
  * server's sentence varies by connection, and an OpenBot older than several connections sends no
  * `stopped`, which draws nothing here.
  *
- * Reconnect is a whole page load into Settings → Providers, as the other ways to fix an AI from a conversation
+ * Reconnect is a whole page load into Settings → AI providers, as the other ways to fix an AI from a conversation
  * are (add-model-key-link.tsx). It is left out for a member whose runs use the organization's
  * connection: only an admin can fix that one. Named query client, as everything drawn inside a
  * conversation.
@@ -81,6 +89,8 @@ export function StoppedConnectionNotice({
     queryClient,
   ).data;
   if (!stopped) return null;
+  // A Google sign-in OpenBot no longer offers: the way on opens Google Gemini's API key directly.
+  const retired = signInRetired(stopped);
   const canFix =
     owner === "personal" ||
     (owner === "organization" && isOrganizationAdmin(me?.role));
@@ -97,11 +107,17 @@ export function StoppedConnectionNotice({
             className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
             href={
               stopped.connection
-                ? reconnectPath(stopped.connection, owner)
+                ? retired
+                  ? providerChangeAddress(stopped.connection, owner)
+                  : reconnectPath(stopped.connection, owner)
                 : chooseDefaultPath()
             }
           >
-            {stopped.connection ? "Reconnect" : "Choose a default"}
+            {stopped.connection
+              ? retired
+                ? GOOGLE_SIGN_IN_ENDED.action
+                : "Reconnect"
+              : "Choose a default"}
           </a>
         ) : null}
         <Button onClick={onChooseModel} size="sm" variant="outline">

@@ -17,8 +17,12 @@ import { failureSaid } from "@/lib/load-failure";
  * token again: an operator who loses it rotates, and rotating retires the old one, which is also how a
  * leak is handled.
  *
- * A coworker with no token can still hold a conversation. What it cannot do is reach anything outside
- * one, which is the right default for a URL somebody pasted.
+ * A KEY IS NOT WHAT GIVES A CONNECTED BOT TOOLS. OpenBot offers its tools to every Bot in the run's
+ * AG-UI `tools`, and a Bot at an address hands each call back for OpenBot to run, through the same
+ * grants, approvals and audit trail. That needs no key. The key is for the other door: an agent that
+ * runs its own tool loop and calls OpenBot's tools itself (`AGENT_TOOL_TOKEN` in
+ * docs/configuration.md is the same door for the Bots OpenBot starts). The panel used to tell a stock AG-UI Bot with no key that it
+ * "can't use tools" right after it had used four of them.
  *
  * A Bot OpenBot runs itself, the harness picked in setup, is handed OpenBot's key on every run and
  * uses its tools with none of its own. The panel says so and offers nothing to generate: it used to
@@ -26,6 +30,12 @@ import { failureSaid } from "@/lib/load-failure";
  */
 export const KEY_FROM_OPENBOT =
   "OpenBot runs this Bot, so it can use its tools without a key.";
+
+const NO_KEY_NEEDED =
+  "This Bot can use OpenBot's tools in its conversations without a key. Generate a key only if your agent calls OpenBot's tools itself.";
+
+const KEY_HELD =
+  "This Bot has a key, so your agent can call OpenBot's tools itself. If you make a new key, the old one stops working right away.";
 
 export function CallbackTokenPanel({
   agentId,
@@ -64,9 +74,7 @@ export function CallbackTokenPanel({
       {heading}
 
       <p className="text-muted-foreground text-sm">
-        {hasToken
-          ? "This Bot has a key, so it can use its tools. If you make a new key, the old one stops working right away."
-          : "This Bot has no key yet. It can talk but can't use tools. Generate a key and add it to your agent's configuration."}
+        {hasToken ? KEY_HELD : NO_KEY_NEEDED}
       </p>
 
       {token ? (

@@ -56,7 +56,7 @@ import {
 } from "./ai-connection-list";
 
 /**
- * Settings → Providers: the AI providers OpenBot's Bots run on and how OpenBot signs in to each, one
+ * Settings → AI providers: the AI providers OpenBot's Bots run on and how OpenBot signs in to each, one
  * row each, every row leading to the provider's own page. Never the key itself.
  *
  * Drawn where the server says an admin can change it here (getAiConnection's `editable`). Keys and
@@ -126,8 +126,8 @@ export function AiModelSection({
 
 /**
  * The organization's AI connection as one row that opens its dialog: what it is, Change, and
- * Disconnect. Settings → Providers draws it against a server older than the list, and so does Admin
- * → Providers.
+ * Disconnect. Settings → AI providers draws it against a server older than the list, and so does Admin
+ * → AI providers.
  */
 export function AiConnectionRow({
   connection,

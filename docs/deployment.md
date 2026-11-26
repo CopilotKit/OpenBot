@@ -1,7 +1,7 @@
 # Deployment
 
-OpenBot ships as one container. It carries the app, the API that serves it, and the browser the Bots
-drive, and it can carry its own PostgreSQL as well. It does what it does on a laptop.
+OpenBot ships as one container. It carries the app, the API that serves it, the engine new Bots run
+on, and the browser the Bots drive, and it can carry its own PostgreSQL as well. It does what it does on a laptop.
 
 ```sh
 # Every release publishes this image, so a deployment needs no clone and no build.
@@ -35,9 +35,10 @@ signature. The signatures are not recorded in a public transparency log, which i
 
 ## What is in the image, and what is not
 
-**In it:** the built app, the API, and Chromium. One port, 3001. The browser listens on 4100 inside
-the container and is deliberately not published: it holds real logins and its only caller is the
-process beside it.
+**In it:** the built app, the API, the TypeScript LangGraph engine new Bots run on
+(`agent-langgraph-ts`), and Chromium. One port, 3001. The browser listens on 4100 inside the
+container and is deliberately not published: it holds real logins and its only caller is the
+process beside it. The engine listens on 4215 on the container's loopback only, for the same reason.
 
 **PostgreSQL, if you ask for it.** `EMBEDDED_POSTGRES=on` starts one inside the container, creates
 the database and the `vector` extension the first time, and runs the migrations on every start. It
@@ -118,6 +119,7 @@ and the fix would not be available.
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `CPK_INTELLIGENCE_API_KEY` | CopilotKit Intelligence. A free plan is available and it can be self-hosted. The older `INTELLIGENCE_API_KEY` is still read |
 | `COPILOTKIT_LICENSE_TOKEN` | optional. Managed Intelligence issues none; set it for a self-hosted Intelligence, which needs the same license on its own deployment too |
 | a model key | `OPENAI_API_KEY`, or the provider you configured |
+| `EMBEDDED_ENGINE` | `off` to run no engine in the container. On by default. See below |
 
 **A license, or a key Intelligence accepts, is required.** The server checks before it starts. With
 `COPILOTKIT_LICENSE_TOKEN` set, the license must be valid and current; one that is not refuses to
@@ -136,9 +138,19 @@ against a host that is not there. Set it, with `MANAGED_AGENT_TOKEN`, only when 
 reachable from this container. Unset it if your `.env` still has the laptop default
 `http://127.0.0.1:4201/`.
 
-`LANGGRAPH_TS_AG_UI_URL` is the same for the TypeScript LangGraph engine (`agent-langgraph-ts`),
-which new Bots run on: the image does not carry it either. Set it, with `MANAGED_AGENT_TOKEN`, only
-when that engine is reachable from this container; unset, new Bots run on the built-in engine.
+**The TypeScript LangGraph engine runs inside the container.** New Bots run on
+`agent-langgraph-ts`, and the image runs it beside the server with nothing to set: it generates the
+tokens the two share (`MANAGED_AGENT_TOKEN`, `MODEL_GATEWAY_TOKEN`, `AGENT_TOOL_TOKEN`) when you have
+not set them, tells the server where the engine is, and the engine reaches the model through the
+server's model gateway, so no provider key sits in it. If the engine stops, it is started again, and
+until it answers a person asking a Bot is told the engine isn't answering. A value you set yourself
+is kept, `LANGGRAPH_TS_AG_UI_URL` included.
+
+To run the engine elsewhere instead (its image is `ghcr.io/copilotkit/openbot-agent-langgraph-ts`),
+set `EMBEDDED_ENGINE=off`, `LANGGRAPH_TS_AG_UI_URL` to its address, and `MANAGED_AGENT_TOKEN` and
+`MODEL_GATEWAY_TOKEN` on both. Without an engine the server refuses new Bots, with a sentence telling
+the person to ask an admin, and logs why; it does not run them on its built-in agent instead. To put
+every Bot on the built-in agent, set `OPENBOT_DEFAULT_BOT_ENGINE=built-in`.
 
 **Authentication is required.** With no identity provider configured, the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.

@@ -27,6 +27,7 @@ import { galleryComponent } from "@/lib/copilot/gallery-registry";
 import { atStart } from "@/lib/manage-paths";
 import { modelNamer } from "@/lib/models/names";
 import { availableModelsQueryOptions } from "@/lib/models/queries";
+import { DELETED_USER, isDeletedUser } from "@/lib/people/deleted-user";
 import { cn } from "@/lib/utils";
 
 /** One row as the API returns it. */
@@ -478,6 +479,15 @@ function initiatorKindOf(event: AuditEvent): string | undefined {
  */
 function personOf(event: AuditEvent): string | undefined {
   const by = event.payload?.by;
+  // A person who deleted their account: their rows stay for 180 days, named by a pseudonym.
+  if (
+    isDeletedUser(event.actorUserId) ||
+    isDeletedUser(typeof by === "string" ? by : null) ||
+    isDeletedUser(
+      typeof event.payload?.actor === "string" ? event.payload.actor : null,
+    )
+  )
+    return DELETED_USER;
   if (typeof by === "string" && by.trim()) return by.trim();
   return event.startedBy?.trim() || undefined;
 }

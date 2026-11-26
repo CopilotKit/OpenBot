@@ -77,6 +77,11 @@ const proc = Bun.spawn(
     "test",
     ...(shard ? [`--shard=${shard.index}/${shard.count}`] : []),
     ...timings,
+    // Workbench is a manual dev tool. Keep the separate Node LangGraph engine's
+    // existing exclusion alongside the dev-tool exclusions.
+    "--path-ignore-patterns=agent-langgraph-ts/**",
+    "--path-ignore-patterns=**/workbench/**",
+    "--path-ignore-patterns=**/fakeNative/**",
   ],
   {
     stdout: "inherit",

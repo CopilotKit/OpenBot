@@ -1,9 +1,11 @@
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { CompanySignInPage } from "@/components/auth/company-sign-in-page";
+import { PendingDeletionPage } from "@/components/auth/pending-deletion-page";
 import { RouteError } from "@/components/layout/route-error";
 import { UnavailablePage } from "@/components/layout/unavailable-page";
 import { NoOrganizationPage } from "@/components/organizations/no-organization-page";
+import { pendingDeletionRefusal } from "@/lib/account-deletion/queries";
 import type { AppErrorSource } from "@/lib/api/generated/model";
 import { recordAppError } from "@/lib/api/generated/product-events/product-events";
 import { idempotencyKey } from "@/lib/api/request";
@@ -190,15 +192,19 @@ export function ReportedErrorComponent(props: ErrorComponentProps) {
   const { error } = props;
   const none = inNoOrganization(error);
   const heldOut = heldOutBySso(error);
+  // The person's account is scheduled to be deleted: every request but reading and cancelling it says so.
+  const pending = pendingDeletionRefusal(error);
   // OpenBot holding off for now (an organization being moved, its database out of reach), in its own words.
   const unavailable = unavailableSaid(error);
-  const answer = none || heldOut || unavailable !== undefined;
+  const answer = none || heldOut || pending || unavailable !== undefined;
   useEffect(() => {
-    // Somebody in no organization, or held out until they sign in through their company, or an organization that is
-    // briefly unavailable, is an answer, not a fault: there is nothing to tell OpenBot.
+    // Somebody in no organization, or held out until they sign in through their company, or whose account is to be
+    // deleted, or an organization that is briefly unavailable, is an answer, not a fault: there is nothing to tell
+    // OpenBot.
     if (!answer) reportAppError("error_boundary", error);
   }, [error, answer]);
   // Wherever it was found, it is answered with its own page, never the router's error screen.
+  if (pending) return <PendingDeletionPage />;
   if (heldOut) return <CompanySignInPage refusal={error.message} />;
   if (none) return <NoOrganizationPage />;
   if (unavailable !== undefined)

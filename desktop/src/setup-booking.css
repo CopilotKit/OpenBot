@@ -1,0 +1,107 @@
+/* The nested booking section owns setup geometry; other Welcome views keep their layout. */
+main > .rail + .sheet.welcome:has(> .booking-step.setup-layout) {
+  overflow: hidden;
+  scrollbar-gutter: auto;
+  padding-right: var(--page-inline);
+  padding-top: calc(var(--head-top) - 11px);
+  padding-bottom: 32px;
+}
+
+main > .rail + .sheet.welcome > .booking-step.setup-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.booking-step.setup-layout h2 {
+  font-size: var(--text-2xl);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Booking uses all room between its heading and Back, including while the calendar loads. */
+main > .rail + .sheet.welcome > .booking-step.setup-layout > .setup-body {
+  padding-block: 18px 0;
+  overflow: hidden;
+}
+.setup-layout .setup-booking-surface {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  text-align: center;
+}
+
+/* Absolute placement keeps a frame's intrinsic height out of the reserved surface's geometry. */
+.setup-layout .setup-booking-surface > .booking-calendar {
+  position: absolute;
+  inset: 8px;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.setup-layout .setup-booking-surface .booking-calendar iframe {
+  width: 100%;
+  height: 100%;
+}
+
+.setup-layout .setup-booking-surface .booking-calendar-loading {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 15px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.setup-layout .setup-booking-surface > .book-a-demo-fallback {
+  width: 100%;
+  min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.booking-step.setup-layout > .setup-footer > button.quiet.booking-back {
+  min-height: 42px;
+  padding: 10px 15px;
+  margin: 0;
+  border-radius: 7px;
+  background: transparent;
+}
+
+@media (max-width: 860px) {
+  main > .rail + .sheet.welcome:has(> .booking-step.setup-layout) {
+    --sheet-pad: 24px;
+    padding-inline: 24px;
+    padding-bottom: 24px;
+  }
+
+  .setup-layout .setup-booking-surface {
+    padding: 8px;
+  }
+
+  .setup-layout .setup-booking-surface > .booking-calendar {
+    inset: 8px;
+  }
+}

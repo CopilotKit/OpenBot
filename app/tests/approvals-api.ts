@@ -209,6 +209,21 @@ export function approvalModeResponse(asksEveryStep: boolean): Response {
   return served(contract.GetApprovalModeResponse, { asksEveryStep });
 }
 
+/** Every approval the person was asked in one conversation, by its thread. */
+export const conversationApprovalsPath = (threadId: string) =>
+  `${ME}/conversations/${segment(threadId)}/approvals`;
+
+/** One conversation's approvals, as the API answers them: on one page, newest first. */
+export function conversationApprovalsResponse(
+  requests: readonly unknown[],
+): Response {
+  return page(
+    contract.ListConversationApprovalsResponse,
+    "approvals",
+    requests.map(approvalBody),
+  );
+}
+
 /** A write that answers nothing: a question dismissed, a rule or a conversation approval removed. */
 export function noContentResponse(): Response {
   return new NativeResponse(null, { status: 204 });

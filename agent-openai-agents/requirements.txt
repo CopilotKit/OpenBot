@@ -1,0 +1,7 @@
+ag-ui-openai-agents==0.2.0
+openai-agents==0.26.0
+openai==3.59.0
+fastapi
+# The Sign in with ChatGPT refresh and the plan's model list (src/chatgpt_credentials.py).
+httpx>=0.28.1,<0.29
+uvicorn[standard]

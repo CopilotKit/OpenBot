@@ -1,7 +1,8 @@
 /**
  * A small but real management service for tests: HTTPS with a test CA, a client certificate
- * required and checked, the contract's strict schemas on every body, and Ed25519-signed commands.
- * It answers exactly as the contract says the real one does, so the agent under test cannot tell.
+ * required and checked, the contract's strict schemas on every body, Ed25519-signed commands, and a
+ * signed desired state in every reply. It answers exactly as the contract says the real one does,
+ * so the agent under test cannot tell.
  */
 import { execFileSync } from "node:child_process";
 import { X509Certificate } from "node:crypto";
@@ -11,14 +12,19 @@ import { join } from "node:path";
 import {
   type Command,
   CommandResult,
+  DESIRED_STATE_KIND,
+  DESIRED_STATE_TTL_SECONDS,
   type DesiredState,
   HEARTBEAT_PATH,
   Heartbeat,
-  type HeartbeatReply,
+  HeartbeatReply,
   type MaintenanceWindow,
+  type SignedDesiredState,
   signCommand,
+  signDesiredState,
   toBase64,
   type UnsignedCommand,
+  type UnsignedDesiredState,
 } from "../../shared/management-contract";
 
 export interface TestPki {
@@ -156,6 +162,22 @@ export class FakeManagementService {
   desired: DesiredState | null = null;
   window: MaintenanceWindow = { weekday: 0, startUtc: "00:00", hours: 168 };
   paused = false;
+  /**
+   * The reply's unsigned `desired` field. Undefined: `desired`, as the service sends both while
+   * agents from before the signed desired state remain.
+   */
+  unsignedDesired: DesiredState | null | undefined = undefined;
+  /**
+   * Sent in place of the signed desired state this service would sign (a replayed, expired or
+   * foreign one, say); null sends none. Undefined: a new one is signed for every reply.
+   */
+  signedDesired: unknown = undefined;
+  /** Changes each reply just before it goes out, as anything between here and the agent could. */
+  tamper:
+    | ((reply: { [key: string]: unknown; commands: unknown[] }) => void)
+    | null = null;
+  /** The counter of the last desired state signed, which only goes up. */
+  counter = 0;
   private pending: Command[] = [];
   private server: ReturnType<typeof Bun.serve> | null = null;
   publicKey = "";
@@ -217,6 +239,32 @@ export class FakeManagementService {
     return signed;
   }
 
+  /** Signs this service's desired state for its install with the next counter; `overrides` changes
+   * what is signed. */
+  async signDesired(
+    overrides: Partial<UnsignedDesiredState> = {},
+  ): Promise<SignedDesiredState> {
+    if (!this.privateKey) throw new Error("start the service first");
+    const now = Date.now();
+    this.counter += 1;
+    return signDesiredState(
+      {
+        kind: DESIRED_STATE_KIND,
+        installId: this.installId,
+        counter: this.counter,
+        issuedAt: new Date(now - 1000).toISOString(),
+        expiresAt: new Date(
+          now + DESIRED_STATE_TTL_SECONDS * 1000,
+        ).toISOString(),
+        desired: this.desired,
+        window: this.window,
+        paused: this.paused,
+        ...overrides,
+      },
+      this.privateKey,
+    );
+  }
+
   /** Bun has verified the client certificate chains to the test CA before a request gets here. */
   private async handle(request: Request) {
     const url = new URL(request.url);
@@ -235,13 +283,26 @@ export class FakeManagementService {
         return new Response("refused", { status: 400 });
       }
       this.heartbeats.push(parsed.data);
+      const signed =
+        this.signedDesired === undefined
+          ? await this.signDesired()
+          : this.signedDesired;
+      // As the service sends it: what it signs, and the unsigned fields older agents read.
       const reply: HeartbeatReply = {
-        desired: this.desired,
+        desired:
+          this.unsignedDesired === undefined
+            ? this.desired
+            : this.unsignedDesired,
         window: this.window,
         paused: this.paused,
         commands: this.pending.splice(0),
       };
-      return Response.json(reply);
+      const sent: { [key: string]: unknown; commands: unknown[] } = {
+        ...HeartbeatReply.parse(reply),
+        commands: [...reply.commands, ...(signed === null ? [] : [signed])],
+      };
+      this.tamper?.(sent);
+      return Response.json(sent);
     }
     const result = url.pathname.match(/^\/v1\/commands\/([^/]+)\/result$/);
     if (request.method === "POST" && result) {

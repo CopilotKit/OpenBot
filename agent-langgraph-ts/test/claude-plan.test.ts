@@ -188,52 +188,72 @@ test("The claude-plan route asks the Claude engine's /model, with the deployment
   }
 });
 
+/** The call in the recorded `tool` fixture, as the run that streamed it hands it back. */
+function handedBack(list: { type: string; [key: string]: unknown }[]) {
+  const start = list.find((event) => event.type === "TOOL_CALL_START")!;
+  const args = list
+    .filter(
+      (event) =>
+        event.type === "TOOL_CALL_ARGS" &&
+        event.toolCallId === start.toolCallId,
+    )
+    .map((event) => String(event.delta))
+    .join("");
+  return {
+    id: String(start.toolCallId),
+    name: String(start.toolCallName),
+    args,
+  };
+}
+
 test("A step's tool call and the next step stay on one Claude query: the same thread, per Bot and thread", async () => {
   const claude = await claudeEngine((index) =>
     index === 0 ? fixture("tool") : fixture("text"),
   );
-  const callback = createServer((request, response) => {
-    request.resume();
-    request.on("end", () => {
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ text: "Sunny, 21 degrees." }));
-    });
-  });
-  await new Promise<void>((resolve) =>
-    callback.listen(0, "127.0.0.1", resolve),
-  );
-  const tools = `http://127.0.0.1:${(callback.address() as AddressInfo).port}/api/agent-tools/call`;
   try {
-    const result = await withEngine(
-      {
-        env: env(claude.url, {
-          AGENT_TOOL_TOKEN: "tool-token",
-          OPENBOT_TOOL_URL: tools,
+    const result = await withEngine({ env: env(claude.url) }, async (base) => {
+      const input = conversation({
+        tools: [WEATHER_TOOL],
+        forwardedProps: { openbotModelRoute: claudeRoute },
+      });
+      const first = await run(base, input);
+      // OpenBot answers the call it was handed and carries the turn on in the next run.
+      const call = handedBack(first.events);
+      const second = await run(base, {
+        ...input,
+        runId: "run-2",
+        messages: [
+          ...(input.messages as unknown[]),
+          {
+            id: "a-call",
+            role: "assistant",
+            content: "",
+            toolCalls: [
+              {
+                id: call.id,
+                type: "function",
+                function: { name: call.name, arguments: call.args },
+              },
+            ],
+          },
+          {
+            id: "t-call",
+            role: "tool",
+            toolCallId: call.id,
+            content: "Sunny, 21 degrees.",
+          },
+        ],
+      });
+      // Another conversation of the same Bot is another Claude query.
+      await run(
+        base,
+        conversation({
+          threadId: "thread-2",
+          forwardedProps: { openbotModelRoute: claudeRoute },
         }),
-      },
-      async (base) => {
-        const first = await run(
-          base,
-          conversation({
-            tools: [WEATHER_TOOL],
-            forwardedProps: {
-              openbotDeploymentTools: ["get_weather"],
-              openbotRun: "signed-run-statement",
-              openbotModelRoute: claudeRoute,
-            },
-          }),
-        );
-        // Another conversation of the same Bot is another Claude query.
-        await run(
-          base,
-          conversation({
-            threadId: "thread-2",
-            forwardedProps: { openbotModelRoute: claudeRoute },
-          }),
-        );
-        return first;
-      },
-    );
+      );
+      return second;
+    });
     assert.equal(
       result.events.at(-1)?.type,
       "RUN_FINISHED",
@@ -262,8 +282,6 @@ test("A step's tool call and the next step stay on one Claude query: the same th
     );
   } finally {
     await claude.close();
-    callback.closeAllConnections();
-    await new Promise<void>((resolve) => callback.close(() => resolve()));
   }
 });
 
@@ -438,81 +456,77 @@ test("A plan route with no address for that plan's engine says so in words", asy
 const LIVE_URL = process.env.OPENBOT_LIVE_CLAUDE_URL?.trim();
 const LIVE_TOKEN = process.env.OPENBOT_LIVE_CLAUDE_TOKEN?.trim();
 
-test("Live: a real Claude engine answers the claude-plan route through /model, a server tool between two steps", {
+test("Live: a real Claude engine answers the claude-plan route through /model, a tool handed back between two runs", {
   skip:
     !LIVE_URL || !LIVE_TOKEN ? "set OPENBOT_LIVE_CLAUDE_URL and _TOKEN" : false,
 }, async () => {
-  let called = 0;
-  const callback = createServer((request, response) => {
-    called += 1;
-    request.resume();
-    request.on("end", () => {
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(
-        JSON.stringify({ text: "Paris: sunny, 21 degrees Celsius." }),
-      );
+  const send = async (base: string, body: Record<string, unknown>) => {
+    const response = await fetch(`${base}/`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "text/event-stream",
+        "x-openbot-agent-token": LIVE_TOKEN!,
+      },
+      body: JSON.stringify(body),
     });
+    return events(await response.text());
+  };
+  const thread = [
+    {
+      id: "standing-role:live-bot",
+      role: "system",
+      content:
+        "You are a terse test Bot. Use get_weather for weather questions.",
+    },
+    {
+      id: "u1",
+      role: "user",
+      content: "What's the weather in Paris? Use the tool.",
+    },
+  ];
+  const input = conversation({
+    threadId: `live-${Date.now()}`,
+    messages: thread,
+    tools: [WEATHER_TOOL],
+    forwardedProps: { openbotModelRoute: claudeRoute },
   });
-  await new Promise<void>((resolve) =>
-    callback.listen(0, "127.0.0.1", resolve),
-  );
-  const tools = `http://127.0.0.1:${(callback.address() as AddressInfo).port}/api/agent-tools/call`;
-  try {
-    const result = await withEngine(
-      {
-        env: {
-          ...env(LIVE_URL!, {
-            AGENT_TOOL_TOKEN: "tool-token",
-            OPENBOT_TOOL_URL: tools,
-          }),
-          MANAGED_AGENT_TOKEN: LIVE_TOKEN!,
-        },
-      },
-      async (base) => {
-        const response = await fetch(`${base}/`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            accept: "text/event-stream",
-            "x-openbot-agent-token": LIVE_TOKEN!,
-          },
-          body: JSON.stringify(
-            conversation({
-              threadId: `live-${Date.now()}`,
-              messages: [
-                {
-                  id: "standing-role:live-bot",
-                  role: "system",
-                  content:
-                    "You are a terse test Bot. Use get_weather for weather questions.",
-                },
-                {
-                  id: "u1",
-                  role: "user",
-                  content: "What's the weather in Paris? Use the tool.",
-                },
-              ],
-              tools: [WEATHER_TOOL],
-              forwardedProps: {
-                openbotDeploymentTools: ["get_weather"],
-                openbotRun: "signed-run-statement",
-                openbotModelRoute: claudeRoute,
+  const [first, second] = await withEngine(
+    { env: { ...env(LIVE_URL!), MANAGED_AGENT_TOKEN: LIVE_TOKEN! } },
+    async (base) => {
+      const first = await send(base, input);
+      assert.equal(first.at(-1)?.type, "RUN_FINISHED", inspect(first.at(-1)));
+      const call = handedBack(first);
+      assert.equal(call.name, "get_weather");
+      const second = await send(base, {
+        ...input,
+        runId: "run-2",
+        messages: [
+          ...thread,
+          {
+            id: "a-call",
+            role: "assistant",
+            content: "",
+            toolCalls: [
+              {
+                id: call.id,
+                type: "function",
+                function: { name: call.name, arguments: call.args },
               },
-            }),
-          ),
-        });
-        return events(await response.text());
-      },
-    );
-    assert.equal(result.at(-1)?.type, "RUN_FINISHED", inspect(result.at(-1)));
-    assert.equal(
-      called,
-      1,
-      "the server tool ran once, between the two Claude steps",
-    );
-    assert.match(words(result), /21/);
-  } finally {
-    callback.closeAllConnections();
-    await new Promise<void>((resolve) => callback.close(() => resolve()));
-  }
+            ],
+          },
+          {
+            id: "t-call",
+            role: "tool",
+            toolCallId: call.id,
+            content: "Paris: sunny, 21 degrees Celsius.",
+          },
+        ],
+      });
+      return [first, second];
+    },
+  );
+  assert.ok(first.some((event) => event.type === "TOOL_CALL_END"));
+  assert.equal(second.at(-1)?.type, "RUN_FINISHED", inspect(second.at(-1)));
+  assert.match(words(second), /21/);
 });
