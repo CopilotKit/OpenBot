@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **A Bot that stops to ask before it uses a tool can be answered.** A Bot connected by its address
+  can pause its own run to ask, as a harness does before it runs one of its own tools. The
+  conversation now shows what the Bot wants to use and with what, with Allow and Don't allow; a wait
+  that is not a yes or no can be let go. Before, nothing showed and the conversation was stuck:
+  every later message was refused until the wait was answered.
+
+- **A single-user OpenBot in a container tells its browser about the deployment.** It refused the
+  page's first question about the deployment on every page, so the release check and attachment
+  limits were missing. The page now asks once more as the browser that was let in.
+
 - **Notifications in the browser, with OpenBot closed.** Settings, Notifications has a new switch,
   Notifications in this browser. Turned on, a Bot's replies, questions and approvals reach that
   browser as push notifications, as "Where updates go" routes push, and a click opens the

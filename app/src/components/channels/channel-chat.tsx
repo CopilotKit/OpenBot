@@ -15,6 +15,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
+import { BotApprovalNotice } from "@/components/approvals/bot-approval-notice";
 import { ConversationAllowances } from "@/components/approvals/conversation-allowances";
 import {
   answerMessage,
@@ -2667,6 +2668,22 @@ export function ChannelChat({
                 {channel.active ? (
                   <ConversationAllowances threadId={channel.threadId} />
                 ) : null}
+                {/* What the Bot stopped its own run to ask; the answer is the next run's `resume`. */}
+                <BotApprovalNotice
+                  agent={agent}
+                  botName={botName}
+                  ready={isReady && !restoring && channel.active}
+                  run={async (resume) => {
+                    setRunsInFlight((count) => count + 1);
+                    try {
+                      await whileObserved(agent, () =>
+                        copilotkit.runAgent({ agent, resume }),
+                      );
+                    } finally {
+                      setRunsInFlight((count) => count - 1);
+                    }
+                  }}
+                />
                 <HandoffResumeNotice
                   botId={runtimeAgentId}
                   agent={agent}
