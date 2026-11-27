@@ -30,7 +30,9 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
-function paneFor(options: { watching?: boolean; busy?: boolean } = {}) {
+function paneFor(
+  options: { watching?: boolean; busy?: boolean; covers?: boolean } = {},
+) {
   const opened: number[] = [];
   const closed: number[] = [];
   let watching = options.watching ?? false;
@@ -40,6 +42,7 @@ function paneFor(options: { watching?: boolean; busy?: boolean } = {}) {
         botId: "bot-1",
         watching: props.watching,
         busy: options.busy ?? false,
+        covers: options.covers ?? false,
         open: () => {
           opened.push(1);
           watching = true;
@@ -85,6 +88,14 @@ describe("a Bot reaching its computer", () => {
 
   test("does not take a pane the person opened for something else", () => {
     const pane = paneFor({ busy: true });
+
+    announce();
+
+    expect(pane.opened).toHaveLength(0);
+  });
+
+  test("does not open over a card in the conversation that waits on the person", () => {
+    const pane = paneFor({ covers: true });
 
     announce();
 
