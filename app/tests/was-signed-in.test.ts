@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { QueryClient } from "@tanstack/react-query";
+import { signOutMutationOptions } from "../src/lib/auth/mutations";
 import {
   forgetSignedIn,
   rememberSignedIn,
@@ -57,5 +59,22 @@ describe("whether somebody was signed in last time", () => {
       throw new Error("storage is blocked");
     });
     expect(wasSignedIn()).toBe(false);
+  });
+
+  test("sign-out forgets", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(
+      async () => Response.json({ success: true }),
+      { preconnect: realFetch.preconnect },
+    ) as typeof fetch;
+    try {
+      rememberSignedIn();
+      const { mutationFn } = signOutMutationOptions(new QueryClient());
+      // The sign-out takes no variables, so the call is made as the app makes it, with none.
+      await (mutationFn as () => Promise<unknown>)();
+      expect(wasSignedIn()).toBe(false);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });
