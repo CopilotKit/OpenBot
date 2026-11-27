@@ -4,6 +4,7 @@ import {
   DECLINED_BY_PERSON,
   declinedByPerson,
   doneByPerson,
+  NOT_RUN_UNANSWERED,
   outcomeForPerson,
 } from "@openbot/shared/approval-outcomes";
 import type { DecisionToolName } from "@openbot/shared/decision-tools";
@@ -623,6 +624,11 @@ export function readOutcome(content: unknown): ToolOutcome | null {
   if (doneByPerson(text)) return { ok: true, doneByPerson: true, reason: text };
   if (declinedByPerson(text))
     return { ok: false, refused: true, declined: true, reason: text };
+  /*
+   * A step that never ran because nothing took it before the Bot went on: nothing turned it away.
+   * Read as a refusal, a command a sleeping phone never ran was drawn "Blocked", in red.
+   */
+  if (text === NOT_RUN_UNANSWERED) return { ok: false, reason: text };
   return text.startsWith("Error:")
     ? { ok: false, reason: text.slice("Error:".length).trim() }
     : { ok: false, refused: true, reason: text };
