@@ -104,7 +104,8 @@ final class ShellController: NSObject, WebControllerDelegate {
                 done()
                 return
             }
-            steps[index] { run(index + 1) }
+            let step = steps[index]
+            step { run(index + 1) }
         }
         run(0)
     }

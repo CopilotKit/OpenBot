@@ -136,6 +136,7 @@ final class ProductionUITests: ShellTestCase {
 
     // j.
     func testProductionSignedIn() throws {
+        note("secret-inputs: \(secret("OPENBOT_SHELL_TEST_SESSION") == nil ? "absent" : "present")")
         guard let session = secret("OPENBOT_SHELL_TEST_SESSION") else {
             throw XCTSkip("OPENBOT_SHELL_TEST_SESSION is not set")
         }
@@ -149,18 +150,25 @@ final class ProductionUITests: ShellTestCase {
         }
         sleep(10)
         screenshot("1-home")
+        attachText("1-home-labels", webLabels(app, limit: 200).joined(separator: "\n"))
         note("home: \(debugState(app))")
         if app.buttons["sign-in-button"].exists {
-            note("production signed the session out (sign-in screen back)")
+            note("production signed the session out (sign-in screen back): the cookie was rejected")
+            return
+        }
+        if webText(app, "Sign in to OpenBot Cloud").exists {
+            note("production shows its sign-in page inside the tabs: the cookie was rejected")
             return
         }
         tab(app, .bots).tap()
         sleep(6)
         screenshot("2-bots")
+        attachText("2-bots-labels", webLabels(app, limit: 200).joined(separator: "\n"))
         note("bots: \(debugState(app))")
         tab(app, .conversations).tap()
         sleep(6)
         screenshot("3-conversations")
+        attachText("3-conversations-labels", webLabels(app, limit: 200).joined(separator: "\n"))
         note("conversations: \(debugState(app))")
         tab(app, .home).tap()
         sleep(5)
@@ -169,6 +177,7 @@ final class ProductionUITests: ShellTestCase {
             conversationLink.tap()
             sleep(6)
             screenshot("4-conversation")
+            attachText("4-conversation-labels", webLabels(app, limit: 200).joined(separator: "\n"))
             note("conversation: \(debugState(app))")
         } else {
             note("no link to a conversation found on Home")
@@ -181,6 +190,8 @@ final class ProductionUITests: ShellTestCase {
     /// prompt or any other challenge: nothing here tries to get past one. Screenshots are taken
     /// before a value is filled in and after the page is left, never while a value shows.
     func testProductionGoogleSignIn() throws {
+        let inputs = ["OPENBOT_SHELL_GOOGLE_EMAIL", "OPENBOT_SHELL_GOOGLE_PASSWORD", "OPENBOT_SHELL_GOOGLE_TOTP_SECRET"]
+        note("secret-inputs: \(inputs.allSatisfy { secret($0) != nil } ? "present" : "absent")")
         guard let email = secret("OPENBOT_SHELL_GOOGLE_EMAIL"),
               let password = secret("OPENBOT_SHELL_GOOGLE_PASSWORD"),
               let totpText = secret("OPENBOT_SHELL_GOOGLE_TOTP_SECRET") else {

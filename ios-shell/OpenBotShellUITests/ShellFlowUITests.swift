@@ -130,6 +130,7 @@ final class ShellFlowUITests: ShellTestCase {
         let commitsAtStart = stateValue(app, "commits") ?? "?"
         screenshot("1-home")
         assertNoWebNavigation(app, "home")
+        XCTAssertTrue(accountButton(app).waitForExistence(timeout: 10), "no Account button on Home")
 
         tab(app, .conversations).tap()
         for title in ["Competitor pricing notes", "Quarterly forecast", "Trip to Lisbon"] {
@@ -140,6 +141,7 @@ final class ShellFlowUITests: ShellTestCase {
         sleep(1)
         screenshot("2-conversations")
         assertNoWebNavigation(app, "conversations")
+        XCTAssertTrue(accountButton(app).exists, "no Account button on Conversations")
 
         webText(app, "Quarterly forecast").tap()
         let transcript = firstExisting([
@@ -160,6 +162,7 @@ final class ShellFlowUITests: ShellTestCase {
         sleep(1)
         screenshot("4-bots")
         assertNoWebNavigation(app, "bots")
+        XCTAssertTrue(accountButton(app).exists, "no Account button on Bots")
 
         tab(app, .home).tap()
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 20), "Home did not come back")
@@ -205,6 +208,47 @@ final class ShellFlowUITests: ShellTestCase {
         sleep(3)
         XCTAssertFalse(tab(app, .home).exists, "the next launch still thought it was signed in")
         screenshot("next-launch")
+    }
+
+    // d, from the page: Account, then Sign out.
+    func testSignOutFromAccountMenu() throws {
+        var app = launchSignedIn(moment: "sign-in")
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        let account = accountButton(app)
+        XCTAssertTrue(account.waitForExistence(timeout: 10), "no Account button on Home")
+        account.tap()
+        let signOut = firstExisting([
+            app.webViews.menuItems["Sign out"], app.webViews.buttons["Sign out"],
+            app.webViews.links["Sign out"], webText(app, "Sign out"),
+        ], timeout: 10)
+        sleep(1)
+        screenshot("1-account-menu")
+        attachText("1-account-menu-labels", webLabels(app).joined(separator: "\n"))
+        guard let signOut = signOut else {
+            XCTFail("the Account menu has no Sign out")
+            return
+        }
+        signOut.tap()
+        XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 20),
+                      "Sign out did not bring back the native sign-in; state \(debugState(app))")
+        XCTAssertTrue(tab(app, .home).waitForNonExistence(timeout: 5), "the tab bar stayed after Sign out")
+        sleep(1)
+        screenshot("2-after-sign-out")
+        sleep(3)
+        app.terminate()
+
+        // The cookie is gone: a relaunch starts on the sign-in screen and stays there.
+        app = launch(base: ShellTestCase.mockA, moment: "relaunch", reset: false, auto: true)
+        XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 10))
+        sleep(3)
+        XCTAssertFalse(tab(app, .home).exists, "the relaunch after Sign out went to the tabs")
+
+        // And back in through the sheet.
+        app.buttons["sign-in-button"].tap()
+        XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 45), "signing in again did not reach the tabs")
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        sleep(1)
+        screenshot("3-signed-in-again")
     }
 
     // e.
@@ -311,6 +355,10 @@ final class ShellFlowUITests: ShellTestCase {
     }
 
     // MARK: - Helpers
+
+    private func accountButton(_ app: XCUIApplication) -> XCUIElement {
+        app.webViews.buttons["Account"]
+    }
 
     private func checkTabBar(_ app: XCUIApplication) {
         let conversations = tab(app, .conversations)
