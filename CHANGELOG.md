@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **The app opens and changes page faster, and holds still.** The checks before every page are
+  asked together and the page's code downloads while they run, so Home is ready about a third
+  sooner on a real network; somebody signed in last time sees the app's frame at once instead of a
+  blank page. Resting the pointer on a link loads its page, so the click shows it finished, and a
+  page change keeps the old page up for a moment instead of cutting to a skeleton, with a short
+  fade (none when less motion is asked for). Home's heading and box no longer move as the page
+  fills in, and Home scrolls to every Explore card. A conversation shows its history at once while
+  it reconnects, instead of after, and reads it once instead of up to four times. "Back in a moment"
+  tries again at most once a second and stays up until the app is ready. No API or database change.
 - **Routines is one box.** Routines in the main menu opens on a box: say what a Bot should do and
   when ("Every weekday at 9, send me yesterday's new leads"), naming the Bot with @, or leaving
   OpenBot to pick it as Home does, and the Bot makes the routine, a goal on a schedule when you give
