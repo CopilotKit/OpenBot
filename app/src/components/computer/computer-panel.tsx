@@ -91,7 +91,7 @@ function WindowsComputerPanel({ botId }: { botId: string }) {
           There's no Windows computer set up for this Bot.
         </PageEmpty>
       ) : (
-        <WindowsComputerView computer={computer.data} />
+        <WindowsComputerView compact computer={computer.data} />
       )}
     </section>
   );

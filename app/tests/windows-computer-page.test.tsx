@@ -10,6 +10,7 @@ import {
   programsFrom,
   unavailableWords,
   WindowsComputerPage,
+  WindowsComputerView,
 } from "@/components/windows-computer/windows-computer-page";
 import {
   getGetWindowsComputerResponseMock,
@@ -17,6 +18,7 @@ import {
   getTakeWindowsComputerControlMockHandler,
   getWindowsComputerMock,
 } from "@/lib/api/generated/windows-computer/windows-computer.msw";
+import type { WindowsComputer } from "@/lib/windows-computer/queries";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
@@ -384,5 +386,77 @@ test("a code that can't be made says so", async () => {
   fireEvent.click(await view.findByRole("button", { name: "Make a code" }));
   expect((await view.findByRole("alert")).textContent).toContain(
     "Too many codes",
+  );
+});
+
+/** The conversation panel's view of the Windows computer (computer-panel.tsx), held by `holder`. */
+function drawPanel(holder: "bot" | "human") {
+  const computer = {
+    ...getGetWindowsComputerResponseMock(),
+    available: true,
+    connected: true,
+    enrolled: true,
+    unavailableReason: undefined,
+    control: {
+      holder,
+      since: "2026-11-20T09:13:41.000Z",
+      snapshotRequired: holder === "human",
+    },
+  } as WindowsComputer;
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <WindowsComputerView compact computer={computer} />
+    </QueryClientProvider>,
+  );
+}
+
+/** The screen sockets still open: a closed one is a viewer that let go. */
+const openSockets = () =>
+  sockets.filter((entry) => entry.socket.readyState !== FakeSocket.CLOSED);
+
+test("in the conversation panel the screen is a tile that opens full size, and only one of the two watches it at a time", async () => {
+  const view = drawPanel("bot");
+  const tile = await view.findByRole("button", {
+    name: "Open your Windows computer's screen full size",
+  });
+  await waitFor(() => expect(openSockets()).toHaveLength(1));
+
+  fireEvent.click(tile);
+  const full = await view.findByRole("dialog", {
+    name: "Your Windows computer's screen",
+  });
+  expect(full).toBeTruthy();
+  expect(view.getByText("Showing full size.")).toBeTruthy();
+  await waitFor(() => expect(sockets).toHaveLength(2));
+  // The tile let go: the Windows computer shows its screen to one viewer, and a newer one replaces the older.
+  await waitFor(() => expect(openSockets()).toHaveLength(1));
+  expect(full.querySelector("canvas")).toBeTruthy();
+
+  fireEvent.click(
+    view.getByRole("button", { name: "Close your Windows computer's screen" }),
+  );
+  await waitFor(() =>
+    expect(
+      view.queryByRole("dialog", { name: "Your Windows computer's screen" }),
+    ).toBeNull(),
+  );
+  expect(
+    await view.findByRole("button", {
+      name: "Open your Windows computer's screen full size",
+    }),
+  ).toBeTruthy();
+  await waitFor(() => expect(openSockets()).toHaveLength(1));
+});
+
+test("Take over in the conversation panel takes it and opens the screen full size to work in", async () => {
+  const view = drawPanel("bot");
+  fireEvent.click(await view.findByRole("button", { name: "Take over" }));
+  expect(
+    await view.findByRole("dialog", { name: "Your Windows computer's screen" }),
+  ).toBeTruthy();
+  await waitFor(() =>
+    expect(requests).toContain(
+      "POST /api/v2/organizations/default/windows-computer/control/take",
+    ),
   );
 });

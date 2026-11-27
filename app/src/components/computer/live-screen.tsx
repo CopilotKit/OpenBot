@@ -140,6 +140,12 @@ type Props = {
    * A Bot's computer's control unless given: the Windows computer's page asks its own.
    */
   ownership?: () => Promise<boolean>;
+  /**
+   * How the picture is sized: across its container's width (the default), or as large as its container allows both
+   * ways at the screen's own shape (`contain`), for a container with a height of its own, such as a full-size view.
+   * Input is mapped through the picture's box, so either is driven the same way.
+   */
+  fit?: "width" | "contain";
   ref?: Ref<LiveScreenHandle>;
 };
 
@@ -159,6 +165,7 @@ export function LiveScreen({
   retryKey = 0,
   label = "The Bot's screen. You have control. Click and type here.",
   autoFocus = false,
+  fit = "width",
   ref,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -848,7 +855,7 @@ export function LiveScreen({
     <>
       <canvas
         ref={canvasRef}
-        className={`block h-auto w-full ${driving ? "cursor-default focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" : ""}`}
+        className={`block ${fit === "contain" ? "mx-auto h-auto max-h-full w-auto max-w-full" : "h-auto w-full"} ${driving ? "cursor-default focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" : ""}`}
         // Only forward input during takeover. Then the screen is a stop in the Tab order and takes every key while it has
         // the focus, which is what a screen reader is told by `application`.
         {...(driving
