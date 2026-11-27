@@ -1,0 +1,17 @@
+name: Documentation
+description: Something in the README or docs is wrong, unclear or missing.
+title: "📚 Documentation: "
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page
+      description: A link to the page or the file path, for example `docs/deployment.md`.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing
+      description: Quote the passage if it is wrong, and say what it should say if you know.
+    validations:
+      required: true
