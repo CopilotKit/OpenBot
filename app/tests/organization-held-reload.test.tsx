@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import {
   asked,
   cutOff,
@@ -12,6 +12,7 @@ import {
   stop,
   UNAVAILABLE,
 } from "./organization-notices-browser";
+import { test } from "./renderer-crash";
 
 /**
  * Loading the page while OpenBot holds an organization off says OpenBot's own sentence on a calm

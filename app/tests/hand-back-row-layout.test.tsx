@@ -1,10 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * The row with Hand back, in a Bot's full-size screen taken over from a phone.

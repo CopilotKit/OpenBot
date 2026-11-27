@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Locator, Page } from "playwright-core";
@@ -14,6 +14,7 @@ import {
   SARITA,
   SUPPORT_NORDICS,
 } from "./people-lists-api";
+import { test } from "./renderer-crash";
 
 /**
  * Every list of people pages and searches the way Admin's People does, and a person is only ever
