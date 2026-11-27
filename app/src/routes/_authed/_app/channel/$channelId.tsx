@@ -28,6 +28,7 @@ import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { useNoBotComputers } from "@/lib/deployment/queries";
 import { useConnectionLost } from "@/lib/desktop/connection-lost";
 import { loadFailure } from "@/lib/load-failure";
+import { loadFirstScreen } from "@/lib/route-data";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 
@@ -52,6 +53,12 @@ const SCREEN_PANEL_WIDTH = 360;
 
 export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
   validateSearch: chatSearchSchema,
+  // Only the conversation itself, never its history, so a sidebar hover can't pull a thread's history. A gone
+  // conversation's error reaches the page's own notice, not the router's error screen.
+  loader: ({ context, params }) =>
+    loadFirstScreen(context.queryClient, [
+      channelQueryOptions(params.channelId),
+    ]),
   component: RouteComponent,
 });
 
