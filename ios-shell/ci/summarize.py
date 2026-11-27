@@ -13,6 +13,15 @@ import subprocess
 import sys
 
 artifacts, xcresult, log_path = sys.argv[1:4]
+# Tests that use a real account: their diagnostics never reach the summary (collect_shots.py moves
+# them out of the general artifact).
+PRIVATE_TESTS = ("testProductionSignedIn", "testProductionGoogleSignIn")
+
+
+def private_entry(entry):
+    test = str(entry.get("test", ""))
+    return any(test == name or test.startswith(name + "-") for name in PRIVATE_TESTS)
+
 attachments = os.path.join(artifacts, "attachments")
 lines = []
 
@@ -95,19 +104,39 @@ if persist:
     lines.append(f"- persistence after relaunch: {persist[-1]}")
 lines.append("")
 
+# 4b. Notes the UI tests print.
+notes = re.findall(r"SHELL_NOTE (.*)", log)
+if notes:
+    lines.append("## Notes from the tests\n")
+    for note in dict.fromkeys(notes):
+        lines.append(f"- {note[:500]}")
+    lines.append("")
+
 # 5. Diagnostics overview.
 diag_path = os.path.join(artifacts, "diagnostics.jsonl")
 lines.append("## Diagnostics\n")
 if os.path.exists(diag_path):
     kinds = collections.Counter()
     notable = []
+    probes = []
+    production_trails = {}
     with open(diag_path, errors="replace") as f:
         for raw_line in f:
             try:
                 entry = json.loads(raw_line)
             except ValueError:
                 continue
+            if private_entry(entry):
+                continue
             kinds[entry.get("kind", "?")] += 1
+            test = str(entry.get("test", ""))
+            if entry.get("kind") == "handoff-probe":
+                probes.append(f"{test}: status {entry.get('status')} supported {entry.get('supported')}")
+            if test.startswith("testProduction") and entry.get("kind") == "navigation-action" and entry.get("mainFrame"):
+                url = str(entry.get("url", ""))
+                trail = production_trails.setdefault(test, [])
+                if not trail or trail[-1] != url:
+                    trail.append(url)
             if entry.get("kind") in ("page-fetch-failed", "page-xhr-failed", "page-csp-violation",
                                      "page-console", "page-onerror", "page-unhandledrejection",
                                      "navigation-error", "page-resource-error"):
@@ -118,6 +147,12 @@ if os.path.exists(diag_path):
         lines.append("```")
         lines.extend(notable[:40])
         lines.append("```")
+    if probes:
+        lines.append("- hand-off probes:")
+        lines.extend(f"  - {probe}" for probe in probes)
+    for test, trail in production_trails.items():
+        lines.append(f"- main-frame navigations in {test}:")
+        lines.extend(f"  - {url}" for url in trail[:40])
 else:
     lines.append("- diagnostics.jsonl was not found in the app container")
 

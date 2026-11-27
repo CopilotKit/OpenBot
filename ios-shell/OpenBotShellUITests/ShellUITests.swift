@@ -1,43 +1,9 @@
 import XCTest
 
-/// Runs the shell against the local probe site (ios-shell/Probe/serve.py must be running on the
-/// Mac that runs the simulator) and against the hosted web app.
-final class ShellUITests: XCTestCase {
-    private let probeBase = "http://127.0.0.1:8765/"
-
-    override func setUp() {
-        super.setUp()
-        continueAfterFailure = true
-        XCUIDevice.shared.appearance = .light
-    }
-
-    // MARK: - Helpers
-
-    private func launch(baseURL: String?, test: String) -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchEnvironment["OPENBOT_SHELL_DIAGNOSTICS"] = "1"
-        app.launchEnvironment["OPENBOT_SHELL_TEST_NAME"] = test
-        if let baseURL = baseURL {
-            app.launchEnvironment["OPENBOT_BASE_URL"] = baseURL
-        }
-        app.launch()
-        return app
-    }
-
-    private func screenshot(_ name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
-
-    private func attachText(_ name: String, _ text: String) {
-        let attachment = XCTAttachment(string: text)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
-
+/// Step 1's tests: the bare web view against the local probe site and the hosted web app. They run
+/// the app in its DEBUG plain mode (OPENBOT_SHELL_PLAIN_WEBVIEW=1: one full-screen web view, no
+/// native sign-in screen and no tab bar), so the probe still measures the web view alone.
+final class ShellUITests: ShellTestCase {
     private func text(beginningWith prefix: String, in element: XCUIElement) -> XCUIElement {
         element.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
     }
@@ -54,10 +20,8 @@ final class ShellUITests: XCTestCase {
         return Int(text[numberRange])
     }
 
-    // MARK: - Tests
-
     func testProbeSite() throws {
-        let app = launch(baseURL: probeBase, test: "testProbeSite")
+        let app = launch(base: ShellTestCase.probe, moment: "probe", plain: true)
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 30), "the web view never appeared")
 
@@ -87,7 +51,7 @@ final class ShellUITests: XCTestCase {
     }
 
     func testLoadsHostedWebApp() throws {
-        let app = launch(baseURL: nil, test: "testLoadsHostedWebApp")
+        let app = launch(base: nil, moment: "hosted", plain: true)
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 60), "the web view never appeared")
 
@@ -113,13 +77,10 @@ final class ShellUITests: XCTestCase {
         // Let redirects, hydration and late requests settle.
         sleep(8)
         screenshot("hosted-light")
-        let lightDump = web.debugDescription
-        attachText("hosted-webview-debugDescription-light", lightDump)
-        print("HOSTED_DEBUG_BEGIN\n\(lightDump)\nHOSTED_DEBUG_END")
+        attachText("hosted-webview-debugDescription-light", web.debugDescription)
         XCUIDevice.shared.appearance = .dark
         sleep(3)
         screenshot("hosted-dark")
-        attachText("hosted-webview-debugDescription-dark", web.debugDescription)
         XCUIDevice.shared.appearance = .light
 
         if retry.exists {
@@ -129,12 +90,11 @@ final class ShellUITests: XCTestCase {
     }
 
     func testOfflineShowsRetry() throws {
-        // Nothing listens on 8799. Port 9 (the first choice) is on WebKit's list of restricted
-        // ports, and WKWebView did not report anything at all for it, so it cannot test the overlay.
-        let app = launch(baseURL: "http://127.0.0.1:8799/", test: "testOfflineShowsRetry")
+        // Nothing listens on 8799 (connection refused: WebKit reports it at once).
+        let app = launch(base: "http://127.0.0.1:8799/", moment: "refused", plain: true)
         let retry = app.buttons["retry-button"]
         let shown = retry.waitForExistence(timeout: 30)
-        screenshot("offline-error-overlay")
+        screenshot("load-error-overlay")
         XCTAssertTrue(shown, "the native error overlay with retry-button did not appear")
         if shown {
             retry.tap()
@@ -143,8 +103,19 @@ final class ShellUITests: XCTestCase {
         }
     }
 
+    func testWatchdogCatchesSilentLoad() throws {
+        // Port 9 is on WebKit's list of restricted ports, and WKWebView reports nothing at all for
+        // it (step 1 found this): only the 20 s watchdog can show the overlay.
+        let app = launch(base: "http://127.0.0.1:9/", moment: "silent", plain: true)
+        let retry = app.buttons["retry-button"]
+        let shown = retry.waitForExistence(timeout: 40)
+        screenshot("watchdog-overlay")
+        XCTAssertTrue(shown, "the load watchdog did not show the overlay within 40 s")
+    }
+
     func testSessionSurvivesRelaunch() throws {
-        var app = launch(baseURL: probeBase + "persist.html?reset=1", test: "testSessionSurvivesRelaunch-first")
+        var app = launch(base: ShellTestCase.probe, moment: "first", plain: true,
+                         extra: ["OPENBOT_BASE_URL": ShellTestCase.probe + "persist.html?reset=1"])
         var web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 30))
         let firstVisit = text(beginningWith: "returning visitor:", in: web)
@@ -152,21 +123,20 @@ final class ShellUITests: XCTestCase {
         XCTAssertTrue(text(beginningWith: "state saved", in: web).waitForExistence(timeout: 15),
                       "persist.html never saved its cookie and localStorage value")
         screenshot("persist-first-launch")
-        attachText("persist-first-launch-texts", labels(of: web).joined(separator: "\n"))
         XCTAssertEqual(firstVisit.label, "returning visitor: no", "the reset visit should be a first visit")
 
         // Give WebKit time to write cookies and localStorage to disk before the process is killed.
         sleep(5)
         app.terminate()
 
-        app = launch(baseURL: probeBase + "persist.html", test: "testSessionSurvivesRelaunch-second")
+        app = launch(base: ShellTestCase.probe, moment: "second", reset: false, plain: true,
+                     extra: ["OPENBOT_BASE_URL": ShellTestCase.probe + "persist.html"])
         web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 30))
         let secondVisit = text(beginningWith: "returning visitor:", in: web)
         XCTAssertTrue(secondVisit.waitForExistence(timeout: 30), "persist.html never answered after relaunch")
         screenshot("persist-after-relaunch")
         let texts = labels(of: web)
-        attachText("persist-after-relaunch-texts", texts.joined(separator: "\n"))
         print("PERSIST_RESULT \(texts.joined(separator: " | "))")
         XCTAssertEqual(secondVisit.label, "returning visitor: yes",
                        "cookie or localStorage did not survive relaunch: \(texts)")

@@ -2,7 +2,7 @@ import Foundation
 import os
 import WebKit
 
-/// Records what happens inside the web view, as JSON lines in Documents/diagnostics.jsonl and in
+/// Records what the shell and the web view do, as JSON lines in Documents/diagnostics.jsonl and in
 /// the log with the prefix "OPENBOT_DIAG ". Compiled in always, on only when the launch
 /// environment has OPENBOT_SHELL_DIAGNOSTICS=1. Never records cookie values, tokens, query string
 /// values or request and response bodies.
@@ -10,12 +10,16 @@ final class Diagnostics: NSObject, WKScriptMessageHandler {
     static let handlerName = "openbotShellDiagnostics"
 
     let enabled: Bool
+    /// OPENBOT_SHELL_TEST_NAME, put on every line so CI can tell tests apart (and keep the lines of
+    /// tests that use a real account out of public logs).
+    private let testName: String
     private let fileURL: URL?
     private let logger = Logger(subsystem: "ai.openbot.shell", category: "diagnostics")
     private let formatter = ISO8601DateFormatter()
 
-    init(enabled: Bool) {
+    init(enabled: Bool, testName: String = "") {
         self.enabled = enabled
+        self.testName = testName
         if enabled,
            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             fileURL = documents.appendingPathComponent("diagnostics.jsonl")
@@ -30,6 +34,7 @@ final class Diagnostics: NSObject, WKScriptMessageHandler {
         guard enabled else { return }
         var entry = fields
         entry["kind"] = kind
+        if !testName.isEmpty { entry["test"] = testName }
         entry["ts"] = formatter.string(from: Date())
         var data: Data
         if JSONSerialization.isValidJSONObject(entry),

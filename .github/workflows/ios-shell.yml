@@ -1,9 +1,16 @@
 name: iOS shell
 
-# Builds the experimental iOS web view shell in ios-shell/ for the simulator and runs its UI tests:
-# against the local probe site (ios-shell/Probe) and against the hosted web app at my.open.bot.
-# Uploads screenshots, the app's diagnostics log and a SUMMARY.md. Simulator only: no signing,
-# no secrets.
+# Builds the experimental iOS shell in ios-shell/ for the simulator and runs its UI tests: against
+# the local probe site (ios-shell/Probe), against two mock stacks of the real built web app
+# (app/workbench/mock-server.ts), and against the hosted web app at my.open.bot.
+#
+# Artifacts: ios-shell-<run id> (everything that is not a real account's), ios-shell-shots-<run id>
+# (downscaled screenshots, SUMMARY.md, diagnostics.jsonl) and, only when a test used a real account,
+# ios-shell-private-<run id>. Simulator only: no signing.
+#
+# Optional repository secrets for the tests against a real account (skipped when empty):
+# OPENBOT_SHELL_TEST_SESSION, OPENBOT_SHELL_GOOGLE_EMAIL, OPENBOT_SHELL_GOOGLE_PASSWORD,
+# OPENBOT_SHELL_GOOGLE_TOTP_SECRET.
 on:
   push:
     branches:
@@ -12,6 +19,8 @@ on:
     paths:
       - ios-shell/**
       - .github/workflows/ios-shell.yml
+      - app/src/lib/native-shell/**
+      - app/workbench/mock-server.ts
   workflow_dispatch:
 
 permissions: {}
@@ -25,7 +34,7 @@ jobs:
     name: Build and test on the iOS simulator
     if: github.repository == 'CopilotKit/OpenBot'
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:
@@ -42,12 +51,40 @@ jobs:
           mkdir -p artifacts
           echo "XCODE_VERSION=$(xcodebuild -version | tr '\n' ' ')" >> "$GITHUB_ENV"
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
 
-      - name: Generate the Xcode project
-        working-directory: ios-shell
-        run: xcodegen generate
+      - name: Install dependencies and build the web app
+        timeout-minutes: 15
+        run: |
+          bun install --frozen-lockfile
+          cp .env.example .env
+          cd app && bun run build
+
+      - name: Start the mock stacks
+        run: |
+          # A: signed out unless the mock's cookie is sent, with the sign-in hand-off.
+          MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > artifacts/mock-a.log 2>&1 &
+          APP_PORT=3010 SERVER_PORT=3001 nohup bun app/serve.ts > artifacts/app-a.log 2>&1 &
+          # B: the same without the hand-off.
+          MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 nohup bun app/workbench/mock-server.ts > artifacts/mock-b.log 2>&1 &
+          APP_PORT=3011 SERVER_PORT=3002 nohup bun app/serve.ts > artifacts/app-b.log 2>&1 &
+          challenge="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          for _ in $(seq 1 60); do
+            a_page="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/ || true)"
+            b_page="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3011/ || true)"
+            a_handoff="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3010/api/auth/shell/handoff?challenge=$challenge" || true)"
+            b_handoff="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3011/api/auth/shell/handoff?challenge=$challenge" || true)"
+            if [ "$a_page" = 200 ] && [ "$b_page" = 200 ] && [ "$a_handoff" = 200 ] && [ "$b_handoff" = 404 ]; then
+              echo "mock stacks are up (A hand-off $a_handoff, B hand-off $b_handoff)"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "mock stacks did not start: A $a_page/$a_handoff, B $b_page/$b_handoff"
+          tail -n 40 artifacts/mock-a.log artifacts/app-a.log artifacts/mock-b.log artifacts/app-b.log
+          exit 1
 
       - name: Start the probe server
         run: |
@@ -62,6 +99,13 @@ jobs:
           echo "probe server did not start"
           cat artifacts/probe-server.log
           exit 1
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        working-directory: ios-shell
+        run: xcodegen generate
 
       - name: Pick and boot a simulator
         run: |
@@ -78,14 +122,34 @@ jobs:
           xcrun simctl boot "$udid" || true
           xcrun simctl bootstatus "$udid" -b
 
-      - name: Build and run the UI tests
-        timeout-minutes: 40
+      - name: Build for testing
+        timeout-minutes: 20
         run: |
           set -o pipefail
-          xcodebuild test \
+          xcodebuild build-for-testing \
             -project ios-shell/OpenBotShell.xcodeproj \
             -scheme OpenBotShell \
             -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee xcodebuild-build.log | grep -E "error:|warning: .*(OpenBotShell|ios-shell)|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
+
+      - name: Run the UI tests
+        timeout-minutes: 50
+        env:
+          # xcodebuild hands TEST_RUNNER_* to the test runner without the prefix. Empty: those tests skip.
+          TEST_RUNNER_OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
+          TEST_RUNNER_OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
+          TEST_RUNNER_OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
+          TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project ios-shell/OpenBotShell.xcodeproj \
+            -scheme OpenBotShell \
+            -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
             -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -109,23 +173,37 @@ jobs:
             container="$(xcrun simctl get_app_container "$SIM_UDID" ai.openbot.shell data 2>/dev/null || true)"
             if [ -n "$container" ] && [ -f "$container/Documents/diagnostics.jsonl" ]; then
               cp "$container/Documents/diagnostics.jsonl" artifacts/diagnostics.jsonl
-              echo "::group::diagnostics.jsonl"
-              cat artifacts/diagnostics.jsonl
-              echo "::endgroup::"
             else
               echo "no diagnostics.jsonl in the app container ($container)"
             fi
-            xcrun simctl spawn "$SIM_UDID" log show --last 15m --style compact \
+            xcrun simctl spawn "$SIM_UDID" log show --last 90m --style compact \
               --predicate 'process == "OpenBotShell"' > artifacts/simulator-app.log 2>&1 || true
           fi
 
-      - name: Write the summary
+      - name: Write the summary and collect the screenshots
         if: always()
         run: |
           python3 ios-shell/ci/summarize.py artifacts TestResults.xcresult xcodebuild.log || true
+          python3 ios-shell/ci/collect_shots.py artifacts || true
           if [ -f artifacts/SUMMARY.md ]; then
             cat artifacts/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [ -f artifacts/diagnostics.jsonl ]; then
+            echo "::group::diagnostics.jsonl (tests with a real account left out)"
+            cat artifacts/diagnostics.jsonl
+            echo "::endgroup::"
+          fi
+          if [ -d private-artifacts ] && [ -n "$(ls -A private-artifacts/shots 2>/dev/null)" ]; then
+            echo "HAS_PRIVATE=1" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ios-shell-shots-${{ github.run_id }}
+          path: artifacts/shots/
+          retention-days: 14
+          if-no-files-found: warn
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -133,6 +211,16 @@ jobs:
           name: ios-shell-${{ github.run_id }}
           path: |
             artifacts/
+            !artifacts/shots/
             xcodebuild.log
+            xcodebuild-build.log
           retention-days: 14
           if-no-files-found: warn
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && env.HAS_PRIVATE == '1'
+        with:
+          name: ios-shell-private-${{ github.run_id }}
+          path: private-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore
