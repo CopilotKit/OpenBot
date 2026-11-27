@@ -34,9 +34,11 @@ export const Route = createFileRoute("/_authed/admin/")({
    * it does in the components.
    */
   loader: async ({ context }) => {
-    const user = await context.queryClient.ensureQueryData(
-      currentUserQueryOptions(),
-    );
+    // A router built without the app's context, as some tests build, has nothing to warm.
+    if (!context.queryClient) return;
+    const user = await context.queryClient
+      .ensureQueryData(currentUserQueryOptions())
+      .catch(() => undefined);
     const capabilities = await context.queryClient
       .ensureQueryData(deploymentCapabilitiesQueryOptions())
       .catch(() => undefined);

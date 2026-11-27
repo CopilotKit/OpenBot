@@ -113,3 +113,9 @@ test("takes an infinite query", async () => {
     pageParams: [""],
   });
 });
+
+test("never rejects, even without a query client", async () => {
+  await loadFirstScreen(undefined as never, [
+    { queryKey: ["a"], queryFn: async () => "one" },
+  ]);
+});

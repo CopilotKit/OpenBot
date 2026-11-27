@@ -35,6 +35,8 @@ export const Route = createFileRoute("/_authed/settings/")({
    * capabilities, so they are read here, and a failed read counts as unknown, as in the section.
    */
   loader: async ({ context }) => {
+    // A router built without the app's context, as some tests build, has nothing to warm.
+    if (!context.queryClient) return;
     const capabilities = await context.queryClient
       .ensureQueryData(deploymentCapabilitiesQueryOptions())
       .catch(() => undefined);

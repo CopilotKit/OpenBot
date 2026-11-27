@@ -39,7 +39,7 @@ export async function loadFirstScreen(
   queries: ReadonlyArray<AnyFirstScreenQuery>,
   withinMs = FIRST_SCREEN_WAIT_MS,
 ): Promise<void> {
-  const all = queries.map((options) =>
+  const all = queries.map(async (options) =>
     isInfinite(options)
       ? queryClient.ensureInfiniteQueryData(options)
       : queryClient.ensureQueryData(options),
