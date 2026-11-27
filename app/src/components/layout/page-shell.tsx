@@ -2,6 +2,7 @@ import { IconChevronLeft } from "@tabler/icons-react";
 import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { createContext, useContext } from "react";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { PageColumn, PageHeader, type ShellWidth } from "./page-parts";
@@ -109,7 +110,12 @@ export function PageShell({
        */
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {barRow}
-        <div className={cn("shrink-0 px-4", bar ? "pt-8" : "pt-12")}>
+        <div
+          className={cn(
+            "shrink-0 px-4",
+            nativeShell() ? (bar ? "pt-4" : "pt-6") : bar ? "pt-8" : "pt-12",
+          )}
+        >
           {header}
         </div>
         <div className={cn("mt-6 flex min-h-0 flex-1 flex-col", className)}>
