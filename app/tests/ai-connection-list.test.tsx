@@ -664,6 +664,7 @@ test("every provider connected hides Connect another AI", async () => {
       "xai",
       "unbiased",
       "trustedrouter",
+      "ttoken",
       "openai-compatible",
     ] as const
   ).map((provider, index) =>

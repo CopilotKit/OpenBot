@@ -219,9 +219,10 @@ pub fn intent_for(provider: &str, login: &str) -> Option<ModelIntent> {
         ("openai", "plan") => ModelIntent::ChatGptPlan,
         ("google", "oauth") => ModelIntent::GoogleOauth,
         ("xai", "oauth") => ModelIntent::XaiOauth,
-        ("google" | "xai" | "unbiased" | "trustedrouter" | "openai-compatible", "endpoint") => {
-            ModelIntent::CompatibleEndpoint
-        }
+        (
+            "google" | "xai" | "unbiased" | "trustedrouter" | "ttoken" | "openai-compatible",
+            "endpoint",
+        ) => ModelIntent::CompatibleEndpoint,
         _ => return None,
     })
 }
@@ -254,6 +255,7 @@ fn endpoint_provider(base_url: &str) -> &'static str {
         Some("api.x.ai") => "xai",
         Some("api.unbiased.ai") => "unbiased",
         Some("api.trustedrouter.com") => "trustedrouter",
+        Some("api.ttoken.dev") => "ttoken",
         _ => "openai-compatible",
     }
 }
@@ -638,8 +640,9 @@ pub struct AiConnection {
     /// The model named on the setup screen. Only an address or a provider sign-in names one; with a
     /// key or a plan the server picks the provider's own.
     pub model: Option<String>,
-    /// The host of a custom address, for the page to tell Gemini, xAI, Unbiased AI and TrustedRouter
-    /// apart from a person's own server. Only the host: an address can carry a password or a key.
+    /// The host of a custom address, for the page to tell Gemini, xAI, Unbiased AI, TrustedRouter and
+    /// TTOken apart from a person's own server. Only the host: an address can carry a password or a
+    /// key.
     pub endpoint_host: Option<String>,
 }
 
@@ -819,6 +822,7 @@ mod tests {
             ("xai", "endpoint", ModelIntent::CompatibleEndpoint),
             ("unbiased", "endpoint", ModelIntent::CompatibleEndpoint),
             ("trustedrouter", "endpoint", ModelIntent::CompatibleEndpoint),
+            ("ttoken", "endpoint", ModelIntent::CompatibleEndpoint),
             (
                 "openai-compatible",
                 "endpoint",
@@ -836,6 +840,7 @@ mod tests {
             ("google", "plan"),
             ("unbiased", "oauth"),
             ("trustedrouter", "oauth"),
+            ("ttoken", "oauth"),
             ("anthropic", "oauth"),
             ("", ""),
         ] {
@@ -876,6 +881,15 @@ mod tests {
                     model: "anthropic/claude-sonnet-5.5".into(),
                 },
                 r#"{"login":"endpoint","provider":"trustedrouter"}"#,
+            ),
+            (
+                ModelCredential::Compatible {
+                    base_url: "https://api.ttoken.dev/v1".into(),
+                    container_base_url: None,
+                    api_key: "sentinel-key".into(),
+                    model: "deepseek/deepseek-v4.1-flash".into(),
+                },
+                r#"{"login":"endpoint","provider":"ttoken"}"#,
             ),
             (
                 ModelCredential::Compatible {

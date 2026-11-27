@@ -111,6 +111,16 @@ const endpointPresets: Record<
     keyUrl: "https://trustedrouter.com/console/api-keys",
     keyLink: "Get a TrustedRouter API key",
   },
+  // TTOken's gateway speaks the OpenAI API and lists models from many providers under their
+  // vendor's prefix, so the model is named the way its /models lists it. Its keys are made per
+  // product, and only one made for the Gateway product calls these endpoints.
+  // https://ttoken.dev/docs
+  ttoken: {
+    baseUrl: "https://api.ttoken.dev/v1",
+    model: "deepseek/deepseek-v4.1-flash",
+    keyUrl: "https://ttoken.dev/dashboard/keys",
+    keyLink: "Get a TTOken API key",
+  },
 };
 
 /** What approving in the browser does, for each provider that signs in that way. */

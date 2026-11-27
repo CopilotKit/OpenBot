@@ -15,6 +15,7 @@ own repository:
 | `kubernetes.svg` | The Kubernetes icon from the CNCF's own artwork repository, [`cncf/artwork`](https://github.com/cncf/artwork) `projects/kubernetes/icon/color/kubernetes-icon-color.svg`, verbatim apart from a `<title>`. Used under the Linux Foundation's trademark usage guidelines, to name the project |
 | `unbiased.svg` | Unbiased AI's own icon, as served at `platform.unbiased.ai/logos/unbiased-icon.svg` and supplied by Unbiased AI for this row, verbatim apart from a `<title>` and `1em` sizing |
 | `trustedrouter.svg` | TrustedRouter's own monochrome mark, `trustedrouter-mono.svg` from the public media kit at [trustedrouter.com/media-kit](https://trustedrouter.com/media-kit) (downloaded 2026-11-19), verbatim apart from a `<title>` and `1em` sizing. It is already drawn in `currentColor` in the 24-unit box |
+| `ttoken.svg` | TTOken's own mark, [ttoken.dev/brand/ttoken-mark.svg](https://ttoken.dev/brand/ttoken-mark.svg) (downloaded 2026-11-28). Its shapes are verbatim; the brand colour is dropped for `currentColor` and the 64-unit box scaled into the 24-unit box, with a `<title>` and `1em` sizing |
 
 The clouds on Desktop's OpenBot for Business choice come from that set too, as its colour marks:
 `aws.svg` (`aws-color.svg`), `azure.svg` (`azure-color.svg`) and `google-cloud.svg`

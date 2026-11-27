@@ -3,8 +3,8 @@
 //! OpenAI and Anthropic offer plan sign-in alongside API keys. Google and xAI use named endpoint
 //! presets with API keys; their official addresses are supplied by the frontend. Unbiased AI signs in
 //! through its own device authorization, which ends in an API key for the same named endpoint
-//! shape, so the key is then carried like a typed one. TrustedRouter is a named endpoint preset
-//! with an API key and no sign-in.
+//! shape, so the key is then carried like a typed one. TrustedRouter and TTOken are named endpoint
+//! presets with an API key and no sign-in.
 //!
 //! The row that asks for a URL is the last one, and it is the only one that asks. Keeping it there
 //! is what keeps a base URL off the main path, which the audience rule at the top of the build doc
@@ -138,6 +138,14 @@ pub fn catalogue() -> Vec<Provider> {
             caution: None,
         },
         Provider {
+            id: "ttoken".into(),
+            name: "TTOken".into(),
+            summary: "Use a TTOken API key for models from many providers.".into(),
+            logins: vec![Login::Endpoint],
+            mark: Some("ttoken".into()),
+            caution: None,
+        },
+        Provider {
             id: "openai-compatible".into(),
             name: "Any OpenAI-compatible endpoint".into(),
             summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.".into(),
@@ -170,6 +178,7 @@ mod tests {
                 "xai",
                 "unbiased",
                 "trustedrouter",
+                "ttoken",
                 "openai-compatible"
             ]
         );
@@ -199,7 +208,7 @@ mod tests {
 
     /// Named providers stay ahead of the custom endpoint escape hatch.
     #[test]
-    fn six_named_providers_and_one_custom_endpoint() {
+    fn seven_named_providers_and_one_custom_endpoint() {
         let rows = catalogue();
         let ids: Vec<&str> = rows.iter().map(|provider| provider.id.as_str()).collect();
         assert_eq!(
@@ -211,6 +220,7 @@ mod tests {
                 "xai",
                 "unbiased",
                 "trustedrouter",
+                "ttoken",
                 "openai-compatible"
             ]
         );
@@ -250,6 +260,17 @@ mod tests {
             .expect("trustedrouter is not offered");
         assert_eq!(trustedrouter.logins, vec![Login::Endpoint]);
         assert_eq!(trustedrouter.name, "TrustedRouter");
+    }
+
+    /// TTOken has no sign-in, so its row asks for an API key and nothing else.
+    #[test]
+    fn ttoken_asks_only_for_a_key() {
+        let ttoken = catalogue()
+            .into_iter()
+            .find(|p| p.id == "ttoken")
+            .expect("ttoken is not offered");
+        assert_eq!(ttoken.logins, vec![Login::Endpoint]);
+        assert_eq!(ttoken.name, "TTOken");
     }
 
     /// Every row is readable without recognising a logo.

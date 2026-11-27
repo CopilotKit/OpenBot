@@ -226,6 +226,7 @@ test("an answer may name a provider this client doesn't know, and a switch is re
       apiKey: "sk-example",
     }).success;
   expect(body("trustedrouter")).toBe(true);
+  expect(body("ttoken")).toBe(true);
   expect(body("unbiased")).toBe(true);
   expect(body("a-provider-added-later")).toBe(false);
   expect(body("")).toBe(false);

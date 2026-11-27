@@ -77,6 +77,14 @@ export const AI_PROVIDERS: AiProvider[] = [
     mark: "trustedrouter",
   },
   {
+    id: "ttoken",
+    name: "TTOken",
+    summary: "Use a TTOken API key for models from many providers.",
+    keySummary: "Use a TTOken API key for models from many providers.",
+    logins: ["endpoint"],
+    mark: "ttoken",
+  },
+  {
     id: "openai-compatible",
     name: "Any OpenAI-compatible endpoint",
     summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.",
@@ -119,6 +127,12 @@ export const ENDPOINT_PRESETS: Partial<
     model: "anthropic/claude-sonnet-5.5",
     keyUrl: "https://trustedrouter.com/console/api-keys",
     keyLink: "Get a TrustedRouter API key",
+  },
+  ttoken: {
+    baseUrl: "https://api.ttoken.dev/v1",
+    model: "deepseek/deepseek-v4.1-flash",
+    keyUrl: "https://ttoken.dev/dashboard/keys",
+    keyLink: "Get a TTOken API key",
   },
 };
 

@@ -567,6 +567,14 @@ function createStates(where: Where): States {
             caution: null,
           },
           {
+            id: "ttoken",
+            name: "TTOken",
+            summary: "Use a TTOken API key for models from many providers.",
+            logins: ["endpoint"],
+            mark: "ttoken",
+            caution: null,
+          },
+          {
             id: "openai-compatible",
             name: "Any OpenAI-compatible endpoint",
             summary:
