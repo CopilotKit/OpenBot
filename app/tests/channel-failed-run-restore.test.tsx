@@ -87,10 +87,18 @@ type RunPlan =
    * runs on slept through the rest. The thread holds the whole reply, and the server keeps the run's
    * ending as it ended: `succeeded` when it finished, `failed` when it ended on a RUN_ERROR.
    */
-  | { kind: "endsUnheard"; text: string; ends: "finished" | "fails" };
+  | { kind: "endsUnheard"; text: string; ends: "finished" | "fails" }
+  /**
+   * The same, on a run that ends by handing this browser a step, as a run that needs the Bot's
+   * computer does: it says what it will do and asks for the step, and the run finishes. The thread
+   * holds both, and the server keeps the run as `succeeded`; the step was never taken.
+   */
+  | { kind: "endsUnheardOnStep"; text: string; tool: string };
 
 let originalFetch: typeof fetch;
 let plans: RunPlan[] = [];
+/** What each run was sent, in order. */
+let runInputs: RunAgentInput[] = [];
 /** Every event the runtime has streamed for a thread, run after run: what `/connect` replays. */
 let recorded = new Map<string, unknown[]>();
 /** The thread's stored messages: what was said, and nothing about how a run ended. */
@@ -307,6 +315,59 @@ function run(input: RunAgentInput): Response {
     return sse(events);
   }
   const messageId = `reply-${input.runId}`;
+  if (plan.kind === "endsUnheardOnStep") {
+    const toolCallId = `call-${input.runId}`;
+    const head = plan.text.slice(0, Math.floor(plan.text.length / 2));
+    // The run as it went on the server: what the Bot said, its step, and RUN_FINISHED.
+    record(input.threadId, [
+      started,
+      { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
+      { type: "TEXT_MESSAGE_CONTENT", messageId, delta: plan.text },
+      { type: "TEXT_MESSAGE_END", messageId },
+      {
+        type: "TOOL_CALL_START",
+        toolCallId,
+        toolCallName: plan.tool,
+        parentMessageId: messageId,
+      },
+      { type: "TOOL_CALL_ARGS", toolCallId, delta: "{}" },
+      { type: "TOOL_CALL_END", toolCallId },
+      { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+    ]);
+    remember(input.threadId, [
+      {
+        id: messageId,
+        role: "assistant",
+        content: plan.text,
+        toolCalls: [
+          {
+            id: toolCallId,
+            type: "function",
+            function: { name: plan.tool, arguments: "{}" },
+          },
+        ],
+      },
+    ]);
+    endings.set(input.runId, {
+      threadId: input.threadId,
+      outcome: "succeeded",
+      endedAt: new Date().toISOString(),
+    });
+    // What reached this browser: the start, the first half of what the Bot said, and then nothing.
+    const heard = [
+      started,
+      { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
+      { type: "TEXT_MESSAGE_CONTENT", messageId, delta: head },
+    ];
+    return new NativeResponse(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(frames(heard)));
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  }
   if (plan.kind === "endsUnheard") {
     const cut = Math.floor(plan.text.length / 2);
     const head = plan.text.slice(0, cut);
@@ -472,7 +533,9 @@ beforeAll(() => {
       }
       if (url.pathname.endsWith("/run")) {
         runAsked = true;
-        return run(RunAgentInputSchema.parse(await request().json()));
+        const input = RunAgentInputSchema.parse(await request().json());
+        runInputs.push(input);
+        return run(input);
       }
       /*
        * A stop, as the runtime carries it out: the runner closes what the run left open and ends it
@@ -591,6 +654,7 @@ afterEach(() => {
   cleanup();
   queryClient.clear();
   plans = [];
+  runInputs = [];
   recorded = new Map();
   stored = new Map();
   stopRequests = [];
@@ -1283,6 +1347,90 @@ test("a run that finished on the server while this browser heard only its start 
     quietRunPeriod.ms = period;
   }
 }, 20_000);
+
+/*
+ * FOUND ON OPENBOT CLOUD, in a phone's web view, on a long task at the highest reasoning level. The
+ * Bot said it would finish the report and asked for a command on its computer, and its run finished
+ * on the server, handing this browser the command. The phone was not listening, so the command never
+ * ran, and the turn ended "The Bot stopped before it finished". Carry on brought a run that ended on
+ * the next command the same way, three times in one conversation.
+ */
+test("a run that finished on a step this browser never heard carries on, and the step is taken", async () => {
+  const period = quietRunPeriod.ms;
+  quietRunPeriod.ms = 200;
+  try {
+    const SAID =
+      "I'll finish the report and put the derivations and numerical checks in the attached PDF.";
+    const DONE = "The report is finished, with the derivations in the PDF.";
+    plans = [
+      { kind: "endsUnheardOnStep", text: SAID, tool: STEP },
+      { kind: "calls", tool: STEP },
+      { kind: "answers", text: DONE },
+    ];
+    const live = open();
+    await send(live, "Please carry on where you stopped.");
+    await live.findByText(DONE, {}, { timeout: 15_000 });
+    await waitFor(
+      () =>
+        expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+      { timeout: 15_000 },
+    );
+    // The turn went on by itself: no notice, no Carry on, and the step was taken here once.
+    expect(live.queryByTestId("transcript-stopped")).toBeNull();
+    expect(live.queryByText(RUN_ENDED_UNHEARD)).toBeNull();
+    expect(live.queryByRole("button", { name: "Carry on" })).toBeNull();
+    expect(stepsRun).toBe(1);
+    expect(runInputs).toHaveLength(3);
+    // The Bot was told the step it asked for was never taken, beside the step, and asked again.
+    const first = runInputs[0]?.runId;
+    const toldNotRun = runInputs[1]?.messages.find(
+      (message) =>
+        message.role === "tool" && message.toolCallId === `call-${first}`,
+    );
+    expect(toldNotRun?.content).toContain("no result came back for this call");
+    // And the person's message is not sent twice.
+    expect(
+      runInputs[1]?.messages.filter(
+        (message) =>
+          message.role === "user" &&
+          message.content === "Please carry on where you stopped.",
+      ),
+    ).toHaveLength(1);
+    expect(typed(live)).toBe("");
+  } finally {
+    quietRunPeriod.ms = period;
+  }
+}, 30_000);
+
+test("a second step a turn never heard keeps the notice and its Carry on, rather than carrying on again", async () => {
+  const period = quietRunPeriod.ms;
+  quietRunPeriod.ms = 200;
+  try {
+    plans = [
+      { kind: "endsUnheardOnStep", text: "Building the PDF now.", tool: STEP },
+      {
+        kind: "endsUnheardOnStep",
+        text: "Trying the PDF build again.",
+        tool: STEP,
+      },
+    ];
+    const live = open();
+    await send(live, "Build the report");
+    const shown = await live.findByTestId(
+      "transcript-stopped",
+      {},
+      { timeout: 25_000 },
+    );
+    expect(within(shown).getByRole("alert").textContent).toBe(
+      RUN_ENDED_UNHEARD,
+    );
+    within(shown).getByRole("button", { name: "Carry on" });
+    expect(runInputs).toHaveLength(2);
+    expect(stepsRun).toBe(0);
+  } finally {
+    quietRunPeriod.ms = period;
+  }
+}, 30_000);
 
 test("a run that failed on the server while this browser heard only its start still says it stopped, with Carry on", async () => {
   const period = quietRunPeriod.ms;
