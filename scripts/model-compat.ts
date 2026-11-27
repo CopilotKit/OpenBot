@@ -13,7 +13,10 @@
  *      (docs/configuration.md, "The model list").
  *   2. Starts each harness image on that provider, as the Desktop's settings would, and sends it
  *      one AG-UI run per model. The harness's own client makes the call, at the version that image
- *      ships. `latest` is the published image people run (ghcr.io/copilotkit/openbot-<harness>);
+ *      ships. The run is the one every Bot's tool path ends in: it hands back a tool call the
+ *      model made in an earlier run, with its result and without the provider's own artefacts on
+ *      it (Gemini's thought signature, which an AG-UI tool call has no field for), as the server
+ *      sends it after running the tool between two runs (`handBackRun`). `latest` is the published image people run (ghcr.io/copilotkit/openbot-<harness>);
  *      `source` is the image built from this checkout, which shows whether a bumped pin fixed it.
  *   3. Checks the ChatGPT plan's Codex client version in each image against the minimum each
  *      listed Codex model needs, from openai/codex's published model catalogue. A plan sign-in
@@ -62,8 +65,9 @@ const SOURCE = "source";
 const MODELS_DEV = "https://models.dev/api.json";
 const CODEX_CATALOGUE =
   "https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json";
-const PROMPT = "Reply with the single word OK.";
-/** One tool the prompt has no use for, so the request takes the client's tool path. */
+const PROMPT =
+  "Look up order 42. Once you have its status, reply with the single word OK.";
+/** The tool the handed-back call was made to, offered again so the request takes the tool path. */
 const PROBE_TOOL = {
   name: "look_up_order",
   description: "Look up the status of an order by its number.",
@@ -509,7 +513,7 @@ export function classifyRun(response: {
   return judgeReply(
     streamed || snapshot,
     calledTool
-      ? "the model called the probe's tool instead of replying"
+      ? "the model called the probe's tool again instead of replying"
       : finished
         ? "the run finished without a reply"
         : "the stream ended without finishing the run",
@@ -973,6 +977,88 @@ async function clientsIn(image: string): Promise<Record<string, string>> {
 let serial = 0;
 
 /** Starts the harness on one provider and model, sends one run, and stops it. */
+/** The order status the handed-back call answers with. */
+const PROBE_RESULT = '{"order": "42", "status": "shipped"}';
+
+/**
+ * The run sent to a harness for one model: a tool call the model made in the previous run, then
+ * its result, as the server sends a Bot's thread after running the tool between two runs. The call
+ * carries nothing the provider gave it: an AG-UI tool call has no field for Gemini's thought
+ * signature, which Gemini 3 and later refuse a call in the current turn without ("Function call is
+ * missing a thought_signature"). A model that answers only a fresh prompt, and not this, cannot
+ * finish any tool call a Bot makes.
+ *
+ * Mastra is reached through its own agent API, in the AI SDK's message shape.
+ */
+export function handBackRun(
+  id: string,
+  model: string,
+  mastra: boolean,
+): Record<string, unknown> {
+  const call = `call_${id}`;
+  if (mastra)
+    return {
+      messages: [
+        { role: "user", content: PROMPT },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: call,
+              toolName: PROBE_TOOL.name,
+              input: { order: "42" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: call,
+              toolName: PROBE_TOOL.name,
+              output: { type: "json", value: JSON.parse(PROBE_RESULT) },
+            },
+          ],
+        },
+      ],
+    };
+  return {
+    threadId: `model-compat-${id}`,
+    runId: `run-${id}`,
+    state: {},
+    messages: [
+      { id: `message-${id}`, role: "user", content: PROMPT },
+      {
+        id: `call-${id}`,
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: call,
+            type: "function",
+            function: { name: PROBE_TOOL.name, arguments: '{"order": "42"}' },
+          },
+        ],
+      },
+      {
+        id: `result-${id}`,
+        role: "tool",
+        toolCallId: call,
+        content: PROBE_RESULT,
+      },
+    ],
+    // A Bot's run always carries tools, and a client's tool path is where models part ways
+    // (Responses-only models, parallel tool calls, signed calls), so this one does too.
+    tools: [PROBE_TOOL],
+    context: [],
+    // What the server tells the LangGraph and Claude Agent SDK harnesses; the others read
+    // BOT_MODEL, set by the caller.
+    forwardedProps: { openbotModel: { model } },
+  };
+}
+
 async function runOne(
   row: Extract<MatrixRow, { kind: "run" }>,
   key: string,
@@ -1062,25 +1148,7 @@ async function runOne(
             accept: mastra ? "application/json" : "text/event-stream",
             "x-openbot-agent-token": token,
           },
-          body: JSON.stringify(
-            mastra
-              ? { messages: [{ role: "user", content: PROMPT }] }
-              : {
-                  threadId: `model-compat-${id}`,
-                  runId: `run-${id}`,
-                  state: {},
-                  messages: [
-                    { id: `message-${id}`, role: "user", content: PROMPT },
-                  ],
-                  // A Bot's run always carries tools, and a client's tool path is where models
-                  // part ways (Responses-only models, parallel tool calls), so this one does too.
-                  tools: [PROBE_TOOL],
-                  context: [],
-                  // What the server tells the LangGraph and Claude Agent SDK harnesses; the others
-                  // read BOT_MODEL, set above.
-                  forwardedProps: { openbotModel: { model: row.model } },
-                },
-          ),
+          body: JSON.stringify(handBackRun(id, row.model, mastra)),
           signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
         },
       );

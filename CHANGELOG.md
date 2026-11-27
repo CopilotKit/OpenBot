@@ -8,6 +8,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **A Bot on Gemini 3 or Gemini 4 finishes what it started with a tool, on every engine.** 1.2.2
+  fixed this on the LangGraph engines. On the others, a Bot that used a tool on Gemini 3.x or
+  Gemini 4 still got an error from Google once the tool's result came back ("Function call is
+  missing a thought_signature"), with a key saved as Google's OpenAI-compatible endpoint, as
+  OpenBot Desktop and Settings save it. Google ADK, AG2, CrewAI, Langroid, LlamaIndex, Mastra and
+  Strands now send each handed-back tool call to a Gemini model with Google's documented
+  placeholder, and keep a real signature when there is one. Requests to every other provider are
+  sent as before. Antigravity was not affected.
+- **`BOT_PROVIDER=google` works on Google ADK, Strands, Langroid, CrewAI, LlamaIndex and AG2.**
+  The first five stopped before reaching Google ("LLM Provider NOT provided"), and AG2 asked for an
+  OpenAI key. AG2 now answers on Google's own Gemini API with the Google key.
+- **The model check tries each model on a tool call handed back.** The scheduled check of which
+  models each engine can run sends every model a run that ends in a tool call and its result, as a
+  Bot's runs do, so a model that cannot finish a tool call is no longer listed as working.
+
 ## 1.2.2
 
 **Before upgrading.**

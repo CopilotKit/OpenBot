@@ -6,6 +6,7 @@ WORKDIR /app
 COPY agent-mastra/package.json agent-mastra/bun.lock ./
 RUN bun install --frozen-lockfile
 
+COPY shared/gemini-signatures.ts /shared/gemini-signatures.ts
 COPY shared/listen-port.ts /shared/listen-port.ts
 COPY shared/model-providers.ts /shared/model-providers.ts
 COPY shared/model-providers.json /shared/model-providers.json

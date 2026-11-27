@@ -15,6 +15,7 @@
 import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { registerApiRoute } from "@mastra/core/server";
+import { signingFetch } from "../../../shared/gemini-signatures";
 import { listenPort } from "../../../shared/listen-port";
 import {
   apiKeyOrPlaceholder,
@@ -74,6 +75,9 @@ async function buildModel(runKey?: string) {
     baseURL?.replace(/\/+$/, "") !== "https://api.openai.com/v1";
   const openai = createOpenAI({
     baseURL: baseURL || "https://api.openai.com/v1",
+    // A compatible address may be Gemini's (Google's endpoint, or the gateway in front of it),
+    // which refuses a handed-back call without its thought signature.
+    ...(compatible ? { fetch: signingFetch() } : {}),
     apiKey:
       key ??
       (compatible

@@ -796,3 +796,107 @@ describe("OpenBot Mastra on OpenBot's model gateway", () => {
     }, 15_000);
   }
 });
+
+/**
+ * Gemini 3 and later refuse a function call handed back without the thought signature the model
+ * gave it, and an AG-UI tool call has no field for one. On a Gemini model at Google's compatible
+ * endpoint, or OpenBot's gateway in front of it, each handed-back call goes with Google's
+ * documented placeholder; any other model's request is sent as it was. See
+ * shared/gemini-signatures.ts.
+ */
+describe("OpenBot Mastra hands a tool call back to Gemini signed", () => {
+  for (const [model, signed] of [
+    ["gemini-3.8-flash", true],
+    ["gpt-5.2", false],
+  ] as const) {
+    test(`${model}: ${signed ? "the placeholder goes with the call" : "the call is sent as it was"}`, async () => {
+      const calls: unknown[] = [];
+      const gateway = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        async fetch(request) {
+          const body = await request.json();
+          for (const message of body.messages ?? [])
+            for (const call of message.tool_calls ?? []) calls.push(call);
+          return Response.json({
+            id: "chat",
+            object: "chat.completion",
+            created: 0,
+            model: body.model,
+            choices: [
+              {
+                index: 0,
+                finish_reason: "stop",
+                message: { role: "assistant", content: "It shipped." },
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          });
+        },
+      });
+      const base = `${gateway.url.toString().replace(/\/+$/, "")}/api/model-provider/v1`;
+      const handedBack = [
+        { role: "user", content: "What is the status of order 42?" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_order",
+              toolName: "look_up_order",
+              input: { order: "42" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call_order",
+              toolName: "look_up_order",
+              output: { type: "json", value: { status: "shipped" } },
+            },
+          ],
+        },
+      ];
+      try {
+        const { stdout, stderr, exitCode } = await runProbe(
+          [
+            Bun.argv[0],
+            "--no-env-file",
+            "-e",
+            [
+              'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
+              `const result = await mastra.getAgent("openbot").generate(${JSON.stringify(handedBack)});`,
+              "console.log(JSON.stringify({ text: result.text }));",
+            ].join("\n"),
+          ],
+          {
+            PATH: process.env.PATH ?? "/opt/homebrew/bin:/usr/bin:/bin",
+            MASTRA_TELEMETRY_DISABLED: "true",
+            DO_NOT_TRACK: "1",
+            NODE_ENV: "test",
+            BOT_PROVIDER: "openai",
+            BOT_MODEL: model,
+            OPENAI_API_KEY: "deployment-gateway-token",
+            OPENAI_BASE_URL: base,
+            ANTHROPIC_API_KEY: "",
+            ANTHROPIC_BASE_URL: "",
+          },
+          10_000,
+        );
+        if (exitCode !== 0)
+          throw new Error(`probe exited ${exitCode}\n${stdout}\n${stderr}`);
+        expect(stdout).toContain('"text":"It shipped."');
+        expect(calls).toHaveLength(1);
+        expect(
+          (calls[0] as { extra_content?: { google?: Record<string, unknown> } })
+            .extra_content?.google?.thought_signature,
+        ).toBe(signed ? "skip_thought_signature_validator" : undefined);
+      } finally {
+        await gateway.stop(true);
+      }
+    }, 15_000);
+  }
+});

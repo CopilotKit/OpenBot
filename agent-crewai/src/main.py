@@ -19,8 +19,12 @@ from typing import Any
 # The spec file every language in the box reads: one level above this Bot in the repository, and
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from model_providers import bot_settings
+from model_providers import bot_settings, litellm_model
 from run_model_key import RunModelKey
+import gemini_signatures
+
+# Every Gemini tool call this Bot sends back is signed. See gemini_signatures.py.
+gemini_signatures.install()
 
 import ag_ui_crewai.endpoint as crewai_endpoint
 from ag_ui.core import Message, Tool
@@ -44,20 +48,10 @@ def _model() -> str:
 
     `BOT_PROVIDER` and `BOT_MODEL` are set by the shell from the model screen. litellm addresses a
     model as `provider/model`, and it reads that provider's key from the environment itself, which
-    is why nothing here touches a key.
-
-    The model half is whatever the endpoint publishes, slashes included. litellm takes the first
-    path component as the provider and sends the rest as the model name, so a name that already
-    contains a slash still needs the chosen provider in front: `qwen/qwen3-8b` on an
-    OpenAI-compatible endpoint is `openai/qwen/qwen3-8b`, and `openai/gpt-5.6-terra` is
-    `openai/openai/gpt-5.6-terra`. Treating a slash as "already a provider" dropped the prefix,
-    and litellm then either routed to a provider nobody configured (`LLM Provider NOT provided`)
-    or sent only the second half to the endpoint.
+    is why nothing here touches a key. See `litellm_model` for the spelling.
     """
     settings = bot_settings("agent-crewai")
-    provider = settings.provider
-    model = settings.model
-    return f"{provider}/{model}"
+    return litellm_model(settings.provider, settings.model)
 
 
 _PROVIDER_MESSAGE_FIELDS = {

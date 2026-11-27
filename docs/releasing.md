@@ -1172,7 +1172,10 @@ from the Actions tab. One job per harness in `.github/published-images.json` run
   [The model list](configuration.md#the-model-list));
 - starts the harness image on each provider the way the Desktop configures it, and sends one AG-UI
   run per model, so the harness's own client makes the call. It checks `latest`, the published
-  image people run, and `source`, the image built from this commit;
+  image people run, and `source`, the image built from this commit. The run hands back a tool call
+  the model made earlier, with its result and nothing the provider gave the call (Gemini's thought
+  signature), as the server does after running a tool between two runs, so a model a Bot cannot
+  finish a tool call on fails here;
 - compares the LangGraph harness's Codex client version with the minimum each ChatGPT plan model
   needs, from openai/codex's published model catalogue. A plan sign-in cannot run in CI. A Claude
   plan runs through the same Claude Code CLI as an Anthropic key, so the key's rows cover it.

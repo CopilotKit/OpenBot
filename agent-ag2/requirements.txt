@@ -1,6 +1,10 @@
 # 1.3.2 is the first release this harness is checked on with both OpenAICompletionsConfig and
-# OpenAIResponsesConfig, which src/main.py names explicitly.
-ag2[ag-ui,anthropic,openai]>=1.3.2
+# OpenAIResponsesConfig, which src/main.py names explicitly. `gemini` installs google-genai, which
+# GeminiConfig needs for a Bot on a Gemini key.
+ag2[ag-ui,anthropic,gemini,openai]>=1.3.2
+# google-genai 3.0.0 (2026-11-06) moved generateContent from /v1beta to /v1, and ag2[gemini] asks
+# for any google-genai, so a fresh install picks it up. Held with the other harnesses.
+google-genai>=2.34,<3
 fastapi
 python-multipart
 uvicorn[standard]

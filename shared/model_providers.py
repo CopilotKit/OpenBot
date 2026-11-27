@@ -210,3 +210,23 @@ def openai_api(model: str, env: Mapping[str, str] | None = None) -> str:
     if chosen in ("responses", "chat"):
         return chosen
     return "responses" if requires_responses_api(model) else "chat"
+
+
+# LiteLLM's names for the providers it spells differently. LiteLLM reads Gemini's API as `gemini/`
+# (its `google/` is no provider at all: "LLM Provider NOT provided"), and finds the key under
+# `GOOGLE_API_KEY`, the variable the `google` row names.
+_LITELLM_PROVIDERS: dict[str, str] = {"google": "gemini"}
+
+
+def litellm_model(provider: str, model: str) -> str:
+    """`provider/model`, which is how LiteLLM addresses one, in LiteLLM's spelling of the provider.
+
+    The model half is whatever the endpoint publishes, slashes included. LiteLLM takes the first
+    path component as the provider and sends the rest as the model name, so a name that already
+    contains a slash still needs the chosen provider in front: `qwen/qwen3-8b` on an
+    OpenAI-compatible endpoint is `openai/qwen/qwen3-8b`, and `openai/gpt-5.6-terra` is
+    `openai/openai/gpt-5.6-terra`. Treating a slash as "already a provider" dropped the prefix,
+    and LiteLLM then either routed to a provider nobody configured or sent only the second half to
+    the endpoint.
+    """
+    return f"{_LITELLM_PROVIDERS.get(provider, provider)}/{model}"

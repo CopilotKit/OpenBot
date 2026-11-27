@@ -84,6 +84,126 @@ def missing_from(body: dict) -> list[str]:
     return [name for name, marker in MARKERS.items() if marker not in text]
 
 
+# A tool call the model made in the previous run, which the server ran between the two runs and
+# now hands back with its result. AG-UI's tool call has no field for Gemini's thought signature, so
+# it arrives unsigned, and Gemini 3 and later refuse an unsigned call in the current turn. See
+# `shared/gemini_signatures.py`.
+HANDED_BACK_TOOL = {
+    "name": "look_up_order",
+    "description": "Look up the status of an order by its number.",
+    "parameters": {
+        "type": "object",
+        "properties": {"order": {"type": "string", "description": "The order number."}},
+        "required": ["order"],
+    },
+}
+GEMINI_MODEL = "gemini-3.8-flash"
+
+
+def handback(thread_id: str = "handback-thread", run_id: str = "handback-run") -> dict:
+    """A run carrying a tool call made in the previous run and its result, as the server sends it."""
+    return {
+        "threadId": thread_id,
+        "runId": run_id,
+        "state": {},
+        "messages": [
+            {"id": "u1", "role": "user", "content": "What is the status of order 42?"},
+            {
+                "id": "a1",
+                "role": "assistant",
+                "content": "",
+                "toolCalls": [
+                    {
+                        "id": "call_handback",
+                        "type": "function",
+                        "function": {"name": "look_up_order", "arguments": '{"order": "42"}'},
+                    }
+                ],
+            },
+            {
+                "id": "t1",
+                "role": "tool",
+                "toolCallId": "call_handback",
+                "content": '{"status": "shipped"}',
+            },
+        ],
+        "tools": [HANDED_BACK_TOOL],
+        "context": [],
+        "forwardedProps": {},
+    }
+
+
+def tool_calls_sent(body: dict) -> list[dict]:
+    """Every tool call in a model request: Chat Completions `tool_calls` and Gemini `functionCall`
+    parts, each as `{"name": ..., "signature": ...}` with the thought signature it carries, if any.
+    """
+    calls = []
+    for message in body.get("messages") or []:
+        for call in (message.get("tool_calls") or []) if isinstance(message, dict) else []:
+            google = ((call.get("extra_content") or {}).get("google") or {})
+            calls.append(
+                {
+                    "name": (call.get("function") or {}).get("name"),
+                    "signature": google.get("thought_signature"),
+                }
+            )
+    for content in body.get("contents") or []:
+        for part in content.get("parts") or [] if isinstance(content, dict) else []:
+            call = part.get("functionCall") or part.get("function_call")
+            if call:
+                calls.append(
+                    {
+                        "name": call.get("name"),
+                        "signature": part.get("thoughtSignature") or part.get("thought_signature"),
+                    }
+                )
+    return calls
+
+
+def check_handback_signed(bodies: list[dict]) -> None:
+    """The model was sent the handed-back call as a call, and the call carries a signature."""
+    assert bodies, "the model was never called"
+    calls = [call for call in tool_calls_sent(bodies[-1]) if call["name"] == "look_up_order"]
+    assert calls, f"the handed-back call never reached the model as a call: {bodies[-1]}"
+    assert all(call["signature"] for call in calls), f"an unsigned call reached Gemini: {calls}"
+
+
+def gemini_environment(base: str, model: str = GEMINI_MODEL) -> dict[str, str]:
+    """Gemini's own API at `base`, the way `BOT_PROVIDER=google` configures one.
+
+    `GOOGLE_GENERATIVE_AI_BASE_URL` is the `google` row's variable; `GEMINI_API_BASE` and
+    `GOOGLE_GEMINI_BASE_URL` are LiteLLM's and google-genai's own names for the same address, set
+    here so whichever client a framework builds is pointed at the fake.
+    """
+    return {
+        "BOT_PROVIDER": "google",
+        "BOT_MODEL": model,
+        "GOOGLE_API_KEY": "contract-key",
+        "GOOGLE_GENERATIVE_AI_BASE_URL": base,
+        "GEMINI_API_BASE": base,
+        "GOOGLE_GEMINI_BASE_URL": base,
+        "OPENAI_API_KEY": "",
+        "OPENAI_BASE_URL": "",
+        "ANTHROPIC_API_KEY": "",
+    }
+
+
+def gemini_gateway_environment(base: str, model: str = GEMINI_MODEL) -> dict[str, str]:
+    """A Gemini model on an OpenAI-compatible address: OpenBot's model gateway at `base`.
+
+    Google's own compatible endpoint is signed by its host, which a test cannot serve; the gateway's
+    path is signed by the same rule for a Gemini model.
+    """
+    return {
+        "BOT_PROVIDER": "",
+        "BOT_MODEL": model,
+        "OPENAI_API_KEY": "contract-key",
+        "OPENAI_BASE_URL": f"{base}/api/model-provider/v1",
+        "ANTHROPIC_API_KEY": "",
+        "GOOGLE_API_KEY": "",
+    }
+
+
 def openai_environment(base: str, model: str = "contract-model") -> dict[str, str]:
     """An OpenAI-compatible endpoint at `base`, the way the setup screen configures one."""
     return {
@@ -191,12 +311,32 @@ def check_gateway_keys(app_for, wire: str, *, path: str = "/", token: str = "con
     check_run_keys(keys[started:], ran_with_token, bodies)
 
 
+def handback_bodies(app_for, environment, *, path: str = "/", token: str = "contract-token"):
+    """The model requests a harness sends for `handback()`, on a fresh app in `environment`.
+
+    `app_for(environment)` sets `environment` (a dict) for the harness and answers its app on a
+    fresh import, as for `check_gateway_keys`. `environment(base)` is an environment function such
+    as `gemini_environment`.
+    """
+    from fastapi.testclient import TestClient
+
+    with fake_provider() as (base, bodies):
+        with TestClient(app_for(environment(base))) as client:
+            response = client.post(path, json=handback(), headers={"x-openbot-agent-token": token})
+    assert response.status_code == 200, response.text
+    types = [e["type"] for e in run_events(response.text) if e["type"].startswith("RUN_")]
+    assert types == ["RUN_STARTED", "RUN_FINISHED"], response.text
+    return bodies
+
+
 @contextmanager
 def fake_provider(keys: list[str] | None = None) -> Iterator[tuple[str, list[dict]]]:
-    """An OpenAI- and Anthropic-compatible model on localhost that answers "ok" and records bodies.
+    """An OpenAI-, Anthropic- and Gemini-compatible model on localhost that answers "ok" and records
+    bodies.
 
     Yields `(base_url, bodies)`: every request body in arrival order. Serves Chat Completions,
-    Responses and Messages, streamed and not, since which one a framework uses is its own choice.
+    Responses, Messages and Gemini's generateContent, streamed and not, since which one a framework
+    uses is its own choice.
     Given `keys`, also writes down the key each request presented, as OpenAI's SDK sends it
     (`Authorization: Bearer`) or Anthropic's (`x-api-key`).
     """
@@ -331,6 +471,30 @@ def fake_provider(keys: list[str] | None = None) -> Iterator[tuple[str, list[dic
             ("message_stop", {"type": "message_stop"}),
         ]
         return sse([f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events])
+
+    @app.post("/{rest:path}")
+    async def gemini(rest: str, request: Request):
+        """Gemini's own API: `.../models/<model>:generateContent`, or `:streamGenerateContent`."""
+        if not rest.endswith((":generateContent", ":streamGenerateContent")):
+            return JSONResponse({"error": {"code": 404, "message": rest}}, status_code=404)
+        body = await request.json()
+        bodies.append(body)
+        answer = {
+            "candidates": [
+                {
+                    "content": {"role": "model", "parts": [{"text": "ok"}]},
+                    "finishReason": "STOP",
+                    "index": 0,
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1, "totalTokenCount": 2},
+            "modelVersion": rest.rsplit("/", 1)[-1].split(":", 1)[0],
+        }
+        if rest.endswith(":generateContent"):
+            return JSONResponse(answer)
+        if request.query_params.get("alt") == "sse":
+            return sse([f"data: {json.dumps(answer)}\r\n\r\n"])
+        return JSONResponse([answer])
 
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))

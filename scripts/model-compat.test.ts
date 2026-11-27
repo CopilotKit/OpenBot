@@ -6,6 +6,7 @@ import {
   classifyMastra,
   classifyRun,
   codexGate,
+  handBackRun,
   type Harness,
   type MatrixRow,
   NOT_CHECKED,
@@ -406,4 +407,57 @@ test("every published harness is one the matrix can run", () => {
     }
     expect(providersFor(harness!).length, image).toBeGreaterThan(0);
   }
+});
+
+// FOUND ON THE REAL GEMINI API: the lock verified gemini-3.8-flash and gemini-4-hydrogen on a run
+// with only a prompt, while every Bot that handed a tool call back to them was refused ("Function
+// call is missing a thought_signature"). The probe's run is that hand-back.
+test("the probe hands back an unsigned tool call and its result, as the server sends it", () => {
+  const run = handBackRun("abc", "gemini-4-hydrogen", false) as {
+    messages: {
+      role: string;
+      toolCalls?: Record<string, unknown>[];
+      toolCallId?: string;
+    }[];
+    tools: { name: string }[];
+    forwardedProps: unknown;
+  };
+  expect(run.messages.map((message) => message.role)).toEqual([
+    "user",
+    "assistant",
+    "tool",
+  ]);
+  const [call] = run.messages[1]!.toolCalls!;
+  expect(call).toEqual({
+    id: "call_abc",
+    type: "function",
+    function: { name: "look_up_order", arguments: '{"order": "42"}' },
+  });
+  expect(run.messages[2]!.toolCallId).toBe("call_abc");
+  expect(run.tools.map((tool) => tool.name)).toEqual(["look_up_order"]);
+  expect(run.forwardedProps).toEqual({
+    openbotModel: { model: "gemini-4-hydrogen" },
+  });
+
+  const mastra = handBackRun("abc", "gemini-4-hydrogen", true) as {
+    messages: { role: string; content: unknown }[];
+  };
+  expect(mastra.messages.map((message) => message.role)).toEqual([
+    "user",
+    "assistant",
+    "tool",
+  ]);
+  expect(JSON.stringify(mastra)).not.toContain("signature");
+});
+
+test("a model that calls the handed-back tool again has not replied", () => {
+  const again = [
+    'data: {"type":"RUN_STARTED","threadId":"t","runId":"r"}',
+    'data: {"type":"TOOL_CALL_START","toolCallId":"c2","toolCallName":"look_up_order"}',
+    'data: {"type":"RUN_FINISHED","threadId":"t","runId":"r"}',
+  ].join("\n\n");
+  expect(classifyRun({ status: 200, body: again })).toEqual({
+    status: "fail",
+    detail: "the model called the probe's tool again instead of replying",
+  });
 });
