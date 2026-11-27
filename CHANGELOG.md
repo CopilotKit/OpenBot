@@ -3337,6 +3337,13 @@ Desktop installation:
 
 ### Conversations
 
+- **Opening a long conversation no longer scrolls through its history.** Entering a long
+  conversation could show its history scrolling from the earliest message down to the newest
+  before stopping. History still arriving after the conversation opened, the stored thread
+  merging in behind the snapshot, a late voice card, or a turn read back from the roster, was
+  read as a message just sent, and the short glide meant for a sent message animated the jump
+  to the bottom. The glide now only runs for a message sent while the conversation is open:
+  history arriving in a batch never glides, and a sent message still does.
 - **An answer that reaches the screen with pieces missing is put right, and the Bot carries on.**
   Sometimes a run's live stream reached the conversation out of shape while the run itself went
   fine: the answer drew with words missing mid-sentence until a reload, or a step that asked for
