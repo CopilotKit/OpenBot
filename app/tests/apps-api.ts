@@ -287,7 +287,7 @@ export function appDirectoryEntries(
       : (fixture.directory ?? [])
           .filter((app) => app.connection.kind !== "unsupported")
           .filter((app) => holds(app.slug, app.name, app.description))
-          .map((app) => {
+          .map((app): AppDirectoryEntry => {
             const added = servers.find((server) => slugOf(server) === app.slug);
             return {
               id: `directory:${app.slug}`,
