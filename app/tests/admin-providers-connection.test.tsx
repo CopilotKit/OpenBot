@@ -511,9 +511,10 @@ beforeAll(async () => {
   }
 }, 120_000);
 
+// Closing two browsers takes longer than a hook's five seconds when the machine runs eight files at once.
 afterAll(async () => {
-  for (const browser of browsers.values()) await browser.close();
-});
+  await Promise.all([...browsers.values()].map((browser) => browser.close()));
+}, 30_000);
 
 /** The page at `path`, its server answering from `server`. */
 async function open(

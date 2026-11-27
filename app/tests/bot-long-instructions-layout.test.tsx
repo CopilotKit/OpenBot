@@ -121,9 +121,10 @@ let script: string;
 if (asked) script = await bundle();
 const browsers: Browser[] = [];
 
+// Closing two browsers takes longer than a hook's five seconds when the machine runs eight files at once.
 afterAll(async () => {
   await Promise.all(browsers.map((browser) => browser.close()));
-});
+}, 30_000);
 
 /**
  * Style what is on the page now, as the app's build would have, and let it settle.
