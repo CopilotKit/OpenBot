@@ -27,6 +27,10 @@ import {
 import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
+import {
+  forgetFirstMessage,
+  putBackFirstMessage,
+} from "@/components/channels/composer/kept-first-message";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { StillWorkingError } from "@/components/channels/composer/queue";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
@@ -699,7 +703,12 @@ export function ChannelChat({
    */
   const [first] = useState(() => {
     const pending = takeFirstMessage(channel.id);
-    if (!pending) return null;
+    if (!pending) {
+      // A first message an earlier page kept and never sent goes back in the message box, which
+      // reads its draft as it mounts, after this. See `kept-first-message.ts`.
+      putBackFirstMessage(channel.id);
+      return null;
+    }
     const attachments = [...pending.attachments];
     // Drawn with its files, as `deliver` will send it, so they do not appear only once it runs.
     const seed: Message =
@@ -1771,6 +1780,8 @@ export function ChannelChat({
       },
       // Live on the thread now: if this chat has closed, the one open for this conversation joins the run.
       onRunStartedEvent: () => {
+        // The server has the conversation's first message: no page needs to put it back now.
+        if (first) forgetFirstMessage(channel.id);
         if (!onScreen.current) runStartedAway(channel.id);
       },
     });

@@ -55,12 +55,63 @@ export type SavedDraft = {
  * known yet: a draft is somebody's, and is never written where another person could open it.
  */
 export function savedDraftKey(draftKey: string): string | undefined {
+  return personalKey(PREFIX, draftKey);
+}
+
+/** `name` under `prefix`, for this person in this organization; undefined until both are known. */
+function personalKey(prefix: string, name: string): string | undefined {
   const organization = currentOrganizationId();
   const person = queryClient.getQueryData<AuthenticatedUser>(
     authKeys.currentUser(),
   )?.id;
   if (!organization || !person) return undefined;
-  return `${PREFIX}${encodeURIComponent(organization)}:${encodeURIComponent(person)}:${encodeURIComponent(draftKey)}`;
+  return `${prefix}${encodeURIComponent(organization)}:${encodeURIComponent(person)}:${encodeURIComponent(name)}`;
+}
+
+const SENDING_PREFIX = "openbot:composer-sending:";
+
+/**
+ * A NEW CONVERSATION'S BOX WHOSE SEND HAD NOT YET MADE ITS CONVERSATION. Each visit to a new
+ * conversation keeps its draft under a name of its own, so a page that died while its Send was
+ * still making the conversation left the words under a name no later visit asks for. This is that
+ * name, kept until the conversation is made, for the next new conversation to open with
+ * (`sendingDraftLeftBehind`).
+ */
+export function rememberSendingDraft(group: string, draftKey: string) {
+  const key = personalKey(SENDING_PREFIX, group);
+  if (!key) return;
+  try {
+    window.localStorage.setItem(key, draftKey);
+  } catch {
+    /* Without storage the words last as long as the page. */
+  }
+}
+
+/** The Send from `group` made its conversation, or gave its words back to the box: nothing is left behind. */
+export function forgetSendingDraft(group: string) {
+  const key = personalKey(SENDING_PREFIX, group);
+  if (!key) return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    /* Nothing was kept. */
+  }
+}
+
+/** The draft a page of `group` left behind when it died mid-Send, if its words are still kept. */
+export function sendingDraftLeftBehind(group: string): string | undefined {
+  const key = personalKey(SENDING_PREFIX, group);
+  if (!key) return undefined;
+  try {
+    const draftKey = window.localStorage.getItem(key);
+    if (!draftKey) return undefined;
+    const saved = savedDraftKey(draftKey);
+    if (saved && readSavedDraft(saved)) return draftKey;
+    window.localStorage.removeItem(key);
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function readSavedDraft(key: string): SavedDraft | undefined {
@@ -90,6 +141,14 @@ export function writeSavedDraft(key: string, draft: SavedDraft | undefined) {
   } catch {
     /* Storage can be full or turned off; the draft then lasts as long as the composer does. */
   }
+}
+
+/** Forget the draft a box keeps under `draftKey` (the composer's own name for it). */
+export function forgetSavedDraft(draftKey: string) {
+  const key = savedDraftKey(draftKey);
+  if (!key) return;
+  writeSavedDraft(key, undefined);
+  saveHeldFiles(key, []);
 }
 
 function isEmptyDraft(draft: SavedDraft): boolean {
