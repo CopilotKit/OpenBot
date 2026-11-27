@@ -241,7 +241,7 @@ export function QuestionNotice({
   botName: string;
   avatarSeed: string;
   onAnswered: (answer: string) => Promise<void>;
-  /** Drawn, but not yet answerable here: the conversation is still being joined. */
+  /** Drawn, but not yet answerable or dismissable here: the conversation is still being joined. */
   disabled?: boolean;
 }) {
   const dismiss = useMutation(
@@ -280,10 +280,14 @@ export function QuestionNotice({
           </p>
         ) : null}
       </div>
+      {/*
+       * Not while `disabled` either: dismissing moves on whatever waits on the question, and its
+       * re-read of every query lands mid-join, under the stored copy drawn while the join replays.
+       */}
       <Button
         aria-label="Dismiss question"
         className="-mt-1 -mr-1"
-        disabled={dismiss.isPending}
+        disabled={dismiss.isPending || disabled}
         onClick={() => dismiss.mutate({ id: question.id })}
         size="icon-sm"
         title="Dismiss without answering"

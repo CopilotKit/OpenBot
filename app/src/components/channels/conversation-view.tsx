@@ -61,7 +61,7 @@ export function ConversationView({
   stoppable,
   queueWhileBusy = false,
   restoring = false,
-  inert = false,
+  readOnly = false,
   intro,
   starterSuggestions,
   onSubmit,
@@ -145,8 +145,11 @@ export function ConversationView({
   queueWhileBusy?: boolean;
   /** History has been asked for and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
   restoring?: boolean;
-  /** The transcript's messages can't be acted on; see `ChatTranscript`. */
-  inert?: boolean;
+  /**
+   * The transcript's message rows are for reading only; queued messages and notices stay live. See
+   * `ChatTranscript`.
+   */
+  readOnly?: boolean;
   /**
    * The top of the conversation, drawn above the first message and scrolled away with it. Only
    * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
@@ -560,7 +563,7 @@ export function ConversationView({
           onSendQueuedNow={disabled ? undefined : sendQueuedNow}
           queued={queued}
           restoring={restoring}
-          inert={inert}
+          readOnly={readOnly}
           {...(stopped ? { stopped } : {})}
           {...(refusals ? { refusals } : {})}
           {...((stopped || refusals) && stoppedNotice ? { stoppedNotice } : {})}

@@ -9,6 +9,7 @@ import {
   render,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import {
   type AgentChannel,
@@ -590,6 +591,9 @@ test("nothing in the early history can be pressed while the replay runs", async 
     expect(shown(view.container, ASKED_TEXT)).toBe(1);
     const send = await view.findByRole("button", { name: "Send answer" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
+    // Nor dismissed: dismissing moves the Bot on, and re-reads what the stored copy is drawn from.
+    const dismiss = view.getByRole("button", { name: "Dismiss question" });
+    expect((dismiss as HTMLButtonElement).disabled).toBe(true);
 
     // Pressed anyway, and sent by its form: neither reaches the server or the agent.
     fireEvent.click(view.getByRole("radio", { name: /Red/ }));
@@ -612,6 +616,13 @@ test("nothing in the early history can be pressed while the replay runs", async 
         ).toBe(false),
       { timeout: 4000 },
     );
+    expect(
+      (
+        view.getByRole("button", {
+          name: "Dismiss question",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
     expect(answersSent).toBe(0);
     expect(setByApp.filter((call) => !call.replayOver)).toEqual([]);
   } finally {
@@ -620,8 +631,10 @@ test("nothing in the early history can be pressed while the replay runs", async 
 }, 10_000);
 
 /*
- * One place stops every renderer from acting on the stored copy: the message list is inert while
- * the join replays, whatever a surface in it would do when pressed. It ends with the replay.
+ * One guard stops every renderer from acting on the stored copy: a press on anything in its rows,
+ * by pointer, key or form, is held back while the join replays, whatever a surface would do with it
+ * (an A2UI button runs the agent). The rows stay readable: nothing is inert, so a screen reader still
+ * reads the history and its text can be selected. It ends with the replay.
  */
 test("the stored copy can't be acted on at all while the replay runs", async () => {
   const turn = turns[0];
@@ -634,18 +647,78 @@ test("the stored copy can't be acted on at all while the replay runs", async () 
   await sleep(200);
 
   expect(replayEnded).toBe(false);
-  const list = view.container.querySelector("[data-transcript-column]");
-  if (!list) throw new Error("No message list");
-  expect(list.hasAttribute("inert")).toBe(true);
+  const reply = view.getByText(PLAIN_REPLY);
+  expect(reply.closest("[inert]")).toBeNull();
+  const row = reply.closest("[data-message-id]");
+  if (!row) throw new Error("No message row");
+
+  /*
+   * A control as a renderer would draw one, with its own listener: the press must not reach it, and
+   * a button's default (submitting its form) must not happen either.
+   */
+  const control = document.createElement("button");
+  row.append(control);
+  let pressed = 0;
+  control.addEventListener("click", () => {
+    pressed += 1;
+  });
+  control.addEventListener("keydown", () => {
+    pressed += 1;
+  });
+  expect(fireEvent.click(control)).toBe(false);
+  expect(fireEvent.keyDown(control, { key: "Enter" })).toBe(false);
+  expect(fireEvent.keyDown(control, { key: " " })).toBe(false);
+  expect(pressed).toBe(0);
 
   await waitFor(() => expect(replayEnded).toBe(true), { timeout: 4000 });
+  // The replay's own rows, pressed once it is over: the press now arrives.
   await waitFor(
-    () =>
-      expect(
-        view.container
-          .querySelector("[data-transcript-column]")
-          ?.hasAttribute("inert"),
-      ).toBe(false),
+    () => {
+      const live = view.getByText(PLAIN_REPLY).closest("[data-message-id]");
+      if (!live) throw new Error("No message row");
+      if (!live.contains(control)) live.append(control);
+      expect(fireEvent.click(control)).toBe(true);
+      expect(pressed).toBeGreaterThan(0);
+    },
     { timeout: 4000 },
   );
+  control.remove();
+}, 10_000);
+
+/*
+ * Only the stored copy waits for the replay. What is typed meanwhile is queued, and the person can
+ * take it back during the replay: the queued line is not part of the stored copy.
+ */
+test("a message queued while the replay runs can be taken back during it", async () => {
+  const turn = turns[0];
+  if (!turn) throw new Error("No turn");
+  script = replaying(turn.replay());
+  storing(turn.stored);
+  roster();
+
+  const view = opened();
+  await sleep(200);
+  expect(replayEnded).toBe(false);
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "One more thing.",
+  );
+  await user.click(view.getByRole("button", { name: "Queue message" }));
+  const remove = await waitFor(() => {
+    const found = view.container.querySelector<HTMLButtonElement>(
+      "[aria-label^='Remove queued message']",
+    );
+    if (!found) throw new Error("Not queued");
+    return found;
+  });
+  expect(replayEnded).toBe(false);
+  expect(remove.closest("[inert]")).toBeNull();
+
+  await user.click(remove);
+  expect(replayEnded).toBe(false);
+  expect(
+    view.container.querySelector("[aria-label^='Remove queued message']"),
+  ).toBeNull();
 }, 10_000);

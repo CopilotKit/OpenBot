@@ -2456,12 +2456,13 @@ export function ChannelChat({
             queueWhileBusy
             restoring={historyLoading}
             /*
-             * Inert, because one place that stops every renderer from acting on the stored copy is
-             * safer than guarding each one: an A2UI surface's button sends its press straight to
+             * Read-only, because one place that stops every renderer from acting on the stored copy
+             * is safer than guarding each one: an A2UI surface's button sends its press straight to
              * `runAgent`, past the guards above, and would detach the replay and start a run the join
-             * has not confirmed. This lasts at most until the join ends or a live turn takes the screen.
+             * has not confirmed. Only the stored copy's rows: what is queued meanwhile can still be
+             * taken back. This lasts at most until the join ends or a live turn takes the screen.
              */
-            inert={earlyShown}
+            readOnly={earlyShown}
             /*
              * The run, not the turn. Stop reaches a run through the core's abort controller, and that
              * controller does not exist until `say` has finished waiting for the runtime agent — so
