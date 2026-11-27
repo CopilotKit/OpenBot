@@ -29,19 +29,26 @@ import { SkinAccountSync } from "../skins/account-sync";
 import { useActiveSkin } from "../skins/registry";
 
 export const Route = createFileRoute("/_authed")({
-  beforeLoad: async ({ context, location }) => {
+  /*
+   * Convention for every route: a `beforeLoad` or `loader` called with `preload: true` only reads. A hover
+   * runs it too, and must not change what the person did not choose, so the writes below wait for the visit.
+   */
+  beforeLoad: async ({ context, location, preload }) => {
     const user = await signedInUser(context.queryClient);
     if (!user) {
-      // An invitation's link is kept while they sign in, and home hands them on to it.
-      rememberInvitationLink(location.pathname);
-      /*
-       * Inside an OpenBot Desktop connected to an OpenBot that runs somewhere else, the desktop app
-       * holds the sign-in and this page has none to renew: the web sign-in screen would sign in a
-       * window that cannot keep it. The desktop app ends what is left of the sign-in and shows its
-       * own setup, where the person signs in again. If it cannot, the sign-in screen is still there.
-       */
-      if (await connectedThroughDesktop(context.queryClient)) {
-        await signOutThroughDesktop().catch(() => undefined);
+      // A hover on a link must not leave the invitation behind or sign Desktop out; only the visit does.
+      if (!preload) {
+        // An invitation's link is kept while they sign in, and home hands them on to it.
+        rememberInvitationLink(location.pathname);
+        /*
+         * Inside an OpenBot Desktop connected to an OpenBot that runs somewhere else, the desktop app
+         * holds the sign-in and this page has none to renew: the web sign-in screen would sign in a
+         * window that cannot keep it. The desktop app ends what is left of the sign-in and shows its
+         * own setup, where the person signs in again. If it cannot, the sign-in screen is still there.
+         */
+        if (await connectedThroughDesktop(context.queryClient)) {
+          await signOutThroughDesktop().catch(() => undefined);
+        }
       }
       throw redirect({ to: "/sign" });
     }
