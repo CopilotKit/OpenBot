@@ -262,7 +262,7 @@ test("apps open: on the owner's own Bot, an app nobody has added offers Connect 
   expect(notion.queryByRole("button", { name: /Request access/ })).toBeNull();
 });
 
-test("apps open: on somebody else's Bot, the person connects it and is told its owner gives it", async () => {
+test("apps open: on somebody else's Bot, the person is told only its owner or an admin can give it, asks with Request access, and may connect their own account", async () => {
   serving({
     apps: [
       appAccess({
@@ -283,11 +283,12 @@ test("apps open: on somebody else's Bot, the person connects it and is told its 
   ).toBeTruthy();
   expect(
     notion.getByText(
-      "Notion isn't connected yet. Connect it, and this Bot's owner can give it to the Bot.",
+      "Only this Bot's owner or an admin can give it Notion. Request access to ask for it. You can connect your own account now too.",
     ),
   ).toBeTruthy();
-  expect(notion.queryByRole("button", { name: /Request access/ })).toBeNull();
-  expect(notion.queryByText(/\badmin\b/i)).toBeNull();
+  expect(
+    notion.getByRole("button", { name: "Request access to Notion" }),
+  ).toBeTruthy();
 });
 
 test("a Bot with no apps: open, nobody is told to ask an admin; locked down, they are", async () => {

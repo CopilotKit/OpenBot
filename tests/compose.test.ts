@@ -93,6 +93,13 @@ function runLangGraphAguiModelProbe(
         "tools.current_tools = lambda: SimpleNamespace(model='', effort='')",
         "tools.model_messages = lambda messages: messages",
         "sys.modules['src.tool_runtime'] = tools",
+        // An OpenAI-compatible model is built as `SignedChatOpenAI(model=..., **kwargs)`, which is
+        // `init_chat_model`'s own construction for `openai`: stood in for the same way.
+        "signatures = ModuleType('src.thought_signatures')",
+        "signatures.SignedChatOpenAI = lambda model, **kwargs: {'model': model, 'model_provider': 'openai'}",
+        "signatures.is_gemini = lambda model: False",
+        "signatures.signed = lambda messages, found: messages",
+        "sys.modules['src.thought_signatures'] = signatures",
         "from src import main",
         "chosen = main._model()",
         "print(json.dumps({'base_url': os.environ.get('OPENAI_BASE_URL'), **chosen}))",
