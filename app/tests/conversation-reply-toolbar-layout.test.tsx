@@ -157,9 +157,27 @@ async function open(
   await page.addStyleTag({ content: copilotkit });
   await style(page);
   await page.evaluate(() => document.fonts.ready);
-  // Rows ease in: looked at once they are still.
-  await page.waitForTimeout(400);
+  await still(page);
   return page;
+}
+
+/**
+ * Until nothing on the page is moving. The page is drawn before its stylesheets are added, so
+ * adding them starts transitions: the Copy button fades from the browser's own button colour to
+ * its own, and rows ease in. Read mid-fade, the colour is neither, and on a busy machine a fixed
+ * wait can end before the fade does.
+ */
+async function still(page: Page) {
+  await page.waitForFunction(() =>
+    document.getAnimations().every(
+      (animation) =>
+        animation.playState !== "running" ||
+        // Driven by scrolling, or endless: neither ever ends on its own.
+        animation.timeline !== document.timeline ||
+        animation.effect?.getComputedTiming().endTime ===
+          Number.POSITIVE_INFINITY,
+    ),
+  );
 }
 
 /** Styles the classes the page draws now. */
