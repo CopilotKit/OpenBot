@@ -1587,6 +1587,14 @@ components:
         systemOwned:
           type: boolean
           description: Whether it comes with OpenBot rather than belonging to a person.
+        ownerless:
+          type: boolean
+          readOnly: true
+          description: >-
+            Whether nobody owns it, as with a Bot OpenBot made for everyone in
+            the organization. Only an admin can give such a Bot apps. Absent
+            or false for a Bot a person owns. Never accepted when a Bot is
+            created or changed.
         packageBotId:
           type: [string, 'null']
           readOnly: true
