@@ -290,7 +290,7 @@ function RouteComponent() {
        */}
       <div
         className={cn(
-          "relative isolate flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable_both-edges] flex flex-col items-center justify-center-safe w-full p-4 mt-8",
+          "relative isolate flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable_both-edges] flex flex-col items-center w-full p-4 mt-8",
           intro && "home-intro",
         )}
       >
@@ -299,10 +299,12 @@ function RouteComponent() {
         <HomeField area={area} intro={intro} />
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
-        {/* Only the heading and the box are centred in the column. What arrives later, the hint,
-            the error lines and Explore Bots, hangs below the box without taking part in the
-            centring, so none of it can move them. */}
-        <div className="relative flex w-full flex-col items-center">
+        {/* Only the heading and the box are centred in the column, by auto margins rather than
+            justify-content: safe, which older WebKit drops. What arrives later, the hint, the
+            error lines and Explore Bots, hangs below the box without taking part in the
+            centring, so none of it can move them. When the window is shorter than this group the
+            margins collapse to nothing and the heading stays reachable. */}
+        <div className="relative my-auto flex w-full flex-col items-center">
           <div className="flex flex-col items-center" data-intro="heading">
             <h1 className="text-2xl font-semibold tracking-tight text-center">
               {greeting}
