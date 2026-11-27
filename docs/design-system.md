@@ -120,8 +120,10 @@ changed in `tokens/src/scheme.ts` and written out with `bun run tokens:generate`
   and as a shadcn user expects. Moving `sm` by 4px, or making every button a pill, redraws every
   screen at once. A new look is a new variant, agreed first.
 - **One system.** No second kit beside the first, no "legacy" mode, no variant that switches
-  between two looks. A skin sets the scheme's tokens under `:root[data-skin]` and nothing more. If
-  a change needs a switch to keep old screens as they were, it is the wrong change.
+  between two looks. A skin keeps its own layout and wears the scheme's colors: it sets none of
+  them under `:root[data-skin]`, and each color role of its own reads the scheme's token that means
+  the same (`--opendots-label: var(--muted-foreground)`). If a change needs a switch to keep old
+  screens as they were, it is the wrong change.
 - **Every state, both modes.** A primitive is done when rest, hover, focus, pressed, disabled and
   invalid are all drawn, in light and in dark, and the keyboard reaches it.
 
@@ -195,6 +197,7 @@ A change to a token or a primitive changes every screen, so it lands differently
 | [`app/tests/ui-primitives-look.test.ts`](../app/tests/ui-primitives-look.test.ts) | Every primitive keeps the look's corner and shadow steps, a copied shadcn one included. |
 | [`app/tests/ui-look-theme.test.ts`](../app/tests/ui-look-theme.test.ts) | The one radius, the icons' line, and every line at one strength. |
 | [`tokens/tests/slate.test.ts`](../tokens/tests/slate.test.ts) | The grays are one family, in light and in dark. |
+| [`tokens/tests/contrast.test.ts`](../tokens/tests/contrast.test.ts) | Text reads on the surfaces it is set on (4.5:1) and the focus ring shows (3:1), in light and in dark. |
 | [`app/tests/skins.test.ts`](../app/tests/skins.test.ts) | A skin sets every light token for dark too. |
 | [`app/tests/checkbox-contrast.test.tsx`](../app/tests/checkbox-contrast.test.tsx) | A checkbox's edge can be seen. |
 

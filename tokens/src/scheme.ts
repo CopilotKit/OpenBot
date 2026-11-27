@@ -78,12 +78,12 @@ const light: Palette = {
   "muted-foreground": "oklch(0.506 0.045 257.4)",
   accent: "oklch(0.956 0.009 250.2)",
   "accent-foreground": "oklch(0.108 0.042 264.7)",
-  destructive: "oklch(0.504 0.178 22.9)",
+  destructive: "oklch(0.46 0.173 22.6)",
   success: "oklch(0.514 0.1 167.2)",
-  warning: "oklch(0.555 0.163 49)",
+  warning: "oklch(0.521 0.143 47.7)",
   border: "oklch(0.108 0.042 264.7 / 20%)",
   input: "oklch(0.108 0.042 264.7 / 20%)",
-  ring: "oklch(0.644 0.167 276.1)",
+  ring: "oklch(0.638 0.167 276.1)",
   "chart-1": "oklch(0.869 0.022 252.894)",
   "chart-2": "oklch(0.554 0.046 257.417)",
   "chart-3": "oklch(0.446 0.043 257.281)",
@@ -97,7 +97,7 @@ const light: Palette = {
   "sidebar-accent": "oklch(0.832 0.085 281.4 / 30%)",
   "sidebar-accent-foreground": "oklch(0.108 0.042 264.7)",
   "sidebar-border": "oklch(0.108 0.042 264.7 / 20%)",
-  "sidebar-ring": "oklch(0.644 0.167 276.1)",
+  "sidebar-ring": "oklch(0.638 0.167 276.1)",
 };
 
 /*

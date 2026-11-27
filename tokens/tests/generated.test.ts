@@ -61,7 +61,7 @@ describe("the phone app's copy", () => {
       const drawn: string = phone[mode].warning;
       expect(drawn).toBe(oklchToHex(token as string));
     }
-    expect(phone.light.warning).toBe("#bb4d00");
+    expect(phone.light.warning).toBe("#a84900");
     expect(phone.dark.warning).toBe("#ffb900");
   });
 });
