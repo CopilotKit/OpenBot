@@ -714,6 +714,17 @@ export function ChannelChat({
   });
   const seed = first?.seed ?? null;
 
+  /*
+   * A CONVERSATION THIS PAGE HAS JUST MADE SENDS ITS FIRST MESSAGE AT ONCE. Its thread is new, so
+   * there is nothing to join, no history to read and no voice chat to bring in, and waiting for them
+   * held the message in this page for a second or two after it showed as sent. A phone locked or a
+   * tab closed in that time lost it: the conversation was made, and opened later empty, with no run
+   * in its thread. So the first message leaves before any of that (`deliver`), and the join is not
+   * made at all (the join effect): the run streams the turn here itself.
+   */
+  const fresh = first !== null;
+  const firstOfFresh = useRef(fresh);
+
   /** Cleared by the send-on-mount effect without restarting it. */
   const seedRef = useRef(first);
 
@@ -851,10 +862,17 @@ export function ChannelChat({
     else pullHistoryRef.current?.();
   });
 
-  // Join the gateway socket, restore durable history, then release the first-message gate.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `joins` is the join asked for again when OpenBot answers again.
+  // Join the gateway socket, restore durable history, then release the first-message gate. `joins`
+  // is the join asked for again when OpenBot answers again.
   useEffect(() => {
     if (!isReady) return;
+    // Just made here: nothing to join or read, and the first message is not held for it (`fresh`).
+    // Asked again when OpenBot answers again (`joins`), it is joined as any conversation is.
+    if (fresh && joins === 0) {
+      openJoined.current();
+      openJoinGate.current();
+      return;
+    }
     let current = true;
     const version = ++historyReadVersion.current;
     // Before the connect: it is handed the subscribers the agent has when it starts.
@@ -1089,6 +1107,7 @@ export function ChannelChat({
     channel.threadId,
     runtimeAgentId,
     joins,
+    fresh,
   ]);
 
   /*
@@ -1642,23 +1661,28 @@ export function ChannelChat({
     // used throughout, so the message, the repair and the run cannot land on two different agents.
     // Give initial voice history time to restore, while keeping ordinary chat usable on failure.
     setVoiceContextNotice(null);
+    // The first message of a conversation just made here: no call has been had in it (`fresh`).
+    const first = firstOfFresh.current;
+    firstOfFresh.current = false;
     let voiceHistoryTimer: ReturnType<typeof setTimeout> | undefined;
-    const priorCalls = await Promise.race([
-      loadVoiceArchive(channel.id),
-      new Promise<never>((_resolve, reject) => {
-        voiceHistoryTimer = setTimeout(
-          () => reject(new Error("Voice history timed out")),
-          2000,
-        );
-      }),
-    ])
-      .catch(() => {
-        setVoiceContextNotice(
-          "Couldn’t bring in what was said on the call. You may need to repeat it.",
-        );
-        return cachedVoiceArchive(channel.id);
-      })
-      .finally(() => clearTimeout(voiceHistoryTimer));
+    const priorCalls = first
+      ? []
+      : await Promise.race([
+          loadVoiceArchive(channel.id),
+          new Promise<never>((_resolve, reject) => {
+            voiceHistoryTimer = setTimeout(
+              () => reject(new Error("Voice history timed out")),
+              2000,
+            );
+          }),
+        ])
+          .catch(() => {
+            setVoiceContextNotice(
+              "Couldn’t bring in what was said on the call. You may need to repeat it.",
+            );
+            return cachedVoiceArchive(channel.id);
+          })
+          .finally(() => clearTimeout(voiceHistoryTimer));
     const target = agentRef.current;
     /*
      * A call this screen holds no answer for is answered from the stored thread first, so the repair
