@@ -931,6 +931,21 @@ async function connectAi(page: Page) {
   await page.locator("[data-onboarding-primary]").click();
 }
 
+/**
+ * An app's sign-in, as a browser goes through it from the app's page: OpenBot's step goes on to the
+ * vendor's sign-in by itself, the vendor connects the app, and the sign-in comes back to Connections.
+ *
+ * The app is connected only once the page has left for the sign-in, as it is for real. Connected
+ * while its page was still reading what it draws, that page read the app as connected and went on
+ * to the list itself, taking the way back with it, so the page the sign-in then came back to had
+ * nowhere to go and stayed on Connections.
+ */
+async function signInThrough(page: Page, server: FakeServer, cloudId: string) {
+  await page.waitForURL(`${SIGN_IN}/${cloudId}`);
+  server.connected.add(cloudId);
+  await page.goto(`${ORIGIN}/connections?connected=${cloudId}`);
+}
+
 /** Reconnect on the list: the app's page, its sign-in, and back to the list connected. */
 async function reconnectThrough(
   page: Page,
@@ -940,8 +955,7 @@ async function reconnectThrough(
 ) {
   await row(page, appId).getByRole("button", { name: "Reconnect" }).click();
   await page.waitForURL(`${ORIGIN}/connections/${cloudId}`);
-  server.connected.add(cloudId);
-  await page.goto(`${ORIGIN}/connections?connected=${cloudId}`);
+  await signInThrough(page, server, cloudId);
   await page.waitForURL(`${ORIGIN}/reconnect`);
 }
 
@@ -1082,10 +1096,7 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
           .getByRole("button", { name: "Reconnect" })
           .click();
         await page.waitForURL(`${ORIGIN}/connections/composio-googlecalendar`);
-        server.connected.add("composio-googlecalendar");
-        await page.goto(
-          `${ORIGIN}/connections?connected=composio-googlecalendar`,
-        );
+        await signInThrough(page, server, "composio-googlecalendar");
         await page.waitForURL(`${ORIGIN}/`);
       } finally {
         await page.close();
@@ -1115,8 +1126,7 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
           { appId: "composio-gmail", key: false },
         ]);
         // And connecting it comes back to the list, with the other still to do.
-        server.connected.add("composio-gmail");
-        await page.goto(`${ORIGIN}/connections?connected=composio-gmail`);
+        await signInThrough(page, server, "composio-gmail");
         await page.waitForURL(`${ORIGIN}/reconnect`);
         await row(page, "gmail").getByText("Reconnected").waitFor();
         await row(page, "googlecalendar")

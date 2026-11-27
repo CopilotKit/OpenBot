@@ -6,6 +6,7 @@ import { compile } from "tailwindcss";
 import { getGetBotResponseMock } from "@/lib/api/generated/bots/bots.msw";
 import { personBody } from "./accounts-api";
 import { botGrantsBody } from "./bot-grants-api";
+import { still } from "./page-still";
 
 /**
  * An unsent reply, and the files attached to it, stay with their conversation, in a real browser.
@@ -423,8 +424,8 @@ async function shoot(page: Page, step: string, name: string) {
     ]),
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
-  // The stylesheet lands after the page drew: give the strip's opening and the fonts a moment.
-  await page.waitForTimeout(500);
+  // The stylesheet lands after the page drew: the strip opens and the fonts load, then it is still.
+  await still(page);
   await page.screenshot({
     path: join(shots, `composer-keeps-draft-${step}-${name}.png`),
   });

@@ -410,8 +410,12 @@ async def plan_models():
     return {"object": "list", "data": [model.as_entry() for model in models]}
 
 
+# No count ends a run. A call the caller owns ends the run on its own, so there a run is one model
+# step; but a deployment's tools are answered here, step after step in one run, and LangGraph's
+# 25 graph steps ended a turn at its twelfth tool call with an error. A person's turn has no step
+# ceiling: it ends when the model answers in words, or when the caller stops the run.
 add_langgraph_fastapi_endpoint(
     app=app,
-    agent=ToolAwareAgent(name="openbot", graph=graph, config={"recursion_limit": 25}),
+    agent=ToolAwareAgent(name="openbot", graph=graph, config={"recursion_limit": sys.maxsize}),
     path="/",
 )

@@ -25,6 +25,7 @@ import {
 } from "@/lib/api/generated/models/models.zod";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import { personBody } from "./accounts-api";
+import { still } from "./page-still";
 
 /**
  * Connect your AI, on an OpenBot that provides no AI of its own (OpenBot Cloud).
@@ -989,7 +990,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(
@@ -2229,7 +2230,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           await page.evaluate(() =>
             window.scrollTo(0, document.documentElement.scrollHeight),
           );
-          await page.waitForTimeout(100);
+          await still(page);
           const room = await page.evaluate(() => {
             const footer = document.querySelector("footer");
             const signOut = [...document.querySelectorAll("button")].find(

@@ -266,6 +266,16 @@ function openAIModel(model: string, run: RunModel, env: Env): BaseChatModel {
   });
 }
 
+/**
+ * Whether a Claude model thinks adaptively when a request leaves `thinking` out: every Claude of
+ * the fifth generation on (Opus, Sonnet, Haiku, Fable, Mythos), as Anthropic documents them.
+ * Earlier ones (Opus 4.7 and 4.8 included) run without thinking when it is left out.
+ */
+function thinksByDefault(model: string): boolean {
+  const generation = /^claude-[a-z]+-(\d+)/.exec(model.trim().toLowerCase());
+  return !!generation && Number(generation[1]) >= 5;
+}
+
 function anthropicModel(model: string, run: RunModel, env: Env): BaseChatModel {
   const baseUrl = env.ANTHROPIC_BASE_URL?.trim() || undefined;
   // Anthropic clears old tool results on its side, so a long run stays inside the window
@@ -279,6 +289,11 @@ function anthropicModel(model: string, run: RunModel, env: Env): BaseChatModel {
       ...(ANTHROPIC_EFFORTS.has(run.effort)
         ? { outputConfig: { effort: run.effort as never } }
         : {}),
+      // Said outright for a model that thinks adaptively anyway, so the request is the same. Left
+      // out, @langchain/anthropic checks its own default (`disabled`, which it never sends) against
+      // Opus 5's rule that disabled thinking can't run at xhigh or max, and throws before asking:
+      // a person who picked Opus 5.5 at Extra high got "The Bot stopped" and no answer.
+      ...(thinksByDefault(model) ? { thinking: { type: "adaptive" } } : {}),
     }),
   );
 }

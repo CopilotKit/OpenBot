@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 
 /**
  * Only an owner removes another owner, as the server holds. Organization settings' Members list, in
@@ -166,7 +167,7 @@ async function open(
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(400);
+  await still(page);
   return page;
 }
 

@@ -2,7 +2,7 @@ import type {
   BrowserChallenge,
   HandoffRequest,
 } from "@openbot/shared/computer-control";
-import { callComputer, type ToolOutcome } from "./call";
+import { callComputer, stepOf, type ToolOutcome } from "./call";
 import { cancelControl, readControl } from "./control";
 
 export type PendingHandoff = { requestId: string; toolCallId: string };
@@ -232,6 +232,8 @@ export async function runHelpRequest(
   reason: string,
   toolCallId?: string,
   signal?: AbortSignal,
+  /** The conversation's thread the call is in: with `toolCallId`, the step the server runs once. */
+  threadId?: string,
 ): Promise<ToolOutcome> {
   const stored = pendingHandoff(botId);
   if (toolCallId && stored?.toolCallId === toolCallId)
@@ -239,7 +241,11 @@ export async function runHelpRequest(
   const asked = await callComputer(
     botId,
     "/control/request",
-    { method: "POST", body: { reason, ...(toolCallId ? { toolCallId } : {}) } },
+    {
+      method: "POST",
+      body: { reason, ...(toolCallId ? { toolCallId } : {}) },
+      step: stepOf({ agent: { threadId }, toolCall: { id: toolCallId } }),
+    },
     signal,
   );
   if (!asked.ok) return asked;
@@ -258,6 +264,8 @@ export async function runNavigation(
   url: string,
   toolCallId?: string,
   signal?: AbortSignal,
+  /** The conversation's thread the call is in: with `toolCallId`, the step the server runs once. */
+  threadId?: string,
 ): Promise<ToolOutcome> {
   const stored = pendingHandoff(botId);
   if (toolCallId && stored?.toolCallId === toolCallId)
@@ -265,7 +273,11 @@ export async function runNavigation(
   const result = await callComputer(
     botId,
     "/navigate",
-    { method: "POST", body: { url, ...(toolCallId ? { toolCallId } : {}) } },
+    {
+      method: "POST",
+      body: { url, ...(toolCallId ? { toolCallId } : {}) },
+      step: stepOf({ agent: { threadId }, toolCall: { id: toolCallId } }),
+    },
     signal,
   );
   const challenge = challengeFrom(result);
@@ -300,6 +312,8 @@ export async function runBrowserRead(
   path: "/read" | "/snapshot",
   toolCallId?: string,
   signal?: AbortSignal,
+  /** The conversation's thread the call is in: with `toolCallId`, the step the server runs once. */
+  threadId?: string,
 ): Promise<ToolOutcome> {
   const stored = pendingHandoff(botId);
   if (toolCallId && stored?.toolCallId === toolCallId)
@@ -307,7 +321,10 @@ export async function runBrowserRead(
   const result = await callComputer(
     botId,
     path,
-    path === "/snapshot" ? { method: "POST" } : undefined,
+    {
+      ...(path === "/snapshot" ? { method: "POST" } : {}),
+      step: stepOf({ agent: { threadId }, toolCall: { id: toolCallId } }),
+    },
     signal,
   );
   const challenge = challengeFrom(result);

@@ -58,6 +58,12 @@ const REJECTED = "invalid x-api-key";
 /** How the next `/run` goes. A fresh one per test. */
 type RunPlan =
   | { kind: "fails"; message: string }
+  /**
+   * The Bot's engine can't take the run (it isn't answering), as OpenBot's server ends one: the run
+   * starts and ends in a RUN_ERROR coded BOT_ENGINE_UNAVAILABLE, and the turn is kept as a refused
+   * turn (`listRefusedTurns`). The person's message reaches the thread, as it does.
+   */
+  | { kind: "engineRefused"; message: string }
   /** The Bot works (it says what it found, and reads an app) and then the run fails. */
   | { kind: "worksThenFails"; text: string; message: string }
   | { kind: "calls"; tool: string }
@@ -81,10 +87,18 @@ type RunPlan =
    * runs on slept through the rest. The thread holds the whole reply, and the server keeps the run's
    * ending as it ended: `succeeded` when it finished, `failed` when it ended on a RUN_ERROR.
    */
-  | { kind: "endsUnheard"; text: string; ends: "finished" | "fails" };
+  | { kind: "endsUnheard"; text: string; ends: "finished" | "fails" }
+  /**
+   * The same, on a run that ends by handing this browser a step, as a run that needs the Bot's
+   * computer does: it says what it will do and asks for the step, and the run finishes. The thread
+   * holds both, and the server keeps the run as `succeeded`; the step was never taken.
+   */
+  | { kind: "endsUnheardOnStep"; text: string; tool: string };
 
 let originalFetch: typeof fetch;
 let plans: RunPlan[] = [];
+/** What each run was sent, in order. */
+let runInputs: RunAgentInput[] = [];
 /** Every event the runtime has streamed for a thread, run after run: what `/connect` replays. */
 let recorded = new Map<string, unknown[]>();
 /** The thread's stored messages: what was said, and nothing about how a run ended. */
@@ -242,6 +256,37 @@ function run(input: RunAgentInput): Response {
     record(input.threadId, events);
     return sse(events);
   }
+  if (plan.kind === "engineRefused") {
+    const asked = input.messages.findLast((message) => message.role === "user");
+    const at = asked ? input.messages.indexOf(asked) : -1;
+    refusedTurns.push({
+      id: `refused-${refusedTurns.length + 1}`,
+      botId: "failed-run-bot",
+      threadId: input.threadId,
+      afterMessageId: at > 0 ? (input.messages[at - 1]?.id ?? null) : null,
+      message: asked
+        ? {
+            id: asked.id,
+            text: typeof asked.content === "string" ? asked.content : "",
+          }
+        : null,
+      initiator: "person",
+      code: "BOT_ENGINE_UNAVAILABLE",
+      detail: plan.message,
+      model: null,
+      createdAt: new Date(Date.now() + refusedTurns.length).toISOString(),
+    });
+    const events = [
+      started,
+      {
+        type: "RUN_ERROR",
+        message: plan.message,
+        code: "BOT_ENGINE_UNAVAILABLE",
+      },
+    ];
+    record(input.threadId, events);
+    return sse(events);
+  }
   if (plan.kind === "worksThenFails") {
     const said = `said-${input.runId}`;
     const read = `read-${input.runId}`;
@@ -270,6 +315,59 @@ function run(input: RunAgentInput): Response {
     return sse(events);
   }
   const messageId = `reply-${input.runId}`;
+  if (plan.kind === "endsUnheardOnStep") {
+    const toolCallId = `call-${input.runId}`;
+    const head = plan.text.slice(0, Math.floor(plan.text.length / 2));
+    // The run as it went on the server: what the Bot said, its step, and RUN_FINISHED.
+    record(input.threadId, [
+      started,
+      { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
+      { type: "TEXT_MESSAGE_CONTENT", messageId, delta: plan.text },
+      { type: "TEXT_MESSAGE_END", messageId },
+      {
+        type: "TOOL_CALL_START",
+        toolCallId,
+        toolCallName: plan.tool,
+        parentMessageId: messageId,
+      },
+      { type: "TOOL_CALL_ARGS", toolCallId, delta: "{}" },
+      { type: "TOOL_CALL_END", toolCallId },
+      { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+    ]);
+    remember(input.threadId, [
+      {
+        id: messageId,
+        role: "assistant",
+        content: plan.text,
+        toolCalls: [
+          {
+            id: toolCallId,
+            type: "function",
+            function: { name: plan.tool, arguments: "{}" },
+          },
+        ],
+      },
+    ]);
+    endings.set(input.runId, {
+      threadId: input.threadId,
+      outcome: "succeeded",
+      endedAt: new Date().toISOString(),
+    });
+    // What reached this browser: the start, the first half of what the Bot said, and then nothing.
+    const heard = [
+      started,
+      { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
+      { type: "TEXT_MESSAGE_CONTENT", messageId, delta: head },
+    ];
+    return new NativeResponse(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(frames(heard)));
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  }
   if (plan.kind === "endsUnheard") {
     const cut = Math.floor(plan.text.length / 2);
     const head = plan.text.slice(0, cut);
@@ -435,7 +533,9 @@ beforeAll(() => {
       }
       if (url.pathname.endsWith("/run")) {
         runAsked = true;
-        return run(RunAgentInputSchema.parse(await request().json()));
+        const input = RunAgentInputSchema.parse(await request().json());
+        runInputs.push(input);
+        return run(input);
       }
       /*
        * A stop, as the runtime carries it out: the runner closes what the run left open and ends it
@@ -554,6 +654,7 @@ afterEach(() => {
   cleanup();
   queryClient.clear();
   plans = [];
+  runInputs = [];
   recorded = new Map();
   stored = new Map();
   stopRequests = [];
@@ -1056,6 +1157,98 @@ test("two turns refused in a row each keep their own notice, under their own mes
   }
 });
 
+/*
+ * FOUND IN TESTING. A Bot whose engine had stopped said so under the message, as the turn's last
+ * line. With the engine back the next message was answered, and that line went with the turn it
+ * belonged to: the message the engine never answered sat in the conversation with nothing under it,
+ * then and after every reload. The server keeps such a turn as a refused one, and the run's RUN_ERROR
+ * says so (BOT_ENGINE_UNAVAILABLE), so it stays under its message like any refusal.
+ */
+test("a turn refused because the Bot's engine isn't answering keeps its notice under its message, through the next turn and after a reload", async () => {
+  const ENGINE_DOWN =
+    "Tide Table Clerk can't run because OpenBot's LangGraph engine isn't answering. Try again in a moment, or ask an admin to check that it's running.";
+  const ASKED = "What is a spring tide, in one sentence?";
+  const AGAIN = "And again: what is a spring tide?";
+  const ANSWER = "A spring tide is an unusually large tide. Fair winds!";
+  const noticeUnder = (view: ReturnType<typeof open>, words: string) =>
+    within(
+      view
+        .getByText(words)
+        .closest("[data-slot=message-scroller-item]") as HTMLElement,
+    ).queryByTestId("transcript-stopped");
+
+  plans = [
+    { kind: "engineRefused", message: ENGINE_DOWN },
+    { kind: "answers", text: ANSWER },
+  ];
+  const live = open();
+  await send(live, ASKED);
+  await waitFor(() =>
+    expect(noticeUnder(live, ASKED)?.textContent).toBe(ENGINE_DOWN),
+  );
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+  // Refused, not failed: the message stays sent and the box is empty, as for any refusal.
+  await waitFor(() => expect(typed(live)).toBe(""));
+
+  // The server's record, read again after the live refusal, is in before the next turn.
+  await waitFor(() => expect(refusedTurns).toHaveLength(1));
+  await new Promise((settle) => setTimeout(settle, 50));
+
+  // The next turn is answered, and the refused one keeps its notice. Typed into the empty box.
+  const user = userEvent.setup({ document: live.container.ownerDocument });
+  await user.type(await live.findByRole("textbox", { name: "Message" }), AGAIN);
+  await user.click(await live.findByRole("button", { name: "Send message" }));
+  await live.findByText(ANSWER);
+  expect(noticeUnder(live, ASKED)?.textContent).toBe(ENGINE_DOWN);
+  expect(live.getAllByTestId("transcript-stopped")).toHaveLength(1);
+
+  // Reloaded: it comes back where it was, once.
+  cleanup();
+  queryClient.clear();
+  const back = open();
+  await settled(back, ANSWER);
+  await waitFor(() =>
+    expect(noticeUnder(back, ASKED)?.textContent).toBe(ENGINE_DOWN),
+  );
+  expect(back.getAllByTestId("transcript-stopped")).toHaveLength(1);
+  expect(back.getAllByText(ASKED)).toHaveLength(1);
+});
+
+/*
+ * The same refusal as the conversation's last turn, reloaded: drawn under its message from the
+ * server's record, and not a second time as how the last run ended.
+ */
+test("a conversation whose last turn the engine refused shows the notice once after a reload, under its message", async () => {
+  const ENGINE_DOWN =
+    "Tide Table Clerk can't run because OpenBot's LangGraph engine isn't answering. Try again in a moment, or ask an admin to check that it's running.";
+  const ASKED = "What is a neap tide, in one sentence?";
+  plans = [{ kind: "engineRefused", message: ENGINE_DOWN }];
+  const live = open();
+  await send(live, ASKED);
+  await live.findByTestId("transcript-stopped");
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+
+  cleanup();
+  queryClient.clear();
+  const back = open();
+  await settled(back, ASKED);
+  // The replay has to be all the way in before a second notice could be drawn from it.
+  await waitFor(() =>
+    expect(back.getAllByTestId("transcript-stopped")).toHaveLength(1),
+  );
+  await new Promise((settle) => setTimeout(settle, 100));
+  const shown = back.getAllByTestId("transcript-stopped");
+  expect(shown).toHaveLength(1);
+  expect(
+    (shown[0] as HTMLElement).closest("[data-slot=message-scroller-item]")
+      ?.textContent,
+  ).toContain(ASKED);
+});
+
 test("a turn that failed before it did anything hands the words back to send again", async () => {
   plans = [{ kind: "fails", message: REJECTED }];
   const live = open();
@@ -1154,6 +1347,90 @@ test("a run that finished on the server while this browser heard only its start 
     quietRunPeriod.ms = period;
   }
 }, 20_000);
+
+/*
+ * FOUND ON OPENBOT CLOUD, in a phone's web view, on a long task at the highest reasoning level. The
+ * Bot said it would finish the report and asked for a command on its computer, and its run finished
+ * on the server, handing this browser the command. The phone was not listening, so the command never
+ * ran, and the turn ended "The Bot stopped before it finished". Carry on brought a run that ended on
+ * the next command the same way, three times in one conversation.
+ */
+test("a run that finished on a step this browser never heard carries on, and the step is taken", async () => {
+  const period = quietRunPeriod.ms;
+  quietRunPeriod.ms = 200;
+  try {
+    const SAID =
+      "I'll finish the report and put the derivations and numerical checks in the attached PDF.";
+    const DONE = "The report is finished, with the derivations in the PDF.";
+    plans = [
+      { kind: "endsUnheardOnStep", text: SAID, tool: STEP },
+      { kind: "calls", tool: STEP },
+      { kind: "answers", text: DONE },
+    ];
+    const live = open();
+    await send(live, "Please carry on where you stopped.");
+    await live.findByText(DONE, {}, { timeout: 15_000 });
+    await waitFor(
+      () =>
+        expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+      { timeout: 15_000 },
+    );
+    // The turn went on by itself: no notice, no Carry on, and the step was taken here once.
+    expect(live.queryByTestId("transcript-stopped")).toBeNull();
+    expect(live.queryByText(RUN_ENDED_UNHEARD)).toBeNull();
+    expect(live.queryByRole("button", { name: "Carry on" })).toBeNull();
+    expect(stepsRun).toBe(1);
+    expect(runInputs).toHaveLength(3);
+    // The Bot was told the step it asked for was never taken, beside the step, and asked again.
+    const first = runInputs[0]?.runId;
+    const toldNotRun = runInputs[1]?.messages.find(
+      (message) =>
+        message.role === "tool" && message.toolCallId === `call-${first}`,
+    );
+    expect(toldNotRun?.content).toContain("no result came back for this call");
+    // And the person's message is not sent twice.
+    expect(
+      runInputs[1]?.messages.filter(
+        (message) =>
+          message.role === "user" &&
+          message.content === "Please carry on where you stopped.",
+      ),
+    ).toHaveLength(1);
+    expect(typed(live)).toBe("");
+  } finally {
+    quietRunPeriod.ms = period;
+  }
+}, 30_000);
+
+test("a second step a turn never heard keeps the notice and its Carry on, rather than carrying on again", async () => {
+  const period = quietRunPeriod.ms;
+  quietRunPeriod.ms = 200;
+  try {
+    plans = [
+      { kind: "endsUnheardOnStep", text: "Building the PDF now.", tool: STEP },
+      {
+        kind: "endsUnheardOnStep",
+        text: "Trying the PDF build again.",
+        tool: STEP,
+      },
+    ];
+    const live = open();
+    await send(live, "Build the report");
+    const shown = await live.findByTestId(
+      "transcript-stopped",
+      {},
+      { timeout: 25_000 },
+    );
+    expect(within(shown).getByRole("alert").textContent).toBe(
+      RUN_ENDED_UNHEARD,
+    );
+    within(shown).getByRole("button", { name: "Carry on" });
+    expect(runInputs).toHaveLength(2);
+    expect(stepsRun).toBe(0);
+  } finally {
+    quietRunPeriod.ms = period;
+  }
+}, 30_000);
 
 test("a run that failed on the server while this browser heard only its start still says it stopped, with Carry on", async () => {
   const period = quietRunPeriod.ms;

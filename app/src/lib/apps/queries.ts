@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { everyPage } from "@/lib/api/every-page";
 import {
   getAppSetup,
@@ -27,6 +27,9 @@ export const appKeys = {
   catalogue: () => ["plugins", "apps", "catalogue"] as const,
   directory: (search: string) =>
     ["plugins", "apps", "directory", { search }] as const,
+  /** The same directory a page at a time: its own key, since what it caches is pages, not a list. */
+  directoryPages: (search: string) =>
+    ["plugins", "apps", "directory-pages", { search }] as const,
 };
 
 /** The most a page holds, so a whole list takes as few requests as it can. */
@@ -149,6 +152,57 @@ export function directoryAppsQueryOptions(search: string) {
         (entry): entry is DirectoryAppEntry => entry.source === "directory",
       );
     },
+  });
+}
+
+/** One page of the wider directory, as Browse apps reads it. */
+export type DirectoryAppPage = {
+  apps: DirectoryApp[];
+  nextCursor: string | null;
+  /** How many apps the whole list holds for this search, or null where the server doesn't say. */
+  total: number | null;
+};
+
+/** How many apps a page of Browse apps holds: enough to fill the screen, few enough to come at once. */
+const DIRECTORY_PAGE = 50;
+
+/**
+ * The wider directory, searched by name or description, a page at a time: the first page as soon
+ * as it comes, and each next one when the screen asks for it.
+ *
+ * The directory holds about two thousand apps, and Browse apps once read every page of them before
+ * it showed one: eighteen requests in a row, and a quarter of a minute on its placeholders. The
+ * server answers the pages in the order the screen draws them (apps you sign in to first, then
+ * apps that take a key, each by title), so each page is drawn as it arrives and nothing moves.
+ */
+export function directoryAppPagesQueryOptions(search: string) {
+  return infiniteQueryOptions({
+    queryKey: appKeys.directoryPages(search),
+    initialPageParam: "",
+    queryFn: async ({ pageParam, signal }): Promise<DirectoryAppPage> => {
+      const page = await listAppDirectory(
+        organizationId(),
+        {
+          source: "directory",
+          limit: DIRECTORY_PAGE,
+          ...(search ? { search } : {}),
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
+        {
+          signal,
+          fallback:
+            "Couldn't load the apps you can connect. Try again in a moment.",
+        },
+      );
+      return {
+        apps: page.entries.filter(
+          (entry): entry is DirectoryAppEntry => entry.source === "directory",
+        ),
+        nextCursor: page.nextCursor,
+        total: page.total ?? null,
+      };
+    },
+    getNextPageParam: (page: DirectoryAppPage) => page.nextCursor ?? undefined,
   });
 }
 

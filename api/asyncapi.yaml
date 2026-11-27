@@ -107,6 +107,18 @@ channels:
     bindings:
       ws:
         method: GET
+        query:
+          type: object
+          properties:
+            capabilities:
+              type: string
+              maxLength: 1024
+              description: >-
+                Which newer messages the app understands, as the
+                OpenBot-Capabilities header lists them on a request: lowercase
+                tokens separated by spaces. A browser can't set a header on a
+                WebSocket, so it is sent here. Optional: a socket opened
+                without it is sent what every release reads.
         bindingVersion: 0.1.0
     messages:
       conversationActivity:
@@ -1014,7 +1026,11 @@ components:
           description: This person pinned or unpinned the conversation.
         busy:
           type: boolean
-          description: A turn started (true) or ended (false) in the conversation.
+          description: >-
+            A turn started (true) or ended (false) in the conversation. Also
+            true, for a socket opened without the capability
+            conversation-work-turn, while the server is carrying a turn
+            there.
         work:
           type: array
           description: >-
@@ -1040,16 +1056,24 @@ components:
       properties:
         kind:
           type: string
-          enum:
+          x-extensible-enum:
             - handoff
             - routine
-          description: A Bot that was asked and has not answered yet, or a routine that is running.
+            - turn
+          description: >-
+            A Bot that was asked and has not answered yet (handoff), a routine
+            that is running (routine), or the person's own turn, which the
+            server is carrying on with no page open (turn), between one run and
+            the next too. A kind the app doesn't know is still work. turn is
+            sent only to a socket opened with the capability
+            conversation-work-turn; any other is sent work without it, and
+            busy true while the turn goes on.
         key:
           type: string
           description: Stable for this piece of work, so two asks of one Bot are two entries.
         botId:
           type: string
-          description: The Bot that was asked, or the Bot the routine runs as.
+          description: The Bot that was asked, the Bot the routine runs as, or the Bot answering the turn.
         botName:
           type:
             - string
@@ -1061,7 +1085,7 @@ components:
         since:
           type: string
           format: date-time
-          description: When the work started.
+          description: When the work started. For a turn, when the server took it on.
     ConversationResync:
       type: object
       required:

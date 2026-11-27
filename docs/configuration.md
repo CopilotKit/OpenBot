@@ -838,6 +838,8 @@ some of a provider's variables and not all of them stops the server at start-up 
 | `TWILIO_FROM_NUMBER`        | The Twilio number OpenBot sends from.                                                                                                                                                                                                              |
 | `EXPO_PROJECT_ID`           | The native app's EAS project id, a UUID. Switches on push notifications and sign-in from the native app (without it, the server does not trust the app's `openbotmobile://` sign-in redirect). A device registers only when the app reports this same project id; any other value is refused. A value that is not a UUID stops the server at start-up.                  |
 | `EXPO_ACCESS_TOKEN`         | Optional. Sent as `Authorization: Bearer` on every request to Expo's push service; without it those requests carry no token.                                                                                                                       |
+| `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY` | Optional, both or neither. The VAPID key pair (RFC 8292) browsers subscribe to push notifications with, in URL-safe base64. Unset, the server makes a pair the first time a browser asks for the key and keeps it in its database, sealed with `KEY_ENCRYPTION_KEY`. Set them only where several databases must sign with one key. One without the other, or a pair that does not match, stops the server at start-up. |
+| `WEB_PUSH_SUBJECT`          | Optional. Who the browsers' push services may contact about this deployment's notifications: an `https:` URL or a `mailto:` address. Unset, an `https` `OPENBOT_PUBLIC_URL`, or OpenBot's own site. Anything else stops the server at start-up. |
 
 With SMS on, point the Twilio number's incoming-message webhook at
 `<DELIVERY_PUBLIC_URL>/api/delivery/webhooks/sms`. OpenBot passes
@@ -848,6 +850,11 @@ The native app in `mobile/` reads two variables of its own when it is built, fro
 `EXPO_PUBLIC_SERVER_URL`, the deployment's public URL (required, `https` outside development, no
 credentials or query string), and `EXPO_PUBLIC_EAS_PROJECT_ID`, the same project id as
 `EXPO_PROJECT_ID` above.
+
+Push to browsers needs nothing set: a person turns notifications on in the web app, in their browser,
+and from then on their Bots' replies, questions and approvals reach that browser the way the person's
+notification settings route push. On iPhone and iPad a browser gets them only from OpenBot added to
+the Home Screen, on iOS or iPadOS 16.4 or later.
 
 ## Inbound email triggers
 

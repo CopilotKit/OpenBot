@@ -1839,7 +1839,7 @@ export const SetAppOAuthClientBody = zod.object({
 export const SetAppOAuthClientResponse = zod.void();
 
 /**
- * Return one page of what can be added with createApp: the apps in OpenBot's own catalogue (source catalogue) in the catalogue's own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. An app that connects with a key but signs in through its vendor is listed once, as the sign-in, with keyVersion naming the same app connected with its key. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included. While the organization's apps are open (getAppsSetting), anybody may add what they find (createApp); where they're locked down an administrator adds it, and anybody else asks for it (createAppAccessRequest). Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they're already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.
+ * Return one page of what can be added with createApp: the apps in OpenBot's own catalogue (source catalogue) in the catalogue's own order, then apps from the wider directory (source directory), the ones a person signs in to before the ones that take a key, each by title, ignoring case, and then by id. So a screen can show the pages as they arrive, in the order it shows them. appId names the app an entry was added as, or is null. An app that connects with a key but signs in through its vendor is listed once, as the sign-in, with keyVersion naming the same app connected with its key. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included. While the organization's apps are open (getAppsSetting), anybody may add what they find (createApp); where they're locked down an administrator adds it, and anybody else asks for it (createAppAccessRequest). Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they're already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.
  * @summary List the apps that can be added
  */
 
@@ -1907,6 +1907,7 @@ export const listAppDirectoryResponseNextCursorMax = 4096;
 export const listAppDirectoryResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
+export const listAppDirectoryResponseTotalMin = 0;
 
 export const ListAppDirectoryResponse = zod.object({
   entries: zod
@@ -2017,7 +2018,7 @@ export const ListAppDirectoryResponse = zod.object({
         .describe("One app that can be added, by where it comes from."),
     )
     .describe(
-      "The catalogue in its own order, then the wider directory by title, ignoring case, and then by id.",
+      "The catalogue in its own order, then the wider directory: apps a person signs in to before apps that take a key (connectsWith key), each by title, ignoring case, and then by id.",
     ),
   nextCursor: zod
     .string()
@@ -2026,6 +2027,13 @@ export const ListAppDirectoryResponse = zod.object({
     .nullable()
     .describe(
       "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
+  total: zod
+    .int()
+    .min(listAppDirectoryResponseTotalMin)
+    .optional()
+    .describe(
+      "How many entries the whole list holds for this search and source, across every page, so a screen can say how many there are while it reads only the first page.",
     ),
 });
 

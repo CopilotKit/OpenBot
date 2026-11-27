@@ -1,3 +1,4 @@
+import { CAPABILITIES_QUERY } from "@openbot/shared/client-capabilities";
 import {
   type Query,
   type QueryClient,
@@ -6,6 +7,7 @@ import {
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { HELD_OUT_NOW, holdOut, SSO_REQUIRED_CLOSE } from "@/lib/auth/held-out";
+import { CAPABILITIES } from "@/lib/client";
 import { nudgeMoment } from "@/lib/notices";
 import {
   isBotReply,
@@ -609,8 +611,13 @@ export function applyToBotLists(
 const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
+/**
+ * The socket names the newer messages this app understands in its query, as every request does in
+ * its OpenBot-Capabilities header (`lib/client.ts`): a browser can't set a header on a WebSocket.
+ */
 function socketUrl() {
-  return buildSocketUrl(apiSocketPath("/conversation-events"));
+  const query = new URLSearchParams({ [CAPABILITIES_QUERY]: CAPABILITIES });
+  return `${buildSocketUrl(apiSocketPath("/conversation-events"))}?${query}`;
 }
 
 export function useChannelEvents() {

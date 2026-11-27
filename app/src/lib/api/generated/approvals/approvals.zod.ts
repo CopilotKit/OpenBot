@@ -1428,7 +1428,7 @@ export const GetApprovalModeResponse = zod
   .describe("How one conversation asks.");
 
 /**
- * Run one computer action a Bot called from the person's open conversation, through the same approval rules every other action goes through. The body names the Bot and carries the conversation with the unanswered call in it. The answer says what came of it: done, with what the computer answered; waiting, when the person must approve it first, and then the decision runs it once and carries the conversation on; or held, when the computer is held for a person, with what to tell them. Only computer tools may be called this way, and the call must match an unanswered one in the conversation. Only the person themselves may take a step.
+ * Run one computer action a Bot called from the person's open conversation, through the same approval rules every other action goes through. The body names the Bot and carries the conversation with the unanswered call in it. The answer says what came of it: done, with what the computer answered; waiting, when the person must approve it first, and then the decision runs it once and carries the conversation on; held, when the computer is held for a person, with what to tell them; or taken, when the server already ran, or is running, this step (the same tool call in the same conversation), so it is not run a second time, with the first run's result once it has one. Only computer tools may be called this way, and the call must match an unanswered one in the conversation. Only the person themselves may take a step.
  * @summary Take a step on a Bot's computer, asking first when it must
  */
 
@@ -1568,6 +1568,26 @@ export const RunComputerStepResponse = zod
       })
       .describe(
         "The computer is held for a person, so nothing ran. The error is what the Bot is told.",
+      ),
+    zod
+      .object({
+        outcome: zod.enum(["taken"]),
+        threadId: zod
+          .string()
+          .describe("The conversation's thread the step belongs to."),
+        toolCallId: zod.string().describe("The tool call the step answers."),
+        running: zod
+          .boolean()
+          .describe("True while the first run of the step has not ended."),
+        result: zod
+          .unknown()
+          .optional()
+          .describe(
+            "What the first run answered, as the tool's result, once it has ended. Any JSON value.",
+          ),
+      })
+      .describe(
+        "The server already ran, or is running, this step: the same tool call in the same conversation. It is not run a second time. While the first run goes on, running is true and there is no result yet; ask again for it. Once the first run has ended, result is what it answered. A first run that was cut off before it answered has, as its result, a note that its outcome is unknown, to check before doing it again. Sent only to a request whose OpenBot-Capabilities header names computer-step-taken.",
       ),
   ])
   .describe("What came of a computer step, by its outcome.");

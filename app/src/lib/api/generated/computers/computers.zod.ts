@@ -643,7 +643,7 @@ export const GetComputerPageFrameResponse = zod.object({
 });
 
 /**
- * Return the text of the page the Bot's browser is showing, with its address and title.
+ * Return the text of the page the Bot's browser is showing, with its address and title. Asked with the Bot's threadId and toolCallId, the step runs once, however many times it is asked.
  * @summary Read the page a Bot's browser is on
  */
 
@@ -661,6 +661,32 @@ export const ReadComputerPageParams = zod.object({
     .min(1)
     .regex(readComputerPagePathBotIdRegExp)
     .describe("The Bot's id."),
+});
+
+export const readComputerPageQueryThreadIdMax = 200;
+
+export const readComputerPageQueryThreadIdRegExp = new RegExp("\\S");
+export const readComputerPageQueryToolCallIdMax = 200;
+
+export const readComputerPageQueryToolCallIdRegExp = new RegExp("\\S");
+
+export const ReadComputerPageQueryParams = zod.object({
+  threadId: zod
+    .string()
+    .min(1)
+    .max(readComputerPageQueryThreadIdMax)
+    .regex(readComputerPageQueryThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(readComputerPageQueryToolCallIdMax)
+    .regex(readComputerPageQueryToolCallIdRegExp)
+    .optional()
+    .describe("The Bot's tool call this step answers. Sent with threadId."),
 });
 
 export const ReadComputerPageResponse = zod.object({
@@ -824,9 +850,27 @@ export const RequestComputerControlHeader = zod.object({
     ),
 });
 
+export const requestComputerControlBodyThreadIdMax = 200;
+
+export const requestComputerControlBodyThreadIdRegExp = new RegExp("\\S");
+
 export const RequestComputerControlBody = zod.object({
   reason: zod.string().optional().describe("What the person is needed for."),
-  toolCallId: zod.string().optional(),
+  toolCallId: zod
+    .string()
+    .optional()
+    .describe(
+      "The Bot's tool call that asked. Sent with threadId, the step also runs once, however many times it is asked (ComputerStepToolCallId says how).",
+    ),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(requestComputerControlBodyThreadIdMax)
+    .regex(requestComputerControlBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
   source: zod
     .enum(["model", "manual"])
     .optional()
@@ -1261,6 +1305,13 @@ export const RequestComputerSecretHeader = zod.object({
     ),
 });
 
+export const requestComputerSecretBodyThreadIdMax = 200;
+
+export const requestComputerSecretBodyThreadIdRegExp = new RegExp("\\S");
+export const requestComputerSecretBodyToolCallIdMax = 200;
+
+export const requestComputerSecretBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const RequestComputerSecretBody = zod.object({
   ref: zod
     .string()
@@ -1273,6 +1324,24 @@ export const RequestComputerSecretBody = zod.object({
     .string()
     .optional()
     .describe("What to ask the person for, such as your bank password."),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(requestComputerSecretBodyThreadIdMax)
+    .regex(requestComputerSecretBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(requestComputerSecretBodyToolCallIdMax)
+    .regex(requestComputerSecretBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const RequestComputerSecretResponse = zod
@@ -1441,7 +1510,7 @@ export const SendComputerHumanInputResponse = zod.object({
 });
 
 /**
- * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again. The body is optional: sent with the Bot's threadId and toolCallId, the step runs once, however many times it is asked.
  * @summary List what a Bot can act on in the page
  */
 
@@ -1470,6 +1539,34 @@ export const SnapshotComputerHeader = zod.object({
     .max(snapshotComputerHeaderIdempotencyKeyMax)
     .describe(
       "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const snapshotComputerBodyThreadIdMax = 200;
+
+export const snapshotComputerBodyThreadIdRegExp = new RegExp("\\S");
+export const snapshotComputerBodyToolCallIdMax = 200;
+
+export const snapshotComputerBodyToolCallIdRegExp = new RegExp("\\S");
+
+export const SnapshotComputerBody = zod.object({
+  threadId: zod
+    .string()
+    .min(1)
+    .max(snapshotComputerBodyThreadIdMax)
+    .regex(snapshotComputerBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(snapshotComputerBodyToolCallIdMax)
+    .regex(snapshotComputerBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
     ),
 });
 
@@ -1551,6 +1648,9 @@ export const NavigateComputerHeader = zod.object({
 });
 
 export const navigateComputerBodyUrlRegExp = new RegExp("\\S");
+export const navigateComputerBodyThreadIdMax = 200;
+
+export const navigateComputerBodyThreadIdRegExp = new RegExp("\\S");
 
 export const NavigateComputerBody = zod.object({
   url: zod
@@ -1562,7 +1662,16 @@ export const NavigateComputerBody = zod.object({
     .string()
     .optional()
     .describe(
-      "The tool call that asked, so a picture of the page is kept under it.",
+      "The tool call that asked, so a picture of the page is kept under it. Sent with threadId, the step also runs once, however many times it is asked (ComputerStepToolCallId says how).",
+    ),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(navigateComputerBodyThreadIdMax)
+    .regex(navigateComputerBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
     ),
 });
 
@@ -1629,12 +1738,37 @@ export const ClickComputerHeader = zod.object({
     ),
 });
 
+export const clickComputerBodyThreadIdMax = 200;
+
+export const clickComputerBodyThreadIdRegExp = new RegExp("\\S");
+export const clickComputerBodyToolCallIdMax = 200;
+
+export const clickComputerBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const ClickComputerBody = zod.object({
   ref: zod
     .string()
     .min(1)
     .describe("The element, by a ref from the latest snapshot."),
   snapshotId: zod.int().describe("The snapshot the ref came from."),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(clickComputerBodyThreadIdMax)
+    .regex(clickComputerBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(clickComputerBodyToolCallIdMax)
+    .regex(clickComputerBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const ClickComputerResponse = zod.object({
@@ -1710,6 +1844,13 @@ export const TypeComputerHeader = zod.object({
     ),
 });
 
+export const typeComputerBodyThreadIdMax = 200;
+
+export const typeComputerBodyThreadIdRegExp = new RegExp("\\S");
+export const typeComputerBodyToolCallIdMax = 200;
+
+export const typeComputerBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const TypeComputerBody = zod.object({
   ref: zod
     .string()
@@ -1721,6 +1862,24 @@ export const TypeComputerBody = zod.object({
     .boolean()
     .optional()
     .describe("Send the field's form afterwards."),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(typeComputerBodyThreadIdMax)
+    .regex(typeComputerBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(typeComputerBodyToolCallIdMax)
+    .regex(typeComputerBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const TypeComputerResponse = zod.object({
@@ -1796,6 +1955,13 @@ export const PressComputerKeyHeader = zod.object({
     ),
 });
 
+export const pressComputerKeyBodyThreadIdMax = 200;
+
+export const pressComputerKeyBodyThreadIdRegExp = new RegExp("\\S");
+export const pressComputerKeyBodyToolCallIdMax = 200;
+
+export const pressComputerKeyBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const PressComputerKeyBody = zod.object({
   key: zod.string().min(1).describe("A key name, such as Enter or Tab."),
   ref: zod
@@ -1804,6 +1970,24 @@ export const PressComputerKeyBody = zod.object({
     .optional()
     .describe("The element to press it on. With it, snapshotId."),
   snapshotId: zod.int().optional(),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(pressComputerKeyBodyThreadIdMax)
+    .regex(pressComputerKeyBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(pressComputerKeyBodyToolCallIdMax)
+    .regex(pressComputerKeyBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const PressComputerKeyResponse = zod.object({
@@ -1879,12 +2063,37 @@ export const ScrollComputerHeader = zod.object({
     ),
 });
 
+export const scrollComputerBodyThreadIdMax = 200;
+
+export const scrollComputerBodyThreadIdRegExp = new RegExp("\\S");
+export const scrollComputerBodyToolCallIdMax = 200;
+
+export const scrollComputerBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const ScrollComputerBody = zod.object({
   deltaY: zod
     .number()
     .optional()
     .describe(
       "Pixels to scroll down, or up when negative. Without it the computer scrolls its own default distance.",
+    ),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(scrollComputerBodyThreadIdMax)
+    .regex(scrollComputerBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(scrollComputerBodyToolCallIdMax)
+    .regex(scrollComputerBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
     ),
 });
 
@@ -1965,6 +2174,13 @@ export const runComputerCommandBodyCommandRegExp = new RegExp("\\S");
 export const runComputerCommandBodyTimeoutMsMin = 1000;
 export const runComputerCommandBodyTimeoutMsMax = 600000;
 
+export const runComputerCommandBodyThreadIdMax = 200;
+
+export const runComputerCommandBodyThreadIdRegExp = new RegExp("\\S");
+export const runComputerCommandBodyToolCallIdMax = 200;
+
+export const runComputerCommandBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const RunComputerCommandBody = zod.object({
   command: zod.string().min(1).regex(runComputerCommandBodyCommandRegExp),
   timeoutMs: zod
@@ -1972,6 +2188,24 @@ export const RunComputerCommandBody = zod.object({
     .min(runComputerCommandBodyTimeoutMsMin)
     .max(runComputerCommandBodyTimeoutMsMax)
     .optional(),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(runComputerCommandBodyThreadIdMax)
+    .regex(runComputerCommandBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(runComputerCommandBodyToolCallIdMax)
+    .regex(runComputerCommandBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const RunComputerCommandResponse = zod.object({
@@ -2023,11 +2257,36 @@ export const ListComputerFilesHeader = zod.object({
     ),
 });
 
+export const listComputerFilesBodyThreadIdMax = 200;
+
+export const listComputerFilesBodyThreadIdRegExp = new RegExp("\\S");
+export const listComputerFilesBodyToolCallIdMax = 200;
+
+export const listComputerFilesBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const ListComputerFilesBody = zod.object({
   path: zod
     .string()
     .optional()
     .describe("A folder of the workspace. Without it, the workspace itself."),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(listComputerFilesBodyThreadIdMax)
+    .regex(listComputerFilesBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(listComputerFilesBodyToolCallIdMax)
+    .regex(listComputerFilesBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const ListComputerFilesResponse = zod.object({
@@ -2076,9 +2335,33 @@ export const ReadComputerFileHeader = zod.object({
 });
 
 export const readComputerFileBodyPathRegExp = new RegExp("\\S");
+export const readComputerFileBodyThreadIdMax = 200;
+
+export const readComputerFileBodyThreadIdRegExp = new RegExp("\\S");
+export const readComputerFileBodyToolCallIdMax = 200;
+
+export const readComputerFileBodyToolCallIdRegExp = new RegExp("\\S");
 
 export const ReadComputerFileBody = zod.object({
   path: zod.string().min(1).regex(readComputerFileBodyPathRegExp),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(readComputerFileBodyThreadIdMax)
+    .regex(readComputerFileBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(readComputerFileBodyToolCallIdMax)
+    .regex(readComputerFileBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const ReadComputerFileResponse = zod.object({
@@ -2128,6 +2411,12 @@ export const WriteComputerFileHeader = zod.object({
 });
 
 export const writeComputerFileBodyPathRegExp = new RegExp("\\S");
+export const writeComputerFileBodyThreadIdMax = 200;
+
+export const writeComputerFileBodyThreadIdRegExp = new RegExp("\\S");
+export const writeComputerFileBodyToolCallIdMax = 200;
+
+export const writeComputerFileBodyToolCallIdRegExp = new RegExp("\\S");
 
 export const WriteComputerFileBody = zod.object({
   path: zod.string().min(1).regex(writeComputerFileBodyPathRegExp),
@@ -2136,6 +2425,24 @@ export const WriteComputerFileBody = zod.object({
     .boolean()
     .optional()
     .describe("Add to the end of the file instead of replacing it."),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(writeComputerFileBodyThreadIdMax)
+    .regex(writeComputerFileBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(writeComputerFileBodyToolCallIdMax)
+    .regex(writeComputerFileBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const WriteComputerFileResponse = zod.object({

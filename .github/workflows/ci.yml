@@ -44,6 +44,7 @@ jobs:
   changes:
     name: changes
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 5 # usually under half a minute
     permissions:
       contents: read
       # To read which jobs passed on the commits this one sits on.
@@ -87,6 +88,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.static == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 10 # usually about a minute
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -140,6 +142,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.api == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 10 # usually about a minute
     env:
       # Pinned with its checksum, from https://github.com/oasdiff/oasdiff/releases. The spec never
       # leaves the runner: the binary runs here, rather than the action, which uploads by default.
@@ -294,6 +297,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 10 # usually under a minute
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -333,6 +337,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app_browser == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 20 # usually about 4 minutes
     env:
       PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
     steps:
@@ -423,7 +428,14 @@ jobs:
   # while a task it handed out works on. And Return in the message box starting a new line on a
   # phone's touch keyboard while a computer's Enter still sends, never on the Enter that confirms
   # a composed character. And a Bot's instructions at 5000 characters, held whole by its Setup
-  # page and the New Bot sheet, and a 5001st refused in view. In the image, as above: WebKit's
+  # page and the New Bot sheet, and a 5001st refused in view. And push notifications in this
+  # browser, turned on and off in Settings and saved through the API, a push shown by the service
+  # worker and a click on it opening its conversation, and on an iPhone in Safari the Home Screen
+  # step said instead of a switch. And Browse apps on a directory the size of the live one, its
+  # first page drawn after one request and the next read as the end comes into view, searched a
+  # page at a time, on a phone and wide. And a first message, from home and from a new
+  # conversation with or without a Bot in To:, showing "Thinking" within 200 ms of Send and every
+  # frame after until the Bot's first words. In the image, as above: WebKit's
   # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
   #
   # The files run side by side, like the Chromium list's, but eight at a time rather than a worker
@@ -439,6 +451,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app_browser == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 30 # usually about 8 minutes
     env:
       PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
     steps:
@@ -456,7 +469,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
-            bun test --parallel=8 app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/settings-tool-cards-core.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/sign-in-reconnect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx app/tests/people-lists.test.tsx app/tests/organization-moving.test.tsx app/tests/organization-removed.test.tsx app/tests/organization-held-reload.test.tsx app/tests/organization-unavailable-pages.test.tsx app/tests/organization-held-actions.test.tsx app/tests/organization-unavailable-admin-pages.test.tsx app/tests/organization-held-recovery.test.tsx app/tests/bot-screen-sharp.test.tsx app/tests/bots-panel-start-conversation.test.tsx app/tests/table-export-browser.test.tsx app/tests/organization-unavailable-chat.test.tsx app/tests/moved-apps-reconnect.test.tsx app/tests/composer-keeps-draft-browser.test.tsx app/tests/conversation-reply-toolbar-layout.test.tsx app/tests/roster-working.test.tsx app/tests/delete-account-layout.test.tsx app/tests/composer-touch-return.test.tsx app/tests/bot-long-instructions-layout.test.tsx
+            bun test --parallel=8 app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/settings-tool-cards-core.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/sign-in-reconnect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx app/tests/people-lists.test.tsx app/tests/organization-moving.test.tsx app/tests/organization-removed.test.tsx app/tests/organization-held-reload.test.tsx app/tests/organization-unavailable-pages.test.tsx app/tests/organization-held-actions.test.tsx app/tests/organization-unavailable-admin-pages.test.tsx app/tests/organization-held-recovery.test.tsx app/tests/bot-screen-sharp.test.tsx app/tests/bots-panel-start-conversation.test.tsx app/tests/table-export-browser.test.tsx app/tests/organization-unavailable-chat.test.tsx app/tests/moved-apps-reconnect.test.tsx app/tests/composer-keeps-draft-browser.test.tsx app/tests/conversation-reply-toolbar-layout.test.tsx app/tests/roster-working.test.tsx app/tests/delete-account-layout.test.tsx app/tests/composer-touch-return.test.tsx app/tests/bot-long-instructions-layout.test.tsx app/tests/web-push-browser.test.tsx app/tests/computer-panel-phone-layout.test.tsx app/tests/browse-apps-pages.test.tsx app/tests/hand-back-row-layout.test.tsx app/tests/first-message-thinking.test.tsx
       # Connect your AI's sign-in code, copied with one press and read back from WebKit's clipboard.
       # Only that test: the rest of the file runs in Chromium in the job above.
       - run: |
@@ -476,6 +489,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app_browser == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 25 # usually about 6 minutes
     env:
       PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
     steps:
@@ -510,6 +524,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.suite == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 15 # usually about 4 minutes
     strategy:
       # Every shard runs to the end, so one red run names every failing test, not just the first
       # shard's.
@@ -555,6 +570,7 @@ jobs:
   test-total:
     name: tests
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 5 # usually seconds
     # Also when a shard failed, so this reports the failure rather than being skipped, which a
     # required check would read as a pass. Not when the suite was not needed: then no shard ran.
     if: always() && needs.changes.outputs.suite == 'true'
@@ -594,6 +610,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.partial == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 25 # installs the browsers it needs, then runs a few files
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -626,6 +643,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.startup == 'true'
     runs-on: ${{ matrix.os == 'windows-latest' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'windows-latest' || 'openbot-windows-16core') || matrix.os }}
+    timeout-minutes: 15 # usually about a minute; room for a macOS runner to arrive
     strategy:
       fail-fast: false
       matrix:
@@ -652,6 +670,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.langgraph_ts == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 10 # usually under a minute
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -678,6 +697,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python_harness == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 15 # usually under 3 minutes for the slowest harness
     strategy:
       fail-fast: false
       matrix:
@@ -720,6 +740,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python_harness == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 10 # usually under a minute
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -757,6 +778,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.build == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 10 # usually under a minute
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -786,6 +808,7 @@ jobs:
   component-list:
     name: component list
     runs-on: ubuntu-latest
+    timeout-minutes: 5 # usually seconds
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'full-ci')
@@ -821,6 +844,7 @@ jobs:
     name: component dockerfile (${{ matrix.image }})
     needs: component-list
     runs-on: ubuntu-latest
+    timeout-minutes: 30 # seconds from main's cache; a cold build of the largest image takes longer
     strategy:
       # Every image is built to the end, so one red run names every Dockerfile that broke.
       fail-fast: false
@@ -852,6 +876,7 @@ jobs:
   verify:
     name: verify
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 5 # usually seconds
     if: always()
     needs: [changes, static, api, mobile, app-browser, app-browser-webkit, app-browser-desktop, test, test-total, changed-tests, startup, langgraph-ts, python-harness, python-harness-compose, build, component-list, component-dockerfiles]
     steps:

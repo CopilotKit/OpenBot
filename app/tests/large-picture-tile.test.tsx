@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { deflateSync } from "node:zlib";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 
 /**
  * A picture over 8MB is not downloaded to draw its tile; it is fetched when somebody opens it.
@@ -210,7 +211,7 @@ async function settled(page: Page) {
   await page.waitForFunction(() =>
     [...document.images].every((image) => image.complete),
   );
-  await page.waitForTimeout(300);
+  await still(page);
 }
 
 test.skipIf(!asked)(

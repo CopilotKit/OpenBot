@@ -35,6 +35,7 @@ import type {
   ComputerSecretSupplied,
   ComputerSecretValue,
   ComputerSnapshot,
+  ComputerSnapshotAsk,
   ComputerStatus,
   ComputerStopped,
   ComputerTarget,
@@ -954,16 +955,25 @@ export const getSnapshotComputerMockHandler = (
     | ComputerSnapshot
     | ((
         info: Parameters<
-          HttpResponseResolver<{ organizationId: string; botId: string }>
+          HttpResponseResolver<
+            { organizationId: string; botId: string },
+            ComputerSnapshotAsk
+          >
         >[0],
       ) => Promise<ComputerSnapshot> | ComputerSnapshot),
   options?: RequestHandlerOptions,
 ) => {
-  return http.post<{ organizationId: string; botId: string }>(
+  return http.post<
+    { organizationId: string; botId: string },
+    ComputerSnapshotAsk
+  >(
     "*/api/v2/organizations/:organizationId/computers/:botId/snapshot",
     async (
       info: Parameters<
-        HttpResponseResolver<{ organizationId: string; botId: string }>
+        HttpResponseResolver<
+          { organizationId: string; botId: string },
+          ComputerSnapshotAsk
+        >
       >[0],
     ) => {
       return HttpResponse.json(

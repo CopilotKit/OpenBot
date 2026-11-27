@@ -124,3 +124,45 @@ export function useFittedWidth(
   }, [area, frame, ratio, shown, minWidth, page, below]);
   return width;
 }
+
+/**
+ * The height a browser window takes when it spans the whole width of `area`, its page at `ratio` (width over height)
+ * and its bars as they are now: as tall as it can ever be there. A space taller than this only holds blank under it.
+ *
+ * For a space given the height left over (a phone, where the window takes the full width and is still shorter than
+ * what is left): the space is held to this height, so what comes after the window sits right under it. Measured, as
+ * `useFittedWidth` is; undefined until the first measurement.
+ */
+export function useFullWidthHeight(
+  area: RefObject<HTMLElement | null>,
+  frame: RefObject<HTMLElement | null>,
+  ratio: number,
+  { shown = true }: { shown?: boolean } = {},
+): number | undefined {
+  const [height, setHeight] = useState<number>();
+  useLayoutEffect(() => {
+    const outer = area.current;
+    const inner = frame.current;
+    if (!shown || !outer || !inner || typeof ResizeObserver === "undefined")
+      return;
+    const measure = () => {
+      const style = getComputedStyle(outer);
+      const spaceWidth =
+        outer.clientWidth -
+        Number.parseFloat(style.paddingLeft) -
+        Number.parseFloat(style.paddingRight);
+      if (spaceWidth <= 0 || inner.clientWidth <= 0) return;
+      // The page spans the window's inner width; the window's border is beside it and its bars above it.
+      const beside = inner.offsetWidth - inner.clientWidth;
+      const bars = inner.offsetHeight - inner.clientWidth / ratio;
+      const next = Math.ceil((spaceWidth - beside) / ratio + bars);
+      setHeight((current) => (current === next ? current : next));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(outer);
+    observer.observe(inner);
+    measure();
+    return () => observer.disconnect();
+  }, [area, frame, ratio, shown]);
+  return height;
+}

@@ -2,11 +2,16 @@ import { CopilotChat } from "@copilotkit/react-core/v2";
 import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { ConversationApprovals } from "@/components/approvals/inline-approval";
 import { TelemetryAssistantMessage } from "@/components/channels/telemetry-assistant-message";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
-import { DetailPanel } from "@/components/layout/detail-panel";
+import { useCardsFirst } from "@/components/computer/use-cards-first";
+import {
+  DetailPanel,
+  detailFitsBeside,
+} from "@/components/layout/detail-panel";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { AddCardButton } from "@/components/plan/add-card-button";
 import { StarPrompt } from "@/components/star-prompt/star-prompt";
@@ -181,12 +186,23 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
   // A command in the chat clicked opens the Computer on its terminal.
   useOpenComputerOnRequest(agentId, () => showComputer(true));
   const noComputers = useNoBotComputers() === true;
+  // With no room beside the chat the Computer is a sheet over it, which gives way to a waiting card.
+  const [computerFits, setComputerFits] = useState(false);
+  useCardsFirst({
+    botId: agentId,
+    threadId,
+    covers: !computerFits,
+    watching: watch === true,
+    close: () => showComputer(false),
+    computers: !noComputers,
+  });
 
   return (
     <DetailPanel
       title="Computer"
       open={watch === true}
       onClose={() => showComputer(false)}
+      onRoomChange={(room) => setComputerFits(detailFitsBeside(room))}
       waiting={threadId ? <ConversationApprovals threadId={threadId} /> : null}
       detail={<ComputerViewPanel agentId={agentId} name={name} />}
     >
@@ -211,6 +227,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
               <ComputerChatControls
                 computerId={agentId}
                 noComputers={noComputers}
+                fitsBeside={computerFits}
                 open={watch === true}
                 onOpenChange={showComputer}
               />

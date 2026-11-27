@@ -769,11 +769,13 @@ paths:
         through. The body names the Bot and carries the conversation with the
         unanswered call in it. The answer says what came of it: done, with what
         the computer answered; waiting, when the person must approve it first,
-        and then the decision runs it once and carries the conversation on; or
-        held, when the computer is held for a person, with what to tell them.
-        Only computer tools may be called this way, and the call must match an
-        unanswered one in the conversation. Only the person themselves may take
-        a step.
+        and then the decision runs it once and carries the conversation on;
+        held, when the computer is held for a person, with what to tell them;
+        or taken, when the server already ran, or is running, this step (the
+        same tool call in the same conversation), so it is not run a second
+        time, with the first run's result once it has one. Only computer tools
+        may be called this way, and the call must match an unanswered one in
+        the conversation. Only the person themselves may take a step.
       security:
         - webSession: []
         - appOAuth: [approvals:write]
@@ -829,6 +831,10 @@ paths:
                   $ref: '#/components/examples/ComputerStepWaitingExample'
                 held:
                   $ref: '#/components/examples/ComputerStepHeldExample'
+                taken:
+                  $ref: '#/components/examples/ComputerStepTakenExample'
+                takenRunning:
+                  $ref: '#/components/examples/ComputerStepTakenRunningExample'
         '400':
           $ref: '#/components/responses/ApprovalRefused'
         '401':
@@ -3292,18 +3298,49 @@ components:
           type: string
         handoff:
           $ref: '#/components/schemas/ComputerStepHandoff'
+    ComputerStepTaken:
+      type: object
+      description: >-
+        The server already ran, or is running, this step: the same tool call
+        in the same conversation. It is not run a second time. While the first
+        run goes on, running is true and there is no result yet; ask again
+        for it. Once the first run has ended, result is what it answered. A
+        first run that was cut off before it answered has, as its result, a
+        note that its outcome is unknown, to check before doing it again.
+        Sent only to a request whose OpenBot-Capabilities header names
+        computer-step-taken.
+      required: [outcome, threadId, toolCallId, running]
+      properties:
+        outcome:
+          type: string
+          const: taken
+        threadId:
+          type: string
+          description: The conversation's thread the step belongs to.
+        toolCallId:
+          type: string
+          description: The tool call the step answers.
+        running:
+          type: boolean
+          description: True while the first run of the step has not ended.
+        result:
+          description: >-
+            What the first run answered, as the tool's result, once it has
+            ended. Any JSON value.
     ComputerStepOutcome:
       description: What came of a computer step, by its outcome.
       oneOf:
         - $ref: '#/components/schemas/ComputerStepDone'
         - $ref: '#/components/schemas/ComputerStepWaiting'
         - $ref: '#/components/schemas/ComputerStepHeld'
+        - $ref: '#/components/schemas/ComputerStepTaken'
       discriminator:
         propertyName: outcome
         mapping:
           done: '#/components/schemas/ComputerStepDone'
           waiting: '#/components/schemas/ComputerStepWaiting'
           held: '#/components/schemas/ComputerStepHeld'
+          taken: '#/components/schemas/ComputerStepTaken'
     ApprovalActionKinds:
       type: object
       additionalProperties: false
@@ -5565,6 +5602,22 @@ components:
         outcome: held
         error: "Not done: the person has control of the computer right now. Tell them you'll do this once they hand it back."
         humanHasControl: true
+    ComputerStepTakenExample:
+      summary: The server already ran this step, and this is what it answered.
+      value:
+        outcome: taken
+        threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+        toolCallId: call_8c1f
+        running: false
+        result:
+          ok: true
+    ComputerStepTakenRunningExample:
+      summary: The server is running this step, and it has not answered yet.
+      value:
+        outcome: taken
+        threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+        toolCallId: call_8c1f
+        running: true
     ApprovalSettingsExample:
       summary: Payments are left to the person, and everything else is open.
       value:
