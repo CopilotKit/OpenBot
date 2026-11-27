@@ -1,6 +1,7 @@
 import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
 import { botNoLongerUsable } from "@/lib/agents/queries";
+import { startedRunId } from "@/lib/copilot/quiet-run";
 import { problemRequestId, recordProblem } from "@/lib/desktop/problems";
 import { useClearWhenHoldEnds } from "@/lib/held-ends";
 import { type Failure, isHeld } from "@/lib/load-failure";
@@ -40,6 +41,10 @@ export function stoppedReason(reported: unknown): string {
   const unreachable = backEndUnreachable(said);
   if (unreachable) return unreachable;
   if (RUNNER_DROPPED.test(said.trim())) return TURN_CUT_OFF;
+  if (AG_UI_RULE_BROKEN.test(said)) {
+    console.warn("A Bot's event stream broke AG-UI's rules.", said);
+    return UNREADABLE_REPLY;
+  }
   if (CONNECTION_CUT.test(said.trim())) {
     console.warn("A Bot's connection was cut part way through a turn.", said);
     return TURN_CUT_OFF;
@@ -67,6 +72,26 @@ const CONNECTION_CUT =
 export function asksToCarryOn(said: string): boolean {
   return /\bAsk (?:it|the Bot) to carry on\.$/.test(said.trim());
 }
+
+/**
+ * The AG-UI client's own words for a stream that breaks its rules (`verifyEvents` in
+ * `@ag-ui/client`): "Cannot send 'TOOL_CALL_START' event: A tool call with ID '…' is already in
+ * progress. Complete it with 'TOOL_CALL_END' first.", and the same with no "event" for the rules about
+ * who owns a message. Anywhere in what ended the run, which may put its own words in front.
+ *
+ * FOUND BY THE AG-UI CONFORMANCE SUITE. A connected Bot's adapter started one tool call twice, the
+ * client refused the stream, and the run ended in those words, shown to the person word for word.
+ * They name an event and a rule the person can do nothing with. The person is told what happened,
+ * and the words go to the console for whoever debugs it, as `backEndUnreachable` does.
+ */
+const AG_UI_RULE_BROKEN = /Cannot send '[A-Z_]+'(?: event)?:/;
+
+/**
+ * Said under a turn a Bot's own stream broke: what it sent didn't follow AG-UI's rules, and the AG-UI
+ * client refused it. Its work so far stands, and Carry on asks it to go on.
+ */
+export const UNREADABLE_REPLY =
+  "The Bot sent something OpenBot couldn't read, so its turn ended. Ask it to carry on.";
 
 /** Said under a turn cut off part way because OpenBot's backend stopped answering. Its work stands. */
 export const TURN_CUT_OFF =
@@ -325,6 +350,23 @@ export function requestNotMade(reported: unknown): boolean {
 }
 
 /**
+ * The code OpenBot's server puts on the RUN_ERROR of a run its Bot's engine couldn't take ("… can't
+ * run because OpenBot's LangGraph engine isn't answering"). The server keeps that turn as a refused
+ * one (`listRefusedTurns`, code BOT_ENGINE_UNAVAILABLE), so it is drawn as a refusal is: under the
+ * message it refused, for good, not as the last turn's ending, which the next turn clears.
+ */
+export const BOT_ENGINE_UNAVAILABLE = "BOT_ENGINE_UNAVAILABLE";
+
+/** Whether a RUN_ERROR ended a turn the server keeps as refused (`BOT_ENGINE_UNAVAILABLE`). */
+export function refusedRun(event: unknown): boolean {
+  return (
+    !!event &&
+    typeof event === "object" &&
+    (event as { code?: unknown }).code === BOT_ENGINE_UNAVAILABLE
+  );
+}
+
+/**
  * How the last run in a thread's history ended, heard while the history is replayed.
  *
  * THE FAILURE IS NOT IN THE MESSAGES. A run that fails ends with a RUN_ERROR, which is an event, and
@@ -342,6 +384,9 @@ export function requestNotMade(reported: unknown): boolean {
  * A STOP IS NOT A FAILURE, and needs nothing special: a run the person stopped ends with
  * RUN_FINISHED, outcome cancelled, as the runtime records it.
  *
+ * NOR IS A REFUSED TURN (`refusedRun`). The server keeps it, and it is drawn under its message from
+ * that record; read here too, it was said twice after a reload, the second time at the bottom.
+ *
  * NOTHING WHEN THE REPLAY BROKE. A connect that failed part way may have stopped after an old failure
  * and before the run that answered it, and a stale failure is worse than none. The caller drops the
  * answer the same way when the join ran out of time.
@@ -356,22 +401,26 @@ export function followLastRun(agent: Pick<AbstractAgent, "subscribe">): {
   failure: () => string | null;
   /** Whether the last run the join has heard of started and has not ended yet. */
   running: () => boolean;
+  /** The id of the last run the join heard start, to ask the server how it ended. */
+  runId: () => string | null;
   stop: () => void;
 } {
   let failure: string | null = null;
   let broken = false;
   let running = false;
+  let runId: string | null = null;
   const subscription = agent.subscribe({
-    onRunStartedEvent: () => {
+    onRunStartedEvent: ({ event }) => {
       failure = null;
       running = true;
+      runId = startedRunId(event) ?? runId;
     },
     onRunFinishedEvent: () => {
       failure = null;
       running = false;
     },
     onRunErrorEvent: ({ event }) => {
-      failure = stoppedReason(event?.message);
+      failure = refusedRun(event) ? null : stoppedReason(event?.message);
       running = false;
     },
     onRunFailed: () => {
@@ -382,6 +431,7 @@ export function followLastRun(agent: Pick<AbstractAgent, "subscribe">): {
   return {
     failure: () => (broken ? null : failure),
     running: () => !broken && running,
+    runId: () => runId,
     stop: () => subscription.unsubscribe(),
   };
 }

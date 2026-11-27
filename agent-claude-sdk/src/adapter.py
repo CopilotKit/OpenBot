@@ -55,6 +55,7 @@ from claude_agent_sdk.types import StreamEvent
 from .replay import (
     INTERRUPT_SECONDS,
     RESULT_CHARS,
+    as_sent_to_model,
     cut_note,
     finish_regardless,
     run_replayed_query,
@@ -1311,6 +1312,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             await turn.queue.put(event)
 
     async def run(self, input_data):
+        # Instructions and data apart before anything reads the run. See `as_sent_to_model`.
+        input_data = as_sent_to_model(input_data)
         thread_id, run_id = input_data.thread_id, input_data.run_id
         # A query this run carries on sends its calls with this run's token from now.
         refresh(thread_id)

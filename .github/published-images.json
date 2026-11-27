@@ -8,6 +8,7 @@
   "agent-pydantic-ai",
   "agent-microsoft",
   "agent-claude-sdk",
+  "agent-openai-agents",
   "agent-strands",
   "agent-ag2",
   "agent-langroid",

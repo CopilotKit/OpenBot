@@ -41,7 +41,7 @@ export type ModelOption = {
 
 /**
  * Who actually serves the models: a provider's own API, an OpenAI-compatible endpoint in front of
- * one, or a ChatGPT or Claude plan. What the Providers page names.
+ * one, or a ChatGPT or Claude plan. What the AI providers page names.
  */
 export type ModelSource =
   | "openai"
@@ -54,7 +54,7 @@ export type ModelSource =
 
 /**
  * Who decides which models people may pick. `all`: one person on their own machine, offered every
- * model the credential lists. `allowed`: a team, where an admin allows models in Admin, Providers.
+ * model the credential lists. `allowed`: a team, where an admin allows models in Admin, AI providers.
  */
 export type ModelExposure = "all" | "allowed";
 

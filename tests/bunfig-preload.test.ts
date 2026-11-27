@@ -43,6 +43,29 @@ describe("bunfig preload", () => {
     });
   }
 
+  /*
+   * The desktop runs its own tests from inside desktop/ too, with all of the root's preloads but the
+   * network guard, and the app's preload through tests/support/app-preload-if-installed.ts, which
+   * leaves it out where only desktop/ is installed (desktop/bunfig.toml says why).
+   */
+  test("the desktop config preloads the root's scripts but the network guard", () => {
+    const bunfig = resolve(repositoryRoot, "desktop", "bunfig.toml");
+    const guard = resolve(repositoryRoot, "tests/support/network-guard.ts");
+    const appPreload = resolve(repositoryRoot, "app/tests/preload.ts");
+    const appPreloadIfInstalled = resolve(
+      repositoryRoot,
+      "tests/support/app-preload-if-installed.ts",
+    );
+    expect(preloadedScripts(bunfig)).toEqual(
+      preloadedScripts(rootBunfig)
+        .filter((script) => script !== guard)
+        .map((script) =>
+          script === appPreload ? appPreloadIfInstalled : script,
+        )
+        .sort(),
+    );
+  });
+
   test("every preloaded script exists", () => {
     const scripts = preloadedScripts(rootBunfig);
 

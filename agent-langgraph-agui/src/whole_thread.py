@@ -40,17 +40,24 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from .parallel_tools import ParallelToolAgent
 
-# The ids of the system messages the server writes for a remote Bot: `standingRoleMessage` and
-# `holdingsMessageFor` in server/src/copilot.ts. The server drops every incoming message whose id
-# starts with one of these before it adds its own, so in a run only its own carry one.
-SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
+# The ids of the system messages the server writes for a remote Bot: the constant opener every run
+# starts with (`openerMessage`), `standingRoleMessage` and `holdingsMessageFor` in
+# server/src/copilot.ts. The server drops every incoming message whose id starts with one of these
+# before it adds its own, so in a run only its own carry one.
+SERVER_INSTRUCTION_ID_PREFIXES = ("openbot-opener:", "standing-role:", "granted-tools:")
+# And the Bot's learned Skills catalog (`RemoteLearnedSkillsMiddleware` in
+# server/src/learning/remote.ts), which the server also drops from a request and writes itself.
+SERVER_INSTRUCTION_IDS = frozenset({"openbot:learned-skills"})
 
 
 def is_server_instruction(message):
     return (
         isinstance(message, SystemMessage)
         and isinstance(message.id, str)
-        and message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+        and (
+            message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+            or message.id in SERVER_INSTRUCTION_IDS
+        )
     )
 
 
@@ -74,7 +81,7 @@ class WholeThreadAgent(ParallelToolAgent):
         if messages and isinstance(messages[0], SystemMessage):
             # Upstream drops it unconditionally. With an empty checkpoint nothing else can have
             # put it there, so it goes back at the front, where the server placed it. It is the
-            # standing role, or the server's quoted personal memory ahead of it; either way it is
+            # server's opener, the standing role, or quoted personal memory ahead of them; it is
             # never dropped, and only the server's own instructions keep their system role at the
             # model (`model_messages` in tool_runtime.py).
             merged["messages"] = [messages[0], *merged["messages"]]

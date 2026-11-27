@@ -11,7 +11,10 @@ import {
   storeConsentHandoff,
 } from "@/lib/plugins/consent-handoff";
 import { finishInBackground } from "@/lib/plugins/finish-on-return";
-import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
+import {
+  connectAccountMutationOptions,
+  connectAnotherAccountMutationOptions,
+} from "@/lib/plugins/mutations";
 import { pluginKeys } from "@/lib/plugins/queries";
 
 /**
@@ -35,7 +38,15 @@ import { pluginKeys } from "@/lib/plugins/queries";
  * button that pressed it is swapped for another between the two.
  */
 
-export function useConnectInNewTab() {
+export function useConnectInNewTab(
+  options: {
+    /**
+     * One more account at an app the person already connected: the press Connections' Connect
+     * another account makes (`connectAnotherAccountMutationOptions`), from a card in a conversation.
+     */
+    another?: boolean;
+  } = {},
+) {
   /*
    * The provider's client, which is the one whoever drew the button reads from. In the app it is
    * the module's own singleton; a screen mounted under another provider is refetched through its
@@ -47,9 +58,25 @@ export function useConnectInNewTab() {
   const [needsKey, setNeedsKey] = useState(false);
   /** The authorization url, when the browser refused to open the tab holding it. */
   const [blockedUrl, setBlockedUrl] = useState<string | null>(null);
-  const connect = useMutation(connectAccountMutationOptions());
+  const connect = useMutation(
+    options.another
+      ? connectAnotherAccountMutationOptions()
+      : connectAccountMutationOptions(),
+  );
   // Stable, so a caller can list it in an effect's dependencies without re-running it every render.
   const stopWaiting = useCallback(() => setWaiting(false), []);
+  /*
+   * HOW MANY PRESSES ARE STILL ON THEIR WAY TO THE SIGN-IN. A press that turns an app on first has
+   * three steps before anything opens: the turn-on, a read of what is left, and the connect route.
+   * Only the connect route was ever pending, so between the turn-on and the sign-in the button went
+   * back to rest and the card read as done for a few seconds. Counted over the whole press instead
+   * (`during`), so `pending` holds from the click until the sign-in, the key form or a refusal.
+   */
+  const [busy, setBusy] = useState(0);
+  const during = useCallback(<T>(work: Promise<T>): Promise<T> => {
+    setBusy((count) => count + 1);
+    return work.finally(() => setBusy((count) => count - 1));
+  }, []);
   /** The tab the consent is open in, while there is one to watch. */
   const handle = useRef<Window | null>(null);
   /** OpenBot's step, while it is on screen in OpenBot Desktop's window, and the tab it holds. */
@@ -152,7 +179,7 @@ export function useConnectInNewTab() {
     const tab = claimTab();
     handle.current = tab;
     markConnectReturn(tab, serverId, here());
-    void ask(serverId, tab);
+    void during(ask(serverId, tab));
   };
 
   /**
@@ -172,14 +199,16 @@ export function useConnectInNewTab() {
       tab?.close();
       handle.current = null;
     };
-    return first().then((serverId) => {
-      if (serverId === null) {
-        unused();
-        return;
-      }
-      markConnectReturn(tab, serverId, from);
-      void ask(serverId, tab);
-    }, unused);
+    return during(
+      first().then((serverId) => {
+        if (serverId === null) {
+          unused();
+          return;
+        }
+        markConnectReturn(tab, serverId, from);
+        return ask(serverId, tab);
+      }, unused),
+    );
   };
 
   /*
@@ -288,7 +317,10 @@ export function useConnectInNewTab() {
     stopWaiting,
     needsKey,
     blockedUrl,
-    pending: connect.isPending,
+    /** From the click until the sign-in opens, the key form is next, or the press was refused. */
+    pending: connect.isPending || busy > 0,
+    /** Holds `pending` over a press's own steps that come before this tab's (`useConnectOnceOn`). */
+    during,
     /**
      * The connect route's refusal, when it refused: kept whole, so whoever draws it draws a hold calmly
      * (`failureSaid`).

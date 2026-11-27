@@ -44,6 +44,12 @@ export const UNNAMED_PERSON = "Unnamed member";
 export const NOT_OPENED_YET = "Hasn't opened OpenBot yet";
 
 /**
+ * The label beside a member whose account is scheduled to be deleted (`deactivated`, the server's
+ * verdict): they can't use OpenBot, and the membership ends with the account unless they cancel.
+ */
+export const DEACTIVATED = "Deactivated";
+
+/**
  * What somebody is called: their name, or their address until they choose one. Somebody who hasn't
  * opened OpenBot yet may have neither (`notOpenedYet`), and is then a neutral label.
  */

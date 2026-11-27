@@ -4,8 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenBot</title>
-    <!-- No icon file ships with the page. Without this line every page load asks for /favicon.ico and is answered 404. -->
-    <link rel="icon" href="data:," />
+    <!-- OpenBot's orb, the icon OpenBot Desktop ships: in a tab, on a phone's home screen and as an installed app. The files are in public/ (scripts/web-icons.ts). -->
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <!-- Sets the theme before the first paint. Must stay inline and classic: `defer` or `type="module"` runs too late. -->
     <script>
       // localStorage throws in some privacy modes; a theme is not worth taking the app down for.
@@ -29,6 +31,21 @@
         // A skin saved under the id it was renamed from (shared/user-preferences.ts RENAMED_SKIN_IDS).
         const skin = saved === "openmuse" ? "openfuse" : saved;
         if (skin && skin !== "openbot") document.documentElement.dataset.skin = skin;
+      } catch {}
+      try {
+        // Opened by OpenBot Desktop's setup, which faded out to the window's ground and marked the
+        // address once (lib/desktop/from-setup.ts): the first paint fades up from that ground. The
+        // mark comes off the address at once, so a reload or a copied link never fades. Not with
+        // reduced motion.
+        if (window.location.hash === "#from-setup") {
+          window.history.replaceState(
+            window.history.state,
+            "",
+            window.location.pathname + window.location.search,
+          );
+          if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+            document.documentElement.dataset.fromSetup = "";
+        }
       } catch {}
     </script>
   </head>

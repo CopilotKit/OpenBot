@@ -62,8 +62,6 @@ jobs:
       manifest_artifact: ${{ needs.images.outputs.manifest-artifact }}
       retention_days: 30
       platforms: '["macos","windows"]'
-    secrets:
-      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
 
   # One link per installer, so nobody has to dig through the run page for them. The CLI and Node
   # versions are already in each desktop leg's own summary.

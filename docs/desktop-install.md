@@ -73,7 +73,7 @@ sequenceDiagram
   N->>N: engine, deployment download, image pulls
   W->>N: sign_in_to_copilotkit (Account opens)
   N->>C: login (no engine needed; opens the browser)
-  Note over W,N: macOS only, when Podman needs installing: the window says the password prompt<br/>is coming and why, and it comes up by itself a moment later
+  Note over W,N: macOS only, when Podman needs installing: the window says the password prompt<br/>comes next and why, and it comes up only on Continue
   W->>N: local_eval_terms, once an engine answers
   N->>C: onboard local-terms
   P->>W: Accept the evaluation agreement
@@ -85,6 +85,8 @@ sequenceDiagram
   W->>N: connect_local_eval, run_local_eval
   N->>C: local connect, local start / status
   W->>N: start_stack
+  Note over W: Finishing setup says OpenBot is ready
+  P->>W: Open OpenBot
   W->>N: show_openbot
   Note over W: The window becomes OpenBot
 ```
@@ -107,16 +109,20 @@ sequenceDiagram
 4. **AI.** The person chooses a provider and gives a key or signs in with that provider. If Start
    is later refused because of the model, the person comes back here and changes it.
 5. **Start.** Continue starts everything in order: connect OpenBot to the local Intelligence, start
-   Intelligence, start OpenBot, then open it. The window becomes OpenBot as soon as the stack
-   answers. There is no question step before the handover.
+   Intelligence, then start OpenBot. This screen, Finishing setup, holds the usage-data choice.
+   Once the stack answers, it says OpenBot is ready and stays until the person selects **Open
+   OpenBot**, so there is time to read the choice and change it. The window then becomes OpenBot.
 
-A return visit with a recorded local stack goes straight to Start. Any other saved state,
+A return visit with a recorded local stack goes straight to Start, and the window becomes OpenBot
+as soon as the stack answers. So does a Start that updates an existing installation. Only a first
+run waits for Open OpenBot. Any other saved state,
 including an installation that an earlier app connected to a hosted Intelligence, starts at the
 first screen and keeps its finished install.
 
 ## Usage data and account attribution
 
-The last setup screen, Finishing setup, ends with a usage-data checkbox, checked by default. It
+The last setup screen, Finishing setup, ends with a usage-data checkbox, checked by default, above
+**Open OpenBot**. Whatever the box says when the person selects Open OpenBot is the setting. It
 says OpenBot shares diagnostics like errors, hangs, updates and available memory, never any
 content, and links [Desktop telemetry](../desktop/TELEMETRY.md). Once the person signs in, the
 data is linked to their OpenBot account (their CopilotKit sign-in), as that document says. The
@@ -186,14 +192,16 @@ fill a gap. Three rules hold that boundary:
 - **Install before sign-in, sign-in before the engine.** Downloading software needs no account, and
   it is the slow part. Starting it on the first click means the person signs in while it runs. The
   sign-in waits for nothing: someone who leaves while Podman installs has still signed in.
-- **No password prompt without an explanation first, and no click before one.** On macOS, Podman's
+- **No password prompt until the person has read why and chosen Continue.** On macOS, Podman's
   package needs an administrator, so macOS asks for the person's password. Install downloads the
-  package, says "Your Mac will ask for your password so OpenBot can install what it needs to run.",
-  leaves it a moment to be read (`install::BEFORE_PROMPT`), and raises the prompt by itself. An
-  install step informs the person and moves forward. The prompt says why in OpenBot's words
-  (`do shell script ... with prompt`). Closing it without a password is said plainly, with Try
-  again, and Install asks again by itself after a short wait (`install::GoAhead`,
-  `ASK_AGAIN_AFTER`). Windows installs Podman for the person's own account with no prompt. When
+  package while the person signs in, then waits: a card on whichever step the person is on says
+  "Your Mac will ask for your password" and why, with Continue, and the prompt comes up only on
+  Continue (`install::install_with_password`, `install::GoAhead`). The prompt comes from the system
+  and comes up over every window. Raised on a timer after a line on OpenBot's window, it came up over
+  the browser's sign-in page on the 1.2.0 Mac run while that line sat behind the browser. The
+  prompt says why in OpenBot's words (`do shell script ... with prompt`). Closing it without a
+  password is said plainly, with Try again, and Install asks again by itself after a short wait
+  (`ASK_AGAIN_AFTER`). Windows installs Podman for the person's own account with no prompt. When
   WSL is missing, the Windows blocker says what Windows will ask and starts the change by itself;
   a declined administrator prompt is asked again the same way. The restart after it is the one
   step that waits for the person's click: OpenBot never restarts the computer on its own, because

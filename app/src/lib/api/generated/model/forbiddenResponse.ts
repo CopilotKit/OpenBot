@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
+ * The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED). Or the caller's account is scheduled to be deleted (ACCOUNT_PENDING_DELETION), which every operation but getAccountDeletion and cancelAccountDeletion answers until the deletion is cancelled.
  */
 export type ForbiddenResponse = Problem;

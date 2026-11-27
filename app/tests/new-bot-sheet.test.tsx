@@ -341,6 +341,30 @@ test("Create fills in what was left blank, then hands over", async () => {
   expect(handedOver).toEqual(["agent_new"]);
 });
 
+/*
+ * Instructions run to 5000 characters. Seen dogfooding: the field stopped taking text at 1000, so
+ * instructions pasted in were cut off without a word.
+ */
+test("instructions up to 5000 characters are sent whole, and the field takes no more", async () => {
+  const { view, user } = await opened();
+  await user.type(view.getByLabelText("Name"), "Expense Review");
+  const instructions = view.getByLabelText(
+    /^Instructions/,
+  ) as HTMLTextAreaElement;
+  const most = `${"Check receipts. ".repeat(312)}Done.res`;
+  expect(most).toHaveLength(5000);
+  // One character past the most it takes: the field stops at 5000.
+  await userEvent
+    .setup({ document: view.container.ownerDocument, delay: null })
+    .type(instructions, `${most}t`);
+  expect(instructions.value).toBe(most);
+
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  await waitFor(() => expect(creates).toHaveLength(1));
+  expect(creates[0]?.roleDescription).toBe(most);
+  // Typing 5000 characters a key at a time takes seconds on a busy runner.
+}, 60_000);
+
 test("refuses an empty or unreachable custom endpoint without creating", async () => {
   verdict = { ok: false, reason: "Nothing answered at that address." };
   const { view, user } = await connected("");

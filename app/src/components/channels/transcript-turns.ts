@@ -1,5 +1,6 @@
 import { answeredBy } from "@openbot/shared/handoff-markers";
 import { readFiring } from "@/lib/channels/routine-firing";
+import { isAnswerToQuestion } from "@/lib/question-answer";
 import type { TranscriptItem } from "./tool-activity";
 
 /**
@@ -33,7 +34,9 @@ export type Turn = {
 
 function isPersons(item: TranscriptItem): boolean {
   return (
-    (item.kind === "text" && isPersonSentMessage(item.role, item.text)) ||
+    (item.kind === "text" &&
+      isPersonSentMessage(item.role, item.text) &&
+      !isAnswerToQuestion(item.id)) ||
     item.kind === "attachments"
   );
 }
@@ -68,7 +71,9 @@ function strip(markdown: string): string {
 /**
  * The conversation's turns, oldest first. A turn starts where the person sent something — text, or
  * files, which arrive as their own row beside the caption and are one turn with it — and runs until
- * they send again. A routine firing starts none: nobody typed it.
+ * they send again. A routine firing starts none: nobody typed it. Nor does an answer to a question
+ * the Bot asked: it carries on the turn the Bot asked in. Counted as a turn, one question and its
+ * answer drew a rail of two marks beside a conversation the person had sent one thing to.
  */
 export function turnsOf(items: readonly TranscriptItem[]): Turn[] {
   const turns: Turn[] = [];

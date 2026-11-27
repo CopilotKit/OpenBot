@@ -6,6 +6,8 @@
  *                 it is paused, which commands it has already run, and the version its own first
  *                 install went to while none has been accepted
  *   journal.json  the last promotion, in the promotion tool's journal format
+ *   desired.json  the last signed desired state accepted: its install, counter and signature, so a
+ *                 replayed older one is refused after a restart too (readDesiredState)
  *
  * A journal in any phase other than `accepted` or `failed` means a promotion stopped after it may
  * have changed the database. Nothing more is upgraded until a person has recovered and removed
@@ -16,7 +18,14 @@
  */
 import { z } from "zod";
 import type { PromotionJournal } from "../../shared/kubernetes-promotion";
+import type { AcceptedDesiredState } from "../../shared/management-contract";
 import type { Kube } from "./kube";
+
+const AcceptedDesired = z.strictObject({
+  installId: z.uuid(),
+  counter: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  signature: z.base64(),
+});
 
 const Release = z.strictObject({
   version: z.string(),
@@ -112,6 +121,26 @@ export class StateStore {
       ...data,
       "state.json": `${JSON.stringify(State.parse(state), null, 2)}\n`,
     });
+  }
+
+  /** The last signed desired state accepted, or null when none was (or a person removed it). */
+  async readDesired(): Promise<AcceptedDesiredState | null> {
+    const value = (await this.data())["desired.json"];
+    return value ? AcceptedDesired.parse(JSON.parse(value)) : null;
+  }
+
+  /**
+   * Keeps the signed desired state just accepted. A merge patch of this one key, so it never writes
+   * back an older state.json or journal.json read before a promotion saved its own.
+   */
+  async saveDesired(accepted: AcceptedDesiredState) {
+    const value = `${JSON.stringify(AcceptedDesired.parse(accepted), null, 2)}\n`;
+    const map = await this.kube.get(this.namespace, "configmap", this.name);
+    if (map)
+      await this.kube.patch(this.namespace, "configmap", this.name, {
+        data: { "desired.json": value },
+      });
+    else await this.write({ "desired.json": value });
   }
 
   async saveJournal(journal: PromotionJournal) {

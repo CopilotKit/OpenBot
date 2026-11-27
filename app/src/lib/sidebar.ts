@@ -6,7 +6,9 @@
  * this app on a server, and nothing ever read that cookie back — so the preference lives here
  * instead, in the same shape and the same storage as the theme preference next door.
  */
-export const SIDEBAR_STORAGE_KEY = "openbot-sidebar";
+import { SIDEBAR_STORAGE_KEY } from "@openbot/shared/app-storage-keys";
+
+export { SIDEBAR_STORAGE_KEY };
 
 /**
  * Only the exact stored `collapsed` starts the sidebar closed.

@@ -64,6 +64,21 @@ if (params.get("theme") === "dark")
 const edition = params.get("edition") === "team" ? "team" : "personal";
 const signsIn = params.get("app") === "slack";
 const known = params.get("scheme") === "known";
+/*
+ * `?state=reconnect`: Fireflies is on and connected, and its key didn't pass its check, so the card
+ * says Reconnect. A Reconnect sends a new key and the key is taken (`?held=1` holds the apps list,
+ * the read the app's page waits for, until `window.__release()`).
+ */
+const reconnecting = params.get("state") === "reconnect" && !signsIn;
+const held = params.get("held") === "1";
+let releaseApps: () => void = () => {};
+const appsHeld = held
+  ? new Promise<void>((resolve) => {
+      releaseApps = resolve;
+    })
+  : Promise.resolve();
+(window as unknown as { __release: () => void }).__release = () =>
+  releaseApps();
 
 const APP = signsIn ? "composio-slack" : "composio-fireflies";
 const TITLE = signsIn ? "Slack" : "Fireflies";
@@ -119,7 +134,17 @@ const server: TodayServer = {
       ],
 };
 
-let on = false;
+const refused: AppAccess = appAccess({
+  key: APP,
+  displayName: TITLE,
+  connect: "key",
+  state: "reconnect",
+  connectedAt: "2026-11-20T09:00:00.000Z",
+});
+/** Whether the key the person typed has been taken, which a Reconnect's form ends with. */
+let rekeyed = false;
+
+let on = reconnecting;
 const original = window.fetch.bind(window);
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input), location.origin);
@@ -138,7 +163,51 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return meResponse({ user: { id: "usr_me", role: "admin", name: "Me" } });
   if (path === botPath(BOT))
     return Response.json({ bot: { id: BOT, name: "Personal Assistant" } });
-  if (path === botAppPath(BOT, APP)) return botAppResponse(on ? after : before);
+  if (path === botAppPath(BOT, APP))
+    return botAppResponse(
+      reconnecting
+        ? rekeyed
+          ? appAccess({ ...refused, state: "ready" })
+          : refused
+        : on
+          ? after
+          : before,
+    );
+  if (reconnecting && path === myConnectionPath(APP, "connect")) {
+    const sent =
+      typeof init?.body === "string"
+        ? init.body
+        : input instanceof Request
+          ? await input.clone().text()
+          : "";
+    let values: unknown;
+    try {
+      values = (JSON.parse(sent || "{}") as { values?: unknown }).values;
+    } catch {
+      values = undefined;
+    }
+    if (values) {
+      rekeyed = true;
+      return startResponse({
+        connected: true,
+        verified: true,
+        probe: "FIREFLIES_GET_USER",
+      });
+    }
+  }
+  if (reconnecting && path === MY_CONNECTIONS_PATH)
+    return connectionPage([
+      {
+        serverId: APP,
+        connectedAt: "2026-11-20T09:00:00.000Z",
+        verified: rekeyed,
+        verifiedAt: rekeyed ? "2026-11-25T09:00:00.000Z" : null,
+        probe: "FIREFLIES_GET_USER",
+        checkable: true,
+      },
+    ]);
+  if (reconnecting && path.endsWith("/apps") && method === "GET")
+    await appsHeld;
   if (path === `${botAppPath(BOT, APP)}/approve`) {
     on = true;
     return appAccessApprovalResponse({

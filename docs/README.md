@@ -11,6 +11,7 @@ Start with [How OpenBot works](how-openbot-works.md): what a Bot has, and where 
 - [The API spec](../api/README.md): the REST API in OpenAPI and the live channels in AsyncAPI, the client generated from them, and how to change them.
 - [API versions and compatibility](api-versioning.md): what counts as breaking, deprecation, the 12-month support window, minimum app versions, the launcher contract, the security floor, and what CI stops.
 - [Bots](coworkers.md): durable Bot profiles, conversations, visibility, deletion, and external AG-UI registration.
+- [Connect your agent's framework](agent-frameworks.md): the few lines a LangGraph, Pydantic AI, Mastra, CrewAI, Claude Agent SDK, Agno, CopilotKit, AWS Strands or A2A agent needs so its model is told the Bot's role and tool guidance.
 - [Approvals](approvals.md): which actions a Bot asks before, the order that decides it, and what an admin can close.
 - [Routines](routines.md): the one list of routines, goals and check-ins, how the server fires them, and who they run as.
 - [Automatic Learning](automatic-learning.md): which Bots contribute conversations to a Learning container, and receive its published skills.

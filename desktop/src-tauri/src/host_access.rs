@@ -767,6 +767,10 @@ impl Inner {
         struct Restored {
             restored: Vec<String>,
         }
+        // Stop must not return while a request can still hand its folders back to the server.
+        // Keep the snapshot and HTTP exchange inside the same effect boundary as Stop. The
+        // broker's client bounds the wait to 15 seconds; the state lock is free during HTTP.
+        let _effect = self.effect_lock.lock().expect("host effect lock poisoned");
         let held = self
             .state
             .lock()
@@ -4202,6 +4206,71 @@ mod tests {
         thread::sleep(Duration::from_millis(200));
         assert!(!grant_is_live(&host));
         assert_eq!(server.asked("/desktop/restore"), 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stop_waits_for_a_folder_hand_back_already_in_flight() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (arrived_tx, arrived_rx) = mpsc::channel();
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            assert!(line.starts_with("POST /api/host-access/desktop/restore "));
+            let mut length = 0;
+            loop {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                if line.trim().is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse::<usize>().unwrap();
+                    }
+                }
+            }
+            reader.read_exact(&mut vec![0; length]).unwrap();
+            arrived_tx.send(()).unwrap();
+            reply_rx.recv().unwrap();
+            let answer = r#"{"restored":["grant"]}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", answer.len()).unwrap();
+        });
+        let inner = Arc::new(shown_inner(&base_url, Arc::new(DenyAllApprovalUi)));
+        let root = inner.state.lock().unwrap().grants["grant"].root.clone();
+        let restoring = inner.clone();
+        let restore = thread::spawn(move || restoring.restore_grants(&Client::new()));
+        arrived_rx.recv_timeout(Duration::from_secs(20)).unwrap();
+        let host = HostAccess { inner };
+        // The request has arrived and its response is held, so this checks the serialization
+        // boundary even if the scheduler delays the Stop thread below.
+        let restore_holds_effect_lock = host.inner.effect_lock.try_lock().is_err();
+        let stopping = host.inner.clone();
+        let (stopped_tx, stopped_rx) = mpsc::channel();
+        let stop = thread::spawn(move || {
+            let host = HostAccess { inner: stopping };
+            host.stop_with_machine_stopped();
+            stopped_tx.send(()).unwrap();
+        });
+        let finished_before_reply = stopped_rx.recv_timeout(Duration::from_millis(100)).is_ok();
+        // Always release and join the workers, including when checking the unfixed race.
+        reply_tx.send(()).unwrap();
+        restore.join().unwrap().unwrap();
+        stop.join().unwrap();
+        server.join().unwrap();
+        assert!(
+            restore_holds_effect_lock,
+            "hand-back bypassed Stop's effect lock"
+        );
+        assert!(
+            !finished_before_reply,
+            "Stop returned while a hand-back was still in flight"
+        );
+        assert!(!grant_is_live(&host));
         let _ = fs::remove_dir_all(root);
     }
 
