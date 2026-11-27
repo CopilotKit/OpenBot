@@ -112,15 +112,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   through a long answer, or a socket that dropped, showed a finished answer with "The Bot stopped before
   it finished" and Carry on. The app now asks how that run ended and shows a finished one whole, with no
   notice. API: `getConversationRun`.
+- **A run that ended on a computer step the page missed carries on by itself.** On the web, when a
+  run ends on a step for the Bot's computer that the page never heard (a phone that was asleep, say),
+  the conversation now carries on by itself once, instead of showing "The Bot stopped before it
+  finished". A second time in the same turn still shows it, with Carry on. A step nothing answered
+  before the Bot went on reads "Didn't run a command", no longer "Blocked" in red.
 - **An answered approval stays in the conversation as one line**, such as "Allowed once: Create event on
   Google Calendar", which opens to the card as it was answered. It does in every conversation, however
   old, through the new `listConversationApprovals`; before, only the person's last hundred approvals had
   their line.
-- **A Bot's "can't run" stays under the message it couldn't answer.** When a Bot's engine isn't
-  answering, the sentence that says so stays under that message after the next message is answered,
-  and after a reload. It used to go as soon as the next turn started, and the message sat in the
-  conversation with nothing under it. `listRefusedTurns` gains the code `BOT_ENGINE_UNAVAILABLE`, and
-  the run's RUN_ERROR carries the same code.
 - **A Bot can connect another account at an app from the conversation.** Asked to connect a second
   account ("my personal email as well"), the Bot puts up one card that starts the sign-in for one more
   account, says which account Bots use once it's listed, and offers Make default. A how-to answer now
