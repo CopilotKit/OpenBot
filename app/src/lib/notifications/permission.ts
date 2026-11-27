@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { desktopShell, type ShellIpc } from "@/lib/desktop/shell";
+import { nativeShell } from "@/lib/native-shell/shell";
 
 /**
  * Whether this browser may show OpenBot's notifications: the browser's own answer, never a guess.
@@ -36,6 +37,8 @@ export type NotificationPermissionState =
 
 /** What the browser says now. A browser that throws on reading it is one that cannot show them. */
 export function notificationPermission(): NotificationPermissionState {
+  // In the phone app's native shell the phone app notifies, never the page: nothing to offer here.
+  if (nativeShell() !== null) return "unsupported";
   try {
     return typeof Notification === "undefined"
       ? "unsupported"

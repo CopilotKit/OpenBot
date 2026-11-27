@@ -1,9 +1,17 @@
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Outlet,
+  useRouterState,
+  redirect,
+} from "@tanstack/react-router";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
+import { NativeShellPanel } from "@/components/layout/native-shell-frame";
+import { DefaultPageBackProvider } from "@/components/layout/page-shell";
 import { PlanBanner } from "@/components/layout/plan-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { SidebarInset } from "@/components/ui/sidebar";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { BotListScopeProvider } from "@/lib/agents/list-scope";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -33,6 +41,32 @@ export const Route = createFileRoute("/_authed/admin")({
 });
 
 function RouteComponent() {
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+  /*
+   * Inside the phone app's native shell, no sidebar (`NativeShellPanel`). Admin's first page lists
+   * every Admin page already, and every other page leads back to it.
+   */
+  if (nativeShell()) {
+    return (
+      <NativeShellPanel>
+        <ConnectionBanner />
+        <PlanBanner />
+        <DefaultPageBackProvider
+          value={
+            pathname === "/admin" || pathname === "/admin/"
+              ? null
+              : { label: "Admin", linkProps: { to: "/admin" } }
+          }
+        >
+          <BotListScopeProvider scope="organization">
+            <Outlet />
+          </BotListScopeProvider>
+        </DefaultPageBackProvider>
+      </NativeShellPanel>
+    );
+  }
   return (
     // The same inset panel as the app's shell; see `_app.tsx`.
     <SidebarShell className="h-svh overflow-hidden">
