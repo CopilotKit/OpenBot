@@ -65,6 +65,18 @@ export const GetDeploymentResponse = zod
       .boolean()
       .describe("Whether a person can dictate a message."),
     voice: zod.boolean().describe("Whether a person can talk to a Bot."),
+    runStop: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether a person can stop a Bot's run from an app with stopConversationRun. Absent from a server older than it.",
+      ),
+    mobileConnections: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether an app's sign-in page can send the person back to OpenBot Mobile (returnTo mobile on connectApp), so the phone can connect their apps. Absent from a server older than it.",
+      ),
     durableHistory: zod
       .boolean()
       .describe("Whether conversations are kept between restarts."),

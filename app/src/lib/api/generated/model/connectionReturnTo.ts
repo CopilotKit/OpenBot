@@ -3,7 +3,7 @@
  */
 
 /**
- * Which of OpenBot's own pages the app sends the person back to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop. Never an address.
+ * Which of OpenBot's own pages the app sends the person back to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop; mobile, back to OpenBot Mobile, which then calls confirmConnection. Never an address. A client sends mobile only where getDeployment says mobileConnections.
  */
 export type ConnectionReturnTo =
   (typeof ConnectionReturnTo)[keyof typeof ConnectionReturnTo];
@@ -12,4 +12,5 @@ export const ConnectionReturnTo = {
   connections: "connections",
   apps: "apps",
   desktop: "desktop",
+  mobile: "mobile",
 } as const;

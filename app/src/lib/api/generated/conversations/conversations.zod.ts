@@ -1047,6 +1047,10 @@ export const ListConversationMessagesQueryParams = zod.object({
 
 export const listConversationMessagesResponseMessagesItemToolCallsMin = 0;
 
+export const listConversationMessagesResponseMessagesItemComponentsItemNameMax = 200;
+
+export const listConversationMessagesResponseMessagesItemComponentsMax = 50;
+
 export const listConversationMessagesResponseMessagesItemFilesItemSizeBytesMin = 0;
 
 export const listConversationMessagesResponseMessagesItemFilesMax = 20;
@@ -1124,6 +1128,38 @@ export const ListConversationMessagesResponse = zod.object({
           .optional()
           .describe(
             "How many tools the Bot called in this message, when it called any.",
+          ),
+        components: zod
+          .array(
+            zod
+              .object({
+                toolCallId: zod
+                  .string()
+                  .min(1)
+                  .describe(
+                    "The tool call that drew it, as the run's TOOL_CALL events name it.",
+                  ),
+                name: zod
+                  .string()
+                  .min(1)
+                  .max(
+                    listConversationMessagesResponseMessagesItemComponentsItemNameMax,
+                  )
+                  .describe(
+                    "The component, as listComponents names it: showBarChart, showTable, askChoice and so on.",
+                  ),
+                arguments: zod
+                  .record(zod.string(), zod.unknown())
+                  .describe(
+                    "What the Bot gave the component, as it sent it. An object the Bot's arguments could not be read into is empty.",
+                  ),
+              })
+              .describe("One gallery component a Bot drew in a message."),
+          )
+          .max(listConversationMessagesResponseMessagesItemComponentsMax)
+          .optional()
+          .describe(
+            "The gallery components the Bot drew in this message (a chart, a table, a card, a question), in the order it drew them. Each is one of the Bot's tool calls, named as listComponents names a component, with the arguments the Bot gave it, so a client draws it again with its own renderer for that name. A client skips a name it does not know, and draws a component's arguments only as far as it can read them: they are the Bot's, and may be partial. Absent when the Bot drew none, and from a server older than this field.",
           ),
         files: zod
           .array(
@@ -1619,6 +1655,66 @@ export const GetConversationRunParams = zod.object({
 });
 
 export const GetConversationRunResponse = zod.object({
+  run: zod
+    .object({
+      id: zod.string().min(1).describe("The run's id, as its events carry it."),
+      outcome: zod
+        .string()
+        .nullable()
+        .describe(
+          "How the run ended, as its own last event said. succeeded: it finished. interrupted: it stopped to ask a person (an approval, a missing value). cancelled: it was stopped. failed: it ended with an error, or its stream failed, or its server ended it on the way down. Null while the run is going, and for a run that ended without saying how.",
+        ),
+      endedAt: zod.iso
+        .datetime({ offset: true })
+        .nullable()
+        .describe("When the run ended, or null while outcome is null."),
+    })
+    .describe("One of a Bot's runs in a conversation, and how it ended."),
+});
+
+/**
+ * Stop one of a Bot's runs in the conversation, as Stop beside the message box does: the Bot stops writing, what it wrote so far stays, and the run ends as cancelled, which its last event on the threadStream channel of api/asyncapi.yaml says. The run is named by the runId its events carry. A run that is going answers 202 with outcome null, since it ends on the replica that runs it a moment later. A run that has ended already answers 200, saying how it ended, so asking twice is harmless. A run this server keeps no record of, or one of another conversation, is not found. Only a person in the conversation may stop a run in it. A client offers Stop only where getDeployment says runStop.
+ * @summary Stop a Bot's run in a conversation
+ */
+
+export const stopConversationRunPathConversationIdRegExp = new RegExp("\\S");
+export const stopConversationRunPathRunIdMax = 256;
+
+export const stopConversationRunPathRunIdRegExp = new RegExp("\\S");
+
+export const StopConversationRunParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  conversationId: zod
+    .string()
+    .min(1)
+    .regex(stopConversationRunPathConversationIdRegExp)
+    .describe("The conversation's id."),
+  runId: zod
+    .string()
+    .min(1)
+    .max(stopConversationRunPathRunIdMax)
+    .regex(stopConversationRunPathRunIdRegExp)
+    .describe("The run's id, as its events carry it."),
+});
+
+export const stopConversationRunHeaderIdempotencyKeyMax = 128;
+
+export const StopConversationRunHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(stopConversationRunHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const StopConversationRunResponse = zod.object({
   run: zod
     .object({
       id: zod.string().min(1).describe("The run's id, as its events carry it."),

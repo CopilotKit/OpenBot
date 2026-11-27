@@ -558,6 +558,7 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/conversations/{conversationId}/approvals: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1conversations~1{conversationId}~1approvals' }
   /api/v2/organizations/{organizationId}/web-push-key: { $ref: './web-push.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1web-push-key' }
   /api/v2/organizations/{organizationId}/people/{personId}/web-push-subscriptions/{subscriptionId}: { $ref: './web-push.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1web-push-subscriptions~1{subscriptionId}' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/runs/{runId}/stop: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1runs~1{runId}~1stop' }
 components:
   securitySchemes:
     webSession:

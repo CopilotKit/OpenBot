@@ -22,6 +22,10 @@ export interface Deployment {
   transcription: boolean;
   /** Whether a person can talk to a Bot. */
   voice: boolean;
+  /** Whether a person can stop a Bot's run from an app with stopConversationRun. Absent from a server older than it. */
+  runStop?: boolean;
+  /** Whether an app's sign-in page can send the person back to OpenBot Mobile (returnTo mobile on connectApp), so the phone can connect their apps. Absent from a server older than it. */
+  mobileConnections?: boolean;
   /** Whether conversations are kept between restarts. */
   durableHistory: boolean;
   /** The social sign-ins offered, by id. */

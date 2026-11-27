@@ -329,6 +329,8 @@ export * from "./deviceNotFoundResponse";
 export * from "./devicePage";
 export * from "./devicePlatform";
 export * from "./deviceResponse";
+export * from "./drawnComponent";
+export * from "./drawnComponentArguments";
 export * from "./forbiddenResponse";
 export * from "./getBotAppParams";
 export * from "./getCheckInUsageDays";

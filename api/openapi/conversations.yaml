@@ -170,6 +170,74 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/runs/{runId}/stop:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/ConversationId'
+      - $ref: '#/components/parameters/ConversationRunId'
+    post:
+      tags: [Conversations]
+      operationId: stopConversationRun
+      summary: Stop a Bot's run in a conversation
+      description: >-
+        Stop one of a Bot's runs in the conversation, as Stop beside the
+        message box does: the Bot stops writing, what it wrote so far stays,
+        and the run ends as cancelled, which its last event on the
+        threadStream channel of api/asyncapi.yaml says. The run is named by
+        the runId its events carry. A run that is going answers 202 with
+        outcome null, since it ends on the replica that runs it a moment
+        later. A run that has ended already answers 200, saying how it ended,
+        so asking twice is harmless. A run this server keeps no record of, or
+        one of another conversation, is not found. Only a person in the
+        conversation may stop a run in it. A client offers Stop only where
+        getDeployment says runStop.
+      security:
+        - webSession: []
+        - appOAuth: [conversations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The run had ended already, and how it ended.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationRunResponse'
+              examples:
+                finished:
+                  $ref: '#/components/examples/ConversationRunResponseExample'
+        '202':
+          description: The run is being stopped. Its outcome is null until it ends.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationRunResponse'
+              examples:
+                stopping:
+                  $ref: '#/components/examples/ConversationRunStoppingExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationRunNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/conversations:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
@@ -2802,6 +2870,20 @@ components:
           type: integer
           minimum: 0
           description: How many tools the Bot called in this message, when it called any.
+        components:
+          type: array
+          maxItems: 50
+          description: >-
+            The gallery components the Bot drew in this message (a chart, a
+            table, a card, a question), in the order it drew them. Each is one
+            of the Bot's tool calls, named as listComponents names a component,
+            with the arguments the Bot gave it, so a client draws it again with
+            its own renderer for that name. A client skips a name it does not
+            know, and draws a component's arguments only as far as it can read
+            them: they are the Bot's, and may be partial. Absent when the Bot
+            drew none, and from a server older than this field.
+          items:
+            $ref: '#/components/schemas/DrawnComponent'
         files:
           type: array
           maxItems: 20
@@ -2810,6 +2892,28 @@ components:
             conversation, read at its attachment address by anyone in it.
           items:
             $ref: '#/components/schemas/Attachment'
+    DrawnComponent:
+      type: object
+      description: One gallery component a Bot drew in a message.
+      required: [toolCallId, name, arguments]
+      properties:
+        toolCallId:
+          type: string
+          minLength: 1
+          description: The tool call that drew it, as the run's TOOL_CALL events name it.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: >-
+            The component, as listComponents names it: showBarChart,
+            showTable, askChoice and so on.
+        arguments:
+          type: object
+          additionalProperties: true
+          description: >-
+            What the Bot gave the component, as it sent it. An object the
+            Bot's arguments could not be read into is empty.
     ConversationMessagePage:
       type: object
       required:
@@ -3886,6 +3990,13 @@ components:
           id: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
           outcome: succeeded
           endedAt: '2026-11-14T12:04:10.000Z'
+    ConversationRunStoppingExample:
+      summary: A run being stopped
+      value:
+        run:
+          id: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          outcome: null
+          endedAt: null
     ConversationPageExample:
       summary: "One page of conversations, and the last."
       value: {"conversations": [{"id": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "name": "General Assistant", "botIds": ["general-assistant"], "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "active": true, "lastMessageAt": "2026-11-14T12:00:00.000Z", "summary": "Quarterly forecast", "opening": "Can you draft the quarterly forecast?", "lastMessage": "Here is the first draft.", "lastMessageBotId": "general-assistant", "createdAt": "2026-11-13T09:00:00.000Z", "pinned": false, "lastReadAt": "2026-11-14T12:00:05.000Z", "canRename": true, "task": false, "work": []}], "nextCursor": null}
