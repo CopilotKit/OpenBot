@@ -3,6 +3,7 @@ import {
   afterEach,
   beforeAll,
   beforeEach,
+  describe,
   expect,
   test,
 } from "bun:test";
@@ -294,4 +295,28 @@ test("Settings under hosted sign-in asks for no company sign-in", async () => {
       instructionsQueryOptions(),
     ),
   );
+});
+
+/**
+ * With the connection lost the capabilities read is retried without end, and a loader that waited for it
+ * would never let the page draw.
+ */
+describe("a capabilities read that never answers", () => {
+  beforeEach(() => {
+    globalThis.fetch = Object.assign(() => new Promise<Response>(() => {}), {
+      preconnect: originalFetch.preconnect,
+    }) as typeof fetch;
+  });
+
+  test("Settings hands over within the first-screen wait", async () => {
+    const started = Date.now();
+    await keysAfterLoading(SettingsRoute);
+    expect(Date.now() - started).toBeLessThan(450);
+  });
+
+  test("Admin hands over within the first-screen wait, though neither deciding read answers", async () => {
+    const started = Date.now();
+    await keysAfterLoading(AdminRoute);
+    expect(Date.now() - started).toBeLessThan(450);
+  });
 });

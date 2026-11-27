@@ -24,7 +24,7 @@ import {
   asksForManagement,
   managementQueryOptions,
 } from "@/lib/management/queries";
-import { loadFirstScreen } from "@/lib/route-data";
+import { loadFirstScreenAfter } from "@/lib/route-data";
 
 export const Route = createFileRoute("/_authed/admin/")({
   /*
@@ -36,20 +36,30 @@ export const Route = createFileRoute("/_authed/admin/")({
   loader: async ({ context }) => {
     // A router built without the app's context, as some tests build, has nothing to warm.
     if (!context.queryClient) return;
-    const user = await context.queryClient
-      .ensureQueryData(currentUserQueryOptions())
-      .catch(() => undefined);
-    const capabilities = await context.queryClient
-      .ensureQueryData(deploymentCapabilitiesQueryOptions())
-      .catch(() => undefined);
-    await loadFirstScreen(context.queryClient, [
-      ...(asksForManagement({ isPending: false, data: capabilities })
-        ? [managementQueryOptions()]
-        : []),
-      ...(isOrganizationAdmin(user?.role) && capabilities?.edition === "team"
-        ? [computerModeQueryOptions()]
-        : []),
-    ]);
+    const { queryClient } = context;
+    await loadFirstScreenAfter(queryClient, {
+      deciding: [
+        currentUserQueryOptions(),
+        deploymentCapabilitiesQueryOptions(),
+      ],
+      choose: () => {
+        const user = queryClient.getQueryData(
+          currentUserQueryOptions().queryKey,
+        );
+        const capabilities = queryClient.getQueryData(
+          deploymentCapabilitiesQueryOptions().queryKey,
+        );
+        return [
+          ...(asksForManagement({ isPending: false, data: capabilities })
+            ? [managementQueryOptions()]
+            : []),
+          ...(isOrganizationAdmin(user?.role) &&
+          capabilities?.edition === "team"
+            ? [computerModeQueryOptions()]
+            : []),
+        ];
+      },
+    });
   },
   component: RouteComponent,
 });
