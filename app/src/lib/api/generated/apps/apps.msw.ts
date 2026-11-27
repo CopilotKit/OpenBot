@@ -324,6 +324,7 @@ export const getListAppDirectoryResponseMock = (): AppDirectoryPage => ({
     },
   ],
   nextCursor: null,
+  total: 2,
 });
 
 export const getGetAppSetupResponseMock = (): AppSetup => ({
