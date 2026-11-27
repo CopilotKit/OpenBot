@@ -1974,7 +1974,7 @@ export function ChannelChat({
           !stoppedHere.current &&
           !waitsOnPerson(target)
         ) {
-          const followed = await followServerTurn({
+          await followServerTurn({
             agent: target,
             conversationId: channel.id,
             heard: heardRunId,
@@ -1982,7 +1982,6 @@ export function ChannelChat({
             quietMs: quietRunPeriod.ms,
             stopped: stoppedSince(stops),
           });
-          if (followed === null) pullHistoryRef.current?.();
         }
         if (!streamBroke.current || turnFailure.current !== null) break;
         streamBroke.current = false;
