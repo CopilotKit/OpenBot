@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
-import type { AgentProfile } from "@/lib/agents/queries";
+import { type AgentProfile, agentQueryOptions } from "@/lib/agents/queries";
+import { takesNoModelChoice } from "@/lib/bot-agents/queries";
 import { failureToastType } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 import { canChoose, everyModel } from "./connections";
@@ -253,4 +254,50 @@ export function useDraftModel(
     choose: (pick: ModelPick) =>
       setPicked(requestFor(pick, catalogue, botDefault)),
   };
+}
+
+/**
+ * Said when the Bot a message went to takes no model pick, so the pick was not saved. The person
+ * picked before OpenBot picked the Bot, and a pick that silently does nothing is a surprise. Whatever
+ * the reason (a Bot connected from outside OpenBot, or one set to hand work out), the person reads
+ * the same thing: the Bot picks its own model.
+ */
+function sayModelNotUsed(bot: AgentProfile) {
+  toast.add({
+    id: "home-model-not-used",
+    type: "info",
+    title: `${bot.name} picks its own model, so it doesn't use the one you picked.`,
+  });
+}
+
+/**
+ * The pick for a first message whose Bot is not known yet: OpenBot picks it when the message is
+ * sent, or the person names one with `@`. Home and a new conversation with nobody in To: both
+ * offer it, and both save it the same way.
+ *
+ * It starts on the catalogue's default. `pickFor` is what `startPicked` (and a start with an `@`)
+ * asks once the Bot is known: the pick to save with that Bot's conversation, before the first
+ * message runs, and the line to say once it has started when that Bot takes no pick
+ * (`takesNoModelChoice`). Nothing to save, and nothing to say, while the pick is the default. A Bot
+ * that could not be read takes the pick, as `useBotTakesModelChoice` reads it.
+ */
+export function usePickedBotModel(
+  catalogue: ModelCatalogue | undefined,
+  roster: readonly AgentProfile[] | undefined,
+) {
+  const draft = useDraftModel(catalogue);
+  const pickFor = async (
+    agentId: string,
+  ): Promise<{ pick: ConversationModelInput | null; notUsed?: () => void }> => {
+    const pick = draft.requested;
+    if (!pick) return { pick: null };
+    const bot =
+      roster?.find((agent) => agent.id === agentId) ??
+      (await queryClient
+        .fetchQuery(agentQueryOptions(agentId))
+        .catch(() => undefined));
+    if (!bot || !(await takesNoModelChoice(queryClient, bot))) return { pick };
+    return { pick: null, notUsed: () => sayModelNotUsed(bot) };
+  };
+  return { ...draft, pickFor };
 }
