@@ -14,6 +14,7 @@ import {
   SearchResults,
   useDebounced,
 } from "@/components/app-sidebar/conversations-panel";
+import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { PageEmpty, PageRows, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +28,7 @@ import {
   normalizeChannelSearch,
 } from "@/lib/channels/queries";
 import { loadFailure } from "@/lib/load-failure";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { useConversationView } from "@/lib/settings/conversation-view";
 import { useMessageListEmphasis } from "@/lib/settings/message-list";
 import { delegatingConversationsQueryOptions } from "@/lib/tasks/queries";
@@ -63,18 +65,37 @@ function ConversationsPage() {
   const searching = term.length > 0;
   const searchable = isChannelSearchable(term);
   const rows = pinnedFirst(channels.data ?? []);
+  const shell = nativeShell() !== null;
 
   return (
     <PageShell
       action={
-        <Button
-          render={(props) => <Link {...props} to="/channel/new" />}
-          size="sm"
-          variant="ghost"
-        >
-          <IconMessagePlus />
-          New conversation
-        </Button>
+        <div className="flex items-center gap-2">
+          {/*
+           * Beside the account in the native shell, the icon alone, named for a screen reader: the
+           * words and the avatar do not both fit beside the title on a phone.
+           */}
+          {shell ? (
+            <Button
+              aria-label="New conversation"
+              render={(props) => <Link {...props} to="/channel/new" />}
+              size="icon"
+              variant="ghost"
+            >
+              <IconMessagePlus />
+            </Button>
+          ) : (
+            <Button
+              render={(props) => <Link {...props} to="/channel/new" />}
+              size="sm"
+              variant="ghost"
+            >
+              <IconMessagePlus />
+              New conversation
+            </Button>
+          )}
+          <ShellAccountMenu />
+        </div>
       }
       title="Conversations"
     >

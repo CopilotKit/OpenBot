@@ -17,9 +17,11 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { NativeSignedOut } from "@/components/auth/native-signed-out";
+import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { PageShell } from "@/components/layout/page-shell";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { useDesktopOpenRequests } from "@/lib/desktop/open-requests";
@@ -38,6 +40,8 @@ import {
   conversationPage,
   TASKS_PATH,
 } from "./conversations-api";
+import { ME_PATH, meBody } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -143,6 +147,14 @@ function serve(list: ReturnType<typeof channel>[] | number | "never") {
         );
       return Response.json(conversationPage(list));
     }
+    if (path === ME_PATH)
+      return Response.json(
+        meBody({
+          user: { id: "sam", name: "Sam Rivera", email: "sam@example.com" },
+        }),
+      );
+    if (path === DEPLOYMENT_PATH)
+      return Response.json({ edition: "team", localEvaluation: false });
     if (path === TASKS_PATH)
       return Response.json({ tasks: [], nextCursor: null });
     return Response.json({ detail: "not served" }, { status: 404 });
@@ -185,6 +197,8 @@ function renderApp(path: string) {
         page("/", () => (
           <>
             <SidebarToggleBar />
+            {/* Beside the bar, not in it: another file stands a stub in for the bar (mock.module). */}
+            <ShellAccountMenu />
             <h1>Home</h1>
           </>
         )),
@@ -235,6 +249,24 @@ describe("the frame", () => {
     expect(view.container.querySelector(".h-14")).toBeNull();
   });
 
+  test("in the shell, the sidebar's account menu sits at the top right, named Account", async () => {
+    inShell(true);
+    serve([]);
+    const { view } = renderApp("/");
+    await view.findByRole("heading", { name: "Home" });
+    const account = view.getByRole("button", { name: "Account" });
+    await userEvent
+      .setup({ document: view.container.ownerDocument })
+      .click(account);
+    const settings = await within(document.body).findByRole("menuitem", {
+      name: "Settings",
+    });
+    expect(settings.getAttribute("href")).toBe("/settings");
+    expect(
+      within(document.body).getByRole("menuitem", { name: "Sign out" }),
+    ).toBeTruthy();
+  });
+
   test("in a browser, the sidebar is there as before", async () => {
     inShell(false);
     serve([]);
@@ -246,13 +278,19 @@ describe("the frame", () => {
     expect(
       view.container.querySelector('[data-slot="sidebar"]'),
     ).not.toBeNull();
+    // The account is the sidebar's, named for the person: none is added at the top of the page.
+    expect(view.queryByRole("button", { name: "Account" })).toBeNull();
   });
 });
 
 /** Where each "New conversation" on the page goes. */
 function newConversationLinks(container: HTMLElement): (string | null)[] {
   return [...container.querySelectorAll("a")]
-    .filter((link) => link.textContent?.trim() === "New conversation")
+    .filter(
+      (link) =>
+        (link.getAttribute("aria-label") ?? link.textContent?.trim()) ===
+        "New conversation",
+    )
     .map((link) => link.getAttribute("href"));
 }
 

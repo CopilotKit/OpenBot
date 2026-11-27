@@ -111,7 +111,20 @@ export const accountMenuItemClassName = "gap-2 px-2 py-1.5";
  * OpenBot lists them, read in a tooltip on hover and keyboard focus, never while the menu is open.
  * The menu itself starts with the whole account row (`AccountLabel`), version included.
  */
-export function AccountMenu({ children }: { children: ReactNode }) {
+export function AccountMenu({
+  children,
+  label,
+  side = "right",
+}: {
+  children: ReactNode;
+  /**
+   * The button's name, in place of the person's. The phone app's native shell names it "Account",
+   * so its tests find it whoever is signed in.
+   */
+  label?: string;
+  /** Where the tooltip opens: beside the strip, or below a page's header. */
+  side?: "right" | "bottom";
+}) {
   const { person, organization } = useAccountNames();
   const [menuOpen, setMenuOpen] = useState(false);
   return (
@@ -120,6 +133,7 @@ export function AccountMenu({ children }: { children: ReactNode }) {
         <TooltipTrigger
           render={
             <DropdownMenuTrigger
+              aria-label={label}
               className={cn(stripItemClassName, "rounded-full")}
             />
           }
@@ -130,7 +144,7 @@ export function AccountMenu({ children }: { children: ReactNode }) {
             {organization ? `${person}, ${organization}` : person}
           </span>
         </TooltipTrigger>
-        <TooltipContent align="center" side="right" sideOffset={8}>
+        <TooltipContent align="center" side={side} sideOffset={8}>
           <span className="grid min-w-0 *:break-words">
             <span>{person}</span>
             {organization ? (

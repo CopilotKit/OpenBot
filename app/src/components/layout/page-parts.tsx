@@ -1,4 +1,5 @@
 import type * as React from "react";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { cn } from "@/lib/utils";
 import {
   Empty,
@@ -65,8 +66,9 @@ export function PageColumn({
              */
             "mx-auto flex w-full flex-col px-4 pb-16",
             "[&>header+*]:mt-8 [&>header+nav]:mt-6 [&>header+nav+*]:mt-8",
-            // Without a bar above it the heading keeps the full original space.
-            bar ? "pt-8" : "pt-12",
+            // Without a bar above it the heading keeps the full original space. Inside the phone
+            // app's native shell, whose status bar is already above the page, less of it.
+            nativeShell() ? (bar ? "pt-4" : "pt-6") : bar ? "pt-8" : "pt-12",
             "max-w-3xl",
             className,
           )}

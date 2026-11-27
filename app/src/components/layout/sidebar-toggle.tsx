@@ -134,7 +134,7 @@ export function SidebarToggleBar({ children }: { children?: ReactNode }) {
    */
   if (!useOptionalSidebar()) {
     return children ? (
-      <div className="flex shrink-0 justify-end px-3 pt-2 empty:hidden">
+      <div className="flex shrink-0 items-center justify-end gap-2 px-3 pt-2 empty:hidden">
         {children}
       </div>
     ) : null;

@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { NewBotSheet } from "@/components/agents/new-bot-sheet";
+import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { BotRoster } from "@/components/bots/bot-roster";
 import {
   PageRows,
@@ -49,16 +50,20 @@ function BotsPage() {
   return (
     <PageShell
       action={
-        <Button
-          render={(props) => (
-            <Link {...props} search={{ new: true }} to="/bots" />
-          )}
-          size="sm"
-          variant="ghost"
-        >
-          <IconPlus />
-          New Bot
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            render={(props) => (
+              <Link {...props} search={{ new: true }} to="/bots" />
+            )}
+            size="sm"
+            variant="ghost"
+          >
+            <IconPlus />
+            New Bot
+          </Button>
+          {/* Only inside the phone app's native shell, which has no sidebar. */}
+          <ShellAccountMenu />
+        </div>
       }
       description={
         personal || alone
