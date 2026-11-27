@@ -190,7 +190,11 @@ beforeAll(() => {
           // Taken and answered on the server; the page never hears the run start.
           stored = [
             ...body.messages,
-            { id: "answer-1", role: "assistant", content: "High water is at noon." },
+            {
+              id: "answer-1",
+              role: "assistant",
+              content: "High water is at noon.",
+            },
           ];
           return new Promise<Response>((_resolve, reject) => {
             unanswered.push(reject);
