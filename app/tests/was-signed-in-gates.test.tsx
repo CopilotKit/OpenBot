@@ -20,6 +20,7 @@ import {
 import { cleanup, render } from "@testing-library/react";
 import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
 import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
+import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import {
   forgetSignedIn,
@@ -48,6 +49,10 @@ let openbot: ReturnType<typeof Bun.serve>;
 let signedIn: boolean;
 /** Where the person is in onboarding: null for somebody who never had it to do. */
 let onboarding: { step: number; completedAt: string | null } | null;
+/** What the terms and AI connection questions answer: required, or a hold (503) where OpenBot is moving. */
+let termsNeeded: boolean;
+let aiNeeded: boolean;
+let held: boolean;
 
 async function answer(request: Request): Promise<Response> {
   const path = new URL(request.url).pathname;
@@ -99,12 +104,37 @@ async function answer(request: Request): Promise<Response> {
       openbotVersion: null,
     });
   if (path === "/api/v2/organizations/org_acme/shortened-tool-names")
-    return NativeResponse.json({ tools: [] });
-  if (path === "/api/v2/organizations/org_acme/people/me/terms")
+    return NativeResponse.json({ names: {} });
+  if (path === "/api/v2/organizations/org_acme/people/me/terms") {
+    if (held)
+      return NativeResponse.json(
+        {
+          status: 503,
+          code: "ORGANIZATION_UNAVAILABLE",
+          detail: "OpenBot is moving. Back in a moment.",
+        },
+        {
+          status: 503,
+          headers: {
+            "content-type": "application/problem+json",
+            "retry-after": "60",
+          },
+        },
+      );
     return NativeResponse.json({
       current: null,
       accepted: null,
-      acceptanceNeeded: false,
+      acceptanceNeeded: termsNeeded,
+    });
+  }
+  if (path === "/api/v2/organizations/org_acme/people/me/ai-connection")
+    return NativeResponse.json({
+      connection: null,
+      organization: { ready: false, provider: null },
+      uses: aiNeeded ? "none" : "personal",
+      required: true,
+      available: true,
+      signIns: [],
     });
   return NativeResponse.json(
     { status: 404, code: "NOT_FOUND", detail: "Not found." },
@@ -119,6 +149,9 @@ beforeAll(() => {
 beforeEach(() => {
   signedIn = true;
   onboarding = null;
+  termsNeeded = false;
+  aiNeeded = false;
+  held = false;
   setCurrentOrganization(undefined);
   queryClient.clear();
   localStorage.clear();
@@ -238,5 +271,69 @@ test("passing the gates on the terms screen doesn't remember", async () => {
   const { view } = openApp("/terms");
   await view.findByText("The terms", {}, { timeout: 5000 });
   await settleReactWork();
+  expect(wasSignedIn()).toBe(false);
+});
+
+test("a redirect to the terms forgets", async () => {
+  rememberSignedIn();
+  termsNeeded = true;
+  const { view } = openApp();
+  await view.findByText("The terms", {}, { timeout: 5000 });
+  expect(wasSignedIn()).toBe(false);
+});
+
+test("a redirect to onboarding forgets", async () => {
+  rememberSignedIn();
+  onboarding = { step: 1, completedAt: null };
+  const { view } = openApp();
+  await view.findByText("Onboarding", {}, { timeout: 5000 });
+  expect(wasSignedIn()).toBe(false);
+});
+
+test("a redirect to Connect your AI forgets", async () => {
+  rememberSignedIn();
+  aiNeeded = true;
+  const { view, router } = openApp();
+  await view.findByText("Onboarding", {}, { timeout: 5000 });
+  expect(router.state.location.search).toMatchObject({ step: "ai" });
+  expect(wasSignedIn()).toBe(false);
+});
+
+test("a preload that would redirect to the terms leaves the flag alone", async () => {
+  rememberSignedIn();
+  termsNeeded = true;
+  await memoryRouter().preloadRoute({ to: "/" } as never);
+  expect(wasSignedIn()).toBe(true);
+});
+
+test("a hold on a gate's question leaves the flag alone", async () => {
+  rememberSignedIn();
+  held = true;
+  const { view } = openApp();
+  await view.findByText(
+    "OpenBot is moving. Back in a moment.",
+    {},
+    { timeout: 5000 },
+  );
+  expect(wasSignedIn()).toBe(true);
+});
+
+test("a gate pass while the sign-out request is out does not leave the flag set", async () => {
+  rememberSignedIn();
+  const { view } = openApp();
+  await view.findByText("The app", {}, { timeout: 5000 });
+  const realFetch = globalThis.fetch;
+  // The sign-out answers only after another gate pass has remembered them again.
+  globalThis.fetch = Object.assign(
+    async (...args: Parameters<typeof fetch>) => {
+      const url = String(args[0] instanceof Request ? args[0].url : args[0]);
+      if (!url.includes("sign-out")) return realFetch(...args);
+      rememberSignedIn();
+      return Response.json({ success: true });
+    },
+    { preconnect: realFetch.preconnect },
+  ) as typeof fetch;
+  const { mutationFn } = signOutMutationOptions(queryClient);
+  await (mutationFn as () => Promise<unknown>)();
   expect(wasSignedIn()).toBe(false);
 });

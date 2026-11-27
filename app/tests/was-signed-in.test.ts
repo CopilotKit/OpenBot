@@ -61,6 +61,23 @@ describe("whether somebody was signed in last time", () => {
     expect(wasSignedIn()).toBe(false);
   });
 
+  test("remembering and forgetting do not throw when storage refuses writes", () => {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error("storage is full");
+        },
+        removeItem: () => {
+          throw new Error("storage is blocked");
+        },
+      },
+    });
+    expect(() => rememberSignedIn()).not.toThrow();
+    expect(() => forgetSignedIn()).not.toThrow();
+  });
+
   test("sign-out forgets", async () => {
     const realFetch = globalThis.fetch;
     globalThis.fetch = Object.assign(

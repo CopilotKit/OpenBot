@@ -93,6 +93,8 @@ export function signOutMutationOptions(queryClient: QueryClient) {
       }
       const hosted = await hostedHere(queryClient);
       await signOut();
+      // Forgotten again: a gate that passed while the request was out has remembered them since.
+      forgetSignedIn();
       if (!hosted) return { leaving: false };
       window.location.assign(
         hostedSignOutAddress(`${window.location.origin}/sign`),
@@ -101,6 +103,7 @@ export function signOutMutationOptions(queryClient: QueryClient) {
     },
     onSuccess: () => {
       clearSkin();
+      forgetSignedIn();
       queryClient.removeQueries({ queryKey: authKeys.all });
     },
   });

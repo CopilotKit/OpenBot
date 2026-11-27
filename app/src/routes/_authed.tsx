@@ -80,6 +80,7 @@ export const Route = createFileRoute("/_authed")({
      */
     if (await terms) {
       if (location.pathname === "/terms") return;
+      if (!preload) forgetSignedIn();
       throw redirect({ to: "/terms", search: { next: location.href } });
     }
     /*
@@ -94,6 +95,7 @@ export const Route = createFileRoute("/_authed")({
      */
     const next = onboardingDestination(location.href);
     if (needsOnboarding(user) && location.pathname !== "/onboarding") {
+      if (!preload) forgetSignedIn();
       throw redirect({ to: "/onboarding", search: next ? { next } : {} });
     }
     /*
@@ -103,6 +105,8 @@ export const Route = createFileRoute("/_authed")({
      * them while it holds. Its question was only asked for somebody who needs no onboarding.
      */
     if (ai && (await ai)) {
+      // These pages are drawn without the frame, so a flag left from an earlier visit would draw it, then redirect, on every load.
+      if (!preload) forgetSignedIn();
       throw redirect({
         to: "/onboarding",
         search: next ? { step: "ai", next } : { step: "ai" },
