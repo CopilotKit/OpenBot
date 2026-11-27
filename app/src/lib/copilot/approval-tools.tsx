@@ -20,6 +20,7 @@ import {
   frontendApprovalSnapshot,
   WAITING_FOR_PERSON,
 } from "./approval-context";
+import { heldByServer } from "./server-owned-interrupts";
 import { inStepOrder } from "./tool-steps";
 
 type RenderProps = { toolCallId: string; [key: string]: unknown };
@@ -146,6 +147,13 @@ export function useFrontendTool<T extends Record<string, unknown>>(
       : {}),
     handler: tool.handler
       ? async (args, context) => {
+          /*
+           * A call the server holds is the server's: its run stopped on the server's own wait for
+           * the person, and the server carries the conversation on once they have done their part.
+           * Acted on here as well, a sign-in opened a second form. It waits, as a held step does.
+           */
+          if (heldByServer(context.agent, context.toolCall?.id))
+            return WAITING_FOR_PERSON;
           /*
            * A computer action waits for the ones asked for before it in its step, and is not
            * taken after one that failed (`inStepOrder`), whether it goes to the gate or straight
