@@ -186,7 +186,8 @@ final class ShellController: NSObject, WebControllerDelegate {
             URLQueryItem(name: "to", value: path),
         ]
         // URLComponents leaves "+" alone in query values; a server reads it as a space.
-        components?.percentEncodedQuery = components?.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        let encoded = components?.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        components?.percentEncodedQuery = encoded
         return components?.url ?? config.url("/sign?native-sign-in=failed")
     }
 
