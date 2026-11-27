@@ -46,11 +46,27 @@ export const Route = createFileRoute("/_authed")({
       throw redirect({ to: "/sign" });
     }
     /*
+     * The questions the gates below decide on go out together, so the wait is the slowest one and
+     * not the sum of them. They are decided in the order they always were: terms, onboarding, the
+     * AI connection, then the shortened tool names. A question an earlier gate never reads, because
+     * it redirected, must not become an unhandled rejection, so each keeps a handler on a side
+     * reference; a failure is still thrown where its gate awaits it.
+     */
+    const terms = serviceTermsRequired(context.queryClient);
+    const ai =
+      location.pathname !== "/onboarding" && !needsOnboarding(user)
+        ? aiConnectionRequired(context.queryClient)
+        : null;
+    const toolNames = learnShortenedToolNames(context.queryClient);
+    terms.catch(() => undefined);
+    ai?.catch(() => undefined);
+    toolNames.catch(() => undefined);
+    /*
      * Terms to agree to (OpenBot Cloud), before onboarding and everything else: from anywhere to
      * the terms screen, which remembers where they were headed. The terms screen itself is let
      * through here, past the gates after this one, until they agree.
      */
-    if (await serviceTermsRequired(context.queryClient)) {
+    if (await terms) {
       if (location.pathname === "/terms") return;
       throw redirect({ to: "/terms", search: { next: location.href } });
     }
@@ -72,19 +88,16 @@ export const Route = createFileRoute("/_authed")({
      * Where OpenBot provides no AI (OpenBot Cloud), somebody whose runs have none, neither their own
      * nor their organization's, connects their own before anything else: from anywhere, and
      * somebody who finished onboarding before that step existed too. The onboarding route admits
-     * them while it holds.
+     * them while it holds. Its question was only asked for somebody who needs no onboarding.
      */
-    if (
-      location.pathname !== "/onboarding" &&
-      (await aiConnectionRequired(context.queryClient))
-    ) {
+    if (ai && (await ai)) {
       throw redirect({
         to: "/onboarding",
         search: next ? { step: "ai", next } : { step: "ai" },
       });
     }
     // Before any conversation is drawn, so a long-named action's step never shows its cut name.
-    await learnShortenedToolNames(context.queryClient);
+    await toolNames;
   },
   /*
    * A browser opened at the address of OpenBot on one computer is refused on the first question,
