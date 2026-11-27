@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PageShell } from "@/components/layout/page-shell";
+import { BrowserNotifications } from "@/components/settings/browser-notifications";
 import { NativeDevices, RecentDeliveries } from "@/components/settings/devices";
 import { UpdateRoutingSection } from "@/components/settings/update-routing";
 
@@ -8,8 +9,9 @@ export const Route = createFileRoute("/_authed/settings/notifications")({
 });
 
 /**
- * Where your Bots' updates reach you, for all of your Bots at once. Each Bot's own page says how
- * much. Whether they check in for you is under Routines, with the check-ins themselves.
+ * Where your Bots' updates reach you, for all of your Bots at once: which kinds go where, this
+ * browser's push notifications, and the phones that get them. Each Bot's own page says how much.
+ * Whether they check in for you is under Routines, with the check-ins themselves.
  */
 function NotificationsPage() {
   return (
@@ -18,6 +20,7 @@ function NotificationsPage() {
       title="Notifications"
     >
       <UpdateRoutingSection />
+      <BrowserNotifications />
       <NativeDevices />
       <RecentDeliveries />
     </PageShell>

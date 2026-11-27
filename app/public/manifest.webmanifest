@@ -1,7 +1,10 @@
 {
+  "id": "/",
   "name": "OpenBot",
   "short_name": "OpenBot",
   "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
   "background_color": "#f8fafb",
   "theme_color": "#f8fafb",
   "icons": [

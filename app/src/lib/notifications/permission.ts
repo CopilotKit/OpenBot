@@ -6,8 +6,9 @@ import { desktopShell, type ShellIpc } from "@/lib/desktop/shell";
  *
  * WHAT A NOTIFICATION IS HERE. The web app raises one when a Bot starts needing the person
  * (`AttentionNotifier` in `bot-profile/attention.tsx`), from the page itself. So it shows while
- * OpenBot is open in a tab, and not once the tab is closed: there is no web push. Onboarding's Get
- * notified step says so rather than promise more.
+ * OpenBot is open in a tab, and not once the tab is closed. Notifications with the tab closed are
+ * web push, which the person turns on in Settings, Notifications (lib/web-push), and which asks
+ * this same permission.
  *
  * ONE ANSWER FOR THE WHOLE PAGE. Onboarding's step and a Bot's page both offer to turn them on,
  * and a press on either has to show on the other, so the state lives here once and both read it

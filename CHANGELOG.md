@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **Notifications in the browser, with OpenBot closed.** Settings, Notifications has a new switch,
+  Notifications in this browser. Turned on, a Bot's replies, questions and approvals reach that
+  browser as push notifications, as "Where updates go" routes push, and a click opens the
+  conversation. On iPhone and iPad it works once OpenBot is added to the Home Screen, on iOS 16.4 or
+  later, and the screen says so there. The app's manifest now opens OpenBot from a Home Screen as an
+  app of its own (`display: standalone`). Signing out turns notifications off in that browser.
+
 - **A Bot's "can't run" stays under the message it couldn't answer.** When a Bot's engine isn't
   answering, the sentence that says so stays under that message after the next message is answered,
   and after a reload. It used to go as soon as the next turn started, and the message sat in the
