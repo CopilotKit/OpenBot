@@ -22,8 +22,8 @@
  * thread as system messages; the step's tools as AG-UI client tools, so the harness hands every call
  * back instead of running it; `forwardedProps.openbotModelOnly`, `openbotBotId`, and
  * `openbotModel` when a model was chosen; a fresh thread id per call, since the harness keeps no
- * state between runs; the deployment's token in `x-openbot-agent-token`. On a step with no tools
- * (the last step) no tools go, and `openbotAnswerOnly` says so.
+ * state between runs; the deployment's token in `x-openbot-agent-token`. On a call bound with
+ * `tool_choice: "none"` no tools go, and `openbotAnswerOnly` says so.
  *
  * THE ANSWER. Only the text and tool-call events are read, as plan-model.ts reads them; a snapshot
  * of the harness's own state is not this run's. A RUN_ERROR ends the call with the harness's words,

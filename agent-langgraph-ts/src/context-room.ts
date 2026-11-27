@@ -411,7 +411,10 @@ export const RECALL_TOOL: Tool = {
   },
 };
 
-/** The run's tools, with recall added for a Bot that has any. */
+/**
+ * The run's tools, with recall added for a Bot that has any. A caller that offers its own recall
+ * keeps it, and answers it (`answersRecall` in run.ts).
+ */
 export function withRecall(tools: readonly Tool[]): Tool[] {
   if (tools.length === 0 || tools.some((tool) => tool.name === RECALL))
     return [...tools];
