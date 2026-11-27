@@ -66,7 +66,7 @@ const BOT = {
  * handing this browser a command for the Bot's computer, as a run that needs the computer does.
  */
 type Scene = {
-  ends: "finished" | "fails" | "onStep";
+  ends: "finished" | "fails" | "onStep" | "carried";
   stored: unknown[];
   endings: Map<string, { outcome: string; endedAt: string }>;
   /** The runs asked for so far, and the commands the browser took through the gate. */
@@ -186,6 +186,111 @@ function stepRun(input: {
   );
 }
 
+/** The source the carried turn saves before it builds the PDF. */
+const SAVED = "report.tex";
+/** The run the server carried the turn on in, once the one this browser started had stopped. */
+const CARRIED_RUN = "carried-on";
+
+/**
+ * A turn the server carries to its answer while this browser sleeps. The server runs the Bot's
+ * computer steps itself, in the run: this browser hears the run start, the Bot say what it will do,
+ * the file it saved with the server's result, and the build asked for; then nothing. That run stopped
+ * part way, its server gone, and another server carried the turn on in a run of its own, which ran
+ * the build and answered. The thread holds all of it.
+ */
+function carriedRun(input: {
+  threadId: string;
+  runId: string;
+  messages: unknown[];
+}): Response {
+  scene.runs = (scene.runs ?? 0) + 1;
+  const person = input.messages.filter(
+    (message) => (message as { role?: string }).role === "user",
+  );
+  const save = {
+    id: "save",
+    type: "function",
+    function: {
+      name: "computer_write_file",
+      arguments: JSON.stringify({
+        path: SAVED,
+        contents: "\\documentclass{article}",
+      }),
+    },
+  };
+  const build = {
+    id: "build",
+    type: "function",
+    function: {
+      name: "computer_run_command",
+      arguments: JSON.stringify({ command: COMMAND }),
+    },
+  };
+  const saved = JSON.stringify({ ok: true, path: SAVED, bytes: 23 });
+  scene.stored = [
+    ...person,
+    { id: "about", role: "assistant", content: ABOUT_TO, toolCalls: [save] },
+    { id: "result-save", role: "tool", toolCallId: "save", content: saved },
+    { id: "builds", role: "assistant", content: "", toolCalls: [build] },
+    {
+      id: "result-build",
+      role: "tool",
+      toolCallId: "build",
+      content: JSON.stringify({
+        ok: true,
+        exitCode: 0,
+        stdout: PRINTED,
+        stderr: "",
+      }),
+    },
+    { id: "done", role: "assistant", content: FINISHED_REPORT },
+  ];
+  // The run this browser started keeps no ending: its server stopped before writing one.
+  scene.endings.set(CARRIED_RUN, {
+    outcome: "succeeded",
+    endedAt: new Date().toISOString(),
+  });
+  const heard = [
+    { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+    { type: "TEXT_MESSAGE_START", messageId: "about", role: "assistant" },
+    { type: "TEXT_MESSAGE_CONTENT", messageId: "about", delta: ABOUT_TO },
+    { type: "TEXT_MESSAGE_END", messageId: "about" },
+    {
+      type: "TOOL_CALL_START",
+      toolCallId: "save",
+      toolCallName: "computer_write_file",
+      parentMessageId: "about",
+    },
+    {
+      type: "TOOL_CALL_ARGS",
+      toolCallId: "save",
+      delta: save.function.arguments,
+    },
+    { type: "TOOL_CALL_END", toolCallId: "save" },
+    {
+      type: "TOOL_CALL_RESULT",
+      messageId: "result-save",
+      toolCallId: "save",
+      role: "tool",
+      content: saved,
+    },
+    {
+      type: "TOOL_CALL_START",
+      toolCallId: "build",
+      toolCallName: "computer_run_command",
+      parentMessageId: "builds",
+    },
+  ];
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(frames(heard)));
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
 const json = (body: unknown, status = 200) =>
   Response.json(body, {
     status,
@@ -237,15 +342,27 @@ async function answer(request: Request): Promise<Response | undefined> {
       mode: "sse",
       telemetryDisabled: true,
     });
-  // Nothing has run in the conversation when it opens: nothing to replay.
+  /*
+   * Nothing has run in the conversation when it opens: nothing to replay. Joined once the carried
+   * turn is over, the thread's last run is replayed: the server's, with the thread as it stands.
+   */
   if (path.endsWith("/connect"))
-    return new Response("", {
-      headers: { "content-type": "text/event-stream" },
-    });
+    return new Response(
+      scene.ends === "carried" && scene.runs
+        ? frames([
+            { type: "RUN_STARTED", threadId: THREAD, runId: CARRIED_RUN },
+            { type: "MESSAGES_SNAPSHOT", messages: scene.stored },
+            { type: "RUN_FINISHED", threadId: THREAD, runId: CARRIED_RUN },
+          ])
+        : "",
+      { headers: { "content-type": "text/event-stream" } },
+    );
   if (path.endsWith("/run"))
     return scene.ends === "onStep"
       ? stepRun(await request.json())
-      : run(await request.json());
+      : scene.ends === "carried"
+        ? carriedRun(await request.json())
+        : run(await request.json());
   // A command a Bot asked for, taken through the server's gate, which runs it and answers.
   if (path === `${ORGANIZATION}/people/me/computer-steps`) {
     scene.steps = (scene.steps ?? 0) + 1;
@@ -570,6 +687,51 @@ describe.skipIf(!asked)("a run whose end never reached this browser", () => {
               1,
             );
             expect(await page.getByText(/Blocked/).count()).toBe(0);
+            expect(
+              await page.evaluate(
+                () => document.documentElement.scrollWidth > innerWidth,
+              ),
+            ).toBe(false);
+          } finally {
+            await page.close();
+          }
+        }, 120_000);
+
+        test(`that the server carried on to its answer shows every step it ran and the answer, with no notice, in ${engine}, ${theme}, ${window.width}px`, async () => {
+          scene = { ends: "carried", stored: [], endings: new Map() };
+          const page = await sent(engine, theme, window);
+          try {
+            await page.getByText(FINISHED_REPORT).waitFor({ timeout: 30_000 });
+            await page
+              .getByRole("button", { name: "Stop the Bot" })
+              .waitFor({ state: "detached", timeout: 15_000 });
+            // The file it saved, drawn from the server's result as a step this page took is.
+            await page.getByText("Saved a file").first().waitFor();
+            // The build the server ran, with what it printed, in the same terminal block.
+            const step = page
+              .locator("details")
+              .filter({
+                has: page.locator(":scope > summary", {
+                  hasText: "Ran a command",
+                }),
+              })
+              .last();
+            await step.locator(":scope > summary").click();
+            await page.getByText(PRINTED).first().waitFor({ timeout: 10_000 });
+            await shoot(
+              page,
+              `run-ended-unheard-carried-${engine}-${theme}-${window.width}`,
+            );
+            expect(await page.getByTestId("transcript-stopped").count()).toBe(
+              0,
+            );
+            expect(await page.getByText(RUN_ENDED_UNHEARD).count()).toBe(0);
+            expect(
+              await page.getByRole("button", { name: "Carry on" }).count(),
+            ).toBe(0);
+            // Nothing ran here, and the Bot was not asked again.
+            expect(scene.steps ?? 0).toBe(0);
+            expect(scene.runs).toBe(1);
             expect(
               await page.evaluate(
                 () => document.documentElement.scrollWidth > innerWidth,

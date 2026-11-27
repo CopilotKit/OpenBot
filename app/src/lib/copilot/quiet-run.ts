@@ -77,6 +77,22 @@ export async function askRunLiveness(
     answerMs?: number;
   } = {},
 ): Promise<RunLiveness> {
+  return (await askRunGoing(conversationId, options)).liveness;
+}
+
+/**
+ * The same ask, with the run it names: the run going in the conversation, when there is one. A run
+ * the server carries a turn on in is a run of its own, started on the server, so a browser that
+ * knows which run it last heard can tell the server's next run from its own (`carried-turn.ts`).
+ */
+export async function askRunGoing(
+  conversationId: string,
+  options: {
+    /** The API's join-token operation; a test gives its own. */
+    join?: (conversationId: string, signal: AbortSignal) => Promise<Joined>;
+    answerMs?: number;
+  } = {},
+): Promise<{ liveness: RunLiveness; runId: string | null }> {
   const join =
     options.join ??
     ((id: string, signal: AbortSignal) =>
@@ -100,13 +116,19 @@ export async function askRunLiveness(
         });
       }),
     ]);
-    if (joined === null) return "unreachable";
-    return typeof joined.runId === "string" ? "live" : "over";
+    if (joined === null) return { liveness: "unreachable", runId: null };
+    return typeof joined.runId === "string"
+      ? { liveness: "live", runId: joined.runId || null }
+      : { liveness: "over", runId: null };
   } catch (error) {
-    return error instanceof ClientError &&
-      error.code === "CONVERSATION_NOT_STARTED"
-      ? "over"
-      : "unreachable";
+    return {
+      liveness:
+        error instanceof ClientError &&
+        error.code === "CONVERSATION_NOT_STARTED"
+          ? "over"
+          : "unreachable",
+      runId: null,
+    };
   } finally {
     clearTimeout(timer);
   }

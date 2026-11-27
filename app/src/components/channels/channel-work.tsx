@@ -1,5 +1,6 @@
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import type { ChannelWork } from "@/lib/channels/queries";
+import { isTurnWork } from "@/lib/copilot/carried-turn";
 import { ProgressRow } from "./progress-row";
 
 /** A Bot as this person knows it: its name and the seed its avatar is drawn from. */
@@ -24,10 +25,12 @@ export function ChannelWorkRows({
   /** The Bot this person knows by that id, when they know it at all. */
   botOf?: (botId: string) => KnownBot | undefined;
 }) {
-  if (!work || work.length === 0) return null;
+  // The person's own turn, carried on by the server, is drawn by the conversation as its own work.
+  const shown = work?.filter((entry) => !isTurnWork(entry));
+  if (!shown || shown.length === 0) return null;
   return (
     <div className="flex flex-col gap-1" data-testid="channel-work">
-      {work.map((entry) => {
+      {shown.map((entry) => {
         const known = botOf?.(entry.botId);
         const name = known?.name ?? entry.botName;
         return (
