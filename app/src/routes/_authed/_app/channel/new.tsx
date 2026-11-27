@@ -519,6 +519,12 @@ function NewConversation({ composition }: { composition: string }) {
             }
           : {})}
         messages={sent ? [sent] : []}
+        /*
+         * Sent, and the Bot has the turn from here: the "Thinking" line under the message, as the
+         * conversation draws it. Making the conversation can take seconds (OpenBot picking the Bot
+         * is a model call), and the message alone under a box that had emptied read as broken.
+         */
+        busy={sent !== null}
         starterSuggestions={
           !group && !sent ? (
             <StarterSuggestions

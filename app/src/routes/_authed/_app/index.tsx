@@ -155,6 +155,17 @@ function RouteComponent() {
   /* The message box's area, which the orb's field behind the page follows. */
   const area = useRef<HTMLDivElement>(null);
   const intro = useHomeIntro();
+  /*
+   * The placeholder's code, fetched while home is open, so Send draws it at once. It is split into
+   * its own file, and fetched only on the first Send it was: until it arrived, home stood there with
+   * its box emptied and nothing to say the message went, as long as a second on a slow connection.
+   * A fetch that fails is tried again by the Send itself.
+   */
+  useEffect(() => {
+    const placeholder = router.routesByPath["/start/$startId"];
+    if (placeholder)
+      void router.loadRouteChunk(placeholder)?.catch(() => undefined);
+  }, [router]);
   useEffect(
     () =>
       onFailedStart(() => {
