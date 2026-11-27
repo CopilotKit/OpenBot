@@ -204,6 +204,14 @@ export const getGetConversationRunResponseMock =
     },
   });
 
+export const getStopConversationRunResponseMock = () => ({
+  run: {
+    id: "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
+    outcome: null,
+    endedAt: null,
+  },
+});
+
 export const getCreateConversationJoinTokenMockHandler = (
   overrideResponse?:
     | ConversationJoinToken
@@ -969,6 +977,48 @@ export const getGetConversationRunMockHandler = (
     options,
   );
 };
+
+export const getStopConversationRunMockHandler = (
+  overrideResponse?:
+    | ConversationRunResponse
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{
+            organizationId: string;
+            conversationId: string;
+            runId: string;
+          }>
+        >[0],
+      ) => Promise<ConversationRunResponse> | ConversationRunResponse),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{
+    organizationId: string;
+    conversationId: string;
+    runId: string;
+  }>(
+    "*/api/v2/organizations/:organizationId/conversations/:conversationId/runs/:runId/stop",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{
+          organizationId: string;
+          conversationId: string;
+          runId: string;
+        }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getStopConversationRunResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getConversationsMock = () => [
   getCreateConversationJoinTokenMockHandler(),
   getListConversationsMockHandler(),
@@ -993,4 +1043,5 @@ export const getConversationsMock = () => [
   getGetConversationThreadMockHandler(),
   getCreateTranscriptionMockHandler(),
   getGetConversationRunMockHandler(),
+  getStopConversationRunMockHandler(),
 ];

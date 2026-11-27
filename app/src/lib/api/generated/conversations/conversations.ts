@@ -74,6 +74,7 @@ import type {
   ServerErrorResponse,
   ServiceUnavailableResponse,
   SignalConversationBusyHeaders,
+  StopConversationRunHeaders,
   TooManyRequestsResponse,
   Transcription,
   TranscriptionUpload,
@@ -4473,3 +4474,159 @@ export function useGetConversationRun<
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+export const getStopConversationRunUrl = (
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/conversations/${encodeURIComponent(String(conversationId))}/runs/${encodeURIComponent(String(runId))}/stop`;
+};
+
+/**
+ * Stop one of a Bot's runs in the conversation, as Stop beside the message box does: the Bot stops writing, what it wrote so far stays, and the run ends as cancelled, which its last event on the threadStream channel of api/asyncapi.yaml says. The run is named by the runId its events carry. A run that is going answers 202 with outcome null, since it ends on the replica that runs it a moment later. A run that has ended already answers 200, saying how it ended, so asking twice is harmless. A run this server keeps no record of, or one of another conversation, is not found. The server keeps no record of a run in a conversation with more than one Bot, so a run there is not found either: a client offers Stop only in a conversation with one Bot. Only a person in the conversation may stop a run in it. A client offers Stop only where getDeployment says runStop.
+ * @summary Stop a Bot's run in a conversation
+ */
+export const stopConversationRun = async (
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+  headers: StopConversationRunHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ConversationRunResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<ConversationRunResponse>(
+    getStopConversationRunUrl(organizationId, conversationId, runId),
+    {
+      ...options,
+      method: "POST",
+      headers: { ...headers, ...getHeaders(options?.headers) },
+    },
+  );
+};
+
+export const getStopConversationRunMutationKey = () =>
+  ["stopConversationRun"] as const;
+
+export const getStopConversationRunMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationRunNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof stopConversationRun>>,
+    TError,
+    StopConversationRunMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof stopConversationRun>>,
+  TError,
+  StopConversationRunMutationVariables,
+  TContext
+> => {
+  const mutationKey = getStopConversationRunMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof stopConversationRun>>,
+    StopConversationRunMutationVariables
+  > = (props) => {
+    const { organizationId, conversationId, runId, headers } = props ?? {};
+
+    return stopConversationRun(
+      organizationId,
+      conversationId,
+      runId,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StopConversationRunMutationResult = NonNullable<
+  Awaited<ReturnType<typeof stopConversationRun>>
+>;
+
+export type StopConversationRunMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | ConversationRunNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type StopConversationRunMutationVariables = {
+  organizationId: string;
+  conversationId: string;
+  runId: string;
+  headers: StopConversationRunHeaders;
+};
+
+/**
+ * @summary Stop a Bot's run in a conversation
+ */
+export const useStopConversationRun = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ConversationRunNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof stopConversationRun>>,
+      TError,
+      StopConversationRunMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof stopConversationRun>>,
+  TError,
+  StopConversationRunMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getStopConversationRunMutationOptions(options),
+    queryClient,
+  );
+};

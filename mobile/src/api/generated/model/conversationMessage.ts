@@ -4,6 +4,7 @@
 import type { Attachment } from "./attachment";
 import type { ConversationMessageConsent } from "./conversationMessageConsent";
 import type { ConversationMessageRole } from "./conversationMessageRole";
+import type { DrawnComponent } from "./drawnComponent";
 
 /**
  * One thing said in a conversation: a person's message, or one Bot's reply.
@@ -45,6 +46,11 @@ export interface ConversationMessage {
    * @minimum 0
    */
   toolCalls?: number;
+  /**
+   * The gallery components the Bot drew in this message (a chart, a table, a card, a question), in the order it drew them. Each is one of the Bot's tool calls, named as listComponents names a component, with the arguments the Bot gave it, so a client draws it again with its own renderer for that name. A client skips a name it does not know, and draws a component's arguments only as far as it can read them: they are the Bot's, and may be partial. The first 50, when the Bot drew more. Absent when the Bot drew none, and from a server older than this field.
+   * @maxItems 50
+   */
+  components?: DrawnComponent[];
   /**
    * In a group conversation, the files a Bot sent from its computer with this reply, in the order it sent them. Each is an attachment of the conversation, read at its attachment address by anyone in it.
    * @maxItems 20

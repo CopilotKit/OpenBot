@@ -290,10 +290,10 @@ export const connectAppBodyValuesMaxOne = 16384;
 
 export const ConnectAppBody = zod.object({
   returnTo: zod
-    .enum(["connections", "apps", "desktop"])
+    .enum(["connections", "apps", "desktop", "mobile"])
     .default(connectAppBodyReturnToDefault)
     .describe(
-      "Which of OpenBot's own pages the app sends the person back to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop. Never an address.",
+      "Which of OpenBot's own pages the app sends the person back to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop; mobile, back to OpenBot Mobile, which then reads the result itself: confirmConnection after connectApp, and the authorizations again (getConnectionAuthorizations or getSharedConnectionAuthorizations) after a consent for one action. Never an address. A client sends mobile only where getDeployment says mobileConnections.",
     ),
   anotherAccount: zod
     .boolean()
@@ -795,10 +795,10 @@ export const AuthorizeConnectionActionBody = zod.object({
       "The action's name, exactly as getConnectionAuthorizations lists it.",
     ),
   returnTo: zod
-    .enum(["connections", "apps", "desktop"])
+    .enum(["connections", "apps", "desktop", "mobile"])
     .default(authorizeConnectionActionBodyReturnToDefault)
     .describe(
-      "Which of OpenBot's own pages the app sends the person back to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop. Never an address.",
+      "Which of OpenBot's own pages the app sends the person back to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop; mobile, back to OpenBot Mobile, which then reads the result itself: confirmConnection after connectApp, and the authorizations again (getConnectionAuthorizations or getSharedConnectionAuthorizations) after a consent for one action. Never an address. A client sends mobile only where getDeployment says mobileConnections.",
     ),
 });
 
@@ -1589,10 +1589,10 @@ export const AuthorizeSharedConnectionActionBody = zod.object({
       "The action's name, exactly as getConnectionAuthorizations lists it.",
     ),
   returnTo: zod
-    .enum(["connections", "apps", "desktop"])
+    .enum(["connections", "apps", "desktop", "mobile"])
     .default(authorizeSharedConnectionActionBodyReturnToDefault)
     .describe(
-      "Which of OpenBot's own pages the app sends the person back to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop. Never an address.",
+      "Which of OpenBot's own pages the app sends the person back to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop; mobile, back to OpenBot Mobile, which then reads the result itself: confirmConnection after connectApp, and the authorizations again (getConnectionAuthorizations or getSharedConnectionAuthorizations) after a consent for one action. Never an address. A client sends mobile only where getDeployment says mobileConnections.",
     ),
 });
 

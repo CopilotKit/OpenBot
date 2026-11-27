@@ -1173,13 +1173,17 @@ components:
             URL-safe base64, the only form the cursor parameter accepts.
     ConnectionReturnTo:
       type: string
-      enum: [connections, apps, desktop]
+      enum: [connections, apps, desktop, mobile]
       default: connections
       description: >-
         Which of OpenBot's own pages the app sends the person back to:
         connections, the person's own page for the app; apps, the app's page
-        for administrators; desktop, back to OpenBot Desktop. Never an
-        address.
+        for administrators; desktop, back to OpenBot Desktop; mobile, back to
+        OpenBot Mobile, which then reads the result itself: confirmConnection
+        after connectApp, and the authorizations again
+        (getConnectionAuthorizations or getSharedConnectionAuthorizations)
+        after a consent for one action. Never an address. A client sends
+        mobile only where getDeployment says mobileConnections.
     SharedConnectionReturnTo:
       type: string
       enum: [apps, desktop]

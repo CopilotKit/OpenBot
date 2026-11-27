@@ -864,3 +864,30 @@ export const getConversationRun = async (
     },
   );
 };
+
+export const getStopConversationRunUrl = (
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/conversations/${encodeURIComponent(String(conversationId))}/runs/${encodeURIComponent(String(runId))}/stop`;
+};
+
+/**
+ * Stop one of a Bot's runs in the conversation, as Stop beside the message box does: the Bot stops writing, what it wrote so far stays, and the run ends as cancelled, which its last event on the threadStream channel of api/asyncapi.yaml says. The run is named by the runId its events carry. A run that is going answers 202 with outcome null, since it ends on the replica that runs it a moment later. A run that has ended already answers 200, saying how it ended, so asking twice is harmless. A run this server keeps no record of, or one of another conversation, is not found. The server keeps no record of a run in a conversation with more than one Bot, so a run there is not found either: a client offers Stop only in a conversation with one Bot. Only a person in the conversation may stop a run in it. A client offers Stop only where getDeployment says runStop.
+ * @summary Stop a Bot's run in a conversation
+ */
+export const stopConversationRun = async (
+  organizationId: string,
+  conversationId: string,
+  runId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ConversationRunResponse> => {
+  return apiRequest<ConversationRunResponse>(
+    getStopConversationRunUrl(organizationId, conversationId, runId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
