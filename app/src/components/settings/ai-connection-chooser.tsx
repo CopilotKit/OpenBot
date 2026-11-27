@@ -580,6 +580,8 @@ export function ChooseConnection({
     (provider && login === "oauth" ? ownModel(provider.id) : null) ??
     kept?.model ??
     preset?.model ??
+    // No address of its own to take one from: the model new Bots run on, as AI Gateway names it.
+    (provider ? SIGN_IN_MODELS[provider.id] : undefined) ??
     ""
   ).trim();
 

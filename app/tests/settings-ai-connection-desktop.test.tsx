@@ -315,10 +315,8 @@ test("a Cloudflare sign-in: signed in through Desktop, and the server switched t
     }),
   );
   await within(dialog).findByText("Signed in to Cloudflare.");
-  expect(within(dialog).getByLabelText("Model name")).toHaveProperty(
-    "value",
-    "openai/gpt-5.5",
-  );
+  // A sign-in asks for no model: the connection names the one new Bots run on.
+  expect(within(dialog).queryByLabelText("Model name")).toBeNull();
   await userEvent.click(
     within(dialog).getByRole("button", { name: "Connect" }),
   );

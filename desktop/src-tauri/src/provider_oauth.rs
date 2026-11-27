@@ -39,7 +39,7 @@ const CLOUDFLARE_DASHBOARD: &str = "https://dash.cloudflare.com";
 const CLOUDFLARE_API: &str = "https://api.cloudflare.com/client/v4";
 /*
  * Cloudflare matches a redirect address exactly, port and all, so the listener cannot take whatever
- * port is free as Google's does. These are the addresses the registered client lists; the first one
+ * port is free. These are the addresses the registered client lists; the first one
  * free is used, so another program holding one does not stop the sign-in.
  */
 const CLOUDFLARE_PORTS: [u16; 3] = [47823, 47824, 47825];

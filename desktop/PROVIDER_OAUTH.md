@@ -123,8 +123,8 @@ Cloudflare's own sentence, "Insufficient unified billing credits".
 To use another client than the built-in one, set
 `OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID` to its ID when building the desktop
 app, or in the process environment at run time. For GitHub-built artifacts it is
-a repository Actions **variable** of that name, passed to the native build
-beside the Google settings. Unset or empty, the build uses the built-in client.
+a repository Actions **variable** of that name, passed to the native build.
+Unset or empty, the build uses the built-in client.
 
 `OPENBOT_CLOUDFLARE_DASHBOARD_URL` and `OPENBOT_CLOUDFLARE_API_URL` point the
 flow at another dashboard and API for testing against a mock.
