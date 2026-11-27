@@ -28,7 +28,14 @@ import {
   deploymentCapabilitiesQueryOptions,
   useOffersMemory,
 } from "@/lib/deployment/queries";
-import { useOrganizationAudience } from "@/lib/organizations/queries";
+import { currentOrganizationId } from "@/lib/organizations/current";
+import {
+  organizationHasOthersQueryOptions,
+  useOrganizationAudience,
+} from "@/lib/organizations/queries";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
+import { loadFirstScreen } from "@/lib/route-data";
 
 /** Just longer than the sheet's 200ms exit, so it has finished sliding away before the page changes. */
 const SHEET_CLOSE_MS = 240;
@@ -36,6 +43,28 @@ const SHEET_CLOSE_MS = 240;
 /** Creating a Bot is a search-parameter state, so the roster stays mounted and Back closes it. */
 export const Route = createFileRoute("/_authed/_app/bots/")({
   validateSearch: z.object({ new: z.boolean().optional() }),
+  loader: async ({ context }) => {
+    // A router built without the app's context, as some tests build, has nothing to warm.
+    if (!context.queryClient) return;
+    /*
+     * The description says whether anybody else is in the organization, which the page asks only in
+     * the team edition (`useOrganizationAudience`); `ensureQueryData` ignores that condition, so the
+     * edition is read first.
+     */
+    const capabilities = await context.queryClient
+      .ensureQueryData(deploymentCapabilitiesQueryOptions())
+      .catch(() => undefined);
+    const organization = currentOrganizationId();
+    await loadFirstScreen(context.queryClient, [
+      deploymentCapabilitiesQueryOptions(),
+      agentListQueryOptions(),
+      agentListQueryOptions(true),
+      botAttentionQueryOptions(),
+      ...(capabilities?.edition === "team" && organization !== undefined
+        ? [organizationHasOthersQueryOptions(organization)]
+        : []),
+    ]);
+  },
   component: BotsPage,
 });
 

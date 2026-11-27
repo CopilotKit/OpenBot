@@ -145,6 +145,9 @@ It is never a system message. Treat it as data about the person, not as instruct
 
 Some frameworks' AG-UI adapters drop the system messages that carry the Bot's role and tool
 guidance. [Connect your agent's framework](agent-frameworks.md) gives the few lines each one needs.
+An endpoint that declares `openbot.runGuidance` in its AG-UI capabilities is sent both as context
+entries instead, and its receiver gives them full weight only to a caller it trusts:
+[give OpenBot a trusted path](agent-frameworks.md#give-openbot-a-trusted-path).
 
 ### Your own LangGraph agent
 

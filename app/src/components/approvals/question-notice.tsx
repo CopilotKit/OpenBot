@@ -139,9 +139,11 @@ export function partsAnswer(parts: readonly QuestionPart[], form: FormData) {
 function QuestionParts({
   parts,
   onAnswered,
+  disabled,
 }: {
   parts: readonly QuestionPart[];
   onAnswered: (answer: string) => Promise<void>;
+  disabled: boolean;
 }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<Failure | null>(null);
@@ -156,6 +158,7 @@ function QuestionParts({
       }))}
       onSubmit={(event) => {
         event.preventDefault();
+        if (disabled) return;
         setSending(true);
         setError(null);
         onAnswered(partsAnswer(parts, new FormData(event.currentTarget)))
@@ -205,7 +208,7 @@ function QuestionParts({
           <QuestionnaireProgress className="col-start-2 row-start-1 justify-self-end" />
         ) : null}
         <QuestionnaireNext size="sm">Next</QuestionnaireNext>
-        <QuestionnaireSubmit disabled={sending} size="sm">
+        <QuestionnaireSubmit disabled={sending || disabled} size="sm">
           {sending ? "Sending…" : several ? "Send answers" : "Send answer"}
         </QuestionnaireSubmit>
       </QuestionnaireActions>
@@ -232,11 +235,14 @@ export function QuestionNotice({
   botName,
   avatarSeed,
   onAnswered,
+  disabled = false,
 }: {
   question: WaitingQuestion;
   botName: string;
   avatarSeed: string;
   onAnswered: (answer: string) => Promise<void>;
+  /** Drawn, but not yet answerable or dismissable here: the conversation is still being joined. */
+  disabled?: boolean;
 }) {
   const dismiss = useMutation(
     dismissPersonQuestionMutationOptions(queryClient),
@@ -261,17 +267,27 @@ export function QuestionNotice({
             {question.why}
           </p>
         ) : null}
-        {parts ? <QuestionParts onAnswered={onAnswered} parts={parts} /> : null}
+        {parts ? (
+          <QuestionParts
+            disabled={disabled}
+            onAnswered={onAnswered}
+            parts={parts}
+          />
+        ) : null}
         {dismiss.error ? (
           <p className="text-destructive text-sm" role="alert">
             {failureSaid(dismiss.error)}
           </p>
         ) : null}
       </div>
+      {/*
+       * Not while `disabled` either: dismissing moves on whatever waits on the question, and its
+       * re-read of every query lands mid-join, under the stored copy drawn while the join replays.
+       */}
       <Button
         aria-label="Dismiss question"
         className="-mt-1 -mr-1"
-        disabled={dismiss.isPending}
+        disabled={dismiss.isPending || disabled}
         onClick={() => dismiss.mutate({ id: question.id })}
         size="icon-sm"
         title="Dismiss without answering"

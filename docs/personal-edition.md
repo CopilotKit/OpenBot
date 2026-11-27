@@ -235,7 +235,7 @@ because the server reads no value saved for it here:
 
 | Admin page | In the personal edition |
 | --- | --- |
-| Routines | How check-ins went shows. The check-ins switch and daily limit are for a team. |
+| Routines | How check-ins went shows. The admin's check-ins switch and daily limit are for a team. Your own check-ins switch is in Settings → Notifications and works here. |
 | Automatic learning | For a team. You review what OpenBot learns on **Skills**. |
 | Apps | Works. The MCP server allowlist is for a team. |
 | Computers | Works. Idle computers and Network are for a team. |

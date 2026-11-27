@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { RENAMED_SKIN_IDS } from "@openbot/shared/user-preferences";
 import { SKINS } from "../src/skins/registry";
 import {
   applySkin,
@@ -8,13 +9,19 @@ import {
   reconcileSkin,
   SKIN_STORAGE_KEY,
 } from "../src/skins/store";
-import { RENAMED_SKIN_IDS } from "@openbot/shared/user-preferences";
-import { SKIN_IDS } from "../src/skins/types";
+import { SKIN_IDS, skinDrawsOwnFrame } from "../src/skins/types";
 
 const read = (path: string) =>
   readFileSync(new URL(path, import.meta.url), "utf8");
 
 const skinned = SKIN_IDS.filter((id) => id !== DEFAULT_SKIN);
+
+describe("skin frames", () => {
+  test("skinDrawsOwnFrame agrees with which skins define a Frame", () => {
+    for (const id of SKIN_IDS)
+      expect(skinDrawsOwnFrame(id)).toBe(Boolean(SKINS[id].Frame));
+  });
+});
 
 describe("skin preference", () => {
   test("a stored skin is used only when OpenBot ships it", () => {
