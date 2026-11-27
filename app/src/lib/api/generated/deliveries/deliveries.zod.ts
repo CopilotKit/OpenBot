@@ -69,7 +69,7 @@ export const ListDeliveriesResponse = zod.object({
           transport: zod
             .enum(["push", "slack", "teams", "sms"])
             .describe(
-              "A way OpenBot reaches a person outside it: push notifications to their phones, Slack, Microsoft Teams, or text messages.",
+              "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
             ),
           kind: zod
             .enum(["reply", "question", "approval", "attention"])

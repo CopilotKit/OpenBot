@@ -125,6 +125,8 @@ tags:
     description: 'The agents an organization''s Bots hand work to: OpenBot''s own, a framework OpenBot runs, or an agent somebody runs at its own address. An administrator adds the organization''s, and anybody may add a private one for their own Bots. A Bot''s delegation says whether it works on one agent or hands work to several, and which.'
   - name: CopilotKit management
     description: Connecting a self-hosted OpenBot to CopilotKit's management service, which keeps it up to date in the company's own cluster through an agent installed there. Only the administrators of the organization `default` manage it, and only on the team edition a company runs itself.
+  - name: Web push
+    description: The browsers a person turned notifications on in, which their Bots send push notifications to through each browser's own push service, and the key a browser subscribes with.
   - name: Moving to OpenBot Cloud
     description: 'Moving what a person has in an OpenBot on their own computer to an organization on OpenBot Cloud: exporting it there as a bundle, importing the bundle on Cloud, and checking that everything arrived before anything is removed. Connections to apps never carry their sign-in, and a model key moves only when the person chooses, sealed to the import.'
 paths:
@@ -9751,7 +9753,7 @@ paths:
         - Devices
       operationId: registerDevice
       summary: Register a device for push notifications
-      description: Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. A device is registered in one organization, the one the address names, and gets push notifications only from the person's Bots there. A person in several organizations registers the phone in each one they want notifications from, under the same id. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications (listNotificationTransports).
+      description: Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. A device is registered in one organization, the one the address names, and gets push notifications only from the person's Bots there. A person in several organizations registers the phone in each one they want notifications from, under the same id. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications to phones (its OpenBot phone app's project is set up).
       security:
         - webSession: []
         - appOAuth:
@@ -10340,7 +10342,7 @@ paths:
         - Notification settings
       operationId: listNotificationTransports
       summary: List the ways OpenBot can reach people here
-      description: 'Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push needs the OpenBot phone app''s project, Slack and Microsoft Teams need the OpenTag pairing, and text messages need Twilio. A person''s settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push is always there for browsers (web push, saveWebPushSubscription) and reaches phones once the OpenBot phone app''s project is set up, Slack and Microsoft Teams need the OpenTag pairing, and text messages need Twilio. A person''s settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -23935,6 +23937,137 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/web-push-key:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Web push
+      operationId: getWebPushKey
+      summary: Read the key a browser subscribes to push notifications with
+      description: 'Return this OpenBot''s public application server key (VAPID, RFC 8292), the key a browser passes as applicationServerKey when it subscribes to push notifications, so that only this OpenBot can send to the subscription. It is the same in every organization here and stays the same across restarts and upgrades. A browser holding a subscription made with a different key unsubscribes and subscribes again with this one. Anybody signed in to the organization may read it: it is public by design.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - devices:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The key.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushKey'
+              examples:
+                key:
+                  $ref: '#/components/examples/WebPushKeyExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/web-push-subscriptions/{subscriptionId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/WebPushSubscriptionId'
+    put:
+      tags:
+        - Web push
+      operationId: saveWebPushSubscription
+      summary: Save this browser's push subscription
+      description: 'Save the push subscription a browser made, under the id the app made for that browser, so the person''s Bots send push notifications to it from this organization: replies, questions, approvals and sign-in requests, as the person''s notification settings route push. Saving again replaces what the id holds; the app saves on every start, so a subscription the browser renewed replaces the old one. A subscription is saved once in each organization: saving its address under another id, or as another person, moves it there, so a browser that changes hands notifies only whoever saved it last. The address must be a browser push service''s (Apple''s, Google''s, Mozilla''s or Microsoft''s). A subscription the push service says has ended is removed when the next notification to it is refused. Only the person themselves may save their subscriptions.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - devices:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveWebPushSubscriptionRequest'
+            examples:
+              chrome:
+                value:
+                  endpoint: https://fcm.googleapis.com/fcm/send/dQw4w9WgXcQ:APA91bHPRgkF3JUikC4ENAHEeMrd41Zxv3hVZjC9KtT8OvPVGJ-hQMRKRrZuJAEcl7B338qju59zJMjw2DELjzEvxwYv7hH5Ynpc1ODQ0aT4U4OFEeBkpI1ffakVCgWq4CwOI5tHxN3n
+                  keys:
+                    p256dh: BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM
+                    auth: tBHItJI5svbpez7KI4CCXg
+      responses:
+        '200':
+          description: The subscription, saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushSubscriptionResponse'
+              examples:
+                saved:
+                  $ref: '#/components/examples/WebPushSubscriptionResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidWebPushSubscription'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Web push
+      operationId: deleteWebPushSubscription
+      summary: Stop push notifications to this browser
+      description: Stop sending push notifications to a browser from this organization. Its subscriptions in the person's other organizations stay. The app does this when the person turns notifications off in that browser and when they sign out of it. Only the person themselves may remove their subscriptions. One already removed is not found, which a client can read as done.
+      security:
+        - webSession: []
+        - appOAuth:
+            - devices:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The browser gets no more push notifications from this organization.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/WebPushSubscriptionNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -24014,8 +24147,8 @@ components:
             components:write: Tell OpenBot which components the app can draw, and, when the signed-in person is an admin, write, publish and delete components and choose which Bots and data each may use.
             skills:read: Read the skills the signed-in person can use, and for an admin everybody's.
             skills:write: Write and delete the signed-in person's skills, and for an admin the organization's and anybody's.
-            devices:read: Read the phones the signed-in person registered for push notifications.
-            devices:write: Register the signed-in person's phones for push notifications, and remove them.
+            devices:read: Read the phones the signed-in person registered for push notifications, and the key a browser subscribes to push notifications with.
+            devices:write: Register the signed-in person's phones and browsers for push notifications, and remove them.
             destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
             destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams and text message destinations.
             deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
@@ -24866,6 +24999,15 @@ components:
         maxLength: 256
         pattern: \S
       example: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+    WebPushSubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      description: 'The browser''s id: a UUID the app makes once in that browser and keeps, so saving again replaces rather than adds.'
+      schema:
+        type: string
+        format: uuid
+      example: 6d0f2a4b-8c1e-4f3a-9b5d-7e2c4a6f8b10
   headers:
     PrivateNoStore:
       description: A Bot is private to the caller.
@@ -32507,7 +32649,7 @@ components:
         - slack
         - teams
         - sms
-      description: 'A way OpenBot reaches a person outside it: push notifications to their phones, Slack, Microsoft Teams, or text messages.'
+      description: 'A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.'
     DeliveryKind:
       type: string
       enum:
@@ -42420,6 +42562,72 @@ components:
       properties:
         run:
           $ref: '#/components/schemas/ConversationRun'
+    WebPushKey:
+      type: object
+      required:
+        - publicKey
+      properties:
+        publicKey:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{87}$
+          description: 'The public key: an uncompressed P-256 point (65 bytes), in URL-safe base64 with no padding, as the Push API''s applicationServerKey takes it.'
+    WebPushSubscriptionKeys:
+      type: object
+      additionalProperties: false
+      required:
+        - p256dh
+        - auth
+      description: The keys the browser encrypts with (RFC 8291), as the subscription's getKey() or toJSON() gives them, in URL-safe base64.
+      properties:
+        p256dh:
+          type: string
+          minLength: 87
+          maxLength: 88
+          pattern: ^[A-Za-z0-9_-]+=?$
+          description: The browser's P-256 public key, uncompressed (65 bytes).
+        auth:
+          type: string
+          minLength: 22
+          maxLength: 24
+          pattern: ^[A-Za-z0-9_-]+={0,2}$
+          description: The authentication secret (16 bytes).
+    SaveWebPushSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - endpoint
+        - keys
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: ^https://
+          description: 'The subscription''s endpoint, the address its push service gave it. It is a credential: OpenBot never sends it back.'
+        keys:
+          $ref: '#/components/schemas/WebPushSubscriptionKeys'
+    WebPushSubscription:
+      type: object
+      description: A browser that gets push notifications for the person, from every one of their Bots in this organization. Never its endpoint or keys.
+      required:
+        - id
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The id the app made for the browser.
+        createdAt:
+          type: string
+          format: date-time
+          description: When OpenBot first saved a subscription under this id.
+    WebPushSubscriptionResponse:
+      type: object
+      required:
+        - webPushSubscription
+      properties:
+        webPushSubscription:
+          $ref: '#/components/schemas/WebPushSubscription'
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -49553,6 +49761,48 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    InvalidWebPushSubscription:
+      description: The request doesn't match the API, or the endpoint is not a browser push service's address.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAPushService:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That address isn't a browser push service's, so OpenBot can't send notifications to it.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    WebPushSubscriptionNotFound:
+      description: 'The person has no such subscription in this organization: it was removed already, or never saved. Or the organization does not exist.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/web-push-subscription-not-found
+                title: Subscription not found.
+                status: 404
+                detail: Subscription not found.
+                code: WEB_PUSH_SUBSCRIPTION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
   examples:
     ReactionPageLast:
       summary: Every reaction in a conversation, on one page.
@@ -54618,3 +54868,13 @@ components:
                 reason: Sending a message asks first.
                 kind: sending
         nextCursor: null
+    WebPushKeyExample:
+      summary: This OpenBot's key.
+      value:
+        publicKey: BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U
+    WebPushSubscriptionResponseExample:
+      summary: A browser, saved.
+      value:
+        webPushSubscription:
+          id: 6d0f2a4b-8c1e-4f3a-9b5d-7e2c4a6f8b10
+          createdAt: '2026-11-26T18:04:12.000Z'
