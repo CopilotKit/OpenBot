@@ -174,6 +174,98 @@ test("the waiting card offers the private sign-in once the request exists", asyn
 });
 
 /**
+ * A sign-in the server holds: the run that asked stopped on the server's own wait for it, and the
+ * server opened the request and carries the conversation on once the person signs in, page open or
+ * not. The call has no answer yet, so the SDK hands it to this app's handler as well. Acted on, it
+ * opened a second request, a second form, and the card read "Sign-in did not complete" over the
+ * form the person still had to fill in.
+ */
+test("a sign-in the server holds opens no second request, and its card offers the server's form", async () => {
+  const posted: string[] = [];
+  global.fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), "http://127.0.0.1").pathname;
+      if (init?.method === "POST") posted.push(path);
+      if (path === SIGN_IN_REQUESTS && init?.method === "POST")
+        return Response.json({ signInRequest }, { status: 201 });
+      if (path === SIGN_IN_REQUESTS)
+        return Response.json({
+          signInRequests: [signInRequest],
+          nextCursor: null,
+        });
+      if (path === `${SIGN_IN_REQUESTS}/${signInRequest.id}`)
+        return Response.json({ signInRequest });
+      return Response.json({ detail: "Not found" }, { status: 404 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const queries = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const kept = new Registry();
+  const tree = render(
+    <Providers queries={queries}>
+      <SignInTool />
+      <Capture kept={kept} />
+    </Providers>,
+  );
+  await waitFor(() => expect(kept.handler).toBeDefined());
+
+  // The run ended on the interrupt the server sends for it.
+  const agent = {
+    threadId: "thread",
+    messages: [],
+    pendingInterrupts: [
+      {
+        id: TOOL_CALL_ID,
+        toolCallId: TOOL_CALL_ID,
+        reason: "human_input",
+        message: `Waiting for the person to sign in to ${SITE} in a private form.`,
+        metadata: {
+          openbotWaiting: {
+            kind: "computer_sign_in",
+            requestId: signInRequest.id,
+            site: SITE,
+          },
+        },
+      },
+    ],
+  };
+  const answer = await kept.handler?.(
+    { site: SITE },
+    { agent, toolCall: { id: TOOL_CALL_ID } },
+  );
+  expect(answer).toEqual({ waiting: true });
+  expect(posted).toEqual([]);
+
+  // The card, drawn with that stand-in as the call's answer, waits on the server's request.
+  const Kept = kept.renderer as Renderer;
+  tree.rerender(
+    <Providers queries={queries}>
+      <SignInTool />
+      <Capture kept={kept} />
+      <Kept
+        name="computer_request_sign_in"
+        args={{ site: SITE }}
+        status="complete"
+        result={JSON.stringify(answer)}
+        toolCallId={TOOL_CALL_ID}
+      />
+    </Providers>,
+  );
+  await tree.findByText("Waiting for you to sign in");
+  expect(tree.queryByText("Sign-in did not complete")).toBeNull();
+  fireEvent.click(
+    await tree.findByRole(
+      "button",
+      { name: /Open private sign-in/ },
+      { timeout: 4000 },
+    ),
+  );
+  await tree.findByText(`Sign in to ${SITE}`);
+});
+
+/**
  * The dialog's own spacing, not a page's. The form's sections are page sections, and a page puts
  * 48px above each one to keep unrelated decisions apart. In the dialog that left a large empty gap
  * above "Use a saved login" and another above "Enter your login".
