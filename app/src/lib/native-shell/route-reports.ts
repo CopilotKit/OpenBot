@@ -1,5 +1,5 @@
 import { useRouterState } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { postToShell, tabForPath } from "./bridge";
 import { nativeShell } from "./shell";
 
@@ -27,7 +27,8 @@ export function useNativeShellRouteReports(): void {
         : null,
   });
 
-  useEffect(() => {
+  // A layout effect, so `ready` goes before anything a page says from its own effects (`signed-out`).
+  useLayoutEffect(() => {
     if (!inShell || readySent) return;
     readySent = true;
     postToShell({ type: "ready" });
