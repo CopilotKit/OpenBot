@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **Desktop setup says where a pasted AI key is kept.** On Connect your AI, every API key field
+  (OpenAI, Anthropic, Gemini, xAI, Unbiased AI, TrustedRouter, and any OpenAI-compatible endpoint)
+  now has the footnote "OpenBot keeps this key on this computer." The Unbiased AI browser sign-in
+  already said that; the typed-key forms did not, so pasting a paid key meant trusting the dialog
+  blind.
 - **A Bot's "can't run" stays under the message it couldn't answer.** When a Bot's engine isn't
   answering, the sentence that says so stays under that message after the next message is answered,
   and after a reload. It used to go as soon as the next turn started, and the message sat in the

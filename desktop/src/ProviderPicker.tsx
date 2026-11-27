@@ -1021,6 +1021,9 @@ export function ProviderPicker({
                       spellCheck={false}
                     />
                   </div>
+                  <p className="footnote">
+                    OpenBot keeps this key on this computer.
+                  </p>
                 </>
               )}
 
@@ -1108,6 +1111,9 @@ export function ProviderPicker({
                       spellCheck={false}
                     />
                   </div>
+                  <p className="footnote">
+                    OpenBot keeps this key on this computer.
+                  </p>
                   {preset && (
                     <p className="footnote">
                       <ExternalLink key={preset.keyUrl} href={preset.keyUrl}>

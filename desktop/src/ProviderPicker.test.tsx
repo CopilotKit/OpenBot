@@ -1842,6 +1842,36 @@ test("a chosen provider's text leaves room for Change", async () => {
  * pool of Agent SDK credits...". That is about signing in with a plan, and an API key has no such
  * pool. It is said with the plan sign-in only.
  */
+/*
+ * A pasted API key stays on this computer (vault.rs). The Unbiased AI browser sign-in already said
+ * so; the typed-key forms did not. Say it under every key field so the person is not trusting the
+ * dialog blind (#2066).
+ */
+test("API key fields say the key stays on this computer", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return allProviders;
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  const kept = /OpenBot keeps this key on this computer/;
+
+  await pick(view, /^Anthropic/);
+  await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+  expect(view.getByLabelText("Anthropic API key")).toBeTruthy();
+  expect(view.getByText(kept)).toBeTruthy();
+
+  await pick(view, /^Google Gemini/);
+  expect(view.getByLabelText("Google Gemini API key")).toBeTruthy();
+  expect(view.getByText(kept)).toBeTruthy();
+
+  await pick(view, /^OpenAI-compatible/);
+  expect(
+    view.getByLabelText("API key, if the endpoint needs one"),
+  ).toBeTruthy();
+  expect(view.getByText(kept)).toBeTruthy();
+});
+
 test("the Claude plan's caution is said with the plan sign-in, not under the API key", async () => {
   const cautioned: Provider[] = [
     {
