@@ -542,6 +542,38 @@ afterAll(async () => {
 
 type Theme = "light" | "dark";
 
+/** How many times a page's renderer has crashed, as the browser reported it (`page.on("crash")`). */
+let renderersCrashed = 0;
+
+/**
+ * Run a test, and run it once more if the browser's renderer crashed while it ran.
+ *
+ * WEBKIT ON LINUX CRASHES ITSELF HERE UNDER CI'S LOAD. With eight files at once, each running
+ * Chromium and WebKit, WebKit's web process died with a segmentation fault while home loaded, in
+ * about one run of this file in three: in its compositor thread (`ThreadedCompositor`), inside
+ * `libWPEWebKit-2.0.so.1` itself, from a core dump of it. Nothing in the page reported an error
+ * first. It came with home's WebGL field turned off, and in a WebKit launched afresh for the test,
+ * and on commits from before the group's first message was added here. A renderer that dies is
+ * the browser's crash, not something this page did wrong, so a test it hit gets one more go.
+ *
+ * Only a crash the browser reported counts: a test that fails any other way fails, and one that
+ * crashes the renderer again on its second go fails too.
+ */
+async function survivingRendererCrash(run: () => Promise<void>) {
+  const before = renderersCrashed;
+  try {
+    await run();
+  } catch (error) {
+    // The browser says its renderer crashed as the calls waiting on that page fail: let it say so.
+    await new Promise((done) => setTimeout(done, 100));
+    if (renderersCrashed === before) throw error;
+    console.warn(
+      `The browser's renderer crashed during this test, so it runs once more. The failure it caused: ${error}`,
+    );
+    await run();
+  }
+}
+
 async function open(
   engine: string,
   path: string,
@@ -554,6 +586,9 @@ async function open(
     colorScheme: theme,
   });
   page.on("pageerror", (error) => console.error(error));
+  page.on("crash", () => {
+    renderersCrashed += 1;
+  });
   const [pathname, search = ""] = path.split("?");
   const query = new URLSearchParams(search);
   query.set("theme", theme);
@@ -762,30 +797,35 @@ describe.skipIf(!asked)(
   () => {
     for (const engine of engines)
       for (const sent of SENDS)
-        test(`shows "Thinking" within ${SHOWN_WITHIN_MS} ms and until the first words, from ${named(sent)}, in ${engine}`, async () => {
-          pace = PACE;
-          const page = await open(engine, sent.path);
-          try {
-            await still(page);
-            if (sent.adds) await addBot(page, sent.adds);
-            // Whatever the page fetched while it was open has arrived, as it has by the time
-            // somebody has written a message. What it did not ask for, Send has to fetch.
-            while (chunks.sent < chunks.asked)
-              await new Promise((done) => setTimeout(done, 50));
-            await sendWatched(page, sent.by);
-            const seen = read(await framesToWords(page));
-            expect(new URL(page.url()).pathname).toMatch(OPENS(sent.adds));
-            expect(seen.wordsDrawn).toBe(true);
-            expect(seen.shownAfterMs).not.toBeNull();
-            expect(
-              seen.shownAfterMs ?? Number.POSITIVE_INFINITY,
-            ).toBeLessThanOrEqual(SHOWN_WITHIN_MS);
-            expect(seen.framesWithout).toEqual([]);
-            expect(seen.goneWithWords).toBe(true);
-          } finally {
-            await page.close();
-          }
-        }, 60_000);
+        test(
+          `shows "Thinking" within ${SHOWN_WITHIN_MS} ms and until the first words, from ${named(sent)}, in ${engine}`,
+          () =>
+            survivingRendererCrash(async () => {
+              pace = PACE;
+              const page = await open(engine, sent.path);
+              try {
+                await still(page);
+                if (sent.adds) await addBot(page, sent.adds);
+                // Whatever the page fetched while it was open has arrived, as it has by the time
+                // somebody has written a message. What it did not ask for, Send has to fetch.
+                while (chunks.sent < chunks.asked)
+                  await new Promise((done) => setTimeout(done, 50));
+                await sendWatched(page, sent.by);
+                const seen = read(await framesToWords(page));
+                expect(new URL(page.url()).pathname).toMatch(OPENS(sent.adds));
+                expect(seen.wordsDrawn).toBe(true);
+                expect(seen.shownAfterMs).not.toBeNull();
+                expect(
+                  seen.shownAfterMs ?? Number.POSITIVE_INFINITY,
+                ).toBeLessThanOrEqual(SHOWN_WITHIN_MS);
+                expect(seen.framesWithout).toEqual([]);
+                expect(seen.goneWithWords).toBe(true);
+              } finally {
+                await page.close();
+              }
+            }),
+          60_000,
+        );
 
     /*
      * A starter task from home that cannot start goes back home, as a written message does, with
@@ -793,33 +833,40 @@ describe.skipIf(!asked)(
      * is still there, and the tasks are offered again.
      */
     for (const engine of engines)
-      test(`a starter task from home that cannot start comes back home with its reason, the box's own words kept, in ${engine}`, async () => {
-        pace = { ...PACE, create: 300 };
-        refuseCreate = true;
-        const DRAFT = "A note to myself, not sent yet";
-        const page = await open(engine, "/");
-        try {
-          await page.getByRole("textbox", { name: "Message" }).fill(DRAFT);
-          await page.getByRole("button", { name: STARTER }).click();
-          await page.waitForURL(/\/start\//, { waitUntil: "commit" });
-          await page.waitForURL((url) => url.pathname === "/");
-          await page
-            .getByRole("alert")
-            .filter({ hasText: "Conversations can't be made right now." })
-            .waitFor();
-          expect(
-            await page.getByRole("textbox", { name: "Message" }).innerText(),
-          ).toBe(DRAFT);
-          await page.getByRole("button", { name: STARTER }).waitFor();
-          await shoot(
-            page,
-            `first-message-thinking-a-starter-task-on-home-failed-${engine}`,
-          );
-        } finally {
-          refuseCreate = false;
-          await page.close();
-        }
-      }, 60_000);
+      test(
+        `a starter task from home that cannot start comes back home with its reason, the box's own words kept, in ${engine}`,
+        () =>
+          survivingRendererCrash(async () => {
+            pace = { ...PACE, create: 300 };
+            refuseCreate = true;
+            const DRAFT = "A note to myself, not sent yet";
+            const page = await open(engine, "/");
+            try {
+              await page.getByRole("textbox", { name: "Message" }).fill(DRAFT);
+              await page.getByRole("button", { name: STARTER }).click();
+              await page.waitForURL(/\/start\//, { waitUntil: "commit" });
+              await page.waitForURL((url) => url.pathname === "/");
+              await page
+                .getByRole("alert")
+                .filter({ hasText: "Conversations can't be made right now." })
+                .waitFor();
+              expect(
+                await page
+                  .getByRole("textbox", { name: "Message" })
+                  .innerText(),
+              ).toBe(DRAFT);
+              await page.getByRole("button", { name: STARTER }).waitFor();
+              await shoot(
+                page,
+                `first-message-thinking-a-starter-task-on-home-failed-${engine}`,
+              );
+            } finally {
+              refuseCreate = false;
+              await page.close();
+            }
+          }),
+        60_000,
+      );
   },
 );
 
