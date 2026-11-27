@@ -141,9 +141,16 @@ async function stylesheet(classes: string[]): Promise<string> {
  * The CSS classes a bundle can draw: every word between its quotes and spaces, so the sheet is there
  * from the first frame. The frame's classes hold brackets, parentheses and `=`
  * (`w-(--sidebar-width-icon)`, `group-data-[collapsible=icon]:hidden`), so those cannot split a word.
+ * A class can also hold single quotes (`[&_svg:not([class*='size-'])]:size-4`), so the words are
+ * read once more with only double quotes and backticks as edges; Tailwind ignores what isn't a class.
  */
 function wordsOf(code: string): string[] {
-  return [...new Set(code.match(/[^\s"'`\\]+/g))];
+  return [
+    ...new Set([
+      ...(code.match(/[^\s"'`\\]+/g) ?? []),
+      ...(code.match(/[^\s"`\\]+/g) ?? []),
+    ]),
+  ];
 }
 
 const browsers = new Map<string, Browser>();
