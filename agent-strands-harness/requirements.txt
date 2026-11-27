@@ -1,0 +1,11 @@
+# StrandsHarnessAgent is in the release after ag-ui-strands 1.0.4. Until that is published this
+# line resolves to a release without it and the Bot fails at import; set the floor to the release
+# that carries it when it lands.
+ag-ui-strands
+strands-agents
+strands-harness
+# See agent-strands/requirements.txt: 1.106.0 fails every model call in this harness.
+litellm<1.106.0
+fastapi
+python-multipart
+uvicorn[standard]
