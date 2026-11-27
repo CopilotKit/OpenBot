@@ -463,6 +463,25 @@ function moreCalls(live: ToolCalls, stored: ToolCalls): ToolCalls {
   return stored.length > calls.length || longer ? stored : undefined;
 }
 
+/**
+ * Whether merging `stored` would put its copy of a Bot's words in place of the screen's: a reply the
+ * store holds otherwise than the screen, and not as the start of it (`mergeStoredMessages`).
+ */
+function rewritesReply(local: Message[], stored: Message[]): boolean {
+  const storedById = new Map(stored.map((message) => [message.id, message]));
+  return local.some((message) => {
+    const copy = storedById.get(message.id);
+    return (
+      message.role === "assistant" &&
+      copy?.role === "assistant" &&
+      typeof message.content === "string" &&
+      typeof copy.content === "string" &&
+      copy.content !== message.content &&
+      !message.content.startsWith(copy.content)
+    );
+  });
+}
+
 /** How long a read-back waits before each read of the stored thread. */
 const READ_BACK_DELAYS_MS = [250, 750, 1500, 3000];
 
@@ -758,8 +777,10 @@ export function ChannelChat({
    * A slow replay used to leave a conversation that already had something to show blank until the
    * replay was over. It is kept here rather than on the agent because the join empties the agent
    * when it starts, and anything put on the agent before the replay ends has its replayed text
-   * appended to it a second time. The transcript draws it only while `replaying`, and it is let go
-   * when the join turns out to carry the Bot's answer and when the join ends.
+   * appended to it a second time. It is let go when the join turns out to carry the Bot's answer,
+   * and otherwise only once the history that replaces it is on the agent: let go when the join
+   * ended, it left the half-replayed agent on screen until that read landed, and the history then
+   * came back as if it had just arrived, every reply typed out again.
    */
   const [earlyHistory, setEarlyHistory] = useState<Message[] | null>(null);
   /**
@@ -841,6 +862,8 @@ export function ChannelChat({
      */
     let joinOver = false;
     let answering = false;
+    // This run's stored copy is on screen, so the cleanup has it to take down.
+    let earlyUp = false;
     const early = readThreadMessages(channel.threadId, runtimeAgentId);
     void early.then((stored) => {
       if (
@@ -850,6 +873,13 @@ export function ChannelChat({
         version === historyReadVersion.current &&
         stored.availability === "ready"
       ) {
+        // A read that worked owns the notice, or an earlier failure is said above the history.
+        setUnreadable(stored.unreadable);
+        setHistoryAvailability("ready");
+        setHistoryReadFailed(false);
+        // An empty store has nothing to show early: the conversation goes on loading as before.
+        if (stored.messages.length === 0) return;
+        earlyUp = true;
         setEarlyHistory(withCurrentA2uiVersions(stored.messages));
         setRestoring(false);
       }
@@ -893,6 +923,7 @@ export function ChannelChat({
           onAnswering: () => {
             answering = true;
             if (current) {
+              earlyUp = false;
               setRestoring(false);
               setReplaying(false);
               setEarlyHistory(null);
@@ -940,10 +971,8 @@ export function ChannelChat({
         keptRunId = lastRun.runId();
         lastRun.stop();
         joinOver = true;
-        if (current) {
-          setReplaying(false);
-          setEarlyHistory(null);
-        }
+        // The stored copy stays up until the history below is on the agent: see `earlyHistory`.
+        if (current) setReplaying(false);
         openJoined.current();
       }
       /*
@@ -982,16 +1011,40 @@ export function ChannelChat({
       let askAgain = false;
       try {
         /*
-         * The read taken with the join holds the thread as the replay found it only when the replay
-         * finished on its own and was not kept for a turn still going: that turn has added to the
-         * store since. Nor after a replay cut short at the deadline. Otherwise the store is read
-         * again, as it was before there was an early read. Not `keptRunId`, which names the last run
-         * the replay heard start, finished or not, and so is set for nearly every thread.
+         * The read taken with the join, when it worked and the join was not kept for a turn still
+         * going, which has added to the store since. Not `keptRunId`, which names the last run the
+         * replay heard start, finished or not, and so is set for nearly every thread.
          */
-        const stored =
-          joined === "connected" && !answering
-            ? await early
+        const held = answering ? null : await early;
+        /*
+         * IT IS OLDER THAN THE REPLAY, so it stands in for a read after it only where merging it
+         * changes no reply the replay drew. A turn still going when it was taken is in it only in
+         * part, and where the replay drew that reply in pieces (the gateway drops some), the
+         * store's copy wins the merge: the reply was left cut short at the early read's part.
+         * Such a read is the screen's only when the store can't be read again.
+         */
+        const usable =
+          held?.availability === "ready" &&
+          !(
+            joined === "connected" &&
+            rewritesReply(agent.messages, held.messages)
+          )
+            ? held
+            : null;
+        /*
+         * A replay that finished leaves nothing the usable read lacks. One cut short at the
+         * deadline is followed by a read of the store, as it was before there was an early read,
+         * since a turn that ended just before opening can be missing from the early one.
+         */
+        const fresh =
+          joined === "connected" && usable !== null
+            ? usable
             : await readThreadMessages(channel.threadId, runtimeAgentId);
+        // A read that worked counts: one failing after it does not say the history is lost.
+        const stored =
+          fresh.availability === "unavailable" && usable !== null
+            ? usable
+            : fresh;
         const isCurrent = current && version === historyReadVersion.current;
         if (isCurrent) {
           // The gateway snapshot can lag the store. Keep its valid local rows even when the
@@ -1022,8 +1075,12 @@ export function ChannelChat({
         }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
-        // never coming.
-        if (current) setRestoring(false);
+        // never coming. The stored copy goes in the same commit as the history takes its place.
+        if (current) {
+          earlyUp = false;
+          setRestoring(false);
+          setEarlyHistory(null);
+        }
         // Release even on join/restore failure; the gate orders messages, not withholds them.
         openJoinGate.current();
       }
@@ -1032,6 +1089,16 @@ export function ChannelChat({
 
     return () => {
       current = false;
+      /*
+       * A join given up part way (the agent changed, the runtime stopped being ready) takes its
+       * stored copy down with it, or the screen kept it, read-only, until a join that might not
+       * come. What was loading goes on loading, as it did before the stored copy was drawn.
+       */
+      setReplaying(false);
+      if (earlyUp) {
+        setEarlyHistory(null);
+        setRestoring(true);
+      }
     };
   }, [
     copilotkit,
@@ -2207,14 +2274,15 @@ export function ChannelChat({
   const storedRefusals = useQuery(refusedTurnsQueryOptions(channel.id)).data;
   /*
    * THE STORED COPY IS FOR READING ONLY. While it is drawn the join is still replaying onto an agent
-   * it emptied, and anything that changed the agent then would be changed again by the replay: a
-   * message set on it has its replayed text appended twice. So until the join is over, or a turn
-   * still going takes the screen (`onAnswering`), what the transcript draws is drawn as it is outside
-   * a conversation, with nothing in it that adds a turn; the question waiting on the person can't be
-   * answered yet; and a hand-back is not checked against a half-replayed thread. The composer waits
-   * on its own: the replay holds the agent running, so what is typed meanwhile is queued.
+   * it emptied, or the history that replaces it is still being read, and anything that changed the
+   * agent then would be changed again: a message set on it has its replayed text appended twice. So
+   * until the history is on the agent, or a turn still going takes the screen (`onAnswering`), what
+   * the transcript draws is drawn as it is outside a conversation, with nothing in it that adds a
+   * turn; the question waiting on the person can't be answered yet; and a hand-back is not checked
+   * against a half-replayed thread. The composer waits on its own: the replay holds the agent
+   * running, so what is typed meanwhile is queued, and a turn waits for the join gate.
    */
-  const earlyShown = earlyHistory !== null && replaying;
+  const earlyShown = earlyHistory !== null;
   // Every render, as the transcript's messages always were: the agent's list changes in place.
   const refused = withRefusedTurns(
     // The stored history while the join replays it, which empties the agent: see `earlyHistory`.
@@ -2299,10 +2367,12 @@ export function ChannelChat({
             /*
              * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
              * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
-             * "Thinking" line exists for. Same value as `pending`, deliberately.
+             * "Thinking" line exists for. Same value as `pending`, except while the join replays
+             * history (`replaying`): the agent reports itself running then with nothing running, and
+             * the stored copy drawn meanwhile is a conversation at rest, not a turn going.
              */
             busy={
-              agent.isRunning ||
+              (agent.isRunning && !replaying) ||
               turnsInFlight > 0 ||
               turnsAway > 0 ||
               carryingOn
@@ -2525,7 +2595,8 @@ export function ChannelChat({
              * finds them mid-turn waits and is tried again.
              */
             working={
-              agent.isRunning || turnsInFlight > 0 ? null : (
+              // Not hidden by a replay, which runs nothing: see `busy`.
+              (agent.isRunning && !replaying) || turnsInFlight > 0 ? null : (
                 <>
                   {readingAnswer ? (
                     <ProgressRow

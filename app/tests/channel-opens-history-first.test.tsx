@@ -17,6 +17,8 @@ import {
   type ChannelSummary,
   channelKeys,
 } from "@/lib/channels/queries";
+import { desktopKeys } from "@/lib/desktop/queries";
+import { noteAnswer, noteNoAnswer } from "@/lib/desktop/reachability";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import {
@@ -86,6 +88,17 @@ let history: () => Response | Promise<Response>;
 let historyReads = 0;
 /** Whether the gateway has sent `replay_complete` in the current test. */
 let replayEnded = false;
+/**
+ * Which test is running, counted up as each one ends. A gateway script still going from an earlier
+ * test (a replay slower than that test) must not say the current test's replay is over, or a wait
+ * on `replayEnded` ends before the current replay has been sent.
+ */
+let testRun = 0;
+
+/** The gateway has sent `replay_complete`, if the test that joined is still the one running. */
+function endReplay(run: number) {
+  if (run === testRun) replayEnded = true;
+}
 /** The questions waiting on the person, as the inbox answers them in the current test. */
 let inboxQuestions: unknown[] = [];
 /** How many answers to a question were sent in the current test. */
@@ -242,6 +255,7 @@ beforeAll(() => {
   );
 });
 afterEach(() => {
+  testRun += 1;
   cleanup();
   queryClient.clear();
   historyReads = 0;
@@ -258,14 +272,17 @@ afterAll(() => {
 
 /**
  * The roster, holding this conversation, busy when the Bot is working in it, with `lastMessage` as
- * the Bot's last line in it.
+ * the Bot's last line in it. With none, the roster has no line of the Bot's to read the history for.
  */
-function roster(busy = false, lastMessage = "Planning the cycle") {
+function roster(
+  busy = false,
+  lastMessage: string | null = "Planning the cycle",
+) {
   const summary: ChannelSummary = {
     ...channel,
     summary: null,
     lastMessage,
-    lastMessageAgentId: "join-bot",
+    lastMessageAgentId: lastMessage === null ? null : "join-bot",
     lastMessageAt: "2026-11-08T00:00:01.000Z",
     createdAt: "2026-11-08T00:00:00.000Z",
     pinned: false,
@@ -296,13 +313,17 @@ function shown(container: HTMLElement, text: string): number {
 const sleep = (milliseconds: number) =>
   act(() => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
 
-/** The gateway sends `events` after its slow start, says the replay is over, and then that it is idle. */
-function replaying(events: unknown[]): Script {
+/**
+ * The gateway sends `events` after its slow start (`REPLAY_MS` unless said), says the replay is over,
+ * and then that it is idle.
+ */
+function replaying(events: unknown[], startMs = REPLAY_MS): Script {
   return async (send) => {
-    await new Promise((resolve) => setTimeout(resolve, REPLAY_MS));
+    const run = testRun;
+    await new Promise((resolve) => setTimeout(resolve, startMs));
     sending(send, events);
     send("replay_complete", { latestEventId: `event-${events.length - 1}` });
-    replayEnded = true;
+    endReplay(run);
     send("stream_idle", { latestEventId: `event-${events.length - 1}` });
   };
 }
@@ -457,10 +478,11 @@ test("a turn still running streams in live", async () => {
   const LIVE_TEXT = "Matching the lookups against the cycle now";
   const start = lookupsReplayStart(channel.threadId);
   script = async (send) => {
+    const run = testRun;
     await new Promise((resolve) => setTimeout(resolve, REPLAY_MS));
     sending(send, start);
     send("replay_complete", { latestEventId: `event-${start.length - 1}` });
-    replayEnded = true;
+    endReplay(run);
     // The run is still going: its next words come live, and the thread never says it is idle.
     const live = (fields: Record<string, unknown>) => ({
       ...fields,
@@ -722,3 +744,180 @@ test("a message queued while the replay runs can be taken back during it", async
     view.container.querySelector("[aria-label^='Remove queued message']"),
   ).toBeNull();
 }, 10_000);
+
+/** Longer than the join's deadline (`JOIN_DEADLINE_MS`, 1500 ms), which ends the join part way. */
+const SLOW_REPLAY_MS = 2500;
+
+const LOADING = { name: "Loading this conversation" };
+const COULD_NOT_LOAD = /Couldn't load earlier messages\./;
+
+/*
+ * A replay slower than the join's deadline is ended part way, and the history is read again to take
+ * its place. Until that read is on the agent the stored copy stays up: never the half-replayed agent
+ * in between, nothing typed out again, and the very same rows once the read has landed.
+ */
+test("a replay slower than the deadline keeps the stored copy up until the history replaces it", async () => {
+  script = replaying(plainReplay(), SLOW_REPLAY_MS);
+  storing(plainStored);
+  roster();
+
+  const view = opened();
+  const reply = await view.findByText(PLAIN_REPLY, undefined, {
+    timeout: 1000,
+  });
+  // Looked at every 20 ms from the stored copy until well after the read that replaces it.
+  const from = Date.now();
+  while (Date.now() - from < 4500) {
+    expect(shown(view.container, PLAIN_USER)).toBe(1);
+    expect(shown(view.container, PLAIN_REPLY)).toBe(1);
+    expect(view.queryByRole("status", LOADING)).toBeNull();
+    await sleep(20);
+  }
+
+  expect(historyReads).toBeGreaterThan(1);
+  expect(reply.isConnected).toBe(true);
+  expect(view.getByText(PLAIN_REPLY)).toBe(reply);
+}, 15_000);
+
+/*
+ * The read taken with the join brought the history; the one after a slow replay did not. What the
+ * first brought is the conversation's history, and nothing is said to have failed.
+ */
+test("a read after a slow replay that fails keeps the stored copy, and says nothing failed", async () => {
+  script = replaying(plainReplay(), SLOW_REPLAY_MS);
+  history = async () => {
+    await new Promise((resolve) => setTimeout(resolve, HISTORY_MS));
+    return historyReads === 1
+      ? NativeResponse.json({ messages: plainStored() })
+      : NativeResponse.json({ error: "unavailable" }, { status: 503 });
+  };
+  roster(false, PLAIN_REPLY);
+
+  const view = opened();
+  const reply = await view.findByText(PLAIN_REPLY, undefined, {
+    timeout: 1000,
+  });
+  // Past the deadline, the read after it, and every retry a failed read would be given.
+  await sleep(6000);
+
+  expect(historyReads).toBeGreaterThan(1);
+  expect(view.queryByText(COULD_NOT_LOAD)).toBeNull();
+  expect(shown(view.container, PLAIN_USER)).toBe(1);
+  expect(shown(view.container, PLAIN_REPLY)).toBe(1);
+  expect(reply.isConnected).toBe(true);
+}, 15_000);
+
+/*
+ * A store with nothing in it yet has nothing to show early: the conversation goes on loading until
+ * the replay brings what it holds, rather than drawing an empty conversation in the meantime.
+ */
+test("an empty stored history leaves the conversation loading until the replay ends", async () => {
+  script = replaying(plainReplay());
+  history = async () => {
+    await new Promise((resolve) => setTimeout(resolve, HISTORY_MS));
+    return NativeResponse.json({
+      messages: historyReads === 1 ? [] : plainStored(),
+    });
+  };
+  roster();
+
+  const view = opened();
+  await waitFor(() => expect(historyReads).toBe(1));
+  await sleep(200);
+
+  expect(replayEnded).toBe(false);
+  expect(view.queryByRole("status", LOADING)).not.toBeNull();
+
+  await view.findByText(PLAIN_REPLY, undefined, { timeout: 4000 });
+  expect(view.queryByRole("status", LOADING)).toBeNull();
+}, 10_000);
+
+/*
+ * The replay holds the agent running whether or not anything runs, and the stored copy is a
+ * conversation at rest: a last message of the person's with no reply (a turn that failed) has no
+ * "Thinking" under it, and the conversation does not say it is busy.
+ */
+test("the stored copy is drawn at rest while the replay runs", async () => {
+  script = replaying([]);
+  storing(() => [{ id: "plain-user", role: "user", content: PLAIN_USER }]);
+  roster();
+
+  const view = opened();
+  await view.findByText(PLAIN_USER, undefined, { timeout: 1000 });
+
+  expect(replayEnded).toBe(false);
+  expect(view.queryByText("Thinking")).toBeNull();
+  expect(
+    view.container
+      .querySelector("[data-transcript-column]")
+      ?.getAttribute("aria-busy"),
+  ).toBe("false");
+}, 10_000);
+
+/*
+ * The read taken with the join can be older than the replay: a turn still going when it was taken
+ * is in it only in part. Where the replay drew that reply in pieces (a gateway that dropped some),
+ * the store's copy wins the merge, so the read the screen is left with must be one taken after the
+ * turn, not the part the early read held.
+ */
+test("a reply the early read held only part of is not cut short to that part", async () => {
+  const PART = "The cycle is on";
+  // The replay's copy lost its first piece, so it does not start with the store's.
+  const PIECES = "cycle is on track and nothing is blocked.";
+  history = async () => {
+    await new Promise((resolve) => setTimeout(resolve, HISTORY_MS));
+    return NativeResponse.json({
+      messages: plainStored(historyReads === 1 ? PART : PLAIN_REPLY),
+    });
+  };
+  script = replaying(plainReplay(PIECES));
+  // No line of the Bot's on the roster, so no other read comes to put it right.
+  roster(false, null);
+
+  const view = opened();
+  await waitFor(() => expect(replayEnded).toBe(true), { timeout: 4000 });
+  await sleep(1000);
+
+  expect(shown(view.container, PLAIN_REPLY)).toBe(1);
+}, 10_000);
+
+/*
+ * A conversation that couldn't load its history says so, and is joined again when OpenBot answers
+ * again. When the read taken with that join brings the history, the notice goes with it, rather
+ * than saying the history couldn't be loaded above the history.
+ */
+test("a stored copy that comes after a failed read takes the failure notice down", async () => {
+  let failing = true;
+  history = async () => {
+    await new Promise((resolve) => setTimeout(resolve, HISTORY_MS));
+    return failing
+      ? NativeResponse.json({ error: "unavailable" }, { status: 503 })
+      : NativeResponse.json({ messages: plainStored() });
+  };
+  // The first join finds nothing; the second replays the turn, after the stored copy is drawn.
+  const first = replaying([]);
+  const second = replaying(plainReplay());
+  script = (send, join) => (join === 1 ? first : second)(send, join);
+  roster();
+  // Inside OpenBot Desktop connected to an OpenBot somewhere else, where OpenBot can stop answering.
+  queryClient.setQueryData(desktopKeys.connection, {
+    mode: "connected",
+    address: "https://openbot.example",
+  });
+
+  try {
+    const view = opened();
+    await view.findByText(COULD_NOT_LOAD, undefined, { timeout: 15_000 });
+
+    failing = false;
+    noteNoAnswer(new TypeError("Failed to fetch"));
+    await sleep(50);
+    await act(() => noteAnswer(new NativeResponse(null, { status: 200 })));
+
+    await view.findByText(PLAIN_REPLY, undefined, { timeout: 1000 });
+    expect(joins).toBe(2);
+    expect(view.queryByText(COULD_NOT_LOAD)).toBeNull();
+  } finally {
+    await noteAnswer(new NativeResponse(null, { status: 200 }));
+  }
+}, 30_000);
