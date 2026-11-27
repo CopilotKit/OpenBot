@@ -25,6 +25,10 @@ import {
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { computerModeQueryOptions } from "@/lib/enterprise/queries";
 import { managementQueryOptions } from "@/lib/management/queries";
+import {
+  identityProvidersQueryOptions,
+  linkedAccountsQueryOptions,
+} from "@/lib/identity/queries";
 import { memoriesQueryOptions, memorySourcesQueryOptions } from "@/lib/memory";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { connectionsQueryOptions } from "@/lib/plugins/queries";
@@ -195,6 +199,8 @@ test("Apps loads the apps the first list is drawn from", async () => {
       appSetupQueryOptions(),
       connectionsQueryOptions(),
       deploymentCapabilitiesQueryOptions(),
+      linkedAccountsQueryOptions(),
+      identityProvidersQueryOptions(),
     ),
   );
 });

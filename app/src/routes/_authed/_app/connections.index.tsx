@@ -115,6 +115,9 @@ export const Route = createFileRoute("/_authed/_app/connections/")({
       appSetupQueryOptions(),
       connectionsQueryOptions(),
       deploymentCapabilitiesQueryOptions(),
+      // The list stays a skeleton until both answer, so the click must not be the first to ask.
+      linkedAccountsQueryOptions(),
+      identityProvidersQueryOptions(),
     ]),
   component: RouteComponent,
   /*
