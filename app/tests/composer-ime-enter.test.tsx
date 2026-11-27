@@ -18,7 +18,20 @@ import { settleReactWork } from "./settle-react-work";
  * field there too.
  */
 
-beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
+/**
+ * The suite's React is evaluated with no `CompositionEvent`, so `compositionstart` never arrives
+ * and key code 229 is treated as a composition that cannot end. A child process
+ * (`ime-react-preload.ts`, `OPENBOT_IME_REACT=1`) evaluates React while happy-dom still has
+ * `CompositionEvent`. The cases that need a composition to open and close run there.
+ */
+const compositionEvents = process.env.OPENBOT_IME_REACT === "1";
+const whileOpen = compositionEvents ? test : test.skip;
+
+beforeAll(() => {
+  if (!GlobalRegistrator.isRegistered) {
+    GlobalRegistrator.register({ url: "http://localhost/" });
+  }
+});
 afterEach(() => {
   cleanup();
   queryClient.clear();
@@ -109,29 +122,36 @@ for (const compact of [true, false]) {
     expect(sent).toEqual([]);
     expect(box().textContent).toBe(text);
 
+    // Without CompositionEvent, React treats 229 as the start of a composition that never ends,
+    // so the next Enter is not a fair check. The child process has CompositionEvent, and there
+    // the next Enter sends.
+    if (!compositionEvents) return;
     fireEvent.keyDown(box(), { key: "Enter", keyCode: 13 });
     await waitFor(() => expect(sent).toEqual([DRAFT]));
   });
 
-  test(`${layout}: Enter before compositionend does not send`, async () => {
-    const { box, sent } = await ready(compact);
-    const text = box().textContent;
-    fireEvent.compositionStart(box());
-    // The keydown lands first, unmarked, while the composition is still open.
-    expect(
-      fireEvent.keyDown(box(), {
-        key: "Enter",
-        keyCode: 13,
-        isComposing: false,
-      }),
-    ).toBe(true);
-    expect(sent).toEqual([]);
-    expect(box().textContent).toBe(text);
+  whileOpen(
+    `${layout}: Enter before compositionend does not send`,
+    async () => {
+      const { box, sent } = await ready(compact);
+      const text = box().textContent;
+      fireEvent.compositionStart(box());
+      // The keydown lands first, unmarked, while the composition is still open.
+      expect(
+        fireEvent.keyDown(box(), {
+          key: "Enter",
+          keyCode: 13,
+          isComposing: false,
+        }),
+      ).toBe(true);
+      expect(sent).toEqual([]);
+      expect(box().textContent).toBe(text);
 
-    fireEvent.compositionEnd(box());
-    fireEvent.keyDown(box(), { key: "Enter", keyCode: 13 });
-    await waitFor(() => expect(sent).toEqual([DRAFT]));
-  });
+      fireEvent.compositionEnd(box());
+      fireEvent.keyDown(box(), { key: "Enter", keyCode: 13 });
+      await waitFor(() => expect(sent).toEqual([DRAFT]));
+    },
+  );
 }
 
 /** A finger is the only pointer, so Return does not send and Cmd+Enter does. */
@@ -152,7 +172,26 @@ function touchPointer() {
   };
 }
 
-test("touch: Cmd+Enter before compositionend does not send", async () => {
+test("touch: Cmd+Enter marked isComposing does not send", async () => {
+  const restore = touchPointer();
+  try {
+    const { box, sent } = await ready(true);
+    fireEvent.keyDown(box(), {
+      key: "Enter",
+      metaKey: true,
+      keyCode: 13,
+      isComposing: true,
+    });
+    expect(sent).toEqual([]);
+
+    fireEvent.keyDown(box(), { key: "Enter", metaKey: true, keyCode: 13 });
+    await waitFor(() => expect(sent).toEqual([DRAFT]));
+  } finally {
+    restore();
+  }
+});
+
+whileOpen("touch: Cmd+Enter before compositionend does not send", async () => {
   const restore = touchPointer();
   try {
     const { box, sent } = await ready(true);
@@ -172,3 +211,25 @@ test("touch: Cmd+Enter before compositionend does not send", async () => {
     restore();
   }
 });
+
+if (!compositionEvents) {
+  test("a composition that opens and closes is checked where CompositionEvent exists", () => {
+    const result = Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        "test",
+        "--preload",
+        "./app/tests/ime-react-preload.ts",
+        "app/tests/composer-ime-enter.test.tsx",
+      ],
+      cwd: `${import.meta.dir}/../..`,
+      env: { ...process.env, OPENBOT_IME_REACT: "1" },
+      stderr: "pipe",
+      stdout: "pipe",
+    });
+    if (result.exitCode !== 0) {
+      const output = `${result.stdout}\n${result.stderr}`;
+      throw new Error(output.slice(-6000));
+    }
+  }, 60_000);
+}

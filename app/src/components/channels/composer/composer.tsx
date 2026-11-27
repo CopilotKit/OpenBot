@@ -1721,22 +1721,35 @@ export function Composer({
    * Runs before prompt-area's own keys, which skip any key this prevents.
    *
    * On a touch keyboard: Cmd or Ctrl+Enter still sends, for an iPad with a keyboard attached, and
-   * Return while live dictation listens still stops it, as Enter does on a computer.
+   * Return while live dictation listens still stops it, as Enter does on a computer. Return
+   * itself does not send.
    *
-   * On a computer: the Enter that confirms a character an input method is composing never sends.
-   * prompt-area skips an Enter marked `isComposing`, which is how Chromium sends it. WebKit sends
-   * it after `compositionend`, unmarked and with the key code 229, and that one sent the message.
+   * The Enter that confirms an IME candidate never sends. The composition stays open from
+   * compositionstart until compositionend, including when the keydown arrives first with
+   * isComposing false, and when the key code is 229. This handler does not prevent that key, and
+   * prompt-area skips it too. Preventing it would cancel the candidate.
    */
+  const imeOpen = useRef(false);
+  const markComposing = () => {
+    imeOpen.current = true;
+  };
+  const clearComposing = () => {
+    imeOpen.current = false;
+  };
   const handleEditorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-    if (touchTyping) {
-      if (event.metaKey || event.ctrlKey || dictation.live.session.active) {
-        event.preventDefault();
-        void submitDraft(value);
-      }
+    if (event.key !== "Enter") return;
+    if (
+      imeOpen.current ||
+      event.nativeEvent.isComposing ||
+      event.keyCode === 229
+    ) {
       return;
     }
-    if (event.keyCode === 229) event.preventDefault();
+    if (!touchTyping) return;
+    if (event.metaKey || event.ctrlKey || dictation.live.session.active) {
+      event.preventDefault();
+      void submitDraft(value);
+    }
   };
 
   /**
@@ -1967,6 +1980,8 @@ export function Composer({
             MESSAGE_BOX_FRAME,
             className,
           )}
+          onCompositionEnd={clearComposing}
+          onCompositionStart={markComposing}
           onSubmit={handleFormSubmit}
         >
           <DictationSurface dictation={dictation} canSend={canSendRecording}>
@@ -1988,6 +2003,7 @@ export function Composer({
                 disabled={disabled}
                 maxHeight={COMPACT_MAX_HEIGHT_PX}
                 minHeight={COMPACT_MIN_HEIGHT_PX}
+                onBlur={clearComposing}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
                 onKeyDown={handleEditorKeyDown}
@@ -2060,6 +2076,8 @@ export function Composer({
         className={cn("overflow-hidden", MESSAGE_BOX_FRAME)}
         data-slot="composer"
         data-typing={draft.isEmpty ? undefined : ""}
+        onCompositionEnd={clearComposing}
+        onCompositionStart={markComposing}
         onSubmit={handleFormSubmit}
       >
         <DictationSurface
@@ -2082,6 +2100,7 @@ export function Composer({
                 className={inputClassName}
                 disabled={disabled}
                 maxHeight={MAX_HEIGHT_PX}
+                onBlur={clearComposing}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
                 onKeyDown={handleEditorKeyDown}
