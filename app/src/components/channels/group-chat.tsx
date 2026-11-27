@@ -169,7 +169,10 @@ export function GroupChat({ channelId }: { channelId: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div
-        className="min-h-0 flex-1 overflow-y-auto"
+        // The scrollbar a conversation with one Bot draws (`MessageScroller`): thin, and its room
+        // kept while nothing scrolls, so where scrollbars take room the column sits where that
+        // conversation's does and does not shift when the lines first overflow.
+        className="min-h-0 flex-1 scrollbar-thin scrollbar-gutter-stable overflow-y-auto"
         onScroll={(event) => {
           atBottom.current = isNearBottom(event.currentTarget);
         }}

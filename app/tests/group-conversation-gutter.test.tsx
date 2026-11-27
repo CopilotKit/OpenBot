@@ -477,9 +477,11 @@ describe.skipIf(!asked)(
           }
           expect(one).not.toBeNull();
           if (!one) return;
-          // The conversation with one Bot is the margin to keep: 16px a side on a phone.
+          // The conversation with one Bot is the margin to keep: 16px a side on a phone (and on the
+          // right its scrollbar's room too, where scrollbars take room, as on Linux and Windows).
           if (width === 390) {
-            expect(round(one.inside)).toEqual({ left: 16, right: 374 });
+            expect(round(one.inside).left).toBe(16);
+            expect(round(one.inside).right).toBeLessThanOrEqual(374);
             expect(round(one.composer)).toEqual({ left: 16, right: 374 });
           }
           for (const group of GROUPS) {
