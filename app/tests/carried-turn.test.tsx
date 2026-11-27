@@ -483,8 +483,8 @@ test("a turn the server carries on in a run of its own is followed here while it
   onRun = (input) => {
     const person = input.messages.filter((message) => message.role === "user");
     const whole = wholeTurn(person);
-    // The run took the first step and ended there, at its step limit: the server carries the turn
-    // on in a run of its own, which this page's run does not bring.
+    // The run took the first step and ended there, its server leaving: another server carries the
+    // turn on in a run of its own, which this page's run does not bring.
     stored = whole.slice(0, person.length + 2);
     endings.set(input.runId, "succeeded");
     live = { runId: "carried-on", events: [], followers: new Set() };
@@ -543,6 +543,68 @@ test("a turn the server carries on in a run of its own is followed here while it
   );
   view.getByText(/computer_write_file answered .*numbers\.txt/);
   expect(view.queryByTestId("transcript-stopped")).toBeNull();
+  expect(stepsRunHere).toBe(0);
+  expect(runs).toHaveLength(1);
+}, 30_000);
+
+/*
+ * The connection this page's run came through is lost (a phone's drops, or the server it came
+ * through leaves), and its stream ends in an error, while the run goes on on the server to its
+ * answer. The page rejoins and follows it, and says nothing of a failure.
+ */
+test("a run whose stream is lost here while it goes on is rejoined and followed to its answer, with no failure said", async () => {
+  const LOST = "The connection to OpenBot was lost.";
+  onRun = (input) => {
+    const person = input.messages.filter((message) => message.role === "user");
+    const whole = wholeTurn(person);
+    stored = whole.slice(0, person.length + 2);
+    // The same run, still going on the server once this page's stream of it has ended.
+    live = { runId: input.runId, events: [], followers: new Set() };
+    void (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      for (const event of serverStep(
+        "add",
+        "computer_run_command",
+        { command: COMMAND },
+        "adds",
+        { ok: true, exitCode: 0, stdout: PRINTED },
+      ))
+        emit(event);
+      for (const event of said("done", DONE)) emit(event);
+      stored = whole;
+      endings.set(input.runId, "succeeded");
+      emit({
+        type: "RUN_FINISHED",
+        threadId: channel.threadId,
+        runId: input.runId,
+      });
+      endLive();
+    })();
+    return sse([
+      { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+      ...said("about", ABOUT_TO),
+      ...serverStep(
+        "save",
+        "computer_write_file",
+        { path: SAVED, contents: "1000\n234" },
+        "about",
+        { ok: true, path: SAVED, bytes: 8 },
+      ),
+      { type: "RUN_ERROR", message: LOST, code: "connection_lost" },
+    ]);
+  };
+  const view = render(app());
+  await send(view, ASKED);
+
+  expect(await view.findByText(DONE, {}, { timeout: 15_000 })).toBeTruthy();
+  await waitFor(
+    () =>
+      expect(view.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+    { timeout: 15_000 },
+  );
+  view.getByText(/computer_run_command answered .*1234/);
+  expect(view.queryByTestId("transcript-stopped")).toBeNull();
+  expect(view.queryByText(LOST)).toBeNull();
   expect(stepsRunHere).toBe(0);
   expect(runs).toHaveLength(1);
 }, 30_000);

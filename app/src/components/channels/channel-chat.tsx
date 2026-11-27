@@ -1851,12 +1851,40 @@ export function ChannelChat({
           break;
         }
         /*
+         * A STREAM LOST HERE IS NOT A TURN THAT FAILED while the server still has a run going. A
+         * phone's connection drops, or the server the run's events came through leaves, and this
+         * run's stream ends in an error while the run goes on, or another server carries the turn on
+         * in a run of its own. When the server says a run is going, the failure is not said: the
+         * turn rejoins the thread and follows that run, and its own end says how the turn went.
+         */
+        if (
+          turnFailure.current !== null &&
+          !turnRefused.current &&
+          !stoppedHere.current &&
+          (await askRunGoing(channel.id)).liveness === "live"
+        ) {
+          const lost = turnFailure.current;
+          turnFailure.current = null;
+          awaitingReply.current = false;
+          setRunError((shown) => (shown?.message === lost ? null : shown));
+          await followServerTurn({
+            agent: target,
+            conversationId: channel.id,
+            heard: null,
+            join: joinThread(target),
+            quietMs: quietRunPeriod.ms,
+            stopped: stoppedSince(stops),
+          });
+        }
+        /*
          * A RUN THAT ENDED BEFORE THE BOT ANSWERED MAY NOT BE THE END OF THE TURN. The server carries
-         * a turn on in a run of its own past one run's step limit or deadline (`carried-turn.ts`), and
+         * a turn on in a run of its own when the server running it leaves (`carried-turn.ts`), and
          * this run's stream ends without it, on the last step it answered. The turn follows that
          * run here, the working dot staying on, its steps and its answer streaming in. Not a turn
          * waiting on the person, whose next run starts only when they answer. Asked once, at once: a
-         * turn that ended without words is not held up waiting to see whether one comes.
+         * turn that ended without words is not held up waiting to see whether one comes. When no
+         * run is going, the thread is read again once the turn is over, for anything the server
+         * wrote that this stream did not bring.
          */
         if (
           endsOnStep(target.messages) &&
@@ -1865,7 +1893,7 @@ export function ChannelChat({
           !stoppedHere.current &&
           !waitsOnPerson(target)
         ) {
-          await followServerTurn({
+          const followed = await followServerTurn({
             agent: target,
             conversationId: channel.id,
             heard: heardRunId,
@@ -1873,6 +1901,7 @@ export function ChannelChat({
             quietMs: quietRunPeriod.ms,
             stopped: stoppedSince(stops),
           });
+          if (followed === null) pullHistoryRef.current?.();
         }
         if (!streamBroke.current || turnFailure.current !== null) break;
         streamBroke.current = false;

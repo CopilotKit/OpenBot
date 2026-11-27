@@ -8,6 +8,7 @@ import {
   ToolActivity,
   type ToolGroup,
 } from "../src/components/channels/tool-activity";
+import { outputOf, readOutcome } from "../src/lib/computers/activity";
 
 /*
  * A step that was under way when its run was cut off (the server restarted, or the run crashed) has
@@ -74,6 +75,28 @@ function group(steps: ToolItem[], active = false) {
   open(view.container);
   return view;
 }
+
+/*
+ * A COMPUTER STEP CUT OFF INSIDE THE SERVER'S RUN. The server runs a Bot's computer steps itself, and
+ * one cut off part way is answered `{ ok: false, error: "Outcome unknown: ..." }` there, or with the
+ * sentence alone. Either way it was not run again, nothing turned it away, and the person reads why
+ * in their own words: never "Blocked", and never a failure with nothing under it.
+ */
+test("a computer step cut off inside the server's run reads as not run, in the person's words, in every form it comes in", () => {
+  for (const content of [
+    JSON.stringify({ ok: false, error: CUT_OFF }),
+    JSON.stringify({ ok: false, reason: CUT_OFF }),
+    CUT_OFF,
+    `Error: ${CUT_OFF}`,
+  ]) {
+    const outcome = readOutcome(content);
+    expect(outcome?.ok).toBe(false);
+    expect(outcome?.refused).toBeUndefined();
+    expect(outcome ? outputOf(outcome) : "").toBe(
+      "It started, but OpenBot can't tell whether it finished. It wasn't run again.",
+    );
+  }
+});
 
 test("a step cut off on its own line reads as interrupted, and opens to plain words", () => {
   // As the thread holds it, and as the runtime hands an errored result back.
