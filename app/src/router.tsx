@@ -16,6 +16,14 @@ export const router = createRouter({
   parseSearch: parseSearchText,
   // The router's own error screen, which also tells OpenBot what it caught (lib/error-reporting.tsx).
   defaultErrorComponent: ReportedErrorComponent,
+  /*
+   * Links load their page when a pointer rests on them. The query cache decides what is fresh, so
+   * the router asks its loaders every time and does not keep a second opinion of its own. The
+   * default 50 ms intent delay stays, so a pointer passing over a long sidebar does not flood the
+   * server.
+   */
+  defaultPreload: "intent",
+  defaultPreloadStaleTime: 0,
 });
 
 /*
