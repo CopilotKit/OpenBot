@@ -27,6 +27,7 @@ const LEGACY_KEY = "openbot-theme";
 
 let browser: Browser;
 let script: string;
+let menuCss: string;
 /** The app's page, with the fixture in the app's place and a note of the theme at first paint. */
 let html: string;
 
@@ -51,6 +52,18 @@ beforeAll(async () => {
     .replace("/src/main.tsx", "/theme.js");
   if (!html.includes("__darkAtFirstPaint") || !html.includes("/theme.js"))
     throw new Error("index.html no longer has the shape this test reads");
+  const compiler = await compile(
+    "@theme { --spacing: 0.25rem; } @tailwind utilities;",
+  );
+  // Include the portaled options and scroll arrows before the menu first measures itself.
+  const classes = [
+    "components/settings/theme-row.tsx",
+    "components/ui/item.tsx",
+    "components/ui/select.tsx",
+  ].flatMap((file) =>
+    readFileSync(join(APP, "src", file), "utf8").split(/[\s"'`{}]+/),
+  );
+  menuCss = compiler.build(classes);
   const { chromium } = await import("playwright-core");
   // The CI job installs full Chromium without the headless shell.
   browser = await chromium.launch({ channel: "chromium" });
@@ -108,27 +121,16 @@ test.skipIf(!asked).each([
     try {
       await page.setViewportSize({ width: 640, height });
       await page.addStyleTag({
-        content: `html { zoom: 1.25 } body { margin: 0 } #root { padding-top: ${fits ? 36 : 12}px }`,
+        content: `${menuCss}\nhtml { zoom: 1.25 } body { margin: 0 } #root { padding-top: ${fits ? 36 : 12}px }`,
       });
-      const css = await compile(
-        "@theme { --spacing: 0.25rem; } @tailwind utilities;",
-      );
-      const style = async () =>
-        page.addStyleTag({
-          content: css.build(
-            await page
-              .locator("[class]")
-              .evaluateAll((elements) =>
-                elements.flatMap((element) => [...element.classList]),
-              ),
-          ),
-        });
-      await style();
       const trigger = page.getByRole("combobox", { name: "Theme" });
       await trigger.click();
       const list = page.getByRole("listbox");
       await list.waitFor();
-      await style();
+      if (!fits) {
+        await page.locator('[data-slot="select-scroll-down-button"]').waitFor();
+        await list.hover();
+      }
       const dimensions = await list.evaluate((menu) => [
         menu.clientHeight,
         menu.scrollHeight,
@@ -137,9 +139,6 @@ test.skipIf(!asked).each([
         expect(dimensions[0]).toBe(dimensions[1]);
       } else {
         expect(dimensions[0]).toBeLessThan(dimensions[1]);
-        const bounds = await list.boundingBox();
-        if (!bounds) throw new Error("The Theme list is hidden");
-        await page.mouse.move(bounds.x + 12, bounds.y + 5);
         await page.mouse.wheel(0, 100);
         await page.waitForFunction(
           () =>
