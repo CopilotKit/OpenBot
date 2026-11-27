@@ -124,7 +124,14 @@ afterAll(async () => {
   await Promise.all(browsers.map((browser) => browser.close()));
 });
 
-/** Style what is on the page now, as the app's build would have, and let it settle. */
+/**
+ * Style what is on the page now, as the app's build would have, and let it settle.
+ *
+ * Styles that arrive after the page has drawn start the transitions they declare: the dialog slides
+ * from where it sat unstyled to the middle of the window over 150ms. A fixed wait measured it partway
+ * there, off the screen, whenever WebKit ran slow under a full CI run, so this waits for every
+ * transition and animation that ends to end, then measures what a person would see.
+ */
 async function styled(page: Page) {
   const classes = await page.evaluate(() =>
     [...document.querySelectorAll("[class]")].flatMap((element) => [
@@ -133,7 +140,23 @@ async function styled(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(400);
+  await page.evaluate(async () => {
+    for (;;) {
+      const moving = document
+        .getAnimations()
+        .filter(
+          (animation) =>
+            animation.playState === "running" &&
+            Number.isFinite(
+              Number(animation.effect?.getComputedTiming().endTime),
+            ),
+        );
+      if (moving.length === 0) return;
+      await Promise.all(
+        moving.map((animation) => animation.finished.catch(() => {})),
+      );
+    }
+  });
 }
 
 async function open(
