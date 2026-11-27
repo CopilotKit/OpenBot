@@ -144,9 +144,12 @@ chart. For a mirror whose charts you sign with your own key, set `product.verify
 charts carry no signature you can check, set `product.verify.enabled=false`.
 
 **What to install is signed too.** The release it moves to, with its chart digest, its image and the window, comes from a desired
-state CopilotKit signs with the same key as commands. The agent acts on it only if:
+state CopilotKit signs with the same key as commands. The signature covers every field of it but the
+release manifest's text, which the signed `releaseManifestSha256` binds instead, so what is signed
+stays small however long a manifest grows. The agent acts on it only if:
 
 - the signature verifies;
+- the release manifest's bytes hash to the signed `releaseManifestSha256`;
 - it names this install;
 - it hasn't expired;
 - its counter isn't below the last one the agent accepted. The agent keeps that counter in its

@@ -112,6 +112,7 @@ import {
   laterRunFailure,
   laterRunReason,
   refusedForPerson,
+  refusedRun,
   requestNotMade,
   stoppedReason,
   TURN_CUT_OFF,
@@ -1668,7 +1669,7 @@ export function ChannelChat({
           } catch {
             // Nothing left to stop.
           }
-          void target.detachActiveRun().catch(() => undefined);
+          const detached = target.detachActiveRun().catch(() => undefined);
           awaitingReply.current = false;
           // What the thread holds is what was saved: read back when the runtime can be asked.
           if (ended === "over") {
@@ -1677,18 +1678,34 @@ export function ChannelChat({
               : "unknown";
             const whole = await readBackFromThread(target, existingMessageIds);
             if (whole) reportReadBack(target);
+            const unrun = unansweredToolCalls(target.messages).size > 0;
             /*
              * A RUN THAT FINISHED IS SHOWN AS FINISHED, though its end never reached here. Its reply
              * is the one read back whole from the thread, and nothing is left for this browser to
              * do. A run that stopped part way, or one the server can't say about, keeps the notice
              * and its Carry on. See `askRunEnding`.
              */
-            if (
-              ending === "finished" &&
-              whole &&
-              unansweredToolCalls(target.messages).size === 0
-            )
-              break;
+            if (ending === "finished" && whole && !unrun) break;
+            /*
+             * A RUN THAT FINISHED ON A STEP THIS BROWSER NEVER HEARD IS CARRIED ON, ONCE. Found on
+             * OpenBot Cloud, in a phone's web view, on a long task at the highest reasoning level:
+             * the Bot's run finished on the server by handing this browser a command to run on its
+             * computer, as every run does that needs the computer. The phone was not listening when
+             * it ended, so the command never ran, and the turn ended "The Bot stopped before it
+             * finished". Carry on brought the next run, which ended on the next command the same way,
+             * three times in one conversation. The run did nothing wrong and this browser was never
+             * asked: the step is answered as not run and the Bot asked again, as the person pressing
+             * Carry on did, and as a run whose stream broke here is. Never more than once a turn: a
+             * second time keeps the notice and its Carry on.
+             */
+            if (ending === "finished" && whole && unrun && !carriedOn) {
+              await detached;
+              const answered = repairUnansweredToolCalls(target.messages);
+              if (answered !== target.messages)
+                target.setMessages(answered as typeof target.messages);
+              stoppedHere.current = false;
+              continue;
+            }
           }
           setRunError({
             message: ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,
@@ -1913,7 +1930,8 @@ export function ChannelChat({
           stoppedReason(event?.message),
           true,
           undefined,
-          refusedForPerson(event?.message),
+          // Or a turn the server keeps as refused: its Bot's engine couldn't take it.
+          refusedForPerson(event?.message) || refusedRun(event),
         );
       },
       onRunFailed: ({ error }) => {
@@ -1937,7 +1955,11 @@ export function ChannelChat({
          * See `laterRunFailure`.
          */
         if (!awaitingReply.current && turnsRef.current > 0) {
-          if (stoppedHere.current) return;
+          /*
+           * Nor a turn already refused in its RUN_ERROR's words: Intelligence's client fails the run
+           * after one, and said again here it was the refusal a second time, as the turn's last line.
+           */
+          if (stoppedHere.current || turnRefused.current) return;
           const said = laterRunFailure(error);
           // A request refused may be OpenBot holding off, which the server is asked about first.
           if (said)

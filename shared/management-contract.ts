@@ -21,7 +21,10 @@
  * signed desired state (`SignedDesiredState`, kind `desired-state`): the version to move to with its
  * release manifest and chart digests, the maintenance window and whether upgrades are paused, all
  * under one signature, for one install, with an expiry and a counter that only goes up for that
- * install. The agent acts on it only when it verifies, names the agent's own install, has not
+ * install. The signature covers every field but the release manifest's text, which is bound by its
+ * signed SHA-256 (`releaseManifestSha256`) instead, so what is signed stays a few hundred bytes
+ * however long the manifest grows (`canonicalDesiredState`). The agent acts on it only when it
+ * verifies, the manifest's bytes match the signed digest, it names the agent's own install, has not
  * expired, and its counter is not below the last one the agent accepted (`readDesiredState`). The
  * reply's own `desired`, `window` and `paused` fields are unsigned: they stay for agents that read
  * them, and an agent that reads the signed desired state ignores them.
@@ -206,7 +209,8 @@ export const SignedDesiredState = z.strictObject({
   desired: DesiredState.nullable(),
   window: MaintenanceWindow,
   paused: z.boolean(),
-  /** Base64 Ed25519 signature over `canonicalSigned(this)`. */
+  /** Base64 Ed25519 signature over `canonicalDesiredState(this)`: every field but the signature and
+   * the release manifest's text, which `desired.releaseManifestSha256` binds. */
   signature: z.base64(),
 });
 export type SignedDesiredState = z.infer<typeof SignedDesiredState>;
@@ -248,6 +252,30 @@ export function canonicalCommand(command: UnsignedCommand | Command): string {
   return canonicalSigned(command);
 }
 
+/**
+ * The most bytes a signed message may have. The service signs with a key in AWS KMS, whose Ed25519
+ * signing takes a raw message of at most 4096 bytes; a longer one is refused there. Pure Ed25519 is
+ * kept (not Ed25519ph, KMS's path for longer messages) because the agent verifies with WebCrypto,
+ * which has no Ed25519ph.
+ * https://docs.aws.amazon.com/kms/latest/APIReference/API_Sign.html
+ */
+export const SIGNED_MESSAGE_MAX_BYTES = 4096;
+
+/**
+ * The exact bytes a desired state's signature covers: RFC 8785 JSON of it without its `signature`
+ * and without `desired.releaseManifest`. The manifest's text is bound by `releaseManifestSha256`,
+ * which is signed, and the agent refuses a manifest whose bytes don't hash to it; leaving the text
+ * out keeps what is signed small however long the manifest grows.
+ */
+export function canonicalDesiredState(
+  value: UnsignedDesiredState | SignedDesiredState,
+): string {
+  const { signature: _signature, ...unsigned } = value as SignedDesiredState;
+  if (!unsigned.desired) return canonicalSigned(unsigned);
+  const { releaseManifest: _manifest, ...desired } = unsigned.desired;
+  return canonicalSigned({ ...unsigned, desired });
+}
+
 /** Ed25519 public keys and signatures travel as base64: a key is its raw 32 bytes. */
 export function fromBase64(value: string): Uint8Array {
   const bytes = Uint8Array.from(atob(value), (character) =>
@@ -274,14 +302,15 @@ async function verifyKey(publicKey: string) {
   );
 }
 
-/** Whether `value.signature` is a valid Ed25519 signature by `publicKey` over its canonical JSON. */
+/** Whether `signatureBase64` is a valid Ed25519 signature by `publicKey` over `message`. */
 async function verifySigned(
-  value: { signature: string },
+  signatureBase64: string,
+  message: string,
   publicKey: string,
 ): Promise<boolean> {
   let signature: Uint8Array;
   try {
-    signature = fromBase64(value.signature);
+    signature = fromBase64(signatureBase64);
   } catch {
     return false;
   }
@@ -290,16 +319,26 @@ async function verifySigned(
     { name: "Ed25519" },
     await verifyKey(publicKey),
     signature as BufferSource,
-    new TextEncoder().encode(canonicalSigned(value)) as BufferSource,
+    new TextEncoder().encode(message) as BufferSource,
   );
 }
 
-async function signed(value: object, privateKey: CryptoKey) {
+/** The UTF-8 bytes of a message to sign, refused when longer than the signer takes. */
+export function signedMessageBytes(message: string): Uint8Array {
+  const bytes = new TextEncoder().encode(message);
+  if (bytes.length > SIGNED_MESSAGE_MAX_BYTES)
+    throw new Error(
+      `the message to sign is ${bytes.length} bytes, over the ${SIGNED_MESSAGE_MAX_BYTES} a signer takes`,
+    );
+  return bytes;
+}
+
+async function signed(message: string, privateKey: CryptoKey) {
   const signature = new Uint8Array(
     await crypto.subtle.sign(
       { name: "Ed25519" },
       privateKey,
-      new TextEncoder().encode(canonicalSigned(value)) as BufferSource,
+      signedMessageBytes(message) as BufferSource,
     ),
   );
   return toBase64(signature);
@@ -310,7 +349,7 @@ export function verifyCommandSignature(
   command: Command,
   publicKey: string,
 ): Promise<boolean> {
-  return verifySigned(command, publicKey);
+  return verifySigned(command.signature, canonicalCommand(command), publicKey);
 }
 
 /** Signs a command: what the management service does before it puts one in a reply. */
@@ -318,7 +357,10 @@ export async function signCommand(
   command: UnsignedCommand,
   privateKey: CryptoKey,
 ): Promise<Command> {
-  return { ...command, signature: await signed(command, privateKey) };
+  return {
+    ...command,
+    signature: await signed(canonicalCommand(command), privateKey),
+  };
 }
 
 /** Signs a desired state with the command key: what the service puts in every reply. */
@@ -326,7 +368,10 @@ export async function signDesiredState(
   desired: UnsignedDesiredState,
   privateKey: CryptoKey,
 ): Promise<SignedDesiredState> {
-  return { ...desired, signature: await signed(desired, privateKey) };
+  return {
+    ...desired,
+    signature: await signed(canonicalDesiredState(desired), privateKey),
+  };
 }
 
 /** The last signed desired state an agent accepted, as it keeps it across restarts. */
@@ -348,7 +393,8 @@ export type DesiredStateReading =
 /**
  * The signed desired state in a reply's commands, as the agent may act on it. Refused, with why:
  * none in the reply, or more than one; malformed; a signature that does not verify with `publicKey`;
- * signed for another install; expired; issued in the future; or a counter below the last one
+ * a release manifest whose bytes don't hash to the signed `releaseManifestSha256`; signed for another
+ * install; expired; issued in the future; or a counter below the last one
  * accepted for this install (`last`), or equal to it without being that same signed desired state
  * (a replay). An equal counter with the same signature is the one already accepted, sent again.
  *
@@ -384,8 +430,25 @@ export async function readDesiredState(
   if (!parsed.success)
     return { ok: false, reason: "malformed signed desired state" };
   const signed = parsed.data;
-  if (!(await verifySigned(signed, options.publicKey)))
+  if (
+    !(await verifySigned(
+      signed.signature,
+      canonicalDesiredState(signed),
+      options.publicKey,
+    ))
+  )
     return { ok: false, reason: "signature does not verify" };
+  // The signature covers the manifest's digest, not its text: text that doesn't hash to the signed
+  // digest is refused here, before anything reads it.
+  if (
+    signed.desired &&
+    (await releaseManifestDigest(signed.desired.releaseManifest)) !==
+      signed.desired.releaseManifestSha256
+  )
+    return {
+      ok: false,
+      reason: "the release manifest does not match its signed digest",
+    };
   if (signed.installId !== options.installId)
     return {
       ok: false,

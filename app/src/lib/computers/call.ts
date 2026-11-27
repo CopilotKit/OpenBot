@@ -65,9 +65,9 @@ const CALLS: Record<
   (botId: string, body: Body | undefined, options: Options) => Promise<unknown>
 > = {
   "/read": (botId, _body, options) =>
-    readComputerPage(organizationId(), botId, options),
+    readComputerPage(organizationId(), botId, undefined, options),
   "/snapshot": (botId, _body, options) =>
-    snapshotComputer(organizationId(), botId, once(), options),
+    snapshotComputer(organizationId(), botId, once(), undefined, options),
   "/navigate": (botId, body, options) =>
     navigateComputer(
       organizationId(),
