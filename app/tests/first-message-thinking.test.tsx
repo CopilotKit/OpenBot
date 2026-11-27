@@ -495,8 +495,21 @@ async function framesToWords(page: Page) {
     .getByRole("log")
     .filter({ hasText: ANSWER })
     .waitFor({ timeout: 30_000 });
-  // A few frames more, so the line is seen to go once the words are there.
-  await page.waitForTimeout(200);
+  // Three frames more, so the line is seen to go once the words are there.
+  const read = await page.evaluate(
+    () =>
+      (window as unknown as { frames: Frame[] }).frames.filter(
+        (frame) => frame.words,
+      ).length,
+  );
+  await page.waitForFunction(
+    (before) =>
+      (window as unknown as { frames: Frame[] }).frames.filter(
+        (frame) => frame.words,
+      ).length >=
+      before + 3,
+    read,
+  );
   return page.evaluate(() => {
     const watch = window as unknown as {
       frames: Frame[];
@@ -607,7 +620,8 @@ describe.skipIf(!asked || !shots)(
                   .getByRole("textbox", { name: "Message" })
                   .fill(QUESTION);
                 await page.keyboard.press("Enter");
-                // OpenBot picking the Bot (or, with one named, making the conversation).
+                // What shows 300 ms after Send, while OpenBot picks the Bot (or, with one named,
+                // makes the conversation): a moment in time is the point, so the wait is fixed.
                 await page.waitForTimeout(300);
                 await shoot(page, name("2-sent"));
                 release("route");
@@ -615,9 +629,14 @@ describe.skipIf(!asked || !shots)(
                 await page.waitForURL(/\/channel\/conversation-/, {
                   waitUntil: "commit",
                 });
-                await page.waitForTimeout(300);
+                await page
+                  .locator('[data-slot="conversation-header"]')
+                  .filter({ hasText: BOT.name })
+                  .waitFor();
                 await shoot(page, name("3-conversation-waiting"));
                 release("runStarts");
+                // The run has started and the model has said nothing yet, which the page draws
+                // nothing new for: given the time to arrive.
                 await page.waitForTimeout(300);
                 await shoot(page, name("4-run-started"));
                 release("firstWords");

@@ -51,6 +51,10 @@ const ALLOWED: Record<string, { most: number; why: string }> = {
     most: 1,
     why: "lets three seconds of the access read's clock go by",
   },
+  "first-message-thinking.test.tsx": {
+    most: 2,
+    why: "photographs what a first message shows a set time after Send, and after a run starts with nothing said yet",
+  },
   "moved-apps-reconnect.test.tsx": {
     most: 9,
     why: "proves nothing is said or asked after a move; its one settle wait, after styling, is still to move to still()",
