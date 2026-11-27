@@ -2021,8 +2021,11 @@ components:
         the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId
         and toolCallId for its result. When the first run was cut off before it
         answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it
-        was done before doing it again. Without both ids a call runs once per
-        Idempotency-Key, as it always has.
+        was done before doing it again. COMPUTER_STEP_RUNNING and
+        COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose
+        OpenBot-Capabilities header names computer-step-taken; any other
+        request is answered as before they existed. Without both ids a call
+        runs once per Idempotency-Key, as it always has.
     ComputerClick:
       type: object
       additionalProperties: false

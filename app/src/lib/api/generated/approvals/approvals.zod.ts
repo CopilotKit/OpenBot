@@ -1587,7 +1587,7 @@ export const RunComputerStepResponse = zod
           ),
       })
       .describe(
-        "The server already ran, or is running, this step: the same tool call in the same conversation. It is not run a second time. While the first run goes on, running is true and there is no result yet; ask again for it. Once the first run has ended, result is what it answered. A first run that was cut off before it answered has, as its result, a note that its outcome is unknown, to check before doing it again.",
+        "The server already ran, or is running, this step: the same tool call in the same conversation. It is not run a second time. While the first run goes on, running is true and there is no result yet; ask again for it. Once the first run has ended, result is what it answered. A first run that was cut off before it answered has, as its result, a note that its outcome is unknown, to check before doing it again. Sent only to a request whose OpenBot-Capabilities header names computer-step-taken.",
       ),
   ])
   .describe("What came of a computer step, by its outcome.");

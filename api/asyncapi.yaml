@@ -107,6 +107,18 @@ channels:
     bindings:
       ws:
         method: GET
+        query:
+          type: object
+          properties:
+            capabilities:
+              type: string
+              maxLength: 1024
+              description: >-
+                Which newer messages the app understands, as the
+                OpenBot-Capabilities header lists them on a request: lowercase
+                tokens separated by spaces. A browser can't set a header on a
+                WebSocket, so it is sent here. Optional: a socket opened
+                without it is sent what every release reads.
         bindingVersion: 0.1.0
     messages:
       conversationActivity:
