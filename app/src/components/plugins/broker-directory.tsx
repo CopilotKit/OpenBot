@@ -489,6 +489,7 @@ function MoreWhenSeen({
     const element = end.current;
     if (
       !element ||
+      landed === 0 ||
       !hasNextPage ||
       isFetchingNextPage ||
       isFetchNextPageError ||
