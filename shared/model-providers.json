@@ -17,7 +17,7 @@
       "label": "Google",
       "key_variable": "GOOGLE_API_KEY",
       "base_url_variable": "GOOGLE_GENERATIVE_AI_BASE_URL",
-      "default_model": "gemini-2.5-flash"
+      "default_model": "gemini-3.8-flash"
     }
   },
   "bots": {
