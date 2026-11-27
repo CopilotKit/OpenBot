@@ -17,7 +17,7 @@ import {
   useQuery,
 } from "@tanstack/react-query";
 import { MotionConfig, motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { CustomAgentCta } from "@/components/agents/custom-agent-cta";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
@@ -1044,6 +1044,64 @@ export function RuntimeStep({
   );
 }
 
+/** Where docs/agent-frameworks.md is read, each framework's setup a section of it. */
+export const AGENT_FRAMEWORKS_DOCS =
+  "https://github.com/CopilotKit/OpenBot/blob/main/docs/agent-frameworks.md";
+
+/**
+ * The frameworks whose AG-UI receivers take the Bot's role and tool guidance at full strength only
+ * from a caller they trust, by harness id, with the docs section that sets each one up. LangChain is
+ * the Python LangGraph receiver, Mastra the Mastra one. "An agent you already run" may be either, so
+ * it links both. Every other framework passes the role through as it ships, and gets no hint.
+ *
+ * Nothing here says what an endpoint declared: the address step can't know that. It says what such a
+ * receiver needs, and where to read how to give it.
+ */
+const TRUSTED_GUIDANCE_SETUP: Record<
+  string,
+  readonly { name: string; href: string }[]
+> = {
+  langgraph: [
+    { name: "LangGraph", href: `${AGENT_FRAMEWORKS_DOCS}#langgraph` },
+  ],
+  mastra: [{ name: "Mastra", href: `${AGENT_FRAMEWORKS_DOCS}#mastra` }],
+  "byo-url": [
+    { name: "LangGraph", href: `${AGENT_FRAMEWORKS_DOCS}#langgraph` },
+    { name: "Mastra", href: `${AGENT_FRAMEWORKS_DOCS}#mastra` },
+  ],
+};
+
+/**
+ * What a framework's receiver needs to give the Bot its full role and tool guidance, under the
+ * address. Nothing for a framework that needs nothing.
+ *
+ * Kept below the address's own description and below a failed test, since it is about how the agent
+ * is set up and not about this address. The description above it is no longer the field's
+ * second-to-last line, so it keeps its own spacing instead of tucking up under the input.
+ */
+function TrustedGuidanceHint({ harness }: { harness: string | null }) {
+  const setup = TRUSTED_GUIDANCE_SETUP[harness ?? "byo-url"];
+  if (!setup) return null;
+  return (
+    <FieldDescription className="text-pretty">
+      For the Bot to get its full role and tool guidance, your agent has to
+      trust OpenBot. Add your agent's key below, or give the address of a
+      listener only OpenBot can reach, with trusted ingress turned on. Set it up
+      for{" "}
+      {setup.map((entry, index) => (
+        // A fragment, not a span: the description underlines only the links that are its children.
+        <Fragment key={entry.name}>
+          {index > 0 ? " or " : null}
+          <a href={entry.href} rel="noopener noreferrer" target="_blank">
+            {entry.name}
+          </a>
+        </Fragment>
+      ))}
+      .
+    </FieldDescription>
+  );
+}
+
 /**
  * The address of an agent somebody else runs, and the key it sits behind if it has one.
  *
@@ -1113,16 +1171,17 @@ export function EndpointStep({
               {failureSaid(endpointError)}
             </FieldError>
           ) : mastra ? (
-            <FieldDescription>
+            <FieldDescription className="nth-last-2:mt-0">
               Give the address of your Mastra server. It needs to run one agent,
               and OpenBot's server has to be able to reach it.
             </FieldDescription>
           ) : (
-            <FieldDescription>
+            <FieldDescription className="nth-last-2:mt-0">
               Any agent that speaks AG-UI works. OpenBot connects to it, so it
               has to be reachable from OpenBot's server.
             </FieldDescription>
           )}
+          <TrustedGuidanceHint harness={harness} />
         </Field>
         <Field>
           <FieldLabel htmlFor="new-bot-key">
