@@ -16,6 +16,11 @@ import {
   toAgentOptions,
 } from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
+import {
+  forgetSendingDraft,
+  rememberSendingDraft,
+  sendingDraftLeftBehind,
+} from "@/components/channels/composer/saved-draft";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
@@ -61,6 +66,9 @@ import { newId } from "../../../../lib/new-id";
  */
 /** What the API's `getBot` answers for a Bot this person cannot see. */
 const AGENT_NOT_FOUND = "Couldn't find that Bot.";
+
+/** The name new conversations keep a Send still making its conversation under (`saved-draft.ts`). */
+const SENDING_FROM = "new";
 
 /** Said when a draft holding files is sent to two or more Bots. */
 const GROUP_TAKES_NO_FILES =
@@ -134,7 +142,16 @@ function NewConversation({ composition }: { composition: string }) {
   const [creatingBot, setCreatingBot] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const navigate = Route.useNavigate();
-  const { startChosen, startGroup, startPicked, pending } = useStartChannel();
+  /*
+   * Where this page's unsent message is kept. Its own, unless a page before it died while its Send
+   * was still making the conversation: those words open here, so they are never left where no page
+   * looks. The box's message is kept there until its conversation has it.
+   */
+  const [draftKey] = useState(
+    () => sendingDraftLeftBehind(SENDING_FROM) ?? `new:${composition}`,
+  );
+  const { startChosen, startGroup, startPicked, pending } =
+    useStartChannel(draftKey);
   const {
     data: profiles,
     isError: rosterError,
@@ -474,7 +491,7 @@ function NewConversation({ composition }: { composition: string }) {
          */
         holdsFilesUntilSent={!group}
         // This new conversation's unsent message, kept with it as its Bots are (`composition`).
-        draftKey={`new:${composition}`}
+        draftKey={draftKey}
         attachmentLimits={attachmentLimits}
         modelPicker={
           <ModelPicker
@@ -533,7 +550,15 @@ function NewConversation({ composition }: { composition: string }) {
             </p>
           ) : null
         }
-        onSubmit={submit}
+        onSubmit={async (draft) => {
+          // Until its conversation is made, a page that dies leaves these words to the next one.
+          rememberSendingDraft(SENDING_FROM, draftKey);
+          try {
+            await submit(draft);
+          } finally {
+            forgetSendingDraft(SENDING_FROM);
+          }
+        }}
         pending={pending}
       />
     </div>

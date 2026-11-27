@@ -128,7 +128,9 @@ function RouteComponent() {
    * not true of it. A Bots list that fails to load is said under the composer already.
    */
   const personal = capabilities.data?.edition === "personal";
-  const { startChosen, startPicked, pending } = useStartChannel();
+  // The box's message is kept in its draft until its conversation has it; a suggestion has no draft.
+  const { startChosen, startPicked, pending } = useStartChannel("home");
+  const suggested = useStartChannel();
   const router = useRouter();
   const navigate = useNavigate();
   // A start that failed behind its placeholder comes back here: its words in the box, its reason
@@ -297,11 +299,11 @@ function RouteComponent() {
         >
           <StarterSuggestions
             bot={fallback}
-            disabled={pending}
+            disabled={pending || suggested.pending}
             onSelect={async (message) => {
               if (!fallback) return;
               const { pick, notUsed } = await pickFor(fallback.id);
-              await startChosen(fallback.id, message, pick);
+              await suggested.startChosen(fallback.id, message, pick);
               notUsed?.();
             }}
           />

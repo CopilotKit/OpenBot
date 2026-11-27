@@ -1,5 +1,6 @@
 import type { Message } from "@ag-ui/core";
 import type { Attachment } from "@copilotkit/react-core/v2";
+import { keepFirstMessage } from "./composer/kept-first-message";
 
 /**
  * What a transcript shows while a brand-new channel is still joining.
@@ -34,8 +35,9 @@ export function seedMessage(text: string, id: string): Message {
  * app. It also earns something router state would not give: taking is destructive, so a component
  * that mounts twice cannot send the same message twice.
  *
- * Deliberately not persisted. A reload finds nothing here, which is correct, by then the message
- * is in the thread and arrives through the normal replay.
+ * Not persisted itself: a reload finds nothing here, and must never send it again. What a reload
+ * needs is kept apart, until the server has the message (`kept-first-message.ts`): a page that died
+ * before sending it gives the words back to the conversation's message box, not to a send.
  */
 export type FirstMessage = {
   /**
@@ -58,6 +60,7 @@ export function stashFirstMessage(
   attachments: readonly Attachment[] = [],
 ): void {
   firstMessages.set(channelId, { text, attachments });
+  keepFirstMessage(channelId, text, attachments);
 }
 
 /** Read the pending first message and forget it. Null for a channel opened any other way. */
