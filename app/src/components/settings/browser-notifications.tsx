@@ -2,6 +2,10 @@ import { IconBell } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import {
+  HOME_SCREEN_FIRST,
+  NEWER_IOS_FIRST,
+} from "@/components/notifications/web-push-words";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -32,10 +36,8 @@ const SAID = {
   off: "Get your Bots' updates here, even when OpenBot is closed.",
   blocked:
     "Your browser blocks notifications from OpenBot. Allow them in your browser's settings for this site, then turn this on.",
-  homeScreenFirst:
-    "On iPhone and iPad, add OpenBot to your Home Screen first: tap Share, then Add to Home Screen. Open OpenBot from there to turn on notifications. It needs iOS 16.4 or later.",
-  newerIosFirst:
-    "Notifications on iPhone and iPad need iOS 16.4 or later. Update iOS, then open OpenBot from your Home Screen to turn them on.",
+  homeScreenFirst: HOME_SCREEN_FIRST,
+  newerIosFirst: NEWER_IOS_FIRST,
 } as const;
 
 /**
