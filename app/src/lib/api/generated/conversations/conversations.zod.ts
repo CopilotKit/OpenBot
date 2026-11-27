@@ -1047,6 +1047,8 @@ export const ListConversationMessagesQueryParams = zod.object({
 
 export const listConversationMessagesResponseMessagesItemToolCallsMin = 0;
 
+export const listConversationMessagesResponseMessagesItemComponentsItemToolCallIdMax = 256;
+
 export const listConversationMessagesResponseMessagesItemComponentsItemNameMax = 200;
 
 export const listConversationMessagesResponseMessagesItemComponentsMax = 50;
@@ -1136,6 +1138,9 @@ export const ListConversationMessagesResponse = zod.object({
                 toolCallId: zod
                   .string()
                   .min(1)
+                  .max(
+                    listConversationMessagesResponseMessagesItemComponentsItemToolCallIdMax,
+                  )
                   .describe(
                     "The tool call that drew it, as the run's TOOL_CALL events name it.",
                   ),
@@ -1159,7 +1164,7 @@ export const ListConversationMessagesResponse = zod.object({
           .max(listConversationMessagesResponseMessagesItemComponentsMax)
           .optional()
           .describe(
-            "The gallery components the Bot drew in this message (a chart, a table, a card, a question), in the order it drew them. Each is one of the Bot's tool calls, named as listComponents names a component, with the arguments the Bot gave it, so a client draws it again with its own renderer for that name. A client skips a name it does not know, and draws a component's arguments only as far as it can read them: they are the Bot's, and may be partial. Absent when the Bot drew none, and from a server older than this field.",
+            "The gallery components the Bot drew in this message (a chart, a table, a card, a question), in the order it drew them. Each is one of the Bot's tool calls, named as listComponents names a component, with the arguments the Bot gave it, so a client draws it again with its own renderer for that name. A client skips a name it does not know, and draws a component's arguments only as far as it can read them: they are the Bot's, and may be partial. The first 50, when the Bot drew more. Absent when the Bot drew none, and from a server older than this field.",
           ),
         files: zod
           .array(
@@ -1673,7 +1678,7 @@ export const GetConversationRunResponse = zod.object({
 });
 
 /**
- * Stop one of a Bot's runs in the conversation, as Stop beside the message box does: the Bot stops writing, what it wrote so far stays, and the run ends as cancelled, which its last event on the threadStream channel of api/asyncapi.yaml says. The run is named by the runId its events carry. A run that is going answers 202 with outcome null, since it ends on the replica that runs it a moment later. A run that has ended already answers 200, saying how it ended, so asking twice is harmless. A run this server keeps no record of, or one of another conversation, is not found. Only a person in the conversation may stop a run in it. A client offers Stop only where getDeployment says runStop.
+ * Stop one of a Bot's runs in the conversation, as Stop beside the message box does: the Bot stops writing, what it wrote so far stays, and the run ends as cancelled, which its last event on the threadStream channel of api/asyncapi.yaml says. The run is named by the runId its events carry. A run that is going answers 202 with outcome null, since it ends on the replica that runs it a moment later. A run that has ended already answers 200, saying how it ended, so asking twice is harmless. A run this server keeps no record of, or one of another conversation, is not found. The server keeps no record of a run in a conversation with more than one Bot, so a run there is not found either: a client offers Stop only in a conversation with one Bot. Only a person in the conversation may stop a run in it. A client offers Stop only where getDeployment says runStop.
  * @summary Stop a Bot's run in a conversation
  */
 

@@ -69,13 +69,13 @@ export const GetDeploymentResponse = zod
       .boolean()
       .optional()
       .describe(
-        "Whether a person can stop a Bot's run from an app with stopConversationRun. Absent from a server older than it.",
+        "Whether a person can stop a Bot's run from an app with stopConversationRun, in a conversation with one Bot. Absent from a server older than it.",
       ),
     mobileConnections: zod
       .boolean()
       .optional()
       .describe(
-        "Whether an app's sign-in page can send the person back to OpenBot Mobile (returnTo mobile on connectApp), so the phone can connect their apps. Absent from a server older than it.",
+        "Whether an app's sign-in and consent pages can send the person back to OpenBot Mobile (returnTo mobile on connectApp, authorizeConnectionAction and authorizeSharedConnectionAction), so the phone can connect their apps. Absent from a server older than it.",
       ),
     durableHistory: zod
       .boolean()

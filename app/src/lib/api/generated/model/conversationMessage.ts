@@ -47,7 +47,7 @@ export interface ConversationMessage {
    */
   toolCalls?: number;
   /**
-   * The gallery components the Bot drew in this message (a chart, a table, a card, a question), in the order it drew them. Each is one of the Bot's tool calls, named as listComponents names a component, with the arguments the Bot gave it, so a client draws it again with its own renderer for that name. A client skips a name it does not know, and draws a component's arguments only as far as it can read them: they are the Bot's, and may be partial. Absent when the Bot drew none, and from a server older than this field.
+   * The gallery components the Bot drew in this message (a chart, a table, a card, a question), in the order it drew them. Each is one of the Bot's tool calls, named as listComponents names a component, with the arguments the Bot gave it, so a client draws it again with its own renderer for that name. A client skips a name it does not know, and draws a component's arguments only as far as it can read them: they are the Bot's, and may be partial. The first 50, when the Bot drew more. Absent when the Bot drew none, and from a server older than this field.
    * @maxItems 50
    */
   components?: DrawnComponent[];

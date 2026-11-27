@@ -188,9 +188,11 @@ paths:
         outcome null, since it ends on the replica that runs it a moment
         later. A run that has ended already answers 200, saying how it ended,
         so asking twice is harmless. A run this server keeps no record of, or
-        one of another conversation, is not found. Only a person in the
-        conversation may stop a run in it. A client offers Stop only where
-        getDeployment says runStop.
+        one of another conversation, is not found. The server keeps no record
+        of a run in a conversation with more than one Bot, so a run there is
+        not found either: a client offers Stop only in a conversation with
+        one Bot. Only a person in the conversation may stop a run in it. A
+        client offers Stop only where getDeployment says runStop.
       security:
         - webSession: []
         - appOAuth: [conversations:write]
@@ -199,7 +201,11 @@ paths:
         - $ref: './common.yaml#/components/parameters/IdempotencyKey'
       responses:
         '200':
-          description: The run had ended already, and how it ended.
+          description: >-
+            The run had ended already, and how it ended. Its outcome is null
+            when it ended without saying how, which reads as a 202's body
+            does: a client that needs to know when the run ends follows it on
+            the threadStream channel.
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
@@ -2880,8 +2886,9 @@ components:
             with the arguments the Bot gave it, so a client draws it again with
             its own renderer for that name. A client skips a name it does not
             know, and draws a component's arguments only as far as it can read
-            them: they are the Bot's, and may be partial. Absent when the Bot
-            drew none, and from a server older than this field.
+            them: they are the Bot's, and may be partial. The first 50, when
+            the Bot drew more. Absent when the Bot drew none, and from a server
+            older than this field.
           items:
             $ref: '#/components/schemas/DrawnComponent'
         files:
@@ -2900,6 +2907,7 @@ components:
         toolCallId:
           type: string
           minLength: 1
+          maxLength: 256
           description: The tool call that drew it, as the run's TOOL_CALL events name it.
         name:
           type: string

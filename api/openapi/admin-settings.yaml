@@ -1209,13 +1209,16 @@ components:
           type: boolean
           description: >-
             Whether a person can stop a Bot's run from an app with
-            stopConversationRun. Absent from a server older than it.
+            stopConversationRun, in a conversation with one Bot. Absent from a
+            server older than it.
         mobileConnections:
           type: boolean
           description: >-
-            Whether an app's sign-in page can send the person back to OpenBot
-            Mobile (returnTo mobile on connectApp), so the phone can connect
-            their apps. Absent from a server older than it.
+            Whether an app's sign-in and consent pages can send the person
+            back to OpenBot Mobile (returnTo mobile on connectApp,
+            authorizeConnectionAction and authorizeSharedConnectionAction), so
+            the phone can connect their apps. Absent from a server older than
+            it.
         durableHistory:
           type: boolean
           description: Whether conversations are kept between restarts.

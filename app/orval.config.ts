@@ -45,7 +45,8 @@ export default defineConfig({
           // A part of a move's bundle is bytes, which no example in the spec can be: an empty one.
           downloadExportPart: { mock: { data: new Blob([]) } },
           // Two answers (200 ended, 202 stopping) would be picked between at random, with a package the
-          // app doesn't install: the one a test of Stop reads, a run being stopped.
+          // app doesn't install: the one a test of Stop reads, a run being stopped. It is the 202's body,
+          // answered with status 200: the generated client hands back the body only, never the status.
           stopConversationRun: {
             mock: {
               data: {

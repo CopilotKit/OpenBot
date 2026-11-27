@@ -24080,7 +24080,7 @@ paths:
         - Conversations
       operationId: stopConversationRun
       summary: Stop a Bot's run in a conversation
-      description: 'Stop one of a Bot''s runs in the conversation, as Stop beside the message box does: the Bot stops writing, what it wrote so far stays, and the run ends as cancelled, which its last event on the threadStream channel of api/asyncapi.yaml says. The run is named by the runId its events carry. A run that is going answers 202 with outcome null, since it ends on the replica that runs it a moment later. A run that has ended already answers 200, saying how it ended, so asking twice is harmless. A run this server keeps no record of, or one of another conversation, is not found. Only a person in the conversation may stop a run in it. A client offers Stop only where getDeployment says runStop.'
+      description: 'Stop one of a Bot''s runs in the conversation, as Stop beside the message box does: the Bot stops writing, what it wrote so far stays, and the run ends as cancelled, which its last event on the threadStream channel of api/asyncapi.yaml says. The run is named by the runId its events carry. A run that is going answers 202 with outcome null, since it ends on the replica that runs it a moment later. A run that has ended already answers 200, saying how it ended, so asking twice is harmless. A run this server keeps no record of, or one of another conversation, is not found. The server keeps no record of a run in a conversation with more than one Bot, so a run there is not found either: a client offers Stop only in a conversation with one Bot. Only a person in the conversation may stop a run in it. A client offers Stop only where getDeployment says runStop.'
       security:
         - webSession: []
         - appOAuth:
@@ -24090,7 +24090,7 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
-          description: The run had ended already, and how it ended.
+          description: 'The run had ended already, and how it ended. Its outcome is null when it ended without saying how, which reads as a 202''s body does: a client that needs to know when the run ends follows it on the threadStream channel.'
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -26501,10 +26501,10 @@ components:
           description: Whether a person can talk to a Bot.
         runStop:
           type: boolean
-          description: Whether a person can stop a Bot's run from an app with stopConversationRun. Absent from a server older than it.
+          description: Whether a person can stop a Bot's run from an app with stopConversationRun, in a conversation with one Bot. Absent from a server older than it.
         mobileConnections:
           type: boolean
-          description: Whether an app's sign-in page can send the person back to OpenBot Mobile (returnTo mobile on connectApp), so the phone can connect their apps. Absent from a server older than it.
+          description: Whether an app's sign-in and consent pages can send the person back to OpenBot Mobile (returnTo mobile on connectApp, authorizeConnectionAction and authorizeSharedConnectionAction), so the phone can connect their apps. Absent from a server older than it.
         durableHistory:
           type: boolean
           description: Whether conversations are kept between restarts.
@@ -28735,6 +28735,7 @@ components:
         toolCallId:
           type: string
           minLength: 1
+          maxLength: 256
           description: The tool call that drew it, as the run's TOOL_CALL events name it.
         name:
           type: string
@@ -28844,7 +28845,7 @@ components:
         components:
           type: array
           maxItems: 50
-          description: 'The gallery components the Bot drew in this message (a chart, a table, a card, a question), in the order it drew them. Each is one of the Bot''s tool calls, named as listComponents names a component, with the arguments the Bot gave it, so a client draws it again with its own renderer for that name. A client skips a name it does not know, and draws a component''s arguments only as far as it can read them: they are the Bot''s, and may be partial. Absent when the Bot drew none, and from a server older than this field.'
+          description: 'The gallery components the Bot drew in this message (a chart, a table, a card, a question), in the order it drew them. Each is one of the Bot''s tool calls, named as listComponents names a component, with the arguments the Bot gave it, so a client draws it again with its own renderer for that name. A client skips a name it does not know, and draws a component''s arguments only as far as it can read them: they are the Bot''s, and may be partial. The first 50, when the Bot drew more. Absent when the Bot drew none, and from a server older than this field.'
           items:
             $ref: '#/components/schemas/DrawnComponent'
         files:
@@ -30756,7 +30757,7 @@ components:
         - desktop
         - mobile
       default: connections
-      description: 'Which of OpenBot''s own pages the app sends the person back to: connections, the person''s own page for the app; apps, the app''s page for administrators; desktop, back to OpenBot Desktop; mobile, back to OpenBot Mobile, which then calls confirmConnection. Never an address. A client sends mobile only where getDeployment says mobileConnections.'
+      description: 'Which of OpenBot''s own pages the app sends the person back to: connections, the person''s own page for the app; apps, the app''s page for administrators; desktop, back to OpenBot Desktop; mobile, back to OpenBot Mobile, which then reads the result itself: confirmConnection after connectApp, and the authorizations again (getConnectionAuthorizations or getSharedConnectionAuthorizations) after a consent for one action. Never an address. A client sends mobile only where getDeployment says mobileConnections.'
     ConnectionValues:
       type: object
       description: What the person typed into the boxes a form answer asked for, by each box's name. Sent once to the app and never logged or kept here.

@@ -10,6 +10,7 @@ export interface DrawnComponent {
   /**
    * The tool call that drew it, as the run's TOOL_CALL events name it.
    * @minLength 1
+   * @maxLength 256
    */
   toolCallId: string;
   /**
