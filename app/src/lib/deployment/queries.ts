@@ -126,6 +126,31 @@ function showsOpenBotOnThisComputer(): Promise<boolean> {
  * told "not found" and drew the router's error in its place. Told "not found" in the organization
  * it knows (signed out since, or no longer in it), it is asked the way it is before signing in.
  */
+/**
+ * `deployment` at `default`, asked as nobody: without the page's cookies.
+ *
+ * ONE OPENBOT REFUSES NOBODY: a single-user one in a container, which answers only a browser that
+ * came in through its entry address, and knows that browser by a cookie (the server's
+ * request-trust.ts). Asked without cookies it said "permission denied", on every page, to the very
+ * browser it had let in: no deployment facts, so no release check and no attachment limits, and a
+ * failed request in the console each time. That refusal is about the browser, not about a person,
+ * so the page asks once more with its cookies. Any other OpenBot answers the first ask.
+ */
+async function asNobody(options: {
+  signal?: AbortSignal;
+  fallback: string;
+}): Promise<Deployment> {
+  try {
+    return await getDeployment(DEPLOYMENT_ORGANIZATION, {
+      ...options,
+      credentials: "omit",
+    });
+  } catch (error) {
+    if (!(error instanceof ClientError) || error.status !== 403) throw error;
+    return getDeployment(DEPLOYMENT_ORGANIZATION, options);
+  }
+}
+
 export async function readDeployment(options: {
   signal?: AbortSignal;
   fallback: string;
@@ -137,17 +162,10 @@ export async function readDeployment(options: {
     } catch (error) {
       if (!(error instanceof ClientError) || error.status !== 404) throw error;
       if (await showsOpenBotOnThisComputer()) throw error;
-      return getDeployment(DEPLOYMENT_ORGANIZATION, {
-        ...options,
-        credentials: "omit",
-      });
+      return asNobody(options);
     }
   }
-  if (!(await showsOpenBotOnThisComputer()))
-    return getDeployment(DEPLOYMENT_ORGANIZATION, {
-      ...options,
-      credentials: "omit",
-    });
+  if (!(await showsOpenBotOnThisComputer())) return asNobody(options);
   try {
     return await getDeployment(DEPLOYMENT_ORGANIZATION, options);
   } catch (error) {
@@ -156,11 +174,7 @@ export async function readDeployment(options: {
       .organizations[0];
     // In no organization (removed from the last one): what this OpenBot offers anybody, asked as nobody, so the
     // sign-in screen and the page for somebody in no organization can still offer a way back in.
-    if (!own)
-      return getDeployment(DEPLOYMENT_ORGANIZATION, {
-        ...options,
-        credentials: "omit",
-      });
+    if (!own) return asNobody(options);
     return getDeployment(own.id, options);
   }
 }
