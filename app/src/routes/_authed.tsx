@@ -18,6 +18,7 @@ import {
   refusedForNotBeingItsApp,
   signedInUser,
 } from "../lib/auth/queries";
+import { forgetSignedIn, rememberSignedIn } from "../lib/auth/was-signed-in";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { ReportedErrorComponent } from "../lib/error-reporting";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
@@ -49,6 +50,10 @@ export const Route = createFileRoute("/_authed")({
         if (await connectedThroughDesktop(context.queryClient)) {
           await signOutThroughDesktop().catch(() => undefined);
         }
+      }
+      if (!preload) {
+        // Nobody is signed in any more, so the next visit must not draw the app's frame before the sign-in screen.
+        forgetSignedIn();
       }
       throw redirect({ to: "/sign" });
     }
@@ -105,6 +110,8 @@ export const Route = createFileRoute("/_authed")({
     }
     // Before any conversation is drawn, so a long-named action's step never shows its cut name.
     await toolNames;
+    // Only somebody who got past every check is remembered, so the next visit may draw the frame while they run.
+    if (!preload) rememberSignedIn();
   },
   /*
    * A browser opened at the address of OpenBot on one computer is refused on the first question,
