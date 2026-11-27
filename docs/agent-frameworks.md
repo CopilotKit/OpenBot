@@ -34,6 +34,9 @@ Every snippet below hands your model the system messages its caller sends, as in
 your endpoint for OpenBot alone: set an authorization header on the Bot's **Setup** and have your
 server check it.
 
+Names in the snippets that come from each framework's example (`agentic_chat`, `AgenticChatFlow`,
+`INSTRUCTIONS`, the model) are yours to replace with your own.
+
 ## Give OpenBot a trusted path
 
 The LangGraph and Mastra receivers that take the context entries give the model the role and the
@@ -53,9 +56,6 @@ To serve the public as well, run two instances of the same app: a public one for
 restricted one with trusted ingress turned on, for OpenBot. Keep the restricted one out of every
 public proxy route, port mapping and load balancer, and keep each conversation on the instance it
 started on. A deployment that only OpenBot uses runs the restricted one alone.
-
-Names in the snippets that come from each framework's example (`agentic_chat`, `AgenticChatFlow`,
-`INSTRUCTIONS`, the model) are yours to replace with your own.
 
 ## Frameworks that need nothing
 
