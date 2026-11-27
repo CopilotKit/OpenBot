@@ -63,6 +63,12 @@ const DEPLOYMENT_ADMINS_ONLY = {
     "Only an admin of the default organization can do this for now, because it applies to every organization here. Ask one of them.",
   retryable: false,
 };
+/** What a single-user OpenBot with an install token says to a request that does not carry it. */
+const INSTALL_TOKEN_REFUSAL = {
+  ...DEPLOYMENT_ADMINS_ONLY,
+  detail:
+    "This OpenBot only answers its own app. Open it from the OpenBot app, or use an API key.",
+};
 const NOT_FOUND = {
   type: "https://open.bot/errors/organization-not-found",
   title: "Organization not found.",
@@ -352,6 +358,26 @@ test("signed in outside `default`, the app's first load learns what OpenBot offe
     "/api/v2/people/me/organizations",
     `/api/v2/organizations/${HARBOR.id}/people/me`,
   ]);
+});
+
+test("an OpenBot that answers only the browser it let in is asked again with that browser's cookies", async () => {
+  // A single-user OpenBot in a container knows its one browser by a cookie, and refuses a request without it: the
+  // deployment asked as nobody, on every page. Refused that way, it is asked once more as the page.
+  setCurrentOrganization(undefined);
+  answer = (path, asNobody) =>
+    path === "/api/v2/organizations/default/deployment" && !asNobody
+      ? Response.json(FACTS)
+      : problem(INSTALL_TOKEN_REFUSAL);
+  const capabilities = await freshClient().fetchQuery(
+    deploymentCapabilitiesQueryOptions(),
+  );
+  expect(capabilities).toMatchObject({ generativeUi: true });
+  expect(sent.map((request) => request.path)).toEqual([
+    "/api/v2/organizations/default/deployment",
+    "/api/v2/organizations/default/deployment",
+  ]);
+  // The first ask, without cookies, is the one refused; nothing else is.
+  expect(refused).toHaveLength(1);
 });
 
 test("once the organization is known, what OpenBot offers is asked there, and nobody signed in asks at `default`", async () => {

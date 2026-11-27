@@ -205,8 +205,14 @@ class RunSystemPrompt:
         registry.add_callback(AfterModelCallEvent, self._after_model_call)
 
     def _before_invocation(self, event: BeforeInvocationEvent) -> None:
+        state = event.invocation_state or {}
+        # Only a run OpenBot sent carries the key. An invocation without it is one the framework
+        # started itself: the Strands harness hands its hooks to the subagents it delegates to,
+        # and such a delegate keeps the prompt it was given.
+        if KEY not in state:
+            return
         parts = [self.base] if self.base else []
-        parts.extend((event.invocation_state or {}).get(KEY) or [])
+        parts.extend(state.get(KEY) or [])
         event.agent.system_prompt = "\n\n".join(parts) or None
 
     def _before_model_call(self, event: BeforeModelCallEvent) -> None:

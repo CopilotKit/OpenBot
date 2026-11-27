@@ -139,6 +139,7 @@ export const PYTHON_HARNESSES = [
   "agent-llamaindex",
   "agent-agno",
   "agent-strands",
+  "agent-strands-harness",
   "agent-pydantic-ai",
   "agent-adk",
   "agent-antigravity",
