@@ -534,10 +534,9 @@ async def test_google_provider_reaches_google_genai_boundary(
                         "role": "user",
                     }
                 ],
-                "generationConfig": {
-                    "candidateCount": 1,
-                    "temperature": 0.7,
-                },
+                # No temperature: langchain-google-genai leaves it unset for Gemini 3 and later, as
+                # Google advises, where it sends its own 0.7 to earlier models.
+                "generationConfig": {"candidateCount": 1},
                 "safetySettings": [],
             },
         }
