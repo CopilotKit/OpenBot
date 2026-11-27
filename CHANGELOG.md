@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **A Bot's "can't run" stays under the message it couldn't answer.** When a Bot's engine isn't
+  answering, the sentence that says so stays under that message after the next message is answered,
+  and after a reload. It used to go as soon as the next turn started, and the message sat in the
+  conversation with nothing under it. `listRefusedTurns` gains the code `BOT_ENGINE_UNAVAILABLE`, and
+  the run's RUN_ERROR carries the same code.
+
 ## 1.2.1
 
 **Before upgrading.**
