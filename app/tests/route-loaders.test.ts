@@ -24,7 +24,10 @@ import {
   channelQueryOptions,
 } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { computerModeQueryOptions } from "@/lib/enterprise/queries";
+import {
+  appsSettingQueryOptions,
+  computerModeQueryOptions,
+} from "@/lib/enterprise/queries";
 import { managementQueryOptions } from "@/lib/management/queries";
 import {
   identityProvidersQueryOptions,
@@ -32,6 +35,7 @@ import {
 } from "@/lib/identity/queries";
 import { memoriesQueryOptions, memorySourcesQueryOptions } from "@/lib/memory";
 import { setCurrentOrganization } from "@/lib/organizations/current";
+import { organizationHasOthersQueryOptions } from "@/lib/organizations/queries";
 import { connectionsQueryOptions } from "@/lib/plugins/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
@@ -42,6 +46,7 @@ import { teamListPagesQueryOptions } from "@/lib/teams/queries";
 import { Route as BotsRoute } from "@/routes/_authed/_app/bots.index";
 import { Route as ChannelRoute } from "@/routes/_authed/_app/channel/$channelId";
 import { Route as AppsRoute } from "@/routes/_authed/_app/connections.index";
+import { Route as GroupRoute } from "@/routes/_authed/_app/group/$channelId";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 import { Route as MemoryRoute } from "@/routes/_authed/_app/memory";
 import { Route as RoutinesRoute } from "@/routes/_authed/_app/routines";
@@ -117,6 +122,13 @@ async function keysAfterLoading(
     .sort();
 }
 
+/** What the sign-in gate leaves in the cache: the edition the deployment runs as. */
+function seedEdition(edition: "team" | "personal") {
+  queryClient.setQueryData(deploymentCapabilitiesQueryOptions().queryKey, {
+    edition,
+  } as never);
+}
+
 function keysOf(...factories: { queryKey: readonly unknown[] }[]) {
   return factories.map((factory) => JSON.stringify(factory.queryKey)).sort();
 }
@@ -146,7 +158,29 @@ test("a conversation that is gone still opens its page", async () => {
   expect(error?.status).toBe(404);
 });
 
-test("Bots loads the roster and what needs attention", async () => {
+/** A group's name is in the header, but its transcript is the page's own business, so a hover never pulls it. */
+test("a group loads only its own record", async () => {
+  expect(await keysAfterLoading(GroupRoute, { channelId: "g1" })).toEqual(
+    keysOf(channelQueryOptions("g1")),
+  );
+});
+
+test("Bots loads the roster, what needs attention and whether anyone else is in the organization", async () => {
+  seedEdition("team");
+  expect(await keysAfterLoading(BotsRoute)).toEqual(
+    keysOf(
+      deploymentCapabilitiesQueryOptions(),
+      agentListQueryOptions(),
+      agentListQueryOptions(true),
+      botAttentionQueryOptions(),
+      organizationHasOthersQueryOptions("default"),
+    ),
+  );
+});
+
+/** The page asks who else is in the organization only in the team edition. */
+test("Bots in the personal edition does not ask who else is in the organization", async () => {
+  seedEdition("personal");
   expect(await keysAfterLoading(BotsRoute)).toEqual(
     keysOf(
       deploymentCapabilitiesQueryOptions(),
@@ -192,7 +226,25 @@ test("Skills loads the skills, the person, the Bots and the browser", async () =
 });
 
 /** Not the directory search, which waits for typing, nor the person's own app requests, which are below the list. */
-test("Apps loads the apps the first list is drawn from", async () => {
+test("Apps loads the apps the first list is drawn from, and in a team whether apps are open", async () => {
+  seedEdition("team");
+  expect(await keysAfterLoading(AppsRoute)).toEqual(
+    keysOf(
+      appsQueryOptions(),
+      catalogueQueryOptions(),
+      appSetupQueryOptions(),
+      connectionsQueryOptions(),
+      deploymentCapabilitiesQueryOptions(),
+      linkedAccountsQueryOptions(),
+      identityProvidersQueryOptions(),
+      appsSettingQueryOptions(),
+    ),
+  );
+});
+
+/** The personal edition is always open, so it never reads the organization's switch. */
+test("Apps in the personal edition does not read whether apps are open", async () => {
+  seedEdition("personal");
   expect(await keysAfterLoading(AppsRoute)).toEqual(
     keysOf(
       appsQueryOptions(),
@@ -207,8 +259,17 @@ test("Apps loads the apps the first list is drawn from", async () => {
 });
 
 test("Teams loads the first page of the list", async () => {
+  seedEdition("team");
   expect(await keysAfterLoading(TeamsRoute)).toEqual(
-    keysOf(teamListPagesQueryOptions("")),
+    keysOf(deploymentCapabilitiesQueryOptions(), teamListPagesQueryOptions("")),
+  );
+});
+
+/** That edition has no teams API, and its page never asks for the list. */
+test("Teams in the personal edition asks for no list", async () => {
+  seedEdition("personal");
+  expect(await keysAfterLoading(TeamsRoute)).toEqual(
+    keysOf(deploymentCapabilitiesQueryOptions()),
   );
 });
 
