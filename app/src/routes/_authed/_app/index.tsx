@@ -147,6 +147,14 @@ function RouteComponent() {
   // Read once, as the box reads its words once: the words a link handed over (`ask`).
   const ask = useSearch({ strict: false }).ask;
   const [asked] = useState(ask);
+  // Chosen once: the conversation list arriving later must not change the words a person has
+  // already started reading.
+  const [greeting] = useState(() =>
+    firstConversationGreeting(
+      user,
+      channels.isSuccess && channels.data.length === 0,
+    ),
+  );
   const [restores, setRestores] = useState(0);
   const [error, setError] = useState<Failure | null>(restored?.error ?? null);
   // A hold is about now: said until the organization answers again, then gone (lib/held-ends.ts).
@@ -285,212 +293,221 @@ function RouteComponent() {
         <HomeField area={area} intro={intro} />
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
-        <div className="flex flex-col items-center" data-intro="heading">
-          <h1 className="text-2xl font-semibold tracking-tight text-center">
-            {firstConversationGreeting(
-              user,
-              channels.isSuccess && channels.data.length === 0,
-            )}
-          </h1>
-        </div>
-        <div
-          className="mt-8 w-full flex flex-col items-center"
-          data-intro="box"
-          ref={area}
-          onKeyDownCapture={() => {
-            typed.current = true;
-          }}
-          onPasteCapture={() => {
-            typed.current = true;
-          }}
-        >
-          <StarterSuggestions
-            bot={fallback}
-            disabled={pending}
-            onSelect={async (message) => {
-              if (!fallback) return;
-              const { pick, notUsed } = await pickFor(fallback.id);
-              await startChosen(fallback.id, message, pick);
-              notUsed?.();
+        {/* Only the heading and the box are centred in the column. What arrives later, the hint,
+            the error lines and Explore Bots, hangs below the box without taking part in the
+            centring, so none of it can move them. */}
+        <div className="relative flex w-full flex-col items-center">
+          <div className="flex flex-col items-center" data-intro="heading">
+            <h1 className="text-2xl font-semibold tracking-tight text-center">
+              {greeting}
+            </h1>
+          </div>
+          <div
+            className="mt-8 w-full flex flex-col items-center"
+            data-intro="box"
+            ref={area}
+            onKeyDownCapture={() => {
+              typed.current = true;
             }}
-          />
-          <Composer
-            agents={toAgentOptions(agents)}
-            commands={skillCommands}
-            className="w-full max-w-2xl"
-            disabled={!fallback}
-            // The box reads its words once, when it mounts; a start that fails while this page is
-            // open is a new box with them in it.
-            key={restores}
-            // Files wait in the box until the message has a conversation to go to; see `start`.
-            holdsFilesUntilSent
-            // An unsent first message stays in the box when somebody looks elsewhere.
-            draftKey="home"
-            attachmentLimits={attachmentLimits}
-            modelPicker={
-              <ModelPicker
-                catalogue={models.data}
-                disabled={!fallback}
-                onChange={draftModel.choose}
-                value={draftModel.value}
-              />
-            }
-            {...(restored
-              ? {
-                  initialValue: restored.text,
-                  ...(restored.files ? { initialFiles: restored.files } : {}),
-                }
-              : asked
-                ? { initialValue: asked, autoFocus: true }
-                : {})}
-            onSubmit={async (draft) => {
-              // The conversation opens NOW, as a placeholder showing the message, and the Bot is
-              // picked and the channel made behind it; see `pending-start.ts`. Waiting here for
-              // both is what kept send looking dead for seconds.
-              setError(null);
-              const pendingId = newId();
-              beginPendingStart(pendingId, {
-                text: draft.text,
-                agentId: draft.agentId,
-              });
-              await navigate({
-                params: { startId: pendingId },
-                to: "/start/$startId",
-              });
-              void startBehind(pendingId, draft);
+            onPasteCapture={() => {
+              typed.current = true;
             }}
-          />
-          {fallback ? (
-            // Said out loud: a message that silently reaches somebody you did not choose is the
-            // kind of surprise that costs trust the first time it happens.
-            <p className="mt-2 w-full max-w-2xl text-xs text-muted-foreground text-center">
-              OpenBot picks the right Bot. Type <code>@</code> to choose one.
-            </p>
-          ) : null}
-          {error ? (
-            <p
-              className="mt-2 w-full max-w-2xl text-sm text-destructive"
-              role="alert"
-            >
-              {failureSaid(error)}
-            </p>
-          ) : failed && agents === undefined ? (
-            // The composer above is `disabled={!fallback}`, and a failed query does not by
-            // itself mean `fallback` is undefined: TanStack Query keeps its last good `data`
-            // across a failed background refetch, and `!fallback` alone is also true of a query
-            // that loaded successfully and genuinely returned zero agents — a case where nobody
-            // failed to load anything. `agents === undefined` is the one condition that is only
-            // true when the query has never once returned successfully, so this alert can only
-            // ever claim a load failure while that is actually what happened.
-            <p
-              className="mt-2 w-full max-w-2xl text-sm text-destructive"
-              role="alert"
-            >
-              {loadFailure(
-                agentsError,
-                "Couldn't load your Bots, so there's no one to send this to. Try again in a moment.",
-              )}
-            </p>
-          ) : null}
-        </div>
-        {/*
-         * Up to four Bots, two to a row, as compact cards that fill the column. A teaser under the
-         * composer, not the place to browse: more than four would push the composer up every time
-         * somebody shared another Bot, so the rest are one "All Bots" away. Every state below
-         * reserves the same two rows, so the composer above it does not move when the list settles.
-         */}
-        <div className="mt-10 w-full max-w-2xl" data-intro="explore">
-          {loading || capabilities.isPending ? (
-            <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Skeleton className="mt-4 h-36" />
-            </>
-          ) : explore?.length ? (
-            // Wins over `failed`: a failed background refetch does not clear TanStack Query's
-            // cached `data`, so a stale list here beats an error card claiming there is
-            // nothing to explore, which would be false while this list is still populated.
-            <section aria-labelledby="explore-agents-heading">
-              <div className="flex flex-row items-center justify-between gap-4">
-                <h2
-                  id="explore-agents-heading"
-                  className="font-semibold text-base"
-                >
-                  Explore Bots
-                </h2>
-                {explore.length > EXPLORE_SHOWN ? (
-                  <Link
-                    className="text-muted-foreground text-sm hover:text-foreground"
-                    to="/bots"
-                  >
-                    All Bots
-                  </Link>
-                ) : null}
-              </div>
-              <ul className="mt-4 grid min-h-36 grid-cols-1 content-start gap-3 sm:grid-cols-2">
-                {explore.slice(0, EXPLORE_SHOWN).map((agent) => (
-                  <li className="min-w-0" key={agent.id}>
-                    <Link search={{ agent: agent.id }} to="/channel/new">
-                      <AgentCard agent={agent} appearance="row" />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : personal ? null : failed &&
-            agents === undefined &&
-            isHeld(agentsError) &&
-            !error ? (
-            // OpenBot holding off (a move, a brief outage) is said once, under the composer, and
-            // the list fills in by itself when it is back (lib/load-failure.tsx). Saying the same
-            // sentence here again read as two things wrong.
-            <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Skeleton className="mt-4 h-[140px]" />
-            </>
-          ) : failed && agents === undefined ? (
-            // `agents === undefined` narrows this to "the query has never once returned
-            // successfully" — not merely "the last request errored". `?.length` alone can't
-            // tell that apart from a slice that loaded and is genuinely empty: TanStack Query
-            // never clears `data` on a failed background refetch, so once the query has
-            // resolved even one response, `agents` stays defined and `explore`'s emptiness is a
-            // fact about that response, not a symptom of the failure. Rendering the destructive
-            // card there would say the opposite of what a populated composer beside it (still
-            // working off that same, successfully loaded `agents`) proves.
-            <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty
-                className={
-                  // OpenBot holding off for now is not a failure (lib/load-failure.tsx).
-                  unavailableSaid(agentsError)
-                    ? "mt-4 h-36 border border-dashed"
-                    : "mt-4 h-36 border border-dashed border-destructive"
-                }
+          >
+            <StarterSuggestions
+              bot={fallback}
+              disabled={pending}
+              onSelect={async (message) => {
+                if (!fallback) return;
+                const { pick, notUsed } = await pickFor(fallback.id);
+                await startChosen(fallback.id, message, pick);
+                notUsed?.();
+              }}
+            />
+            <Composer
+              agents={toAgentOptions(agents)}
+              commands={skillCommands}
+              className="w-full max-w-2xl"
+              disabled={!fallback}
+              // The box reads its words once, when it mounts; a start that fails while this page is
+              // open is a new box with them in it.
+              key={restores}
+              // Files wait in the box until the message has a conversation to go to; see `start`.
+              holdsFilesUntilSent
+              // An unsent first message stays in the box when somebody looks elsewhere.
+              draftKey="home"
+              attachmentLimits={attachmentLimits}
+              modelPicker={
+                <ModelPicker
+                  catalogue={models.data}
+                  disabled={!fallback}
+                  onChange={draftModel.choose}
+                  value={draftModel.value}
+                />
+              }
+              {...(restored
+                ? {
+                    initialValue: restored.text,
+                    ...(restored.files ? { initialFiles: restored.files } : {}),
+                  }
+                : asked
+                  ? { initialValue: asked, autoFocus: true }
+                  : {})}
+              onSubmit={async (draft) => {
+                // The conversation opens NOW, as a placeholder showing the message, and the Bot is
+                // picked and the channel made behind it; see `pending-start.ts`. Waiting here for
+                // both is what kept send looking dead for seconds.
+                setError(null);
+                const pendingId = newId();
+                beginPendingStart(pendingId, {
+                  text: draft.text,
+                  agentId: draft.agentId,
+                });
+                await navigate({
+                  params: { startId: pendingId },
+                  to: "/start/$startId",
+                });
+                void startBehind(pendingId, draft);
+              }}
+            />
+          </div>
+          <div className="absolute inset-x-0 top-full flex flex-col items-center">
+            {error ? (
+              <p
+                className="mt-2 w-full max-w-2xl text-sm text-destructive"
+                role="alert"
               >
-                <EmptyHeader>
-                  <EmptyTitle className="text-destructive">
-                    {loadFailure(
-                      agentsError,
-                      "Couldn't load the Bots shared with you.",
-                    )}
-                  </EmptyTitle>
-                </EmptyHeader>
-              </Empty>
-            </>
-          ) : (
-            // Reached both when the query never failed and `explore` is genuinely empty, and
-            // when it failed but `agents` is defined — a loaded, empty slice either way. Same
-            // plain copy for both: an empty roster is a fact, not an error.
-            <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-36 border border-dashed">
-                <EmptyHeader>
-                  <EmptyTitle className="text-muted-foreground">
-                    Nobody has shared a Bot with you yet.
-                  </EmptyTitle>
-                </EmptyHeader>
-              </Empty>
-            </>
-          )}
+                {failureSaid(error)}
+              </p>
+            ) : failed && agents === undefined ? (
+              // The composer above is `disabled={!fallback}`, and a failed query does not by
+              // itself mean `fallback` is undefined: TanStack Query keeps its last good `data`
+              // across a failed background refetch, and `!fallback` alone is also true of a query
+              // that loaded successfully and genuinely returned zero agents — a case where nobody
+              // failed to load anything. `agents === undefined` is the one condition that is only
+              // true when the query has never once returned successfully, so this alert can only
+              // ever claim a load failure while that is actually what happened.
+              <p
+                className="mt-2 w-full max-w-2xl text-sm text-destructive"
+                role="alert"
+              >
+                {loadFailure(
+                  agentsError,
+                  "Couldn't load your Bots, so there's no one to send this to. Try again in a moment.",
+                )}
+              </p>
+            ) : (
+              // In the page from the first paint and invisible until there is a Bot to send to, so
+              // its arrival moves nothing. Said out loud: a message that silently reaches somebody
+              // you did not choose is the kind of surprise that costs trust the first time it happens.
+              <p
+                className={cn(
+                  "mt-2 w-full max-w-2xl text-xs text-muted-foreground text-center",
+                  !fallback && "invisible",
+                )}
+              >
+                OpenBot picks the right Bot. Type <code>@</code> to choose one.
+              </p>
+            )}
+            {/*
+             * Up to four Bots, two to a row, as compact cards that fill the column. A teaser under the
+             * composer, not the place to browse: more than four would push the composer up every time
+             * somebody shared another Bot, so the rest are one "All Bots" away. Every state below
+             * reserves the same two rows, so the composer above it does not move when the list settles.
+             */}
+            <div className="mt-10 w-full max-w-2xl" data-intro="explore">
+              {!personal && (loading || capabilities.isPending) ? (
+                <>
+                  <h2 className="font-semibold text-base">Explore Bots</h2>
+                  <Skeleton className="mt-4 h-36" />
+                </>
+              ) : explore?.length ? (
+                // Wins over `failed`: a failed background refetch does not clear TanStack Query's
+                // cached `data`, so a stale list here beats an error card claiming there is
+                // nothing to explore, which would be false while this list is still populated.
+                <section aria-labelledby="explore-agents-heading">
+                  <div className="flex flex-row items-center justify-between gap-4">
+                    <h2
+                      id="explore-agents-heading"
+                      className="font-semibold text-base"
+                    >
+                      Explore Bots
+                    </h2>
+                    {explore.length > EXPLORE_SHOWN ? (
+                      <Link
+                        className="text-muted-foreground text-sm hover:text-foreground"
+                        to="/bots"
+                      >
+                        All Bots
+                      </Link>
+                    ) : null}
+                  </div>
+                  <ul className="mt-4 grid min-h-36 grid-cols-1 content-start gap-3 sm:grid-cols-2">
+                    {explore.slice(0, EXPLORE_SHOWN).map((agent) => (
+                      <li className="min-w-0" key={agent.id}>
+                        <Link search={{ agent: agent.id }} to="/channel/new">
+                          <AgentCard agent={agent} appearance="row" />
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : personal ? null : failed &&
+                agents === undefined &&
+                isHeld(agentsError) &&
+                !error ? (
+                // OpenBot holding off (a move, a brief outage) is said once, under the composer, and
+                // the list fills in by itself when it is back (lib/load-failure.tsx). Saying the same
+                // sentence here again read as two things wrong.
+                <>
+                  <h2 className="font-semibold text-base">Explore Bots</h2>
+                  <Skeleton className="mt-4 h-[140px]" />
+                </>
+              ) : failed && agents === undefined ? (
+                // `agents === undefined` narrows this to "the query has never once returned
+                // successfully" — not merely "the last request errored". `?.length` alone can't
+                // tell that apart from a slice that loaded and is genuinely empty: TanStack Query
+                // never clears `data` on a failed background refetch, so once the query has
+                // resolved even one response, `agents` stays defined and `explore`'s emptiness is a
+                // fact about that response, not a symptom of the failure. Rendering the destructive
+                // card there would say the opposite of what a populated composer beside it (still
+                // working off that same, successfully loaded `agents`) proves.
+                <>
+                  <h2 className="font-semibold text-base">Explore Bots</h2>
+                  <Empty
+                    className={
+                      // OpenBot holding off for now is not a failure (lib/load-failure.tsx).
+                      unavailableSaid(agentsError)
+                        ? "mt-4 h-36 border border-dashed"
+                        : "mt-4 h-36 border border-dashed border-destructive"
+                    }
+                  >
+                    <EmptyHeader>
+                      <EmptyTitle className="text-destructive">
+                        {loadFailure(
+                          agentsError,
+                          "Couldn't load the Bots shared with you.",
+                        )}
+                      </EmptyTitle>
+                    </EmptyHeader>
+                  </Empty>
+                </>
+              ) : (
+                // Reached both when the query never failed and `explore` is genuinely empty, and
+                // when it failed but `agents` is defined — a loaded, empty slice either way. Same
+                // plain copy for both: an empty roster is a fact, not an error.
+                <>
+                  <h2 className="font-semibold text-base">Explore Bots</h2>
+                  <Empty className="mt-4 h-36 border border-dashed">
+                    <EmptyHeader>
+                      <EmptyTitle className="text-muted-foreground">
+                        Nobody has shared a Bot with you yet.
+                      </EmptyTitle>
+                    </EmptyHeader>
+                  </Empty>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </div>
       {/* A Bot already working somewhere, and the way to it. Nothing while every Bot is idle. */}
