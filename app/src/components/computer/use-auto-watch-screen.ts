@@ -14,11 +14,17 @@ import {
  *
  * The person's pane comes first. It does not open over something they opened (`busy`), it does not
  * reopen what they are already watching, and a run they closed stays closed for the rest of it.
+ *
+ * AND THE CONVERSATION COMES FIRST. Where the screen has no room beside the conversation (a phone,
+ * or a narrow window) it would open as a sheet over all of it, and it used to: the Bot then stopped
+ * to ask the person to take over, or to sign in, and the card asking sat under the sheet. There it
+ * opens only when the person asks, with the Computer button, which says when the Bot needs them.
  */
 export function useAutoWatchScreen({
   botId,
   watching,
   busy,
+  covers,
   open,
   close,
 }: {
@@ -27,6 +33,8 @@ export function useAutoWatchScreen({
   watching: boolean;
   /** The pane is showing something else the person asked for, which auto-open must not take. */
   busy: boolean;
+  /** The screen would open over the conversation rather than beside it. */
+  covers: boolean;
   open: () => void;
   close: () => void;
 }): { dismiss: () => void } {
@@ -42,8 +50,8 @@ export function useAutoWatchScreen({
   const openedFor = useRef<number | null>(null);
 
   // Read inside subscriptions that outlive the render they were made in.
-  const latest = useRef({ watching, busy, open, close });
-  latest.current = { watching, busy, open, close };
+  const latest = useRef({ watching, busy, covers, open, close });
+  latest.current = { watching, busy, covers, open, close };
 
   useEffect(() => {
     if (!botId) return;
@@ -51,8 +59,13 @@ export function useAutoWatchScreen({
       if (activity.botId !== botId) return;
       run.current = activity.epoch;
       if (dismissed.current === activity.epoch) return;
-      const { watching: isWatching, busy: isBusy, open: show } = latest.current;
-      if (isWatching || isBusy) return;
+      const {
+        watching: isWatching,
+        busy: isBusy,
+        covers: isOver,
+        open: show,
+      } = latest.current;
+      if (isWatching || isBusy || isOver) return;
       openedFor.current = activity.announcement;
       show();
     });
