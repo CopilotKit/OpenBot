@@ -51,13 +51,9 @@ const ALLOWED: Record<string, { most: number; why: string }> = {
     most: 1,
     why: "lets three seconds of the access read's clock go by",
   },
-  "conversation-reply-toolbar-layout.test.tsx": {
-    most: 1,
-    why: "its wait for the Copy button's fade is being replaced on its own",
-  },
   "moved-apps-reconnect.test.tsx": {
     most: 9,
-    why: "proves nothing is said or asked after a move; its settle waits are being replaced on their own",
+    why: "proves nothing is said or asked after a move; its one settle wait, after styling, is still to move to still()",
   },
   "moved-elsewhere.test.tsx": {
     most: 8,
@@ -69,7 +65,7 @@ const ALLOWED: Record<string, { most: number; why: string }> = {
   },
   "organization-unavailable-chat.test.tsx": {
     most: 7,
-    why: "holds the organization out of reach for the time a send takes; being reworked on its own",
+    why: "holds the organization out of reach for the time a send takes, and lets a stopped turn's notice land",
   },
   "people-lists.test.tsx": {
     most: 2,
