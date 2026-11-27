@@ -88,7 +88,6 @@ import {
 import { offerItsOwnTools } from "@/lib/copilot/bot-offer";
 import { isBrokenStream, STREAM_BROKE } from "@/lib/copilot/broken-stream";
 import {
-  CARRIED_RUN_SETTLE_MS,
   endsOnStep,
   followCarriedRun,
   followServerTurn,
@@ -1856,13 +1855,11 @@ export function ChannelChat({
          * a turn on in a run of its own past one run's step limit or deadline (`carried-turn.ts`), and
          * this run's stream ends without it, on the last step it answered. The turn follows that
          * run here, the working dot staying on, its steps and its answer streaming in. Not a turn
-         * waiting on the person, whose next run starts only when they answer. A run that ended on a
-         * computer step is asked about twice, a moment apart: the server may be a moment behind in
-         * starting the next.
+         * waiting on the person, whose next run starts only when they answer. Asked once, at once: a
+         * turn that ended without words is not held up waiting to see whether one comes.
          */
-        const onStep = endsOnStep(target.messages);
         if (
-          onStep !== null &&
+          endsOnStep(target.messages) &&
           !streamBroke.current &&
           turnFailure.current === null &&
           !stoppedHere.current &&
@@ -1875,7 +1872,6 @@ export function ChannelChat({
             join: joinThread(target),
             quietMs: quietRunPeriod.ms,
             stopped: stoppedSince(stops),
-            settleMs: onStep === "computer" ? CARRIED_RUN_SETTLE_MS : 0,
           });
         }
         if (!streamBroke.current || turnFailure.current !== null) break;

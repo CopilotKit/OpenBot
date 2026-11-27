@@ -1,6 +1,5 @@
 import { EventType, type Message } from "@ag-ui/core";
 import type { AbstractAgent } from "@copilotkit/react-core/v2";
-import { isComputerCall } from "@openbot/shared/tool-steps";
 import { withoutWaitingPlaceholders } from "./approval-context";
 import { joinWithin } from "./join-thread";
 import {
@@ -43,20 +42,11 @@ export function turnAnswered(messages: readonly Message[]): boolean {
 }
 
 /**
- * The step a turn's messages end on, when they end on a step's answer: a computer step, or any
- * other. A run the server ends to carry the turn on ends on one, past the last step it answered.
+ * Whether a turn's messages end on a step's answer. A run the server ends to carry the turn on ends
+ * on one, past the last step it answered.
  */
-export function endsOnStep(
-  messages: readonly Message[],
-): "computer" | "other" | null {
-  const last = messages.at(-1);
-  if (last?.role !== "tool") return null;
-  const call = messages
-    .flatMap((message) =>
-      message.role === "assistant" ? (message.toolCalls ?? []) : [],
-    )
-    .find((each) => each.id === last.toolCallId);
-  return call && isComputerCall(call.function.name) ? "computer" : "other";
+export function endsOnStep(messages: readonly Message[]): boolean {
+  return messages.at(-1)?.role === "tool";
 }
 
 /**
@@ -160,13 +150,6 @@ export async function followCarriedRun({
 }
 
 /**
- * How long after its run ended without an answer the server is asked once more for a run going. A
- * server carrying the turn on starts its next run as the last one ends, and can be a moment behind
- * in saying so.
- */
-export const CARRIED_RUN_SETTLE_MS = 2_000;
-
-/**
  * Follow the turn for as long as the server carries it on in runs of its own, one after another, and
  * say which run it was last in: null when the server carried nothing on. Stops at the Bot's answer, at
  * a join that ended without hearing its run end, or when `stopped` says the turn is no longer this
@@ -179,7 +162,6 @@ export async function followServerTurn({
   join,
   quietMs,
   stopped,
-  settleMs = 0,
   ask = askRunGoing,
 }: {
   agent: Pick<AbstractAgent, "subscribe" | "detachActiveRun" | "messages">;
@@ -189,20 +171,13 @@ export async function followServerTurn({
   join: () => Promise<unknown>;
   quietMs: number;
   stopped: () => boolean;
-  /** When no run is going at first, how long to wait before asking once more. None by default. */
-  settleMs?: number;
   ask?: typeof askRunGoing;
 }): Promise<string | null> {
   let last: string | null = null;
   let known = heard;
-  for (let first = true; ; first = false) {
+  for (;;) {
     if (stopped()) return last;
-    let next = await carriedRun(conversationId, known, ask);
-    if (next === null && first && settleMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, settleMs));
-      if (stopped()) return last;
-      next = await carriedRun(conversationId, known, ask);
-    }
+    const next = await carriedRun(conversationId, known, ask);
     if (next === null) return last;
     const followed = await followCarriedRun({
       agent,
