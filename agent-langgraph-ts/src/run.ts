@@ -102,6 +102,32 @@ export type RunContext = {
   room: { stage: number };
 };
 
+/**
+ * The stage each thread's turn last had to be cleared to, so a turn carried on in run after run
+ * (each step of a long task is a run of its own) starts there instead of being refused as too long
+ * first, every step. FOUND ON A 300-STEP TURN: every run began at stage 0, and the provider refused
+ * the first request of 293 of them. A new message from the person starts the thread at 0 again.
+ * Held for the most recent threads only; a thread forgotten starts at 0, as every run once did.
+ */
+const stages = new Map<string, number>();
+const MOST_THREADS = 1_000;
+
+function startingStage(input: RunAgentInput): number {
+  const latest = input.messages?.at(-1);
+  if (!input.threadId || !latest || latest.role === "user") return 0;
+  return stages.get(input.threadId) ?? 0;
+}
+
+function keepStage(threadId: string, stage: number): void {
+  if (!threadId) return;
+  stages.delete(threadId);
+  if (stage > 0) stages.set(threadId, stage);
+  if (stages.size > MOST_THREADS) {
+    const oldest = stages.keys().next().value;
+    if (oldest !== undefined) stages.delete(oldest);
+  }
+}
+
 export type RunOptions = {
   emit: Emit;
   signal?: AbortSignal;
@@ -577,7 +603,7 @@ export async function runAgent(
       emit,
       signal: options.signal,
       answersRecall: !offered.some((tool) => tool.name === RECALL),
-      room: { stage: 0 },
+      room: { stage: startingStage(input) },
     };
     const thread = modelMessages(input.messages ?? [], input.context ?? []);
     const final = await graph.invoke(
@@ -591,6 +617,7 @@ export async function runAgent(
         signal: options.signal,
       },
     );
+    keepStage(input.threadId, run.room.stage);
     const all = final.messages as BaseMessage[];
     const added = all
       .slice(thread.length)
