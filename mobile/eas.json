@@ -2,7 +2,10 @@
   "cli": { "version": ">= 27.0.0", "appVersionSource": "remote" },
   "build": {
     "base": {
-      "env": { "EXPO_PUBLIC_SERVER_URL": "https://api.open.bot" }
+      "env": {
+        "EXPO_PUBLIC_SERVER_URL": "https://api.open.bot",
+        "EXPO_PUBLIC_WEB_URL": "https://my.open.bot"
+      }
     },
     "development": {
       "extends": "base",

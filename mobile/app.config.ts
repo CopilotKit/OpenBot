@@ -55,10 +55,24 @@ const config: ExpoConfig = {
     // The answer to Apple's export question, which every upload asks. The app's only encryption is HTTPS, and it
     // checks signatures (src/security-floor-check.ts). Both are exempt. Change this before the app encrypts anything.
     config: { usesNonExemptEncryption: false },
+    // What the phone says when it asks. The web app in the web view (src/web/shell.tsx) asks for both: the
+    // microphone to dictate a message, and the camera when a photo is taken to attach to one.
+    infoPlist: {
+      NSMicrophoneUsageDescription:
+        "OpenBot uses the microphone when you dictate a message to a Bot.",
+      NSCameraUsageDescription:
+        "OpenBot uses the camera when you take a photo or a video to send to a Bot.",
+    },
     icon: { light: "./assets/icon.png", dark: "./assets/icon-dark.png" },
   },
   android: {
     package: "ai.open.bot.mobile",
+    // For the web app in the web view: dictation, and a photo taken to attach to a message.
+    permissions: [
+      "android.permission.RECORD_AUDIO",
+      "android.permission.MODIFY_AUDIO_SETTINGS",
+      "android.permission.CAMERA",
+    ],
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: SPLASH.light,

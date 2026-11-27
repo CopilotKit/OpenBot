@@ -78,6 +78,30 @@ Two places don't keep these rules yet. Don't add to either:
 
 ## OpenBot Mobile
 
+### For now: the web app in a web view
+
+For its first release, OpenBot Mobile shows the web app in a web view, and keeps native only what a
+page can't do. The web app changes every week, and a web view has each change the day it ships. The
+app's own screens stay in `mobile/`, and the rest of this section is about them.
+
+A build shows the web view when it names the web app (`EXPO_PUBLIC_WEB_URL`). A build that names none
+draws the app's own screens. These parts are native in the web view too:
+
+- the launch, and the notice when OpenBot can't be reached;
+- push notifications: asking the person, the push token, and opening the page a notification is
+  about;
+- a link that leaves OpenBot, which opens in the phone's browser;
+- the security floor.
+
+Two rules come with the web view. The code is in `mobile/src/web/`, and
+[mobile/README.md](../mobile/README.md) says how it works.
+
+- **The page holds the sign-in.** The app has no sign-in of its own there, so it asks the page to
+  tell OpenBot which phone gets the person's notifications.
+- **Nothing is sold in the app.** The App Store and Google Play don't allow a plan to be paid for
+  through a web page in an app. The app never opens the pages that add a card or a seat, and it
+  hides the links to them.
+
 ### It is not a clone of the desktop app
 
 OpenBot Mobile doesn't have to do everything the web app and OpenBot Desktop do. A screen on the
