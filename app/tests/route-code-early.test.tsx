@@ -80,12 +80,41 @@ test("a chunk that fails to load early is not an error", async () => {
       : Promise.resolve(page());
   }, Promise.resolve());
   const stop = loadCodeEarly(router);
-  await router.load();
-  const view = render(<RouterProvider router={router} />);
-  expect(await view.findByText("The page")).toBeTruthy();
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  process.off("unhandledRejection", onUnhandled);
-  stop();
-  expect(attempts).toBe(2);
-  expect(unhandled).toEqual([]);
+  try {
+    await router.load();
+    const view = render(<RouterProvider router={router} />);
+    expect(await view.findByText("The page")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(attempts).toBe(2);
+    expect(unhandled).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    stop();
+  }
+});
+
+test("a chunk still failing when the router asks fails the page as the router's own error, with nothing unhandled", async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const router = build(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    throw new Error("offline");
+  }, gate);
+  const stop = loadCodeEarly(router);
+  try {
+    const loading = router.load();
+    release();
+    await loading;
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(router.state.matches.at(-1)?.status).toBe("error");
+    expect(unhandled).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    stop();
+  }
 });

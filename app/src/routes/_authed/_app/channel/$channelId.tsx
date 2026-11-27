@@ -28,8 +28,8 @@ import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { useNoBotComputers } from "@/lib/deployment/queries";
 import { useConnectionLost } from "@/lib/desktop/connection-lost";
 import { loadFailure } from "@/lib/load-failure";
-import { loadFirstScreen } from "@/lib/route-data";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
+import { loadFirstScreen } from "@/lib/route-data";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 
 const chatSearchSchema = z.object({

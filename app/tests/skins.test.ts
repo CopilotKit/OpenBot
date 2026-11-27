@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { RENAMED_SKIN_IDS } from "@openbot/shared/user-preferences";
 import { SKINS } from "../src/skins/registry";
 import {
   applySkin,
@@ -8,7 +9,6 @@ import {
   reconcileSkin,
   SKIN_STORAGE_KEY,
 } from "../src/skins/store";
-import { RENAMED_SKIN_IDS } from "@openbot/shared/user-preferences";
 import { SKIN_IDS, skinDrawsOwnFrame } from "../src/skins/types";
 
 const read = (path: string) =>

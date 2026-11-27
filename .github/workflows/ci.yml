@@ -420,7 +420,9 @@ jobs:
   # Bots panel. And a Bot's table of links, downloaded as Markdown and as CSV with its links, and
   # looking exactly as Streamdown's own table. And a conversation's row in the Conversations and
   # Bots panels saying Working for as long as its Bot works, through a read of every query and
-  # while a task it handed out works on. In the image, as above: WebKit's
+  # while a task it handed out works on. And that what is already drawn does not move: Home's
+  # heading and box when the page finishes loading, and the app's frame drawn while the sign-in
+  # checks run when the page behind it arrives. In the image, as above: WebKit's
   # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
   #
   # The files run side by side, like the Chromium list's, but eight at a time rather than a worker

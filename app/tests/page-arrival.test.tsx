@@ -11,6 +11,10 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { PageArrival } from "@/components/layout/page-arrival";
+import { Route as ChannelRoute } from "@/routes/_authed/_app/channel/$channelId";
+import { Route as NewChannelRoute } from "@/routes/_authed/_app/channel/new";
+import { Route as GroupRoute } from "@/routes/_authed/_app/group/$channelId";
+import { Route as StartRoute } from "@/routes/_authed/_app/start.$startId";
 
 beforeAll(() => {
   if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
@@ -70,6 +74,7 @@ test("the same page with other params keeps its wrapper", async () => {
   const { view, router } = openApp("/c/1");
   await view.findByText("page c");
   const before = view.container.querySelector(".page-arrival");
+  expect(before).not.toBeNull();
   await router.navigate({ to: "/c/$id", params: { id: "2" } } as never);
   await waitFor(() => expect(router.state.location.pathname).toBe("/c/2"));
   expect(view.container.querySelector(".page-arrival")).toBe(before);
@@ -79,19 +84,49 @@ test("pages that hand over to each other keep their wrapper", async () => {
   const { view, router } = openApp("/d");
   await view.findByText("page d");
   const before = view.container.querySelector(".page-arrival");
+  expect(before).not.toBeNull();
   await router.navigate({ to: "/e" } as never);
   await view.findByText("page e");
   expect(view.container.querySelector(".page-arrival")).toBe(before);
 });
 
+/** The text between the braces that open at `open`, with nested blocks kept. */
+function blockAt(css: string, open: number): { body: string; end: number } {
+  let depth = 0;
+  for (let i = open; i < css.length; i++) {
+    if (css[i] === "{") depth += 1;
+    if (css[i] === "}" && --depth === 0)
+      return { body: css.slice(open + 1, i), end: i + 1 };
+  }
+  throw new Error("Unbalanced braces in styles.css.");
+}
+
 test("no motion when less is asked for", () => {
   const css = readFileSync(
     new URL("../src/styles.css", import.meta.url),
     "utf8",
-  );
-  const block = css.match(
-    /@media \(prefers-reduced-motion: no-preference\) \{\s*\.page-arrival \{[^}]*animation:[^}]*\}\s*\}/,
-  );
-  expect(block).not.toBeNull();
-  expect(css.match(/\.page-arrival \{[^}]*animation/g)?.length).toBe(1);
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  const media =
+    /@media\s*\(\s*prefers-reduced-motion:\s*no-preference\s*\)\s*\{/g;
+  let outside = css;
+  const inside: string[] = [];
+  for (const found of [...css.matchAll(media)].reverse()) {
+    const open = found.index + found[0].length - 1;
+    const { body, end } = blockAt(css, open);
+    inside.push(body);
+    outside = outside.replace(css.slice(found.index, end), "");
+  }
+  expect(
+    inside.filter((b) => /\.page-arrival\s*\{[^}]*animation:/.test(b)),
+  ).toHaveLength(1);
+  expect(outside).not.toMatch(/\.page-arrival[^{]*\{[^}]*animation/);
+});
+
+test("the conversation routes all hand over to each other", () => {
+  const routes = [StartRoute, NewChannelRoute, ChannelRoute, GroupRoute];
+  for (const route of routes)
+    expect(
+      (route.options as { staticData?: { arrival?: string } }).staticData
+        ?.arrival,
+    ).toBe("conversation");
 });

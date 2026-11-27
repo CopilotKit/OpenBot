@@ -40,9 +40,11 @@ import { settleReactWork } from "./settle-react-work";
 const NativeResponse = globalThis.Response;
 let openbot: ReturnType<typeof Bun.serve>;
 let signedIn: boolean;
+let asked: string[];
 
 async function answer(request: Request): Promise<Response> {
   const path = new URL(request.url).pathname;
+  asked.push(path);
   if (!signedIn)
     return NativeResponse.json(
       { status: 401, code: "UNAUTHENTICATED", detail: "Sign in to OpenBot." },
@@ -98,6 +100,7 @@ beforeAll(() => {
 });
 beforeEach(() => {
   signedIn = true;
+  asked = [];
   setCurrentOrganization(undefined);
   queryClient.clear();
   sessionStorage.clear();
@@ -159,6 +162,7 @@ test("preloading home leaves a pending invitation for the visit", async () => {
   const router = memoryRouter();
   rememberInvitationLink("/invitations/inv_1");
   await router.preloadRoute({ to: "/" } as never);
+  expect(asked).toContain("/api/v2/people/me/organizations");
   expect(takeInvitationLink()).toBe("inv_1");
 });
 
@@ -166,5 +170,6 @@ test("preloading while signed out remembers no invitation", async () => {
   signedIn = false;
   const router = memoryRouter();
   await router.preloadRoute({ to: "/invitations/inv_2" } as never);
-  expect(sessionStorage.getItem("openbot.invitation-link")).toBeNull();
+  expect(asked).toContain("/api/v2/people/me/organizations");
+  expect(takeInvitationLink()).toBeUndefined();
 });

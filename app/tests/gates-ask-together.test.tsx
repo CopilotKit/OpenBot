@@ -18,9 +18,9 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
+import { getGetPersonalAiConnectionResponseMock } from "@/lib/api/generated/models/models.msw";
 import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
 import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
-import { getGetPersonalAiConnectionResponseMock } from "@/lib/api/generated/models/models.msw";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import { ReportedErrorComponent } from "@/lib/error-reporting";
 import { setCurrentOrganization } from "@/lib/organizations/current";

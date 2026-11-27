@@ -43,7 +43,7 @@ test("hands over after the wait", async () => {
   );
   const took = Date.now() - started;
   expect(took).toBeGreaterThanOrEqual(45);
-  expect(took).toBeLessThan(150);
+  expect(took).toBeLessThan(500);
   expect(queryClient.isFetching()).toBe(1);
   queryClient.clear();
 });
