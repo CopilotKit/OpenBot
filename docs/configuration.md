@@ -18,16 +18,45 @@ bash scripts/start.sh
 
 | Variable                      | Meaning                                                                                               |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                | PostgreSQL connection string.                                                                         |
+| `DATABASE_URL`                | PostgreSQL connection string. Not needed with `EMBEDDED_POSTGRES=on`.                                 |
 | `KEY_ENCRYPTION_KEY`          | Base64-encoded 32-byte key for encrypted stored credentials. Generate with `openssl rand -base64 32`. |
 | `INTELLIGENCE_API_URL`        | CopilotKit Intelligence API URL.                                                                      |
 | `INTELLIGENCE_GATEWAY_WS_URL` | CopilotKit Intelligence realtime gateway URL.                                                         |
 | `CPK_INTELLIGENCE_API_KEY` | Runtime key written by the CopilotKit CLI. Preferred when non-empty. |
 | `INTELLIGENCE_API_KEY` | Legacy runtime key; used when `CPK_INTELLIGENCE_API_KEY` is empty or absent. |
 
-All five above stop server startup if missing. The three `INTELLIGENCE_` values are additionally
-checked as a set, so a partial set is refused as a misconfiguration rather than treated as
-unconfigured.
+`KEY_ENCRYPTION_KEY` and the Intelligence values stop server startup if missing. `DATABASE_URL` is
+required of a server that points at a database somewhere else, and is not needed when the container
+runs its own (below). The three `INTELLIGENCE_` values are additionally checked as a set, so a
+partial set is refused as a misconfiguration rather than treated as unconfigured.
+
+**A database inside the container.** `EMBEDDED_POSTGRES=on` starts a PostgreSQL inside the same
+container, creates the `openbot` database and the `vector` extension the first time, and applies the
+migrations on every start. It listens on loopback only and is never published, so it has no password
+to manage. Set it *instead of* `DATABASE_URL`: `docs/deployment.md` says to leave `EMBEDDED_POSTGRES`
+off when you point at a database you already run, and `.env.example` ships a `DATABASE_URL` for the
+Compose stack, so a one-container deployment started from that file is the case to check.
+
+Give it a volume at `/var/lib/postgresql`, the parent rather than the data directory itself. On a
+platform whose volume is an ext4 mount, which is most of them, the mount arrives holding a
+`lost+found`, and `initdb` refuses to initialise into a directory with anything in it; mounting the
+parent leaves `data` an ordinary subdirectory. That is what the one-container `docker run` in
+[README.md](../README.md) and [deployment.md](deployment.md) does:
+
+```sh
+docker run -p 3001:3001 --env-file .env \
+  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql \
+  ghcr.io/copilotkit/openbot:latest
+```
+
+Without a volume, nothing outlives the container, so a redeploy starts the embedded database over. A
+Docker named volume mounted at `/var/lib/postgresql/data` also works, because it arrives empty
+rather than with a `lost+found`, so an existing installation mounted that way needs no change. A
+platform that offers no volume at all is the one to point at a managed database instead: set
+`DATABASE_URL`, leave `EMBEDDED_POSTGRES` off, and make sure the role in that URL can create the
+`vector` extension. [docs/deployment.md](deployment.md) has each platform's notes and sizes.
+`EMBEDDED_POSTGRES` is read by the all-in-one image; the Compose stack has a `postgres` service of
+its own and does not use this setting.
 
 **One address.** The browser opens the Intelligence gateway's socket itself, at the address the
 server gives it, and an Intelligence that runs beside OpenBot is reached at OpenBot's own address,
