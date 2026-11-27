@@ -94,12 +94,14 @@ export const Route = createFileRoute("/_authed/_app/")({
   validateSearch: z.object({ ask: z.string().max(2000).optional() }),
   // The edition decides whether there is an Explore section at all, so it is read before the page draws and the
   // composer never moves when it arrives.
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, preload }) => {
     /*
      * Somebody who opened an invitation's link before signing in lands here once they have, and
      * is handed on to the invitation they came for (lib/organizations/invitation-link.ts).
      */
-    const invitationId = takeInvitationLink();
+    // A hover must change nothing, and the visit takes the invitation: taking it here would spend the
+    // link before anybody has been taken to it.
+    const invitationId = preload ? undefined : takeInvitationLink();
     if (invitationId)
       throw redirect({
         to: "/invitations/$invitationId",
