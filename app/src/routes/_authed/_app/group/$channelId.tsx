@@ -10,6 +10,7 @@ import { channelQueryOptions } from "@/lib/channels/queries";
 
 /** A conversation with several Bots. The channel is an ordinary channel with more than one Bot. */
 export const Route = createFileRoute("/_authed/_app/group/$channelId")({
+  staticData: { arrival: "conversation" },
   component: RouteComponent,
 });
 

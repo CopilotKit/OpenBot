@@ -52,6 +52,7 @@ const HEADING_ENTRANCE_OFFSET = "translateY(4px)";
 const SCREEN_PANEL_WIDTH = 360;
 
 export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
+  staticData: { arrival: "conversation" },
   validateSearch: chatSearchSchema,
   // Only the conversation itself, never its history, so a sidebar hover can't pull a thread's history. A gone
   // conversation's error reaches the page's own notice, not the router's error screen.

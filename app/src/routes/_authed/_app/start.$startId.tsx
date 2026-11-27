@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authed/_app/start/$startId")({
+  staticData: { arrival: "conversation" },
   component: RouteComponent,
 });
 

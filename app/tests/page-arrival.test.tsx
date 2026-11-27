@@ -34,11 +34,20 @@ function openApp(start: string) {
       path,
       component: () => <p>{text}</p>,
     });
+  const shared = (path: string, text: string) =>
+    createRoute({
+      getParentRoute: () => root,
+      path,
+      staticData: { arrival: "conversation" },
+      component: () => <p>{text}</p>,
+    });
   const router = createRouter({
     routeTree: root.addChildren([
       page("/a", "page a"),
       page("/b", "page b"),
       page("/c/$id", "page c"),
+      shared("/d", "page d"),
+      shared("/e", "page e"),
     ]),
     history: createMemoryHistory({ initialEntries: [start] }),
   });
@@ -63,6 +72,15 @@ test("the same page with other params keeps its wrapper", async () => {
   const before = view.container.querySelector(".page-arrival");
   await router.navigate({ to: "/c/$id", params: { id: "2" } } as never);
   await waitFor(() => expect(router.state.location.pathname).toBe("/c/2"));
+  expect(view.container.querySelector(".page-arrival")).toBe(before);
+});
+
+test("pages that hand over to each other keep their wrapper", async () => {
+  const { view, router } = openApp("/d");
+  await view.findByText("page d");
+  const before = view.container.querySelector(".page-arrival");
+  await router.navigate({ to: "/e" } as never);
+  await view.findByText("page e");
   expect(view.container.querySelector(".page-arrival")).toBe(before);
 });
 
