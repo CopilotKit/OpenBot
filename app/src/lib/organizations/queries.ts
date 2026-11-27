@@ -167,9 +167,10 @@ async function ownOrganizations(
     listed = await everyOrganization(signal).catch(async (error) => {
       /*
        * Inside OpenBot Desktop connected to this OpenBot, the desktop app names the organization the
-       * person last worked in, kept through signing out and in again. One they have since left is
-       * answered as not found: the desktop app is asked to name none, so the server works in their
-       * own, and the list is read again. Once, and never an error screen for it.
+       * person last picked in the switcher, kept across launches. One they have since left is
+       * answered as not found: the desktop app is asked to name none, so the server works in the
+       * one they signed in to, else their own, and the list is read again. Once, and never an
+       * error screen for it.
        */
       if (
         error instanceof ClientError &&
