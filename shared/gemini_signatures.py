@@ -139,18 +139,23 @@ def install() -> None:
         return
     import importlib
 
+    # Whatever is importable and is the client it looks like: a module a test or a framework put
+    # in its place (a stub with no `Client`) is left alone rather than stop the harness at import.
     for name in ("httpx", "httpx2"):
         try:
             module = importlib.import_module(name)
         except ImportError:
             continue
-        _patch_httpx(module)
+        if all(hasattr(module, attribute) for attribute in ("Client", "AsyncClient", "Request")):
+            _patch_httpx(module)
     try:
         import aiohttp
     except ImportError:
         pass
     else:
-        _patch_aiohttp(aiohttp.ClientSession)
+        session = getattr(aiohttp, "ClientSession", None)
+        if session is not None and hasattr(session, "_request"):
+            _patch_aiohttp(session)
     _installed = True
 
 
