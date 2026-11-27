@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { marksPlugin } from "./marks-plugin";
+import { still } from "./page-still";
 
 /**
  * A turn the server refused reads as the app's notice, and a short conversation has no stray rail.
@@ -164,10 +165,10 @@ async function open(
    * The turns are measured against the styled window a frame after it is styled, and the rail
    * (where it is drawn) appears then. Styled again, for its own classes.
    */
-  await page.waitForTimeout(300);
+  await still(page);
   await style(page);
   // Rows ease in: looked at once they are still.
-  await page.waitForTimeout(400);
+  await still(page);
   return page;
 }
 

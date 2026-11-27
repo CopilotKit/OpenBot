@@ -27,6 +27,7 @@ import {
   MODEL_USAGE_PATH,
   overviewResponse,
 } from "./admin-settings-api";
+import { still } from "./page-still";
 
 /**
  * Admin → AI providers: an admin changes the organization's AI, disconnects it and connects another,
@@ -510,9 +511,10 @@ beforeAll(async () => {
   }
 }, 120_000);
 
+// Closing two browsers takes longer than a hook's five seconds when the machine runs eight files at once.
 afterAll(async () => {
-  for (const browser of browsers.values()) await browser.close();
-});
+  await Promise.all([...browsers.values()].map((browser) => browser.close()));
+}, 30_000);
 
 /** The page at `path`, its server answering from `server`. */
 async function open(
@@ -593,7 +595,7 @@ async function style(page: Page) {
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
   // A dialog scales in: looked at once it is still.
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(

@@ -12,6 +12,7 @@ import { personBody } from "./accounts-api";
 import { deploymentBody, overviewResponse } from "./admin-settings-api";
 import { approvalInboxResponse } from "./approvals-api";
 import { marksPlugin } from "./marks-plugin";
+import { still } from "./page-still";
 import { screenLinkLooks } from "./screen-link-style";
 import { CALLS, waitingRequests } from "./settings-tool-cards-admin.calls";
 
@@ -443,7 +444,7 @@ async function open(
   }
   await page.addStyleTag({ content: sheet });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(400);
+  await still(page);
   return page;
 }
 
