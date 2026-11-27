@@ -19,6 +19,10 @@ export function isOwnPath(path: unknown): path is string {
  * middle of (a draft, an open dialog, a conversation's live stream) is kept, where loading the page
  * again lost it. The event is cancelled to tell the shell it was handled; an OpenBot page from before
  * this leaves it, and the shell loads the page instead.
+ *
+ * The phone app's native shell asks the same way when one of its tabs is tapped
+ * (`lib/native-shell`). A page that is already open is handled and left as it is, as the sidebar's
+ * link to it does: Home keeps what is in its box, a conversation its scroll.
  */
 export function useDesktopOpenRequests() {
   const router = useRouter();
@@ -27,6 +31,8 @@ export function useDesktopOpenRequests() {
       const path = (event as CustomEvent<{ path?: unknown }>).detail?.path;
       if (!isOwnPath(path)) return;
       event.preventDefault();
+      const here = router.history.location;
+      if (path === here.pathname + here.search + here.hash) return;
       router.history.push(path);
     };
     window.addEventListener(OPEN_REQUEST, open);

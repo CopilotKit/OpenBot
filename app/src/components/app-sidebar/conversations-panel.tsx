@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { PageEmpty, PageRows } from "@/components/layout/page-shell";
 import { SectionPanel } from "@/components/layout/section-panel";
 import {
   InputGroup,
@@ -36,6 +37,7 @@ import {
 } from "@/lib/settings/message-list";
 import { delegatingConversationsQueryOptions } from "@/lib/tasks/queries";
 import { Button } from "../ui/button";
+import { Separator } from "../ui/separator";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
@@ -88,7 +90,7 @@ export const SEARCH_HINT = "Type at least 2 characters to search history";
  * `value`, once it has stopped changing for `delay`. Each search is a request, so one per pause in
  * typing rather than one per keystroke.
  */
-function useDebounced(value: string, delay: number): string {
+export function useDebounced(value: string, delay: number): string {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(value), delay);
@@ -161,18 +163,24 @@ export function isUnread(
  * moves to the top. Nothing else animates, a roster that reacts to being read is a roster that
  * moves under the cursor.
  */
-function ChannelRow({
+export function ChannelRow({
   channel,
   animateOrder,
   emphasis,
   view,
   delegating,
+  layout = "sidebar",
+  divided = false,
 }: {
   channel: ChannelSummary;
   animateOrder: boolean;
   emphasis: MessageListEmphasis;
   view: ConversationView;
   delegating: readonly string[];
+  /** In the sidebar, or a row of the Conversations page's card (see `Channel`). */
+  layout?: "sidebar" | "page";
+  /** On the page, a divider above every row but the first, inside the row so it moves with it. */
+  divided?: boolean;
 }) {
   const shouldReduceMotion = useReducedMotion();
   // Whether this row is unread, as a boolean, for the same reason `Channel` computes `isOpen`
@@ -193,7 +201,9 @@ function ChannelRow({
       layout={animateOrder && !shouldReduceMotion ? "position" : false}
       transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
     >
+      {divided ? <Separator /> : null}
       <Channel
+        layout={layout}
         view={view}
         emphasis={emphasis}
         channelId={channel.id}
@@ -228,12 +238,13 @@ function ChannelRow({
  * replace each other as somebody types, and a list that moves under them is the very thing they
  * are trying to read.
  */
-function SearchResults({
+export function SearchResults({
   term,
   settled,
   emphasis,
   view,
   delegating,
+  layout = "sidebar",
 }: {
   /** The search as it was when typing last paused, normalised. This is what is asked for. */
   term: string;
@@ -242,8 +253,11 @@ function SearchResults({
   emphasis: MessageListEmphasis;
   view: ConversationView;
   delegating: readonly string[];
+  /** In the sidebar, or the Conversations page's card of rows. */
+  layout?: "sidebar" | "page";
 }) {
   const results = useInfiniteQuery(channelSearchInfiniteQueryOptions(term));
+  const page = layout === "page";
 
   if (!settled || results.isPending) {
     return (
@@ -274,6 +288,12 @@ function SearchResults({
     );
   }
   if (results.data.length === 0) {
+    if (page)
+      return (
+        <PageEmpty icon={IconSearch} title="No matches">
+          {`No conversation has “${term}” in its name or recent messages.`}
+        </PageEmpty>
+      );
     return (
       <div className="py-4">
         <Empty className="border border-dashed min-h-[40dvh] px-2">
@@ -287,21 +307,26 @@ function SearchResults({
       </div>
     );
   }
+  const rows = (
+    /* Mounted with its first rows, so they appear without the entrance a new channel gets. */
+    <AnimatePresence initial={false}>
+      {results.data.map((channel, index) => (
+        <ChannelRow
+          view={view}
+          emphasis={emphasis}
+          key={channel.id}
+          animateOrder={false}
+          channel={channel}
+          delegating={delegating}
+          layout={layout}
+          divided={page && index > 0}
+        />
+      ))}
+    </AnimatePresence>
+  );
   return (
     <>
-      {/* Mounted with its first rows, so they appear without the entrance a new channel gets. */}
-      <AnimatePresence initial={false}>
-        {results.data.map((channel) => (
-          <ChannelRow
-            view={view}
-            emphasis={emphasis}
-            key={channel.id}
-            animateOrder={false}
-            channel={channel}
-            delegating={delegating}
-          />
-        ))}
-      </AnimatePresence>
+      {page ? <PageRows>{rows}</PageRows> : rows}
       {results.hasNextPage ? (
         <div className="px-2 py-3 text-center">
           {results.isFetchNextPageError ? (

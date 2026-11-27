@@ -127,6 +127,18 @@ export function SidebarToggle({ className }: { className?: string }) {
  * `children` sit at the band's right end, so a screen can put something there without a second bar.
  */
 export function SidebarToggleBar({ children }: { children?: ReactNode }) {
+  /*
+   * With no sidebar at all (the phone app's native shell, `components/layout/native-shell-frame.tsx`)
+   * there is no toggle to keep a place for, so no band: only what the screen put at its end, and
+   * nothing when that draws nothing (`empty:hidden`).
+   */
+  if (!useOptionalSidebar()) {
+    return children ? (
+      <div className="flex shrink-0 justify-end px-3 pt-2 empty:hidden">
+        {children}
+      </div>
+    ) : null;
+  }
   return (
     <div className="h-12 shrink-0 flex items-center px-3">
       <SidebarToggle />

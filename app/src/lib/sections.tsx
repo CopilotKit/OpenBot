@@ -39,6 +39,7 @@ export function sectionForPath(
 ): SectionId | null {
   if (
     pathname === "/" ||
+    pathname === "/conversations" ||
     pathname === "/channel" ||
     pathname.startsWith("/channel/")
   ) {

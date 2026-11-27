@@ -1,5 +1,6 @@
 import type { SaveWebPushSubscriptionRequest } from "@/lib/api/generated/model";
 import { desktopShell } from "@/lib/desktop/shell";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { newId } from "@/lib/new-id";
 
 /**
@@ -28,7 +29,8 @@ const ID_STORAGE_KEY = "openbot-web-push-id";
  *   the Home Screen, on iOS 16.4 or later. The person is told how, since a switch here can't work.
  * - `newer-ios-first`: OpenBot opened from the Home Screen of an iPhone or iPad older than iOS 16.4.
  * - `unsupported`: anything else, OpenBot Desktop's window included, which shows notifications
- *   through the desktop app. Nothing is offered.
+ *   through the desktop app, and the phone app's native shell, which is no Home Screen web app and
+ *   whose notifications are the phone app's own. Nothing is offered.
  *
  * The Push API is offered only to a secure page (HTTPS, or this computer's own address), so an
  * OpenBot opened at a plain-HTTP address is `unsupported` too.
@@ -40,7 +42,11 @@ export type WebPushSupport =
   | "unsupported";
 
 export function webPushSupport(): WebPushSupport {
-  if (typeof window === "undefined" || desktopShell() !== null)
+  if (
+    typeof window === "undefined" ||
+    desktopShell() !== null ||
+    nativeShell() !== null
+  )
     return "unsupported";
   if (
     "serviceWorker" in navigator &&

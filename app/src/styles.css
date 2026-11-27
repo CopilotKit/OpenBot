@@ -537,3 +537,14 @@ html[data-from-setup] body {
     opacity: 0;
   }
 }
+
+/*
+ * Inside the phone app's native shell (lib/native-shell, marked by index.html before the first
+ * paint). The page is the web view between the shell's status bar and its tab bar, so it does not
+ * bounce past its edges like a web page: a bounce would show the web view's backing behind the
+ * page. Pressing and holding still selects text, in a message as anywhere.
+ */
+html[data-native-shell],
+html[data-native-shell] body {
+  overscroll-behavior: none;
+}
