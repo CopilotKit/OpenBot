@@ -62,9 +62,11 @@ const SHOWN_WITHIN_MS = 200;
 /**
  * The hand-over from the line to the words. The line goes in the frame the reply arrives, and the
  * reply is written in from the next (`paced-reveal.ts`), so a frame or two before the first word is
- * that, not a wait with nothing on screen.
+ * that, not a wait with nothing on screen. Counted in frames as well as time: with eight files
+ * running at once in CI, a frame can take longer than 50 ms, and the hand-over frame with it.
  */
 const REVEAL_HANDOFF_MS = 50;
+const REVEAL_HANDOFF_FRAMES = 2;
 /** The starter task clicked: its title, which is the task's button. */
 const STARTER = "Chart Hacker News";
 
@@ -585,12 +587,18 @@ function read({ frames, sent }: { frames: Frame[]; sent: number }) {
   const before = words === -1 ? after : after.slice(0, words);
   const from = first ? before.indexOf(first) : before.length;
   const wordsAt = words === -1 ? Number.POSITIVE_INFINITY : after[words].at;
+  const handOver = new Set(
+    words === -1 ? [] : before.slice(-REVEAL_HANDOFF_FRAMES),
+  );
   return {
     shownAfterMs: first ? Math.round(first.at - sent) : null,
     framesWithout: before
       .slice(Math.max(from, 0))
       .filter(
-        (frame) => !frame.thinking && wordsAt - frame.at > REVEAL_HANDOFF_MS,
+        (frame) =>
+          !frame.thinking &&
+          !handOver.has(frame) &&
+          wordsAt - frame.at > REVEAL_HANDOFF_MS,
       )
       .map((frame) => `${Math.round(frame.at - sent)}ms ${frame.path}`),
     wordsDrawn: words !== -1,
