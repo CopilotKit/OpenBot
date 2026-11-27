@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Browser, Page } from "playwright-core";
+import { compile } from "tailwindcss";
 
 /**
  * OpenBot follows the system's light or dark until a person chooses one of their own.
@@ -26,6 +27,7 @@ const LEGACY_KEY = "openbot-theme";
 
 let browser: Browser;
 let script: string;
+let menuCss: string;
 /** The app's page, with the fixture in the app's place and a note of the theme at first paint. */
 let html: string;
 
@@ -50,6 +52,18 @@ beforeAll(async () => {
     .replace("/src/main.tsx", "/theme.js");
   if (!html.includes("__darkAtFirstPaint") || !html.includes("/theme.js"))
     throw new Error("index.html no longer has the shape this test reads");
+  const compiler = await compile(
+    "@theme { --spacing: 0.25rem; } @tailwind utilities;",
+  );
+  // Include the portaled options and scroll arrows before the menu first measures itself.
+  const classes = [
+    "components/settings/theme-row.tsx",
+    "components/ui/item.tsx",
+    "components/ui/select.tsx",
+  ].flatMap((file) =>
+    readFileSync(join(APP, "src", file), "utf8").split(/[\s"'`{}]+/),
+  );
+  menuCss = compiler.build(classes);
   const { chromium } = await import("playwright-core");
   // The CI job installs full Chromium without the headless shell.
   browser = await chromium.launch({ channel: "chromium" });
@@ -64,6 +78,7 @@ async function open(
   system: "light" | "dark",
   stored: string | null = null,
   key = KEY,
+  menu = false,
 ): Promise<Page> {
   const context = await browser.newContext({ colorScheme: system });
   const page = await context.newPage();
@@ -88,10 +103,60 @@ async function open(
       [key, stored] as const,
     );
   }
-  await page.goto(`${ORIGIN}/`);
-  await page.locator("[data-setting-shows]").waitFor({ timeout: 8000 });
+  await page.goto(`${ORIGIN}/${menu ? "?menu" : ""}`);
+  await (menu
+    ? page.getByRole("combobox", { name: "Theme" })
+    : page.locator("[data-setting-shows]")
+  ).waitFor({ timeout: 8000 });
   return page;
 }
+
+test.skipIf(!asked).each([
+  [160, true],
+  [80, false],
+] as const)(
+  "the Theme menu reaches Dark at %dpx viewport height",
+  async (height, fits) => {
+    const page = await open("light", null, KEY, true);
+    try {
+      await page.setViewportSize({ width: 640, height });
+      await page.addStyleTag({
+        content: `${menuCss}\nhtml { zoom: 1.25 } body { margin: 0 } #root { padding-top: ${fits ? 36 : 12}px }`,
+      });
+      const trigger = page.getByRole("combobox", { name: "Theme" });
+      await trigger.click();
+      const list = page.getByRole("listbox");
+      await list.waitFor();
+      if (!fits) {
+        await page.locator('[data-slot="select-scroll-down-button"]').waitFor();
+        await list.hover();
+      }
+      const dimensions = await list.evaluate((menu) => [
+        menu.clientHeight,
+        menu.scrollHeight,
+      ]);
+      if (fits) {
+        expect(dimensions[0]).toBe(dimensions[1]);
+      } else {
+        expect(dimensions[0]).toBeLessThan(dimensions[1]);
+        await page.mouse.wheel(0, 100);
+        await page.waitForFunction(
+          () =>
+            (document.querySelector('[role="listbox"]')?.scrollTop ?? 0) > 0,
+          null,
+          { timeout: 3000 },
+        );
+      }
+      await list.getByRole("option", { name: "Dark" }).click();
+      expect(
+        await trigger.locator('[data-slot="select-value"]').textContent(),
+      ).toBe("Dark");
+    } finally {
+      await page.context().close();
+    }
+  },
+  30_000,
+);
 
 /** What the page shows: the theme at first paint, the theme now, and what the setting reads. */
 function shown(page: Page) {

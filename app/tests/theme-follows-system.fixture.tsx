@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { ThemeRow } from "@/components/settings/theme-row";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 
 /**
@@ -23,6 +24,10 @@ const root = document.getElementById("root");
 if (!root) throw new Error("no #root");
 createRoot(root).render(
   <ThemeProvider>
-    <Choices />
+    {new URLSearchParams(location.search).has("menu") ? (
+      <ThemeRow />
+    ) : (
+      <Choices />
+    )}
   </ThemeProvider>,
 );

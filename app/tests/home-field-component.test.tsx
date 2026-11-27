@@ -59,12 +59,18 @@ test("under a skin there is no field: a skin draws its own palette", () => {
  * here: a canvas hands back the same context every time, and once that context is lost it makes
  * nothing more.
  */
-function fakeWebGl() {
+function fakeWebGl(onBox?: (box: number[]) => void) {
   let lost = false;
   const gl = new Proxy(
     {},
     {
       get(_, name: string) {
+        if (name === "getUniformLocation")
+          return (_: unknown, key: string) => key;
+        if (name === "uniform4f")
+          return (key: string, ...values: number[]) => {
+            if (key === "uBox") onBox?.(values);
+          };
         if (name === "getExtension")
           return (ext: string) =>
             ext === "WEBGL_lose_context"
@@ -102,6 +108,40 @@ test("React mounting the field twice, as it does in development, still draws it"
     expect(view.container.querySelector("canvas")?.hidden).toBe(false);
   } finally {
     HTMLCanvasElement.prototype.getContext = original;
+  }
+});
+
+test("the field stays centered on the composer when DOM bounds are zoomed", async () => {
+  const originalContext = HTMLCanvasElement.prototype.getContext;
+  const originalRect = HTMLElement.prototype.getBoundingClientRect;
+  const drawn = Promise.withResolvers<number[]>();
+  const gl = fakeWebGl(drawn.resolve);
+  HTMLCanvasElement.prototype.getContext = ((): unknown =>
+    gl) as typeof originalContext;
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this instanceof HTMLCanvasElement) return new DOMRect(0, 0, 1000, 500);
+    if (this.getAttribute("data-slot") === "composer")
+      return new DOMRect(250, 125, 500, 125);
+    return originalRect.call(this);
+  };
+  try {
+    const view = render(<Page />);
+    const canvas = view.container.querySelector("canvas");
+    if (!canvas) throw new Error("No Home field canvas");
+    Object.defineProperties(canvas, {
+      clientWidth: { value: 800 },
+      clientHeight: { value: 400 },
+    });
+    const [x, y, width, height] = await drawn.promise;
+    expect([x, y, width, height]).toEqual([
+      canvas.width / 4,
+      canvas.height / 2,
+      canvas.width / 2,
+      canvas.height / 4,
+    ]);
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = originalRect;
+    HTMLCanvasElement.prototype.getContext = originalContext;
   }
 });
 
