@@ -284,7 +284,7 @@ function RouteComponent() {
       </SidebarToggleBar>
       <div
         className={cn(
-          "relative isolate flex-1 flex flex-col items-center justify-center w-full p-4 mt-8",
+          "relative isolate flex-1 min-h-0 overflow-y-auto flex flex-col items-center justify-center-safe w-full p-4 mt-8",
           intro && "home-intro",
         )}
       >
@@ -370,44 +370,51 @@ function RouteComponent() {
               }}
             />
           </div>
-          <div className="absolute inset-x-0 top-full flex flex-col items-center">
-            {error ? (
-              <p
-                className="mt-2 w-full max-w-2xl text-sm text-destructive"
-                role="alert"
-              >
-                {failureSaid(error)}
-              </p>
-            ) : failed && agents === undefined ? (
-              // The composer above is `disabled={!fallback}`, and a failed query does not by
-              // itself mean `fallback` is undefined: TanStack Query keeps its last good `data`
-              // across a failed background refetch, and `!fallback` alone is also true of a query
-              // that loaded successfully and genuinely returned zero agents — a case where nobody
-              // failed to load anything. `agents === undefined` is the one condition that is only
-              // true when the query has never once returned successfully, so this alert can only
-              // ever claim a load failure while that is actually what happened.
-              <p
-                className="mt-2 w-full max-w-2xl text-sm text-destructive"
-                role="alert"
-              >
-                {loadFailure(
-                  agentsError,
-                  "Couldn't load your Bots, so there's no one to send this to. Try again in a moment.",
-                )}
-              </p>
-            ) : (
-              // In the page from the first paint and invisible until there is a Bot to send to, so
-              // its arrival moves nothing. Said out loud: a message that silently reaches somebody
-              // you did not choose is the kind of surprise that costs trust the first time it happens.
-              <p
-                className={cn(
-                  "mt-2 w-full max-w-2xl text-xs text-muted-foreground text-center",
-                  !fallback && "invisible",
-                )}
-              >
-                OpenBot picks the right Bot. Type <code>@</code> to choose one.
-              </p>
-            )}
+          <div className="absolute inset-x-0 top-full flex flex-col items-center pb-8">
+            {/* The hint rises in with the box on a first visit; Explore below carries its own rise. */}
+            <div
+              className="flex w-full flex-col items-center"
+              data-intro="hint"
+            >
+              {error ? (
+                <p
+                  className="mt-2 w-full max-w-2xl text-sm text-destructive"
+                  role="alert"
+                >
+                  {failureSaid(error)}
+                </p>
+              ) : failed && agents === undefined ? (
+                // The composer above is `disabled={!fallback}`, and a failed query does not by
+                // itself mean `fallback` is undefined: TanStack Query keeps its last good `data`
+                // across a failed background refetch, and `!fallback` alone is also true of a query
+                // that loaded successfully and genuinely returned zero agents — a case where nobody
+                // failed to load anything. `agents === undefined` is the one condition that is only
+                // true when the query has never once returned successfully, so this alert can only
+                // ever claim a load failure while that is actually what happened.
+                <p
+                  className="mt-2 w-full max-w-2xl text-sm text-destructive"
+                  role="alert"
+                >
+                  {loadFailure(
+                    agentsError,
+                    "Couldn't load your Bots, so there's no one to send this to. Try again in a moment.",
+                  )}
+                </p>
+              ) : (
+                // In the page from the first paint and invisible until there is a Bot to send to, so
+                // its arrival moves nothing. Said out loud: a message that silently reaches somebody
+                // you did not choose is the kind of surprise that costs trust the first time it happens.
+                <p
+                  className={cn(
+                    "mt-2 w-full max-w-2xl text-xs text-muted-foreground text-center",
+                    !fallback && "invisible",
+                  )}
+                >
+                  OpenBot picks the right Bot. Type <code>@</code> to choose
+                  one.
+                </p>
+              )}
+            </div>
             {/*
              * Up to four Bots, two to a row, as compact cards that fill the column. A teaser under the
              * composer, not the place to browse: more than four would push the composer up every time

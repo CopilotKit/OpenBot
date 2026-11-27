@@ -160,7 +160,12 @@ afterAll(async () => {
 });
 
 /** The Bots list and conversation list, once answered. */
-type Trail = { bots: boolean; conversations: boolean };
+type Trail = {
+  bots: boolean;
+  conversations: boolean;
+  /** The Bots the list answers with; the one Bot by default. */
+  list?: (typeof bot)[];
+};
 
 /** What one frame of the page showed. */
 type Frame = {
@@ -203,7 +208,9 @@ async function answer(route: Route, trail: Trail) {
   const path = new URL(route.request().url()).pathname;
   if (route.request().method() === "GET" && path === BOTS) {
     await new Promise((done) => setTimeout(done, ANSWER_AFTER_MS));
-    await route.fulfill({ json: { bots: [bot], nextCursor: null } });
+    await route.fulfill({
+      json: { bots: trail.list ?? [bot], nextCursor: null },
+    });
     trail.bots = true;
     return;
   }
@@ -293,13 +300,18 @@ async function open(
   edition: string,
   visit: Visit,
   trail: Trail,
+  look: {
+    width?: number;
+    height?: number;
+    reducedMotion?: "reduce" | "no-preference";
+  } = {},
 ): Promise<Page> {
   const browser = browsers.get(engine);
   if (!browser) throw new Error(`no ${engine}`);
   const page = await browser.newPage({
-    viewport: { width: 1280, height: 800 },
+    viewport: { width: look.width ?? 1280, height: look.height ?? 800 },
     colorScheme: theme,
-    reducedMotion: "reduce",
+    reducedMotion: look.reducedMotion ?? "reduce",
   });
   page.on("pageerror", (error) => console.error(error));
   await page.addInitScript(recordFrames);
@@ -418,4 +430,113 @@ describe.skipIf(!asked)("Home while it loads", () => {
             }
           }, 60_000);
         }
+
+  for (const engine of engines) {
+    // Nothing on Home scrolls but Home itself, so Explore Bots hanging under the box must be
+    // reachable by scrolling it in a window too short for them, as on a phone.
+    for (const [width, height] of [
+      [1280, 700],
+      [390, 700],
+    ] as const)
+      test(`the last Explore Bot can be scrolled to at ${width}x${height}, in ${engine}`, async () => {
+        const shared = Array.from({ length: 6 }, (_, index) => ({
+          ...bot,
+          builtIn: false,
+          mine: false,
+          visibility: "public",
+          id: `shared-${index}`,
+          name: `Shared Bot ${index}`,
+        }));
+        const trail: Trail = {
+          bots: false,
+          conversations: false,
+          list: [bot, ...shared],
+        };
+        const page = await open(engine, "light", "business", "later", trail, {
+          width,
+          height,
+        });
+        try {
+          await page.locator('[data-intro="explore"] li').first().waitFor();
+          await still(page);
+          const frames = await framesOf(page);
+          const first = frames[0];
+          if (!first) throw new Error("no frame was recorded");
+          await page.mouse.move(width / 2, height / 2);
+          await page.mouse.wheel(0, 2000);
+          await page.waitForTimeout(300);
+          const reach = await page.evaluate(() => {
+            const last = [
+              ...document.querySelectorAll('[data-intro="explore"] li'),
+            ].at(-1);
+            if (!last) return null;
+            const box = last.getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              box.left + box.width / 2,
+              box.top + box.height / 2,
+            );
+            return {
+              bottom: box.bottom,
+              inner: window.innerHeight,
+              reached: hit ? last.contains(hit) : false,
+            };
+          });
+          if (!reach) throw new Error("no Explore Bot was drawn");
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot({
+              path: join(
+                shots,
+                `home-scrolled-${engine}-${width}x${height}.png`,
+              ),
+            });
+          }
+          expect(reach.bottom).toBeLessThanOrEqual(reach.inner);
+          expect(reach.reached).toBe(true);
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+
+    test(`the hint is never more visible than the box on a first visit, in ${engine}`, async () => {
+      const trail: Trail = { bots: false, conversations: false };
+      const page = await open(engine, "light", "business", "first", trail, {
+        reducedMotion: "no-preference",
+      });
+      try {
+        // Both are recorded on every frame as the product of their own and their ancestors'
+        // opacity, since the page fades them in through the element that carries `data-intro`.
+        const seen = await page.evaluate(async () => {
+          const effective = (element: Element | null) => {
+            let opacity = 1;
+            for (let at = element; at; at = at.parentElement)
+              opacity *= Number(getComputedStyle(at).opacity);
+            return opacity;
+          };
+          const out: { box: number; hint: number }[] = [];
+          for (let frame = 0; frame < 150; frame += 1) {
+            await new Promise((done) => requestAnimationFrame(done));
+            const line = [...document.querySelectorAll("p")].find((p) =>
+              p.textContent?.startsWith("OpenBot picks"),
+            );
+            const box = document.querySelector('[data-intro="box"]');
+            if (!line || !box) continue;
+            out.push({
+              box: effective(box),
+              hint:
+                getComputedStyle(line).visibility === "hidden"
+                  ? 0
+                  : effective(line),
+            });
+          }
+          return out;
+        });
+        expect(seen.length).toBeGreaterThan(0);
+        for (const frame of seen)
+          expect(frame.hint).toBeLessThanOrEqual(frame.box + 0.001);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+  }
 });

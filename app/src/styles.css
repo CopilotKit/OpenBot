@@ -472,6 +472,10 @@
   animation-delay: 300ms;
   animation-duration: 850ms;
 }
+.home-intro [data-intro="hint"] {
+  animation-delay: 300ms;
+  animation-duration: 850ms;
+}
 .home-intro [data-intro="explore"] {
   animation-delay: 560ms;
 }
