@@ -20,10 +20,31 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { companySignInQueryOptions } from "@/lib/auth/company-sign-in";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
+import { loadFirstScreen } from "@/lib/route-data";
+import { instructionsQueryOptions } from "@/lib/settings/queries";
 import { SkinPicker } from "@/skins/skin-picker";
 
 export const Route = createFileRoute("/_authed/settings/")({
+  /*
+   * Asks only for what the page would ask for: the company sign-in is skipped where the deployment
+   * signs people in itself, because `ensureQueryData` ignores the `enabled` the section sets and
+   * would send a read the page leaves out on purpose. Nothing under Settings guarantees the
+   * capabilities, so they are read here, and a failed read counts as unknown, as in the section.
+   */
+  loader: async ({ context }) => {
+    const capabilities = await context.queryClient
+      .ensureQueryData(deploymentCapabilitiesQueryOptions())
+      .catch(() => undefined);
+    await loadFirstScreen(context.queryClient, [
+      instructionsQueryOptions(),
+      ...(capabilities?.hostedSignIn !== true
+        ? [companySignInQueryOptions()]
+        : []),
+    ]);
+  },
   component: RouteComponent,
 });
 
