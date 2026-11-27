@@ -15,8 +15,10 @@ paths:
         where every address outside /api/v2 reads and writes. A request
         signed in with an API key has no session, so none is active. An
         app's token has no session either: for it, active marks the
-        organization its OpenBot-Organization header names, or the caller's
-        own when it sends none. The header is checked against the caller's
+        organization its OpenBot-Organization header names; when it sends
+        none, the one the token was signed in to, while the caller is a
+        member of it, else the caller's own. The header is checked against
+        the caller's
         membership, as on every address that names no organization, so one
         they are not in answers not found. A session and an API key ignore
         it. To work in another one, set it as the
@@ -843,8 +845,9 @@ components:
           description: >-
             Whether the caller is working in this one: the organization their
             session works in, or for an app's token the one its
-            OpenBot-Organization header names, else the caller's own. Always
-            false for a request made with an API key.
+            OpenBot-Organization header names, else the one the token was
+            signed in to while the caller is a member of it, else the
+            caller's own. Always false for a request made with an API key.
         canMoveIn:
           type: boolean
           description: >-
