@@ -482,6 +482,24 @@
 }
 
 /*
+ * A page arriving (`PageArrival` in components/layout/page-arrival.tsx): a short fade, so a switch
+ * between pages reads as a change and not a flash. Only opacity, and only when motion is allowed.
+ */
+@keyframes page-arrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .page-arrival {
+    animation: page-arrive 150ms ease-out both;
+  }
+}
+
+/*
  * Teach a Bot's three steps sit on one soft gradient, the way an app's introduction does in other products. The
  * colours are fixed tints rather than tokens, with a darker set for the dark theme, so the stage reads as a showcase
  * while the cards on it keep the app's own colours.
