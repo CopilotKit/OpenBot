@@ -95,7 +95,7 @@ function RouteComponent() {
           ) : null}
           <span
             className={cn(
-              "min-w-0 text-sm tracking-tight truncate",
+              "min-w-0 text-sm tracking-tighter truncate",
               agentId ? null : "text-muted-foreground",
             )}
           >

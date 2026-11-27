@@ -28,7 +28,7 @@ function RouteComponent() {
           participantIds={channel.data?.agentIds ?? []}
           size={22}
         />
-        <span className="min-w-0 truncate text-sm tracking-tight">
+        <span className="min-w-0 truncate text-sm tracking-tighter">
           {channel.data?.name ?? "Group"}
         </span>
         <GroupPeopleButton channelId={channelId} />

@@ -92,7 +92,7 @@ export function PageHeader({
     <header className="flex flex-col gap-2" data-slot="page-header">
       <div className="flex flex-row items-center justify-between gap-4">
         <h1
-          className="font-semibold text-2xl tracking-tight"
+          className="font-semibold text-2xl tracking-tighter"
           data-slot="page-title"
         >
           {title}

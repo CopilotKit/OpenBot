@@ -48,7 +48,7 @@ function Home() {
     <div className="flex min-h-screen flex-col bg-background">
       <div className="flex-1 flex flex-col items-center justify-center w-full p-4 mt-8">
         <div className="flex flex-col items-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-center">
+          <h1 className="text-2xl font-semibold tracking-tighter text-center">
             Start a conversation
           </h1>
         </div>

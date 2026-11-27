@@ -277,7 +277,7 @@ function RouteComponent() {
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
         <div className="flex flex-col items-center" data-intro="heading">
-          <h1 className="text-2xl font-semibold tracking-tight text-center">
+          <h1 className="text-2xl font-semibold tracking-tighter text-center">
             {firstConversationGreeting(
               user,
               channels.isSuccess && channels.data.length === 0,

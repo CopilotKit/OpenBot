@@ -352,7 +352,7 @@ let origin = "";
 beforeAll(async () => {
   if (!asked) return;
   const script = await bundle();
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -363,7 +363,7 @@ beforeAll(async () => {
         return new Response(script, {
           headers: { "content-type": "text/javascript" },
         });
-      const font = join(inter, path.split("/").pop() ?? "");
+      const font = join(sora, path.split("/").pop() ?? "");
       if (path.startsWith("/files/") && existsSync(font))
         return new Response(Bun.file(font));
       if (path.startsWith("/api/"))

@@ -248,7 +248,7 @@ async function open(
   });
   const page = await context.newPage();
   page.on("pageerror", (error) => console.error(error));
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   let styled = () => {};
   const ready = new Promise<void>((resolve) => {
     styled = resolve;
@@ -266,7 +266,7 @@ async function open(
       });
     if (path === "/view.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, path.split("/").pop() ?? "");
+    const font = join(sora, path.split("/").pop() ?? "");
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     const computerPath = `/api/v2/organizations/default/computers/${BOT}`;

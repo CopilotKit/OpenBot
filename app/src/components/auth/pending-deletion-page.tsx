@@ -69,14 +69,14 @@ export function PendingDeletionPage({
     <div className="flex h-dvh w-full flex-col items-center justify-center">
       <div className="flex w-full max-w-82 flex-col items-center p-4">
         <AgentOrb size="56px" />
-        <h1 className="mt-8 text-balance text-center font-medium text-2xl tracking-tight">
+        <h1 className="mt-8 text-balance text-center font-medium text-2xl tracking-tighter">
           {day
             ? `Your account will be deleted on ${day}.`
             : "Your account will be deleted."}
         </h1>
         <div className="mt-8 flex w-full flex-col gap-2">
           <Button
-            className="h-10 w-full tracking-tight"
+            className="h-10 w-full tracking-tighter"
             disabled={cancel.isPending}
             onClick={() => cancel.mutate()}
             size="lg"
@@ -84,7 +84,7 @@ export function PendingDeletionPage({
             {cancel.isPending ? "Cancelling…" : "Cancel deletion"}
           </Button>
           <Button
-            className="h-10 w-full tracking-tight"
+            className="h-10 w-full tracking-tighter"
             disabled={cancel.isPending}
             onClick={() => setDeleting(true)}
             size="lg"
@@ -93,7 +93,7 @@ export function PendingDeletionPage({
             Delete now
           </Button>
           <Button
-            className="h-10 w-full tracking-tight"
+            className="h-10 w-full tracking-tighter"
             disabled={signOut.pending}
             onClick={signOut.run}
             size="lg"

@@ -112,9 +112,9 @@ describe("default look tokens", () => {
 describe("fonts", () => {
   const styles = read("../src/styles.css");
 
-  // OpenDuet is set in Inter.
-  test("Inter still loads", () => {
-    expect(styles).toContain('@import "@fontsource-variable/inter"');
+  // The app and OpenDuet are set in Sora.
+  test("Sora loads", () => {
+    expect(styles).toContain('@import "@fontsource-variable/sora"');
   });
 });
 

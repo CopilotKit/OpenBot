@@ -723,7 +723,7 @@ The styles of the tab's page, inline: it is served by this app from 127.0.0.1 an
 OpenBot's own tokens (written here from `tokens/src/scheme.ts` by `bun run tokens:generate`):
 the frame's lavender ground with a card on it, its type, its 10px radius, and the orb, OpenBot's
 mark, as the setup window draws it. Light and dark follow the system, as the setup window does.
-Inter when the computer has it, the system's own face otherwise: a font is a file, and this page
+Sora when the computer has it, the system's own face otherwise: a font is a file, and this page
 fetches none.
 */
 const END_PAGE_STYLE: &str = r#"
@@ -764,7 +764,7 @@ body {
   padding: 24px 16px;
   background: var(--sidebar);
   color: var(--foreground);
-  font-family: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: "Sora Variable", "Sora", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;

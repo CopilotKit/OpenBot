@@ -215,7 +215,7 @@ function PlaygroundPage() {
         <div className="flex items-start gap-2">
           <SidebarToggle className="-ml-2 shrink-0" />
           <div>
-            <h1 className="font-semibold text-2xl tracking-tight">
+            <h1 className="font-semibold text-2xl tracking-tighter">
               Playground
             </h1>
             <p className="mt-1 max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">

@@ -50,7 +50,7 @@ export function CompanySignInPage({ refusal }: { refusal: string }) {
     <div className="flex h-dvh w-full flex-col items-center justify-center">
       <div className="flex w-full max-w-82 flex-col items-center p-4">
         <AgentOrb size="56px" />
-        <h1 className="mt-8 text-center font-medium text-2xl tracking-tight">
+        <h1 className="mt-8 text-center font-medium text-2xl tracking-tighter">
           Sign in with your company
         </h1>
         <p
@@ -63,7 +63,7 @@ export function CompanySignInPage({ refusal }: { refusal: string }) {
           <LinkCompanyAccount providers={providers} size="lg" />
           <OtherOrganizations />
           <Button
-            className="h-10 w-full tracking-tight"
+            className="h-10 w-full tracking-tighter"
             disabled={signOut.pending}
             onClick={signOut.run}
             size="lg"
@@ -125,7 +125,7 @@ function OtherOrganizations() {
         <DropdownMenuTrigger
           render={
             <Button
-              className="h-10 w-full tracking-tight"
+              className="h-10 w-full tracking-tighter"
               disabled={switching.isPending}
               size="lg"
               variant="outline"

@@ -219,7 +219,7 @@ async function open(
     server.latest = socket;
     connected(socket);
   });
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   await page.route(`${ORIGIN}/**`, (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -230,7 +230,7 @@ async function open(
       });
     if (path === "/shell.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, path.split("/").pop() ?? "");
+    const font = join(sora, path.split("/").pop() ?? "");
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (path === `${ORGANIZATION}/conversations`) {

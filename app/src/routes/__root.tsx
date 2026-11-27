@@ -12,7 +12,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDesktopOpenRequests } from "@/lib/desktop/open-requests";
 import { useServiceWorkerOpenRequests } from "@/lib/web-push/open-requests";
 import type { RouterContext } from "../router-context";
-import "@fontsource-variable/inter/wght.css";
+import "@fontsource-variable/sora/wght.css";
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,

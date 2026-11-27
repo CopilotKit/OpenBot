@@ -124,7 +124,7 @@ export function UpdateScreen({ verdict }: { verdict: UpdateVerdict }) {
 
 function Heading({ children }: { children: ReactNode }) {
   return (
-    <h1 className="mt-8 text-balance text-2xl font-medium tracking-tight">
+    <h1 className="mt-8 text-balance text-2xl font-medium tracking-tighter">
       {children}
     </h1>
   );

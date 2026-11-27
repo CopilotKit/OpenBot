@@ -157,12 +157,12 @@ async function open(
     reducedMotion: "reduce",
   });
   page.on("pageerror", (error) => console.error(error));
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   await page.route(`${ORIGIN}/**`, (route) => {
     const at = new URL(route.request().url()).pathname;
     if (at === "/browse.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, at.split("/").pop() ?? "");
+    const font = join(sora, at.split("/").pop() ?? "");
     if (at.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     // The fixture answers the API itself; anything that reaches the network has nowhere to go.

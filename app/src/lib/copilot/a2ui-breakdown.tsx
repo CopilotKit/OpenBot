@@ -203,7 +203,7 @@ export function A2UIBreakdown({
           </p>
           <p
             aria-live="polite"
-            className="text-3xl leading-tight font-semibold tracking-tight tabular-nums"
+            className="text-3xl leading-tight font-semibold tracking-tighter tabular-nums"
             data-slot="breakdown-total"
           >
             {format(total)}

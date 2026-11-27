@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **Text in Sora, in every app.** The web app, OpenBot Desktop and the browser extension set their
+  text in Sora instead of Inter, at the same sizes, with the letters a little closer together
+  (Tailwind's `tracking-tight`, and headings a step closer). Sora has Latin letters only: Cyrillic, Greek and other scripts are
+  drawn in the computer's own face.
+
 - **Notifications in the browser, with OpenBot closed.** Settings, Notifications has a new switch,
   Notifications in this browser. Turned on, a Bot's replies, questions and approvals reach that
   browser as push notifications, as "Where updates go" routes push, and a click opens the

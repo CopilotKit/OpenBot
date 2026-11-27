@@ -11,7 +11,7 @@ import {
 } from "./SecurityFloor";
 import { isShuttingDownPage, ShuttingDownWindow } from "./ShuttingDown";
 import { isStatusPage, StatusWindow } from "./StatusWindow";
-import "@fontsource-variable/inter";
+import "@fontsource-variable/sora";
 import "./styles.css";
 import "./setup-layout.css";
 import "./setup-page-first.css";

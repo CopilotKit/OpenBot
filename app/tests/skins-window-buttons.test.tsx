@@ -247,7 +247,7 @@ async function open(
     deviceScaleFactor: 2,
   });
   page.on("pageerror", (error) => console.error(error));
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   const mark = macDesktop ? ' data-desktop-titlebar="overlay"' : "";
   await page.route(`${ORIGIN}/**`, (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -258,7 +258,7 @@ async function open(
       });
     if (path === "/frame.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, path.split("/").pop() ?? "");
+    const font = join(sora, path.split("/").pop() ?? "");
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     return route.fulfill({ status: 404 });
@@ -489,7 +489,8 @@ describe.skipIf(!asked)("the skins and the window's buttons", () => {
       "openduet-chat": { 'button[aria-label="Menu"]': { x: 161, y: 20 } },
       "openduet-page": {
         'button[aria-label="Back to Home"]': { x: 16, y: 12 },
-        "[data-openduet-page] header p": { x: 484, y: 25 },
+        // The page's title is centred, so its left edge follows its width: 1px left since Sora.
+        "[data-openduet-page] header p": { x: 483, y: 25 },
       },
       "openduet-pane": { 'button[aria-label="Menu"]': { x: 16, y: 20 } },
       "openduet-update": {

@@ -890,8 +890,8 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         await page
           .getByRole("button", { name: "Sign in to OpenBot Cloud" })
           .waitFor();
-        // Measured in the window's own face, at rest: a line set in the fallback, before Inter has
-        // loaded, can wrap where Inter's doesn't, and the card's entrance moves every box.
+        // Measured in the window's own face, at rest: a line set in the fallback, before Sora has
+        // loaded, can wrap where Sora's doesn't, and the card's entrance moves every box.
         await settled(page);
         const shape = await page.evaluate(() => {
           const rail = document.querySelector("main > .rail") as HTMLElement;

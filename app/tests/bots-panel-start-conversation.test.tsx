@@ -217,7 +217,7 @@ async function open(
     deviceScaleFactor: 2,
   });
   page.on("pageerror", (error) => console.error(error));
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   await page.route(`${ORIGIN}/**`, (route) => {
     const url = new URL(route.request().url());
     const at = url.pathname;
@@ -228,7 +228,7 @@ async function open(
       });
     if (at === "/shell.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, at.split("/").pop() ?? "");
+    const font = join(sora, at.split("/").pop() ?? "");
     if (at.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (at.startsWith("/api/")) {

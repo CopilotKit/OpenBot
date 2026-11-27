@@ -131,7 +131,7 @@ export function StripItem({
               <ItemIcon aria-hidden="true" stroke={1.75} />
             </span>
             <span
-              className="max-w-full truncate font-medium text-xs leading-none tracking-tight"
+              className="max-w-full truncate font-medium text-xs leading-none tracking-tighter"
               data-slot="strip-label"
             >
               {label}

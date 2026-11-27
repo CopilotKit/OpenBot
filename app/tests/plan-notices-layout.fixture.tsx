@@ -161,7 +161,7 @@ function Scene() {
     return (
       <div className="flex w-full justify-center">
         <div className="flex w-full max-w-82 flex-col items-center p-4">
-          <h1 className="mt-8 text-center font-medium text-2xl tracking-tight">
+          <h1 className="mt-8 text-center font-medium text-2xl tracking-tighter">
             {CLOUD_SIGN_IN_TITLE}
           </h1>
           <div className="mt-3 w-full">

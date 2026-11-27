@@ -133,9 +133,10 @@ icons a screen draws with. What it leaves to this page:
 - **No pixel value copied from a design** (`w-[91px]`, `h-[43px]`). Use the nearest step of the
   scale, never a smaller one. Sizes stay: a new look changes how things are drawn, not how big they
   are.
-- **One typeface and one icon set, in every app.** Inter and Tabler today, in the web app, OpenBot
+- **One typeface and one icon set, in every app.** Sora and Tabler today, in the web app, OpenBot
   Desktop and the extension. Changing either is a change for all three at once, agreed first. It
-  never lands in one app.
+  never lands in one app. Sora covers Latin only: Cyrillic, Greek and other scripts are drawn in
+  the system's face, and nothing loads a second face for them.
 - **Draw with tokens, not with pictures.** A picture has one set of colors: it can't follow dark
   mode, a skin or a customer's theme. Draw interface parts in CSS or as an SVG that takes
   `currentColor`. A picture that is content, such as a screenshot or a photo, is a dependency like

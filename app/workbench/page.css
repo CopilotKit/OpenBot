@@ -9,7 +9,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/inter";
+@import "@fontsource-variable/sora";
 @import "../src/theme.css";
 
 /* Tailwind ships only the classes it sees used: the app's components and the workbench's files. */

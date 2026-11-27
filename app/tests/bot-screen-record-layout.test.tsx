@@ -143,7 +143,7 @@ afterAll(async () => {
 async function open(window: { width: number; height: number }): Promise<Page> {
   const page = await browser.newPage({ viewport: window });
   page.on("pageerror", (error) => console.error(error));
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   // The live screen's socket connects and sends no frame: the page keeps its shape without one.
   await page.routeWebSocket(/.*/, () => {});
   await page.route(`${ORIGIN}/**`, (route) => {
@@ -155,7 +155,7 @@ async function open(window: { width: number; height: number }): Promise<Page> {
       });
     if (path === "/view.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, path.split("/").pop() ?? "");
+    const font = join(sora, path.split("/").pop() ?? "");
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     // The Bot's computer in the API. Only these addresses answer, so a call that slipped back to

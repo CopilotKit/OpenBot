@@ -55,7 +55,7 @@ export function UnavailablePage({
     <div className="flex min-h-dvh w-full flex-1 flex-col items-center justify-center in-data-[slot=sidebar-inset]:min-h-0">
       <div className="-mt-12 flex w-full max-w-82 flex-col items-center p-4">
         <AgentOrb size="56px" />
-        <h1 className="mt-8 text-center font-medium text-2xl tracking-tight">
+        <h1 className="mt-8 text-center font-medium text-2xl tracking-tighter">
           Back in a moment
         </h1>
         <p
@@ -65,7 +65,7 @@ export function UnavailablePage({
           {said}
         </p>
         <Button
-          className="mt-8 h-10 w-full tracking-tight"
+          className="mt-8 h-10 w-full tracking-tighter"
           disabled={trying}
           onClick={() => void tryAgain()}
           size="lg"

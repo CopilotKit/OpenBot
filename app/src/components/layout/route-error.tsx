@@ -90,7 +90,7 @@ function RouteErrorScreen({
     <div className="flex min-h-dvh w-full flex-1 flex-col items-center justify-center in-data-[slot=sidebar-inset]:min-h-0">
       <div className="-mt-12 flex w-full max-w-82 flex-col items-center p-4 text-center">
         <AgentOrb size="56px" />
-        <h1 className="mt-8 text-balance font-medium text-2xl tracking-tight">
+        <h1 className="mt-8 text-balance font-medium text-2xl tracking-tighter">
           {chunk ? "This page didn't load" : "Something went wrong"}
         </h1>
         <p className="mt-3 text-balance text-muted-foreground text-sm">
@@ -99,7 +99,7 @@ function RouteErrorScreen({
             : "OpenBot ran into a problem showing this page. Reload to try again."}
         </p>
         <Button
-          className="mt-8 h-10 w-full tracking-tight"
+          className="mt-8 h-10 w-full tracking-tighter"
           onClick={() => window.location.reload()}
           size="lg"
         >
@@ -117,7 +117,7 @@ function RouteErrorScreen({
         </section>
         <div className="mt-3 flex w-full flex-col gap-2">
           <Button
-            className="h-10 w-full tracking-tight"
+            className="h-10 w-full tracking-tighter"
             onClick={async () => {
               try {
                 await navigator.clipboard.writeText(details);
@@ -139,7 +139,7 @@ function RouteErrorScreen({
           ) : null}
           {logFolder ? (
             <Button
-              className="h-10 w-full tracking-tight"
+              className="h-10 w-full tracking-tighter"
               disabled={openLogs.isPending}
               onClick={() => openLogs.mutate()}
               size="lg"
