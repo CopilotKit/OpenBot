@@ -53,9 +53,18 @@ const page = createRoute({
   component: () => <p data-stub-page="">The page</p>,
 } as never) as unknown as AnyRoute;
 
+// Any other address the test opens (a section with no panel, such as /routines) is the same stub page.
+const other = createRoute({
+  getParentRoute: () => app,
+  path: "$",
+  component: () => <p data-stub-page="">The page</p>,
+} as never) as unknown as AnyRoute;
+
 const router = createRouter({
   history: createBrowserHistory(),
-  routeTree: root.addChildren([authed.addChildren([app.addChildren([page])])]),
+  routeTree: root.addChildren([
+    authed.addChildren([app.addChildren([page, other])]),
+  ]),
   context: { queryClient },
 });
 

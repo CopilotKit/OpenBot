@@ -12,7 +12,11 @@ import {
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { wasSignedIn } from "@/lib/auth/was-signed-in";
-import { isNavigationLink, navigationFor } from "@/lib/navigation";
+import {
+  beforeCapabilities,
+  isNavigationLink,
+  navigationFor,
+} from "@/lib/navigation";
 import {
   CONVERSATIONS,
   type SectionId,
@@ -31,10 +35,14 @@ import { skinDrawsOwnFrame } from "@/skins/types";
 const FRAMELESS = ["/onboarding", "/terms", "/sign-in", "/admin", "/settings"];
 
 /*
- * The sections as the main menu lists them before anything about the person is known: the team
- * edition's, with no question asked of the server. A skeleton is drawn while those questions run.
+ * The sections as the real strip draws them on its first render, before the edition and the role
+ * are known (`useNavigationItems`): without Memory, which the personal edition never has, so a
+ * `/memory` that is no section yet opens on Conversations here as it does there. No question is
+ * asked of the server. A skeleton is drawn while those questions run.
  */
-const SECTION_ROUTES: readonly SectionRoute[] = navigationFor(undefined)
+const SECTION_ROUTES: readonly SectionRoute[] = beforeCapabilities(
+  navigationFor(undefined),
+)
   .filter(isNavigationLink)
   .filter((item) => item.section === "primary")
   .map((item) => ({ id: item.id, to: item.to }));
@@ -79,7 +87,7 @@ function StripRow() {
 }
 
 /**
- * One conversation that hasn't loaded. The classes are `ChannelRow`'s (channel.tsx) and
+ * One conversation that hasn't loaded. The classes are `ChannelRow`'s (conversations-panel.tsx) and
  * `ChannelItemContent`'s, which need the conversation itself: a 32px avatar beside two lines.
  */
 function ConversationRow({ index }: { index: number }) {

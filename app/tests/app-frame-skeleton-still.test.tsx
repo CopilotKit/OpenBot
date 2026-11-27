@@ -247,7 +247,8 @@ function recordFrames() {
     const element = document.querySelector(selector);
     if (!element) return null;
     const { x, y, width, height } = element.getBoundingClientRect();
-    return { x, y, width, height };
+    // The real frame keeps a panel with no area where the section has none; it holds nothing.
+    return width === 0 && height === 0 ? null : { x, y, width, height };
   };
   const tick = () => {
     const inset = boxOf('[data-slot="sidebar-inset"]');
@@ -298,6 +299,7 @@ async function open(
   panel: Panel,
   width: Width,
   trail: Trail,
+  path: string,
 ): Promise<Page> {
   const browser = browsers.get(engine);
   if (!browser) throw new Error(`no ${engine}`);
@@ -330,54 +332,72 @@ async function open(
       body: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>${css}</style></head><body><div id="root"></div><script type="module" src="/screens.js"></script></body></html>`,
     });
   });
-  await page.goto(`${ORIGIN}/`);
+  await page.goto(`${ORIGIN}${path}`);
   return page;
 }
 
+/** Waits until the server has been asked for what the page needs, or says which ask never came. */
+async function heardFrom(trail: Trail, path: string) {
+  // Routines asks for no conversations: the frame's panel, which would, is not there.
+  const needed: (keyof Trail)[] =
+    path === "/" ? ["person", "conversations"] : ["person"];
+  const deadline = Date.now() + 15_000;
+  for (const key of needed) {
+    while (!trail[key]) {
+      if (Date.now() > deadline)
+        throw new Error(`the page never asked for the ${key}`);
+      await new Promise((done) => setTimeout(done, 25));
+    }
+  }
+}
+
+/** `/` has a panel (Conversations'); `/routines` is a section with none. */
+const PATHS = ["/", "/routines"] as const;
+
 describe.skipIf(!asked)("The frame drawn during the sign-in checks", () => {
   for (const engine of engines)
-    for (const width of WIDTHS)
-      for (const panel of PANELS)
-        for (const theme of THEMES)
-          test(`lines up with the real one, in ${engine}, ${width}px, panel ${panel}, ${theme}`, async () => {
-            const trail: Trail = { person: false, conversations: false };
-            const page = await open(engine, theme, panel, width, trail);
-            const name = `app-frame-${engine}-${width}-${panel}-${theme}`;
-            try {
-              await page.locator('[aria-busy="true"]').waitFor();
-              if (shots) {
-                mkdirSync(shots, { recursive: true });
-                await page.screenshot({
-                  path: join(shots, `${name}-skeleton.png`),
-                });
+    for (const path of PATHS)
+      for (const width of WIDTHS)
+        for (const panel of PANELS)
+          for (const theme of THEMES)
+            test(`lines up with the real one at ${path}, in ${engine}, ${width}px, panel ${panel}, ${theme}`, async () => {
+              const trail: Trail = { person: false, conversations: false };
+              const page = await open(engine, theme, panel, width, trail, path);
+              const name = `app-frame-${engine}-${path === "/" ? "home" : path.slice(1)}-${width}-${panel}-${theme}`;
+              try {
+                await page.locator('[aria-busy="true"]').waitFor();
+                if (shots) {
+                  mkdirSync(shots, { recursive: true });
+                  await page.screenshot({
+                    path: join(shots, `${name}-skeleton.png`),
+                  });
+                }
+                await page.locator("[data-stub-page]").waitFor();
+                await heardFrom(trail, path);
+                await still(page);
+                if (shots)
+                  await page.screenshot({
+                    path: join(shots, `${name}-settled.png`),
+                  });
+                const frames = await framesOf(page);
+                // Both frames were drawn, the skeleton first, or there is nothing to compare.
+                expect(frames[0]?.skeleton).toBe(true);
+                expect(frames.at(-1)?.skeleton).toBe(false);
+                const first = frames[0];
+                if (!first?.inset) throw new Error("no frame was recorded");
+                // On a phone the sidebar is a sheet nobody has opened, so only the page's panel shows.
+                const seen = (frame: Frame) =>
+                  width === 390
+                    ? { inset: frame.inset }
+                    : {
+                        strip: frame.strip,
+                        panel: frame.panel,
+                        inset: frame.inset,
+                      };
+                for (const frame of frames)
+                  expect(seen(frame)).toEqual(seen(first));
+              } finally {
+                await page.close();
               }
-              await page.locator("[data-stub-page]").waitFor();
-              while (!(trail.person && trail.conversations))
-                await new Promise((done) => setTimeout(done, 25));
-              await still(page);
-              if (shots)
-                await page.screenshot({
-                  path: join(shots, `${name}-settled.png`),
-                });
-              const frames = await framesOf(page);
-              // Both frames were drawn, the skeleton first, or there is nothing to compare.
-              expect(frames[0]?.skeleton).toBe(true);
-              expect(frames.at(-1)?.skeleton).toBe(false);
-              const first = frames[0];
-              if (!first?.inset) throw new Error("no frame was recorded");
-              // On a phone the sidebar is a sheet nobody has opened, so only the page's panel shows.
-              const seen = (frame: Frame) =>
-                width === 390
-                  ? { inset: frame.inset }
-                  : {
-                      strip: frame.strip,
-                      panel: frame.panel,
-                      inset: frame.inset,
-                    };
-              for (const frame of frames)
-                expect(seen(frame)).toEqual(seen(first));
-            } finally {
-              await page.close();
-            }
-          }, 60_000);
+            }, 60_000);
 });
