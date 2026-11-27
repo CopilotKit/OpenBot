@@ -601,3 +601,34 @@ test("nothing in the early history can be pressed while the replay runs", async 
     agents.setMessages = original;
   }
 }, 10_000);
+
+/*
+ * One place stops every renderer from acting on the stored copy: the message list is inert while
+ * the join replays, whatever a surface in it would do when pressed. It ends with the replay.
+ */
+test("the stored copy can't be acted on at all while the replay runs", async () => {
+  const turn = turns[0];
+  if (!turn) throw new Error("No turn");
+  script = replaying(turn.replay());
+  storing(turn.stored);
+  roster();
+
+  const view = opened();
+  await sleep(200);
+
+  expect(replayEnded).toBe(false);
+  const list = view.container.querySelector("[data-transcript-column]");
+  if (!list) throw new Error("No message list");
+  expect(list.hasAttribute("inert")).toBe(true);
+
+  await waitFor(() => expect(replayEnded).toBe(true), { timeout: 4000 });
+  await waitFor(
+    () =>
+      expect(
+        view.container
+          .querySelector("[data-transcript-column]")
+          ?.hasAttribute("inert"),
+      ).toBe(false),
+    { timeout: 4000 },
+  );
+}, 10_000);

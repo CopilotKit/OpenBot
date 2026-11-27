@@ -223,6 +223,8 @@ type ChatTranscriptProps = {
   onSendQueuedNow?: (id: string) => void;
   /** History has been asked for and has not arrived. Drawn only when there is nothing else to draw. */
   restoring?: boolean;
+  /** Nothing in the drawn messages can be pressed, focused or reached by a renderer; see `ChannelChat`. */
+  inert?: boolean;
   /**
    * Why the last turn ended without an answer, if it did.
    *
@@ -2245,6 +2247,7 @@ export function ChatTranscript({
   onSendQueuedNow,
   queued = EMPTY_QUEUE,
   restoring = false,
+  inert = false,
   stopped,
   refusals = NO_REFUSALS,
   stoppedNotice,
@@ -2807,6 +2810,7 @@ export function ChatTranscript({
                   aria-busy={busy}
                   className={cn("py-6", column)}
                   data-transcript-column
+                  inert={inert}
                   spacerClassName="order-2"
                 >
                   {/*
