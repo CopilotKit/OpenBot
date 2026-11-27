@@ -39,8 +39,9 @@
   --opendots-hover: var(--accent);
   --opendots-active: var(--sidebar-accent);
   --opendots-active-ink: var(--sidebar-accent-foreground);
-  --opendots-tag: var(--secondary);
-  --opendots-tag-ink: var(--secondary-foreground);
+  /* The Bot's name under a conversation, and a count: quiet text, no chip of its own. */
+  --opendots-tag: var(--sidebar);
+  --opendots-tag-ink: var(--muted-foreground);
   --opendots-nav-ink: var(--muted-foreground);
   --opendots-dot-ink: var(--sidebar-foreground);
   --opendots-new-chat-ink: var(--sidebar-foreground);
