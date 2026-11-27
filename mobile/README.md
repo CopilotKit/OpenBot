@@ -163,8 +163,9 @@ read your `.env`. Expo holds `EXPO_PUBLIC_SERVER_URL` for every environment, wit
 Try every update on a real phone with a `preview` build before it goes further.
 
 Do not publish to `production` from your machine. An update reaches every installed app the next
-time it starts. The workflow that publishes to `production`, with a reviewer, is not set up yet.
+time it starts. Publish it with the **OpenBot Mobile update** workflow
+(`.github/workflows/mobile-update.yml`), run by hand from the Actions tab: pick the channel and say
+what changed. A `preview` update starts from any branch. A `production` update runs in the
+`mobile-release` environment, so a reviewer approves it, and only `main` and `mobile` may start it.
 
 A `development` build takes no updates. It loads its JavaScript from your machine.
-
-Not set up yet: the workflow that publishes updates.

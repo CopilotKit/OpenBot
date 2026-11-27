@@ -1,0 +1,76 @@
+name: OpenBot Mobile update
+
+# Publishes an update of OpenBot Mobile (mobile/) with Expo's update service, EAS Update: new
+# JavaScript for the apps people already have installed, with no store release. An app looks for an
+# update when it starts, downloads it in the background, and runs it the next time it starts.
+# mobile/README.md says which apps an update reaches: those on the same channel, built with the
+# same native code (the runtime version).
+#
+# Run by hand. A preview update goes to the `preview` channel, which only the team's preview builds
+# read, and starts from main or from any branch of this repository. Try it on a real phone before
+# it goes further. A production update reaches every app installed from the stores, so it runs in
+# the `mobile-release` environment: a reviewer approves the run, and only main and mobile may start
+# it.
+#
+# Unlike a build, the update's JavaScript is bundled here, on GitHub's machine, and then uploaded
+# to Expo. Its variables (EXPO_PUBLIC_SERVER_URL) come from the Expo environment of the same name,
+# not from this repository. EXPO_TOKEN is the token of a robot user of the Expo organization, the
+# same one the build workflow uses in each environment.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: The channel to publish to. A build reads the channel mobile/eas.json gives it.
+        type: choice
+        options:
+          - preview
+          - production
+        default: preview
+      message:
+        description: What changed, as expo.dev lists it with the update.
+        type: string
+        required: true
+
+permissions: {}
+
+# Two updates to the same channel never run at once: the later one waits, and then becomes the
+# newest update on the channel.
+concurrency:
+  group: mobile-update-${{ inputs.channel }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Publish the update on Expo
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.channel == 'production' && 'mobile-release' || 'mobile-preview' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No cache, here or for the EAS CLI below: this job bundles what installed apps will run, so
+      # it reads nothing another run could have written.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      # The bundle is made from the app's own packages, installed from its reviewed lockfile as CI
+      # installs them.
+      - run: npm ci --prefix mobile --ignore-scripts
+      - uses: expo/expo-github-action@5273c2136bd09c2a341fe3340d3e767ce5a13015 # 9.0.2
+        with:
+          eas-version: 27.11.0
+          eas-cache: false
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+      # The channel names its Expo environment too: preview and production each have one.
+      - name: Publish the update
+        working-directory: mobile
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          eas update --channel "$CHANNEL" --environment "$CHANNEL" --message "$MESSAGE" --platform all --non-interactive
