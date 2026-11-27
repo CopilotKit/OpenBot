@@ -4,6 +4,7 @@ import { BotLookProvider } from "../components/agents/bot-look";
 import { HeldOutGate } from "../components/auth/company-sign-in-page";
 import { OpenFromApp } from "../components/desktop/open-from-app";
 import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
+import { AppFrameSkeleton } from "../components/layout/app-frame-skeleton";
 import { CommandMenu } from "../components/navigation/command-menu";
 import { NewOrganizationDialog } from "../components/organizations/new-organization-dialog";
 import { OrganizationBoundary } from "../components/organizations/organization-boundary";
@@ -111,6 +112,13 @@ export const Route = createFileRoute("/_authed")({
     // Only somebody who got past every check is remembered, so the next visit may draw the frame while they run.
     if (!preload) rememberSignedIn();
   },
+  /*
+   * Somebody who was signed in sees the app's frame from the main script's arrival, not a blank page, while the
+   * checks above run. It draws nothing for a visitor who never signed in (the skeleton reads the flag itself).
+   */
+  pendingComponent: AppFrameSkeleton,
+  pendingMs: 0,
+  pendingMinMs: 0,
   /*
    * A browser opened at the address of OpenBot on one computer is refused on the first question,
    * who is signed in: OpenBot answers only its own app there. It is told to open the app instead.

@@ -7,16 +7,31 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
+  type AnyRoute,
   createMemoryHistory,
+  createRoute,
   createRootRoute,
+  createRootRouteWithContext,
   createRouter,
+  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { AppFrameSkeleton } from "@/components/layout/app-frame-skeleton";
+import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
+import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
+import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import { forgetSignedIn, rememberSignedIn } from "@/lib/auth/was-signed-in";
+import { ReportedErrorComponent } from "@/lib/error-reporting";
+import { setCurrentOrganization } from "@/lib/organizations/current";
+import { queryClient } from "@/query-client";
+import type { RouterContext } from "@/router-context";
+import { Route as AuthedRoute } from "@/routes/_authed";
+import { Route as SignRoute } from "@/routes/sign";
 import { clearSkin, setSkin } from "@/skins/store";
+import { nativeFetch, pageFetch } from "./page-fetch";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -24,22 +39,103 @@ import { settleReactWork } from "./settle-react-work";
  * drawn at whatever address is being opened, so each test opens the skeleton at one.
  */
 
-beforeAll(() => {
-  if (!GlobalRegistrator.isRegistered) {
-    GlobalRegistrator.register({ url: "http://localhost/" });
+const NativeResponse = globalThis.Response;
+let openbot: ReturnType<typeof Bun.serve>;
+let signedIn: boolean;
+/** While set, the answer to `people/me` waits for it: the sign-in checks are running. */
+let holdPerson: Promise<void> | null;
+
+async function answer(request: Request): Promise<Response> {
+  const path = new URL(request.url).pathname;
+  if (path === "/api/v2/organizations/default/deployment")
+    return NativeResponse.json(
+      GetDeploymentResponse.parse({
+        ...getGetDeploymentResponseMock(),
+        edition: "team",
+        authProviders: ["google"],
+        hostedSignIn: true,
+        ssoConfigured: false,
+        ssoRequired: false,
+      }),
+    );
+  if (!signedIn)
+    return NativeResponse.json(
+      { status: 401, code: "UNAUTHENTICATED", detail: "Sign in to OpenBot." },
+      { status: 401, headers: { "content-type": "application/problem+json" } },
+    );
+  if (path === "/api/v2/people/me/organizations")
+    return NativeResponse.json(
+      ListOrganizationsResponse.parse({
+        organizations: [
+          {
+            id: "org_acme",
+            slug: "acme",
+            name: "Acme",
+            role: "member",
+            active: true,
+            personal: false,
+          },
+        ],
+        canCreate: false,
+        nextCursor: null,
+      }),
+    );
+  if (path === "/api/v2/organizations/org_acme/people/me") {
+    await holdPerson;
+    return NativeResponse.json({
+      person: {
+        id: "bea",
+        email: "bea@example.com",
+        name: "Bea Lund",
+        needsName: false,
+        image: null,
+        role: "member",
+        onboarding: null,
+      },
+      openbotVersion: null,
+    });
   }
+  if (path === "/api/v2/organizations/org_acme/shortened-tool-names")
+    return NativeResponse.json({ tools: [] });
+  if (path === "/api/v2/organizations/org_acme/people/me/terms")
+    return NativeResponse.json({
+      current: null,
+      accepted: null,
+      acceptanceNeeded: false,
+    });
+  return NativeResponse.json(
+    { status: 404, code: "NOT_FOUND", detail: "Not found." },
+    { status: 404, headers: { "content-type": "application/problem+json" } },
+  );
+}
+
+beforeAll(() => {
+  openbot = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: answer });
+  GlobalRegistrator.register({ url: `http://127.0.0.1:${openbot.port}/` });
 });
 beforeEach(() => {
+  signedIn = true;
+  holdPerson = null;
+  setCurrentOrganization(undefined);
+  queryClient.clear();
+  localStorage.clear();
+  sessionStorage.clear();
+  globalThis.fetch = pageFetch();
   rememberSignedIn();
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  await settleReactWork();
   forgetSignedIn();
   clearSkin();
+  queryClient.clear();
+  globalThis.fetch = nativeFetch;
 });
 afterAll(async () => {
   await settleReactWork();
-  if (GlobalRegistrator.isRegistered) GlobalRegistrator.unregister();
+  await GlobalRegistrator.unregister();
+  openbot.stop(true);
+  setCurrentOrganization("default");
 });
 
 /** The skeleton as the whole app, at `path`, once the router has settled there. */
@@ -88,4 +184,130 @@ test("a flag that was never set renders nothing", async () => {
   forgetSignedIn();
   const view = await openAt("/");
   expect(view.container.innerHTML).toBe("");
+});
+
+/**
+ * The real sign-in gate, with its pending options, in front of two stub pages and a stub sign-in
+ * screen. The gate's component is a bare outlet, so the only frame in the document is the skeleton.
+ */
+function openApp() {
+  const root = createRootRouteWithContext<RouterContext>()({
+    component: Outlet,
+  });
+  const gate = AuthedRoute.options as unknown as Record<string, unknown>;
+  const authed = createRoute({
+    id: "_authed",
+    getParentRoute: () => root,
+    component: Outlet,
+    ...{
+      beforeLoad: gate.beforeLoad,
+      errorComponent: gate.errorComponent,
+      pendingComponent: gate.pendingComponent,
+      pendingMs: gate.pendingMs,
+      pendingMinMs: gate.pendingMinMs,
+    },
+  } as never) as unknown as AnyRoute;
+  const page = (path: string, name: string) =>
+    createRoute({
+      getParentRoute: () => authed,
+      path,
+      component: () => <p>{name}</p>,
+    } as never) as unknown as AnyRoute;
+  const sign = SignRoute.options as unknown as Record<string, unknown>;
+  const signIn = createRoute({
+    getParentRoute: () => root,
+    path: "/sign",
+    ...{
+      validateSearch: sign.validateSearch,
+      beforeLoad: sign.beforeLoad,
+      component: sign.component,
+    },
+  } as never) as unknown as AnyRoute;
+  const router = createRouter({
+    routeTree: root.addChildren([
+      authed.addChildren([page("/", "Page A"), page("/other", "Page B")]),
+      signIn,
+    ]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    context: { queryClient },
+    defaultErrorComponent: ReportedErrorComponent,
+  });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+  return { view, router };
+}
+
+const insetOf = (view: { container: HTMLElement }) =>
+  view.container.querySelector('[data-slot="sidebar-inset"]');
+
+test("a returning person sees the frame while the checks run", async () => {
+  let release = () => {};
+  holdPerson = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { view } = openApp();
+  await waitFor(() => expect(stripOf(view)).not.toBeNull());
+  expect(insetOf(view)).not.toBeNull();
+  expect(view.queryByText("Page A")).toBeNull();
+
+  release();
+  await view.findByText("Page A", {}, { timeout: 5000 });
+  expect(stripOf(view)).toBeNull();
+});
+
+test("a visitor never signed in sees no frame", async () => {
+  forgetSignedIn();
+  signedIn = false;
+  let release = () => {};
+  holdPerson = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { view } = openApp();
+  await settleReactWork();
+  expect(stripOf(view)).toBeNull();
+  expect(insetOf(view)).toBeNull();
+
+  release();
+  await view.findByRole("heading", { name: /sign in/i }, { timeout: 5000 });
+  expect(stripOf(view)).toBeNull();
+  expect(insetOf(view)).toBeNull();
+});
+
+test("a page change never shows the frame skeleton", async () => {
+  /*
+   * Every time the skeleton's frame is added to the document, however briefly: only the skeleton's
+   * page-area is marked busy, so a mount that a render would have shown and removed in one tick is
+   * still counted.
+   */
+  let mounts = 0;
+  const seen = new MutationObserver((records) => {
+    for (const record of records)
+      for (const node of record.addedNodes)
+        if (
+          node instanceof Element &&
+          (node.matches('[aria-busy="true"]') ||
+            node.querySelector('[aria-busy="true"]'))
+        )
+          mounts++;
+  });
+  // Watching from before the first render, so the first load's skeleton is counted too.
+  seen.observe(document.body, { childList: true, subtree: true });
+  const { view, router } = openApp();
+  // The first load of a returning person does draw it, which proves the observer sees a mount.
+  await view.findByText("Page A", {}, { timeout: 5000 });
+  expect(mounts).toBeGreaterThan(0);
+  await settleReactWork();
+
+  mounts = 0;
+  await router.navigate({ to: "/other" } as never);
+  await view.findByText("Page B", {}, { timeout: 5000 });
+  await router.navigate({ to: "/" } as never);
+  await view.findByText("Page A", {}, { timeout: 5000 });
+  await settleReactWork();
+  seen.disconnect();
+  expect(mounts).toBe(0);
+  expect(stripOf(view)).toBeNull();
 });
