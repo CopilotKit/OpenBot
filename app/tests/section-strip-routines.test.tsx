@@ -5,6 +5,7 @@ import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { personBody } from "./accounts-api";
 import { conversationPage } from "./conversations-api";
+import { still } from "./page-still";
 
 /**
  * On Routines, a section with no panel, the strip lights Routines, and it can always be chosen
@@ -437,7 +438,7 @@ describe.skipIf(!asked)("Routines on the strip", () => {
             await choose(page, "Chats");
             await choose(page, "Bots");
             await choose(page, "Routines");
-            await page.waitForTimeout(400);
+            await still(page);
             await page.screenshot({
               path: join(
                 shots,

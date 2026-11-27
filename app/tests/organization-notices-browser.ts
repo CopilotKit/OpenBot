@@ -36,6 +36,7 @@ import {
 } from "@/lib/api/generated/teams/teams.zod";
 import { personBody } from "./accounts-api";
 import { conversationPage, problemBody } from "./conversations-api";
+import { still } from "./page-still";
 
 export const asked = process.env.OPENBOT_APP_BROWSER === "1";
 export const shots = process.env.OPENBOT_APP_SHOTS;
@@ -601,7 +602,7 @@ export async function style(page: Page): Promise<void> {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(150);
+  await still(page);
 }
 
 /** Save the page as `<name>-<step>-<engine>-<width>-<theme>.png` when screenshots are asked for. */

@@ -21,6 +21,7 @@ import {
 } from "@/lib/api/generated/people/people.zod";
 import { movedElsewhereNoticeId } from "@/lib/moves/moved-elsewhere";
 import { personBody } from "./accounts-api";
+import { still } from "./page-still";
 
 /**
  * After a move to OpenBot Cloud, the person can tell where their Bots went and as whom they are
@@ -604,7 +605,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(page: Page, step: string, engine: string, theme: Theme) {

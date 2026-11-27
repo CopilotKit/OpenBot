@@ -8,6 +8,7 @@ import { compile } from "tailwindcss";
 import { getGetBotResponseMock } from "@/lib/api/generated/bots/bots.msw";
 import { personBody } from "./accounts-api";
 import { botGrantsBody } from "./bot-grants-api";
+import { still } from "./page-still";
 
 /**
  * A Bot that browses, and asks the person to take over its browser or for a password, on a phone and
@@ -405,7 +406,7 @@ async function style(page: Page) {
 async function shoot(page: Page, name: string) {
   await style(page);
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(400);
+  await still(page);
   if (!shots) return;
   mkdirSync(shots, { recursive: true });
   await page.screenshot({ path: join(shots, `${name}.png`) });

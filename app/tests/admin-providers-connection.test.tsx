@@ -27,6 +27,7 @@ import {
   MODEL_USAGE_PATH,
   overviewResponse,
 } from "./admin-settings-api";
+import { still } from "./page-still";
 
 /**
  * Admin → AI providers: an admin changes the organization's AI, disconnects it and connects another,
@@ -593,7 +594,7 @@ async function style(page: Page) {
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
   // A dialog scales in: looked at once it is still.
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Locator, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 import {
   answer,
   ORGANIZATION,
@@ -655,7 +656,7 @@ describe.skipIf(!asked)("each screen at every width and theme", () => {
             await look.act?.(page);
             // What opened after the first styling (a dialog, a list) is styled too.
             await restyle(page);
-            await page.waitForTimeout(400);
+            await still(page);
             const sideways = await page.evaluate(
               () =>
                 document.documentElement.scrollWidth > innerWidth ||

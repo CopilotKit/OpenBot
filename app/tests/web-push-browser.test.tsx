@@ -6,6 +6,7 @@ import { compile } from "tailwindcss";
 import { servedHeaders } from "../serve";
 import { ME_PATH, meResponse } from "./accounts-api";
 import { notificationsResponse } from "./notifications-api";
+import { still } from "./page-still";
 import {
   WEB_PUSH_KEY,
   WEB_PUSH_SUBSCRIPTIONS_PATH,
@@ -148,7 +149,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(400);
+  await still(page);
 }
 
 /** Every request the API was sent, as the server saw it. */

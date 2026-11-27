@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 import { screenLinkLooks } from "./screen-link-style";
 
 /**
@@ -207,7 +208,7 @@ async function open(
   });
   await page.evaluate(() => document.fonts.ready);
   // An approval card unfolds its answers as it opens; it is looked at once it has.
-  await page.waitForTimeout(400);
+  await still(page);
   return page;
 }
 
