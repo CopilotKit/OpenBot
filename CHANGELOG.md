@@ -3131,6 +3131,10 @@ to 1.88.0. AG-UI stays 1.0.2.
 - Setup's usage data checkbox stays where it is while the step's rows arrive.
 - Check again on Setup asks about a model key added a moment ago, where within ten seconds of the
   last check it still said the key hadn't been checked.
+- A Mastra Bot on a Gemini model through an OpenAI-compatible endpoint no longer fails when the
+  model makes a tool call. Gemini streams the call without the index the chat stream expects,
+  and the run failed before the call landed; the missing index is now filled in from the call's
+  place in the list.
 
 ## 1.0.3
 
