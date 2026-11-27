@@ -23,6 +23,7 @@ import { forgetSignedIn, rememberSignedIn } from "../lib/auth/was-signed-in";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { ReportedErrorComponent } from "../lib/error-reporting";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
+import { standingInWhileLoadingAgain } from "../lib/load-again";
 import { onboardingDestination } from "../lib/onboarding/destination";
 import { rememberInvitationLink } from "../lib/organizations/invitation-link";
 import { learnShortenedToolNames } from "../lib/plugins/tool-names";
@@ -115,8 +116,10 @@ export const Route = createFileRoute("/_authed")({
   /*
    * Somebody who was signed in sees the app's frame from the main script's arrival, not a blank page, while the
    * checks above run. It draws nothing for a visitor who never signed in (the skeleton reads the flag itself).
+   * While a page that stood in for the app ("Back in a moment", no organization) loads it again, that page is drawn
+   * instead, so it never gives way to the empty frame or a blank page (lib/load-again.ts).
    */
-  pendingComponent: AppFrameSkeleton,
+  pendingComponent: () => standingInWhileLoadingAgain() ?? <AppFrameSkeleton />,
   pendingMs: 0,
   pendingMinMs: 0,
   /*

@@ -7,7 +7,11 @@ import { CopilotKitMark } from "@/components/auth/provider-logo";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { hostedSignInAddress } from "@/lib/auth/hosted";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { IN_NONE } from "@/lib/organizations/in-no-organization";
+import { loadAgainWhenAnswered } from "@/lib/load-again";
+import {
+  IN_NONE,
+  inNoOrganization,
+} from "@/lib/organizations/in-no-organization";
 import { organizationKeys } from "@/lib/organizations/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -21,20 +25,31 @@ import { queryClient } from "@/query-client";
  * through OpenBot by CopilotKit is how a membership added there reaches this OpenBot, so that is offered first. Sign out
  * is always there.
  */
-export function NoOrganizationPage() {
+export function NoOrganizationPage({
+  tryingAgain = false,
+}: {
+  /** Drawn on its own while the app loads again after Try again (lib/load-again.ts): it says so, and can't be pressed. */
+  tryingAgain?: boolean;
+} = {}) {
   const router = useRouter();
   const signOut = useSignOut();
-  const [retrying, setRetrying] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const retrying = tryingAgain || pressed;
   const hosted =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
 
   const tryAgain = async () => {
-    setRetrying(true);
+    setPressed(true);
     try {
       await queryClient.invalidateQueries({ queryKey: organizationKeys.all });
-      await router.invalidate();
+      // This page stays up saying "Trying again…" until the app is ready, or stays as it is when they're still in none.
+      await loadAgainWhenAnswered({
+        router,
+        stays: inNoOrganization,
+        meanwhile: <NoOrganizationPage tryingAgain />,
+      });
     } finally {
-      setRetrying(false);
+      setPressed(false);
     }
   };
 
