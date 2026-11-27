@@ -35,6 +35,11 @@ import { still } from "./page-still";
  * same few seconds of nothing. It is read the same way, from home and from a new conversation with
  * the Bot in To:, the two places the tasks are offered.
  *
+ * A first message to two Bots in To: starts a group, and the new conversation showed nothing while
+ * the group was made and the message sent; the group then opened on the message alone until its
+ * next read found a Bot's run started. It is read the same way, through the group's own
+ * conversation, to the first Bot's first words in its line.
+ *
  *   OPENBOT_APP_BROWSER=1 OPENBOT_APP_ENGINES=chromium,webkit bun test app/tests/first-message-thinking.test.tsx
  *
  * Chromium by default; OPENBOT_APP_ENGINES=chromium,webkit adds WebKit, the engine OpenBot
@@ -85,6 +90,26 @@ const BOT = {
   packageBotId: "personal-assistant",
 };
 
+/** A second Bot, picked into To: beside the first to make a group. */
+const OTHER_BOT = {
+  ...BOT,
+  id: "moon-bot",
+  name: "Moon Reader",
+  title: "Almanac keeper",
+  packageBotId: null,
+};
+
+/** A line of a group conversation as the API lists it. */
+type GroupLine = {
+  id: string;
+  role: "person" | "bot";
+  personId: string | null;
+  botId: string | null;
+  text: string;
+  status: string;
+  createdAt: string;
+};
+
 /** How long each step the server takes is held, in milliseconds; null holds it until released. */
 type Pace = {
   /** OpenBot picking the Bot for a message nobody was named for. */
@@ -117,6 +142,8 @@ let made = 0;
 let refuseCreate = false;
 /** The conversations made, by id, with the thread each one's run answers on. */
 const conversations = new Map<string, { threadId: string; ran: boolean }>();
+/** The group conversations made, by id, with their lines, oldest first. */
+const groups = new Map<string, GroupLine[]>();
 
 function wait(step: keyof Pace): Promise<void> {
   const ms = pace[step];
@@ -159,6 +186,28 @@ function run(threadId: string, runId: string): Response {
   });
 }
 
+/**
+ * A group's turn on a person's message, as the server runs it with nobody's browser attached: the
+ * first Bot's line is written as running when its run starts, and its words go into that line. Only
+ * the first Bot is played: its first words are where the test stops reading.
+ */
+async function groupTurn(lines: GroupLine[], messageId: string) {
+  await wait("runStarts");
+  const line: GroupLine = {
+    id: `${messageId}:${BOT.id}`,
+    role: "bot",
+    personId: "dana",
+    botId: BOT.id,
+    text: "",
+    status: "running",
+    createdAt: new Date().toISOString(),
+  };
+  lines.push(line);
+  await wait("firstWords");
+  line.text = ANSWER;
+  line.status = "completed";
+}
+
 /** What the server answers for the API and the runtime. */
 async function answer(request: Request, path: string): Promise<Response> {
   const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -188,6 +237,7 @@ async function answer(request: Request, path: string): Promise<Response> {
     });
   }
   if (path === CONVERSATIONS_PATH && request.method === "POST") {
+    const body = (await request.json()) as { group?: boolean };
     await wait("create");
     if (refuseCreate)
       return Response.json(
@@ -200,7 +250,50 @@ async function answer(request: Request, path: string): Promise<Response> {
     made += 1;
     const id = `conversation-${made}`;
     conversations.set(id, { threadId: `thread-${made}`, ran: false });
+    if (body.group) groups.set(id, []);
     return json({ conversation: conversationBody(id) }, 201);
+  }
+  const groupRead = path.match(/\/conversations\/([^/]+)\/(members|messages)$/);
+  const lines = groupRead ? groups.get(groupRead[1]) : undefined;
+  if (groupRead && lines) {
+    if (groupRead[2] === "members")
+      return json({
+        members: [
+          ...[BOT, OTHER_BOT].map((bot) => ({
+            kind: "bot",
+            id: bot.id,
+            name: bot.name,
+          })),
+          {
+            kind: "person",
+            id: "dana",
+            name: "Dana Reyes",
+            email: "dana.reyes@northwind.example",
+            creator: true,
+          },
+        ],
+        nextCursor: null,
+      });
+    if (request.method === "POST") {
+      // Taken, and answered by the server in its own time.
+      const body = (await request.json()) as { id: string; text: string };
+      lines.push({
+        id: body.id,
+        role: "person",
+        personId: "dana",
+        botId: null,
+        text: body.text,
+        status: "completed",
+        createdAt: new Date().toISOString(),
+      });
+      void groupTurn(lines, body.id);
+      return json({ id: body.id, queued: true }, 202);
+    }
+    // Newest first, as the API lists them.
+    return json({
+      messages: lines.map((line) => ({ ...line })).reverse(),
+      nextCursor: null,
+    });
   }
   const conversation = path.match(/\/conversations\/([^/]+)$/);
   if (conversation && conversations.has(conversation[1]))
@@ -237,8 +330,10 @@ async function answer(request: Request, path: string): Promise<Response> {
     });
   }
   if (path === `${ORGANIZATION_PATH}/bots`)
-    return json({ bots: [BOT], nextCursor: null });
+    return json({ bots: [BOT, OTHER_BOT], nextCursor: null });
   if (path === `${ORGANIZATION_PATH}/bots/${BOT.id}`) return json({ bot: BOT });
+  if (path === `${ORGANIZATION_PATH}/bots/${OTHER_BOT.id}`)
+    return json({ bot: OTHER_BOT });
   if (/\/bots\/[^/]+\/grants$/.test(path)) return json(botGrantsBody());
   if (/\/bots\/[^/]+\/components$/.test(path))
     return json({ components: [], nextCursor: null });
@@ -273,10 +368,11 @@ async function answer(request: Request, path: string): Promise<Response> {
 }
 
 function conversationBody(id: string) {
+  const group = groups.has(id);
   return {
     id,
-    name: BOT.name,
-    botIds: [BOT.id],
+    name: group ? `${BOT.name}, ${OTHER_BOT.name}` : BOT.name,
+    botIds: group ? [BOT.id, OTHER_BOT.id] : [BOT.id],
     threadId: conversations.get(id)?.threadId ?? `thread-${id}`,
     active: true,
     lastMessageAt: null,
@@ -360,6 +456,7 @@ async function stylesheet(): Promise<string> {
     "routes/_authed/_app/start.$startId.tsx",
     "routes/_authed/_app/channel/new.tsx",
     "routes/_authed/_app/channel/$channelId.tsx",
+    "routes/_authed/_app/group/$channelId.tsx",
   ].flatMap((file) =>
     readFileSync(join(APP, "src", file), "utf8").split(/[\s"'`{}]+/),
   );
@@ -505,9 +602,10 @@ async function watchFrames(page: Page, by: By) {
             line.textContent?.trim() === "Thinking" &&
             line.getClientRects().length > 0,
         );
-        const words = [...document.querySelectorAll('[role="log"]')].some(
-          (log) => log.textContent?.includes(firstWord),
-        );
+        // A conversation with one Bot writes its words into its log; a group, into the Bot's line.
+        const words = [
+          ...document.querySelectorAll('[role="log"], [data-speaker]'),
+        ].some((log) => log.textContent?.includes(firstWord));
         watch.frames.push({ at, path: location.pathname, thinking, words });
         requestAnimationFrame(frame);
       };
@@ -533,6 +631,24 @@ async function sendWatched(page: Page, by: By) {
   await page.keyboard.press("Enter");
 }
 
+/** The Bot's words, once drawn: in a conversation's log, or in a group's line for that Bot. */
+function answerShown(page: Page) {
+  return page
+    .locator('[role="log"], [data-speaker]')
+    .filter({ hasText: ANSWER });
+}
+
+/** Pick a second Bot into To: beside the first, which makes the conversation a group. */
+async function addBot(page: Page, name: string) {
+  await page.getByPlaceholder("Add another Bot for a group…").click();
+  await page.keyboard.type(name);
+  await page.getByRole("option", { name }).click();
+  await page
+    .locator('[data-slot="conversation-header"]')
+    .getByText(name)
+    .waitFor();
+}
+
 /** Send a first message as `sendWatched` does, without watching. */
 async function send(page: Page, by: By) {
   if (by === "starter") {
@@ -545,10 +661,7 @@ async function send(page: Page, by: By) {
 
 /** Every frame read since Send, once the Bot's words are drawn; and when Send was. */
 async function framesToWords(page: Page) {
-  await page
-    .getByRole("log")
-    .filter({ hasText: ANSWER })
-    .waitFor({ timeout: 30_000 });
+  await answerShown(page).waitFor({ timeout: 30_000 });
   // Three frames more, so the line is seen to go once the words are there.
   const read = await page.evaluate(
     () =>
@@ -606,26 +719,39 @@ function read({ frames, sent }: { frames: Frame[]; sent: number }) {
   };
 }
 
-/** Where a first message is sent from, and the path it is sent on. */
-const PLACES = [
+/**
+ * Where a first message is sent from, and the path it is sent on. A second Bot picked into To:
+ * (`adds`) makes it a group's first message, which opens the group's own conversation.
+ */
+const PLACES: readonly { place: string; path: string; adds?: string }[] = [
   { place: "home", path: "/" },
   { place: "new-conversation", path: "/channel/new" },
   {
     place: "new-conversation-with-a-bot",
     path: `/channel/new?agent=${BOT.id}`,
   },
-] as const;
+  {
+    place: "new-conversation-with-two-bots",
+    path: `/channel/new?agent=${BOT.id}`,
+    adds: OTHER_BOT.name,
+  },
+];
 
 /**
  * Every way a first message goes: written, from each place; and a starter task, from each place
- * that offers them (a new conversation offers them for the Bot in To:, so not with nobody there).
+ * that offers them (a new conversation offers them for the one Bot in To:, so not with nobody
+ * there, nor to a group).
  */
 const SENDS = [
   ...PLACES.map((where) => ({ ...where, by: "typing" as const })),
-  ...PLACES.filter(({ place }) => place !== "new-conversation").map(
-    (where) => ({ ...where, by: "starter" as const }),
-  ),
+  ...PLACES.filter(
+    ({ place, adds }) => place !== "new-conversation" && !adds,
+  ).map((where) => ({ ...where, by: "starter" as const })),
 ];
+
+/** The conversation a first message opens: a group's, for one sent to two Bots. */
+const OPENS = (adds: string | undefined) =>
+  adds ? /\/group\/conversation-/ : /\/channel\/conversation-/;
 
 /** What a send is called in a test's name and a screenshot's. */
 const named = ({ place, by }: (typeof SENDS)[number]) =>
@@ -641,15 +767,14 @@ describe.skipIf(!asked)(
           const page = await open(engine, sent.path);
           try {
             await still(page);
+            if (sent.adds) await addBot(page, sent.adds);
             // Whatever the page fetched while it was open has arrived, as it has by the time
             // somebody has written a message. What it did not ask for, Send has to fetch.
             while (chunks.sent < chunks.asked)
               await new Promise((done) => setTimeout(done, 50));
             await sendWatched(page, sent.by);
             const seen = read(await framesToWords(page));
-            expect(new URL(page.url()).pathname).toStartWith(
-              "/channel/conversation-",
-            );
+            expect(new URL(page.url()).pathname).toMatch(OPENS(sent.adds));
             expect(seen.wordsDrawn).toBe(true);
             expect(seen.shownAfterMs).not.toBeNull();
             expect(
@@ -724,6 +849,7 @@ describe.skipIf(!asked || !shots)(
               const name = (step: string) =>
                 `first-message-thinking-${named(sent).replaceAll(" ", "-")}-${step}-${engine}-${width}-${theme}`;
               try {
+                if (sent.adds) await addBot(page, sent.adds);
                 await shoot(page, name("1-before"));
                 await send(page, sent.by);
                 // What shows 300 ms after Send, while OpenBot picks the Bot (or, with one named,
@@ -732,7 +858,7 @@ describe.skipIf(!asked || !shots)(
                 await shoot(page, name("2-sent"));
                 release("route");
                 release("create");
-                await page.waitForURL(/\/channel\/conversation-/, {
+                await page.waitForURL(OPENS(sent.adds), {
                   waitUntil: "commit",
                 });
                 await page
@@ -746,10 +872,7 @@ describe.skipIf(!asked || !shots)(
                 await page.waitForTimeout(300);
                 await shoot(page, name("4-run-started"));
                 release("firstWords");
-                await page
-                  .getByRole("log")
-                  .filter({ hasText: ANSWER })
-                  .waitFor({ timeout: 30_000 });
+                await answerShown(page).waitFor({ timeout: 30_000 });
                 await shoot(page, name("5-first-words"));
               } finally {
                 for (const step of [

@@ -12,6 +12,7 @@ import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import type { AgentProfile } from "@/lib/agents/queries";
 import {
   createGroupMutationOptions,
+  groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
 import { saveConversationModel } from "@/lib/models/mutations";
@@ -259,9 +260,15 @@ export function useStartChannel(
       discard: async (channelId) => {
         await deleteChannel.mutateAsync(channelId);
       },
-      open: (channelId) => {
+      open: async (channelId) => {
         // The server has the group's first message: the box it was typed in lets it go.
         if (sentFrom) forgetSavedDraft(sentFrom);
+        /*
+         * Read before it opens, so the group opens on its transcript with the message in it and
+         * "Thinking" under it, as the new conversation showed them until now, and not on the
+         * shapes of a transcript still loading. A read that fails leaves the group to load it.
+         */
+        await queryClient.prefetchQuery(groupQueryOptions(channelId));
         return navigate({
           params: { channelId },
           replace: true,

@@ -18,14 +18,16 @@ import { setCurrentOrganization } from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import { Route as ConversationRoute } from "@/routes/_authed/_app/channel/$channelId";
 import { Route as NewConversationRoute } from "@/routes/_authed/_app/channel/new";
+import { Route as GroupRoute } from "@/routes/_authed/_app/group/$channelId";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 import { Route as StartRoute } from "@/routes/_authed/_app/start.$startId";
 
 /**
  * The three places a first message is sent from, and the conversation it opens, for
  * first-message-thinking.test.tsx to bundle and load in a browser: home, the placeholder home opens
- * (`/start`), a new conversation (`/channel/new`) and the conversation itself, each the app's own
- * route. What the server and the Bot's run answer, and how long they take, comes from the test.
+ * (`/start`), a new conversation (`/channel/new`) and the conversation itself (`/channel/...`, or
+ * `/group/...` for a first message to two Bots), each the app's own route. What the server and the
+ * Bot's run answer, and how long they take, comes from the test.
  *
  * The signed-in person is put in place here, as the signed-in gate leaves them.
  */
@@ -87,6 +89,7 @@ const router = createRouter({
     at(StartRoute, "/start/$startId", { component: placeholderChunk }),
     at(NewConversationRoute, "/channel/new"),
     at(ConversationRoute, "/channel/$channelId"),
+    at(GroupRoute, "/group/$channelId"),
   ]),
 });
 

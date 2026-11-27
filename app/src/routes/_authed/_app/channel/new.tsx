@@ -308,6 +308,8 @@ function NewConversation({ composition }: { composition: string }) {
         throw new Error(GROUP_TAKES_NO_FILES);
       }
       setError(null);
+      // The message, and "Thinking" under it, while the group is made and the message sent to it.
+      setSent(seedMessage(draft.text, newId()));
       try {
         // An `@` addresses one Bot, as it does in every later message of the group.
         await startGroup(
@@ -316,6 +318,7 @@ function NewConversation({ composition }: { composition: string }) {
           draft.agentId,
         );
       } catch (caught) {
+        setSent(null);
         setError(failureOf(caught, "Couldn't start the group. Try again."));
         throw caught;
       }
@@ -522,7 +525,8 @@ function NewConversation({ composition }: { composition: string }) {
         /*
          * Sent, and the Bot has the turn from here: the "Thinking" line under the message, as the
          * conversation draws it. Making the conversation can take seconds (OpenBot picking the Bot
-         * is a model call), and the message alone under a box that had emptied read as broken.
+         * is a model call), and the message alone under a box that had emptied read as broken. A
+         * group's first message too: its transcript says "Thinking" under it once it opens.
          */
         busy={sent !== null}
         starterSuggestions={
