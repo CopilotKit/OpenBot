@@ -95,7 +95,9 @@ export const Route = createFileRoute("/sign")({
  * (`components/auth/native-signed-out.tsx`). `?native-sign-in=web` asks for this screen anyway: the
  * shell's way back to the web sign-in when its own can't be used.
  */
-function signsInNatively(search: { "native-sign-in"?: string }): boolean {
+export function signsInNatively(search: {
+  "native-sign-in"?: string;
+}): boolean {
   return nativeShell() !== null && search["native-sign-in"] !== "web";
 }
 
