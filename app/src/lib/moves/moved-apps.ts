@@ -92,11 +92,38 @@ export function movedApps(imports: readonly Import[]): ReconnectApp[] {
  * go by that id. Any other app (a catalogue app, a server added by its address) travels as its id.
  */
 export function cloudAppFor<
-  T extends { id: string; directoryEntryId: string | null },
+  T extends { id: string; directoryEntryId: string | null; source?: string },
 >(appId: string, apps: readonly T[]): T | undefined {
   return (
     apps.find((app) => app.directoryEntryId === `directory:${appId}`) ??
-    apps.find((app) => app.id === appId)
+    apps.find((app) => app.id === appId) ??
+    signInVersionOf(appId, apps)
+  );
+}
+
+/**
+ * THE SAME APP, ADDED AS ITS SIGN-IN. An app the directory connects with a key (Fireflies, PostHog)
+ * is added here as a sign-in where it has one: the vendor's own server, added by its address under
+ * `<slug>-mcp`, or the directory's `<slug>_mcp` app. A move names it by its key app's slug, so
+ * without this the reconnect list never found it here: Reconnect added it again, the add was
+ * refused as already added, and connecting it never marked it reconnected. The ids are the ones the
+ * server gives those two (`vendorServerId`, and a directory entry's own).
+ */
+function signInVersionOf<
+  T extends { id: string; directoryEntryId: string | null; source?: string },
+>(appId: string, apps: readonly T[]): T | undefined {
+  const slug = appId
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!slug) return undefined;
+  const vendorIds = new Set([`${slug}-mcp`, `vendor-${slug}-mcp`]);
+  return (
+    apps.find(
+      (app) =>
+        app.directoryEntryId?.toLowerCase() ===
+        `directory:${appId.toLowerCase()}_mcp`,
+    ) ?? apps.find((app) => app.source === "address" && vendorIds.has(app.id))
   );
 }
 

@@ -36,7 +36,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { NavigationItem } from "@/lib/navigation";
-import { BUSINESS_URL } from "@/lib/openbot-for-business";
+import {
+  type AppBusinessPlace,
+  BUSINESS_URL,
+} from "@/lib/openbot-for-business";
 import { cn } from "@/lib/utils";
 import {
   BOOK_A_DEMO_LINE,
@@ -87,8 +90,12 @@ export const TEAM_FEATURES = TEAM_FEATURE_GROUPS.flatMap(
  * Open or closed, for the one dialog the signed-in layout mounts. Module state so any entry in any
  * skin (the navigation, the home page's link, a Bot's computer line, the self-host banner) can open
  * it without a provider of its own.
+ *
+ * With where it was opened from, which its calendar is tagged with and counts (`BookingCalendar`).
+ * The calendar is drawn only while the dialog is open, so it reads the entry that opened it.
  */
 let open = false;
+let openedFrom: AppBusinessPlace = "account_menu";
 const listeners = new Set<() => void>();
 
 function setOpen(next: boolean) {
@@ -96,7 +103,8 @@ function setOpen(next: boolean) {
   for (const listener of listeners) listener();
 }
 
-export function openTeamFeatures() {
+export function openTeamFeatures(from: AppBusinessPlace) {
+  openedFrom = from;
   setOpen(true);
 }
 
@@ -176,6 +184,7 @@ export function TeamFeaturesDialog() {
  * OpenBot for Business page in a new tab (on the Desktop, in the person's browser).
  */
 function BookDemo() {
+  const [place] = useState(() => openedFrom);
   const [failed, setFailed] = useState(false);
   const fail = useCallback(() => setFailed(true), []);
   // Calendly shows its own confirmation in the frame; there is nothing more to say here.
@@ -212,7 +221,7 @@ function BookDemo() {
             </a>
           </div>
         ) : (
-          <BookingCalendar onBooked={booked} onFailed={fail} />
+          <BookingCalendar onBooked={booked} onFailed={fail} place={place} />
         )}
       </div>
     </section>
@@ -240,7 +249,7 @@ export function navigationRender(
         className={cn("w-full text-left", props.className)}
         onClick={(event) => {
           props.onClick?.(event);
-          openTeamFeatures();
+          openTeamFeatures("account_menu");
         }}
         type="button"
       />
@@ -273,7 +282,7 @@ export function NavigationTarget({
         className={cn("w-full text-left", props.className)}
         onClick={(event) => {
           onClick?.(event);
-          openTeamFeatures();
+          openTeamFeatures("account_menu");
         }}
         type="button"
       />
@@ -296,7 +305,7 @@ export function BusinessComputerLink({ className }: { className?: string }) {
         "w-fit text-left text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground",
         className,
       )}
-      onClick={openTeamFeatures}
+      onClick={() => openTeamFeatures("computer_line")}
       type="button"
     >
       Give each Bot its own computer with OpenBot for Business.

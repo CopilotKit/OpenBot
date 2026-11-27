@@ -8,7 +8,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
 import {
   PageEmpty,
@@ -291,7 +291,10 @@ export function PluginPage({
   onAdded,
 }: {
   pluginKey: string;
-  /** Open the key form on arrival, for an app Browse apps just added that takes a key. */
+  /**
+   * Start connecting on arrival: the key form for an app that takes a key (Browse apps just added
+   * it), the sign-in for one that signs in (Reconnect on Connections, or on a card's shared account).
+   */
   startConnect?: boolean;
   /**
    * Open the form a catalogue entry needs before it can be added, on arrival: its instance host or
@@ -344,6 +347,11 @@ export function PluginPage({
     connections.data?.connections ?? [],
   ).find((row) => row.serverId === key);
   const youConnected = connection !== undefined;
+  /*
+   * A sign-in the vendor withdrew: the row stands over a revoked grant. It read as Connected with
+   * nothing to press; it is offered Reconnect, which is Connect's press.
+   */
+  const withdrawn = connection?.revoked === true;
   /*
    * A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, AND ONLY WHERE IT IS READ.
    *
@@ -687,6 +695,27 @@ export function PluginPage({
       setGranting(null);
     }
   };
+
+  /*
+   * THE SIGN-IN ON ARRIVAL (`startConnect`), for an app OpenBot signs in to itself that is here,
+   * with a client to consent against, and whose account isn't connected or was withdrawn: the same
+   * press as the Connect or Reconnect below, made for the person who already pressed Reconnect on
+   * Connections. Once per visit. A directory app's row starts its own (`BrokeredAccountRow`).
+   */
+  const signInOnArrival =
+    startConnect &&
+    auth === "user-oauth" &&
+    server !== undefined &&
+    (server.hasCredential || server.dynamicClient) &&
+    connections.isSuccess &&
+    (!youConnected || withdrawn);
+  const signInStarted = useRef(false);
+  const { mutate: startSignIn } = connectSelf;
+  useEffect(() => {
+    if (!signInOnArrival || signInStarted.current) return;
+    signInStarted.current = true;
+    startSignIn(key);
+  }, [signInOnArrival, startSignIn, key]);
 
   /*
    * Nothing rather than a placeholder, so no sentence asserts anything while the fetch is open —
@@ -1245,6 +1274,7 @@ export function PluginPage({
                     heading="Shared account"
                     notice="Sign in as the shared account, not your own."
                     provider={provider}
+                    startConnect={startConnect}
                     title={title}
                   />
                 ) : (
@@ -1292,17 +1322,34 @@ export function PluginPage({
                     <ItemContent>
                       <ItemTitle>Your account</ItemTitle>
                       <ItemDescription>
-                        {personal
-                          ? youConnected
-                            ? `Connected. Your Bots use your ${vendorNameOf(title)} as you.`
-                            : `Connect your ${vendorNameOf(title)} account so your Bots can use it.`
-                          : youConnected
-                            ? `Connected. A Bot with these tools uses your ${vendorNameOf(title)} as you. Everybody else connects their own.`
-                            : `Connect your own account to try this connector. ${reassurance}`}
+                        {withdrawn
+                          ? `Your ${title} connection needs reconnecting.`
+                          : personal
+                            ? youConnected
+                              ? `Connected. Your Bots use your ${vendorNameOf(title)} as you.`
+                              : `Connect your ${vendorNameOf(title)} account so your Bots can use it.`
+                            : youConnected
+                              ? `Connected. A Bot with these tools uses your ${vendorNameOf(title)} as you. Everybody else connects their own.`
+                              : `Connect your own account to try this connector. ${reassurance}`}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
-                      {youConnected ? (
+                      {withdrawn ? (
+                        /* Connect's press over the withdrawn grant: the vendor's consent page. */
+                        <Button
+                          disabled={connectSelf.isPending}
+                          onClick={() => {
+                            setError(null);
+                            connectSelf.mutate(key);
+                          }}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          {connectSelf.isPending ? "Connecting…" : "Reconnect"}
+                          <IconArrowUpRight />
+                        </Button>
+                      ) : youConnected ? (
                         <>
                           {/* Decorative: the word beside it already says which. */}
                           <span
@@ -1517,7 +1564,7 @@ export function PluginPage({
                * edition's one person is pointed at the Connect above; an admin is never told to
                * connect their own account for it.
                */}
-              {server.signIn && !youConnected
+              {server.signIn && (!youConnected || withdrawn)
                 ? personal
                   ? `Connect your ${vendorNameOf(title)} account to see its tools.`
                   : listsToolsOnceConnected(title)

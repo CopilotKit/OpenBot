@@ -58,11 +58,26 @@ const DESCRIPTION =
   "These apps were connected in OpenBot on your computer. Connect each one again here.";
 
 function ReconnectPage() {
-  const moved = useMovedApps();
   const { notAdded } = Route.useSearch();
-  const navigate = useNavigate();
   // Arriving at the list means no app page is waiting to bring the person back.
   React.useEffect(() => clearReconnectReturn(), []);
+  return <ReconnectList notAdded={notAdded} />;
+}
+
+/**
+ * The list itself. `working` is the app whose Reconnect is under way (`/reconnect/<appId>` finding
+ * the app here, or adding it): the list stays on screen with that row saying so, until its page
+ * opens. It used to be a blank page for those seconds, which read as the screen breaking.
+ */
+export function ReconnectList({
+  notAdded,
+  working,
+}: {
+  notAdded?: string;
+  working?: string;
+}) {
+  const moved = useMovedApps();
+  const navigate = useNavigate();
   const nothingHere = moved.ready && moved.apps.length === 0;
   React.useEffect(() => {
     if (nothingHere) void navigate({ to: "/", replace: true });
@@ -145,6 +160,7 @@ function ReconnectPage() {
               mayAdd={moved.mayAdd}
               notAdded={notAdded === app.appId}
               onDismiss={() => moved.dismiss(app)}
+              working={working === app.appId}
             />
             {index !== moved.apps.length - 1 && <Separator />}
           </React.Fragment>
@@ -226,6 +242,7 @@ function MovedAppRow({
   notAdded,
   dismissing,
   onDismiss,
+  working,
 }: {
   admins: readonly AdminName[];
   app: MovedApp;
@@ -234,6 +251,8 @@ function MovedAppRow({
   notAdded: boolean;
   dismissing: boolean;
   onDismiss: () => void;
+  /** Its Reconnect is under way: the button says so, and nothing on the row can be pressed. */
+  working: boolean;
 }) {
   const summary = movedAppSummary(app);
   const note = movedAppNote(app, mayAdd, notAdded, admins);
@@ -269,7 +288,11 @@ function MovedAppRow({
           </span>
         ) : (
           <>
-            {app.cloudId !== null || mayAdd ? (
+            {working ? (
+              <Button disabled size="sm">
+                Connecting…
+              </Button>
+            ) : app.cloudId !== null || mayAdd ? (
               <Button
                 render={
                   <Link params={{ appId: app.appId }} to="/reconnect/$appId" />
@@ -281,7 +304,7 @@ function MovedAppRow({
             ) : null}
             <Button
               aria-label={`Dismiss ${app.appName}`}
-              disabled={dismissing}
+              disabled={dismissing || working}
               onClick={onDismiss}
               size="icon-sm"
               title={`Dismiss ${app.appName}`}

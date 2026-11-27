@@ -16,6 +16,7 @@ import {
   AiBrain01Icon,
   Alert02Icon,
   AlertDiamondIcon,
+  Archive02Icon,
   ArrowDataTransferHorizontalIcon,
   ArrowDown01Icon,
   ArrowDown02Icon,
@@ -58,6 +59,7 @@ import {
   CloudServerIcon,
   CloudUploadIcon,
   CompassIcon,
+  ComputerArrowDownIcon,
   ComputerIcon,
   ComputerPhoneSyncIcon,
   ComputerRemoveIcon,
@@ -302,6 +304,7 @@ export const IconAlertTriangleFilled = defineIcon(
 );
 export const IconApps = defineIcon("apps", DashboardSquare01Icon);
 export const IconAppsOff = defineIcon("apps-off", DashboardSquareRemoveIcon);
+export const IconArchive = defineIcon("archive", Archive02Icon);
 export const IconArrowDown = defineIcon("arrow-down", ArrowDown02Icon);
 export const IconArrowLeft = defineIcon("arrow-left", ArrowLeft02Icon);
 export const IconArrowRight = defineIcon("arrow-right", ArrowRight02Icon);
@@ -406,6 +409,10 @@ export const IconCube = defineIcon("cube", CubeIcon);
 export const IconDatabase = defineIcon("database", Database01Icon);
 export const IconDatabaseOff = defineIcon("database-off", DatabaseLockedIcon);
 export const IconDeviceDesktop = defineIcon("device-desktop", ComputerIcon);
+export const IconDeviceDesktopDown = defineIcon(
+  "device-desktop-down",
+  ComputerArrowDownIcon,
+);
 export const IconDeviceDesktopOff = defineIcon(
   "device-desktop-off",
   ComputerRemoveIcon,

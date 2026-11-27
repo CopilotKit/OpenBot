@@ -253,8 +253,8 @@ function TeamModelsDialog({
             </p>
           ) : allowed === null ? (
             <p className="text-muted-foreground text-sm">
-              Your organization doesn't list any models yet. Allow some on
-              Providers first.
+              Your organization doesn't list any models yet. Allow some on AI
+              providers first.
             </p>
           ) : (
             <>

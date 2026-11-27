@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 
 /**
  * An unticked tickbox can be seen, in light and in dark.
@@ -192,7 +193,7 @@ async function open(
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   // The tickbox eases its border colour in; let it land.
-  await page.waitForTimeout(400);
+  await still(page);
   return page;
 }
 

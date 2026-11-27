@@ -36,6 +36,7 @@ import {
 } from "@/lib/api/generated/teams/teams.zod";
 import { personBody } from "./accounts-api";
 import { conversationPage, problemBody } from "./conversations-api";
+import { still } from "./page-still";
 
 export const asked = process.env.OPENBOT_APP_BROWSER === "1";
 export const shots = process.env.OPENBOT_APP_SHOTS;
@@ -507,26 +508,63 @@ async function stylesheet(classes: string[]): Promise<string> {
 
 const browsers = new Map<string, Browser>();
 let script: string;
+/** Set while `stop` closes the browsers, so only a browser lost before then is said. */
+let stopping = false;
+
+/*
+ * A PAGE OR BROWSER LOST MID-TEST IS SAID IN THE LOG, AND HOW. Playwright fails whatever the test was
+ * waiting on with the same words whether the browser crashed the page or something closed it
+ * ("Target page, context or browser has been closed"), so a test that failed that way in CI said
+ * nothing of which it was. Lines start with [browser lost]; the failing test's name follows them in
+ * the output. Nothing here changes what a test does.
+ */
 
 /** Build the app (`fixture`, beside this file) and start each browser asked for. */
 export async function start(
   fixture = "organization-notices.fixture.tsx",
 ): Promise<void> {
   script = await bundle(fixture);
+  stopping = false;
   const playwright = await import("playwright-core");
   for (const engine of engines) {
     const type: BrowserType = playwright[engine];
-    browsers.set(
-      engine,
-      // The CI job installs full Chromium without the headless shell.
-      await type.launch(engine === "chromium" ? { channel: "chromium" } : {}),
+    // The CI job installs full Chromium without the headless shell.
+    const browser = await type.launch(
+      engine === "chromium" ? { channel: "chromium" } : {},
     );
+    browser.on("disconnected", () => {
+      if (!stopping)
+        console.error(
+          `[browser lost] ${engine} disconnected: the browser crashed or was killed`,
+        );
+    });
+    browsers.set(engine, browser);
   }
 }
 
 export async function stop(): Promise<void> {
+  stopping = true;
   for (const browser of browsers.values()) await browser.close();
   browsers.clear();
+}
+
+/** Say when `page` crashes, or closes without the test closing it. */
+function sayIfLost(page: Page, what: string): void {
+  let closedByTest = false;
+  const close = page.close.bind(page);
+  page.close = (options) => {
+    closedByTest = true;
+    return close(options);
+  };
+  page.on("crash", () =>
+    console.error(`[browser lost] the page crashed: ${what}, at ${page.url()}`),
+  );
+  page.on("close", () => {
+    if (!closedByTest && !stopping)
+      console.error(
+        `[browser lost] the page closed, not by the test: ${what}, at ${page.url()}`,
+      );
+  });
 }
 
 /** The app opened at `path`, signed in, in a window of `look`'s size and theme. */
@@ -543,6 +581,7 @@ export async function open(
     colorScheme: look.theme,
     reducedMotion: "reduce",
   });
+  sayIfLost(page, `${engine}, ${look.width}, ${look.theme}, opened at ${path}`);
   page.on("pageerror", (error) => console.error(error));
   const inter = join(packageDir("@fontsource-variable/inter"), "files");
   await page.route(`${ORIGIN}/**`, (route) => {
@@ -601,7 +640,7 @@ export async function style(page: Page): Promise<void> {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(150);
+  await still(page);
 }
 
 /** Save the page as `<name>-<step>-<engine>-<width>-<theme>.png` when screenshots are asked for. */

@@ -84,6 +84,25 @@ info:
     refused for a version.
 
 
+    An app says which newer answers it understands in the header
+    `OpenBot-Capabilities`: lowercase tokens separated by spaces, such as
+    `OpenBot-Capabilities: computer-step-taken`. The server sends a newer
+    shape of an answer only to a request naming its token, and the shape
+    before it to every other request, so an app never gets an answer it
+    can't read, whatever its version. A token the server doesn't know is
+    ignored. The conversation events socket takes the same list in its
+    `capabilities` query parameter, since a browser can't set a header on
+    a WebSocket. The tokens: `computer-step-taken`, a computer step the
+    server already ran or is running is answered as such, `taken` from
+    runComputerStep and the problems COMPUTER_STEP_RUNNING and
+    COMPUTER_STEP_OUTCOME_UNKNOWN from a direct computer call that names
+    its step by threadId and toolCallId; and `conversation-work-turn`, a
+    conversation's work can name the person's own turn that the server is
+    carrying on (kind turn). A request without a token is answered as
+    before its shape existed. A program of your own need not send the
+    header.
+
+
     Every answer carries `X-Request-Id`, the id OpenBot's server logs the
     request under, and a problem's requestId is the same id. So does every
     other answer under /api, the four addresses outside /api/v2 included.
@@ -148,6 +167,7 @@ tags:
   - { name: Memory, description: "The facts a person's Bots remember about them, and the app actions those facts are read in from. Each person's are theirs alone: an administrator can't read them either." }
   - { name: Agents, description: "The agents an organization's Bots hand work to: OpenBot's own, a framework OpenBot runs, or an agent somebody runs at its own address. An administrator adds the organization's, and anybody may add a private one for their own Bots. A Bot's delegation says whether it works on one agent or hands work to several, and which." }
   - { name: CopilotKit management, description: "Connecting a self-hosted OpenBot to CopilotKit's management service, which keeps it up to date in the company's own cluster through an agent installed there. Only the administrators of the organization `default` manage it, and only on the team edition a company runs itself." }
+  - { name: Web push, description: "The browsers a person turned notifications on in, which their Bots send push notifications to through each browser's own push service, and the key a browser subscribes with." }
   - { name: Moving to OpenBot Cloud, description: "Moving what a person has in an OpenBot on their own computer to an organization on OpenBot Cloud: exporting it there as a bundle, importing the bundle on Cloud, and checking that everything arrived before anything is removed. Connections to apps never carry their sign-in, and a model key moves only when the person chooses, sealed to the import." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
@@ -354,6 +374,8 @@ paths:
   /api/v2/people/me/invitations/{invitationId}: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}' }
   /api/v2/people/me/invitations/{invitationId}/accept: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}~1accept' }
   /api/v2/people/me/invitations/{invitationId}/decline: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}~1decline' }
+  /api/v2/people/me/account-deletion: { $ref: './accounts.yaml#/paths/~1api~1v2~1people~1me~1account-deletion' }
+  /api/v2/people/me/account-deletion/cancel: { $ref: './accounts.yaml#/paths/~1api~1v2~1people~1me~1account-deletion~1cancel' }
   /api/v2/organizations/{organizationId}/teams: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams' }
   /api/v2/organizations/{organizationId}/teams/{teamId}: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}' }
   /api/v2/organizations/{organizationId}/teams/{teamId}/members: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1members' }
@@ -532,6 +554,10 @@ paths:
   /api/v2/organizations/{organizationId}/imports/{importId}/parts/{partNumber}: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1parts~1{partNumber}' }
   /api/v2/organizations/{organizationId}/imports/{importId}/apply: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1apply' }
   /api/v2/organizations/{organizationId}/imports/{importId}/verification: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1verification' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/runs/{runId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1runs~1{runId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/conversations/{conversationId}/approvals: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1conversations~1{conversationId}~1approvals' }
+  /api/v2/organizations/{organizationId}/web-push-key: { $ref: './web-push.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1web-push-key' }
+  /api/v2/organizations/{organizationId}/people/{personId}/web-push-subscriptions/{subscriptionId}: { $ref: './web-push.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1web-push-subscriptions~1{subscriptionId}' }
 components:
   securitySchemes:
     webSession:
@@ -661,8 +687,8 @@ components:
             components:write: Tell OpenBot which components the app can draw, and, when the signed-in person is an admin, write, publish and delete components and choose which Bots and data each may use.
             skills:read: Read the skills the signed-in person can use, and for an admin everybody's.
             skills:write: Write and delete the signed-in person's skills, and for an admin the organization's and anybody's.
-            devices:read: Read the phones the signed-in person registered for push notifications.
-            devices:write: Register the signed-in person's phones for push notifications, and remove them.
+            devices:read: Read the phones the signed-in person registered for push notifications, and the key a browser subscribes to push notifications with.
+            devices:write: Register the signed-in person's phones and browsers for push notifications, and remove them.
             destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
             destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams and text message destinations.
             deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
@@ -1185,7 +1211,10 @@ components:
       description: >-
         The caller holds no role in this organization, or the organization
         requires signing in through the company's identity provider and the
-        caller hasn't (SSO_REQUIRED).
+        caller hasn't (SSO_REQUIRED). Or the caller's account is scheduled to
+        be deleted (ACCOUNT_PENDING_DELETION), which every operation but
+        getAccountDeletion and cancelAccountDeletion answers until the
+        deletion is cancelled.
       headers:
         X-Request-Id:
           $ref: '#/components/headers/RequestId'
@@ -1212,6 +1241,17 @@ components:
                 status: 403
                 detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
                 code: SSO_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            accountPendingDeletion:
+              value:
+                type: https://open.bot/errors/account-pending-deletion
+                title: Your account is being deleted.
+                status: 403
+                detail: Your account is scheduled to be deleted. Cancel the deletion to use OpenBot again.
+                code: ACCOUNT_PENDING_DELETION
                 category: permission
                 retryable: false
                 requestId: req_example

@@ -18,6 +18,8 @@ info:
 
     OpenBot's own apps name themselves on every request in the header `OpenBot-Client`: `<kind>/<version>`, where kind is web, desktop, mobile or recorder, such as `OpenBot-Client: desktop/1.1.0`. A header may name more than one, separated by spaces: OpenBot Desktop adds its own to the one its window's page sent. getDeployment says which API versions this OpenBot serves and the oldest release of each app it serves (minimumClients). Every other operation under /api/v2 refuses an app older than that with 400 and the code CLIENT_UPDATE_REQUIRED, whose problem names the app (client) and its minimum (minimumVersion) and whose detail tells the person to update OpenBot. When that minimum was raised because of a security problem in older releases, the problem also says security: true, and getDeployment lists it under securityMinimumClients. A program of your own need not send the header; without it nothing is refused for a version.
 
+    An app says which newer answers it understands in the header `OpenBot-Capabilities`: lowercase tokens separated by spaces, such as `OpenBot-Capabilities: computer-step-taken`. The server sends a newer shape of an answer only to a request naming its token, and the shape before it to every other request, so an app never gets an answer it can't read, whatever its version. A token the server doesn't know is ignored. The conversation events socket takes the same list in its `capabilities` query parameter, since a browser can't set a header on a WebSocket. The tokens: `computer-step-taken`, a computer step the server already ran or is running is answered as such, `taken` from runComputerStep and the problems COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN from a direct computer call that names its step by threadId and toolCallId; and `conversation-work-turn`, a conversation's work can name the person's own turn that the server is carrying on (kind turn). A request without a token is answered as before its shape existed. A program of your own need not send the header.
+
     Every answer carries `X-Request-Id`, the id OpenBot's server logs the request under, and a problem's requestId is the same id. So does every other answer under /api, the four addresses outside /api/v2 included. Quote it when reporting a failure, so the request can be found in the server's logs.
 
     This file is the single source of truth: the clients, the server's types, the docs and the contract tests are all generated from it or checked against it. A change that breaks an existing client fails the pull request.
@@ -125,6 +127,8 @@ tags:
     description: 'The agents an organization''s Bots hand work to: OpenBot''s own, a framework OpenBot runs, or an agent somebody runs at its own address. An administrator adds the organization''s, and anybody may add a private one for their own Bots. A Bot''s delegation says whether it works on one agent or hands work to several, and which.'
   - name: CopilotKit management
     description: Connecting a self-hosted OpenBot to CopilotKit's management service, which keeps it up to date in the company's own cluster through an agent installed there. Only the administrators of the organization `default` manage it, and only on the team edition a company runs itself.
+  - name: Web push
+    description: The browsers a person turned notifications on in, which their Bots send push notifications to through each browser's own push service, and the key a browser subscribes with.
   - name: Moving to OpenBot Cloud
     description: 'Moving what a person has in an OpenBot on their own computer to an organization on OpenBot Cloud: exporting it there as a bundle, importing the bundle on Cloud, and checking that everything arrived before anything is removed. Connections to apps never carry their sign-in, and a model key moves only when the person chooses, sealed to the import.'
 paths:
@@ -3788,7 +3792,7 @@ paths:
         - Conversations
       operationId: listRefusedTurns
       summary: List the caller's turns in a conversation that were refused
-      description: 'Return one page of the caller''s own turns in the conversation that were refused before they ran, newest first: a model they may not run (MODEL_NOT_ALLOWED), a permission they don''t have (CAPABILITY_REQUIRED), no OpenBot plan (PLAN_REQUIRED), an AI connection that can''t run now or no default connection to run on (AI_CONNECTION_STOPPED; getModelChoice''s stopped says which). Each says what the turn was for (the person''s message, or what a routine or a task asked) and why it was refused, in the words the refusal said. Nothing of a refused turn reaches the conversation''s thread, so a client draws these into the transcript itself: each after the message named by afterMessageId, or after the thread''s messages where that is null. botId narrows the list to one Bot''s. A missing cursor starts at the newest page and nextCursor null ends the list.'
+      description: 'Return one page of the caller''s own turns in the conversation that were refused before they ran, newest first: a model they may not run (MODEL_NOT_ALLOWED), a permission they don''t have (CAPABILITY_REQUIRED), no OpenBot plan (PLAN_REQUIRED), an AI connection that can''t run now or no default connection to run on (AI_CONNECTION_STOPPED; getModelChoice''s stopped says which), or a Bot whose engine couldn''t take the run (BOT_ENGINE_UNAVAILABLE). Each says what the turn was for (the person''s message, or what a routine or a task asked) and why it was refused, in the words the refusal said. Nothing of a refused turn reaches the conversation''s thread, so a client draws these into the transcript itself: each after the message named by afterMessageId, or after the thread''s messages where that is null. BOT_ENGINE_UNAVAILABLE is the exception: its run started, so the person''s message is in the thread, and the run ended in a RUN_ERROR carrying the same code and words; a client draws the refusal under that message, once, and not as how the run ended. botId narrows the list to one Bot''s. A missing cursor starts at the newest page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -5069,7 +5073,7 @@ paths:
         - Models
       operationId: replaceAiConnection
       summary: Change how OpenBot reaches its AI provider
-      description: 'Switch the AI provider OpenBot''s Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can''t use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization''s vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider. On OpenBot Cloud an administrator may also share their own plan (openai, anthropic) or provider sign-in (google, xai) as the organization''s AI: send that login once they have signed in to the provider through OpenBot (startPersonalAiSignIn) and the sign-in is kept for them. Bots across the organization then run on that sign-in for everyone with no AI of their own, and sharedSignIn names whose it is. It stops working if that person removes their own sign-in; another administrator can switch it at any time. With several connections (listAiConnections) this changes the default: the connection saved becomes the default, in place of the provider''s own connection where it already had one (its id stays the provider), and a default of another provider stays connected as one of the others, no longer the default.'
+      description: 'Switch the AI provider OpenBot''s Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can''t use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization''s vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider. On OpenBot Cloud an administrator may also share their own plan (openai, anthropic) or provider sign-in (xai) as the organization''s AI: send that login once they have signed in to the provider through OpenBot (startPersonalAiSignIn) and the sign-in is kept for them. Bots across the organization then run on that sign-in for everyone with no AI of their own, and sharedSignIn names whose it is. It stops working if that person removes their own sign-in; another administrator can switch it at any time. With several connections (listAiConnections) this changes the default: the connection saved becomes the default, in place of the provider''s own connection where it already had one (its id stays the provider), and a default of another provider stays connected as one of the others, no longer the default.'
       security:
         - webSession: []
         - appOAuth:
@@ -5241,7 +5245,7 @@ paths:
         - Models
       operationId: replacePersonalAiConnection
       summary: Set a person's own AI connection
-      description: 'Connect the AI a person''s runs use, with their own key or an address, or a key a sign-in through OpenBot kept for them (useSavedKey). OpenBot checks the connection with the provider first: a key, an address or a model it can''t use is refused and nothing is saved. Once saved, the person''s next run uses it, ahead of the organization''s. The key is encrypted and kept for the person alone, never in the organization''s vault, and never sent back. A plan (openai, anthropic) or a provider sign-in (google, xai) is accepted only once the person has signed in to that provider through OpenBot (startPersonalAiSignIn) and the sign-in was approved: the server keeps that sign-in for them alone and renews it itself. Without one it is refused, since the server runs the person''s Bots and can''t use a sign-in held on a computer. With several connections of their own (listPersonalAiConnections) this changes their default: the connection saved becomes the default, in place of the provider''s own connection where they already had one (its id stays the provider), and a default of another provider stays connected as one of the others, no longer the default. Recorded on the audit trail, never with a key. Only the person themselves may set it, and only where available is true.'
+      description: 'Connect the AI a person''s runs use, with their own key or an address, or a key a sign-in through OpenBot kept for them (useSavedKey). OpenBot checks the connection with the provider first: a key, an address or a model it can''t use is refused and nothing is saved. Once saved, the person''s next run uses it, ahead of the organization''s. The key is encrypted and kept for the person alone, never in the organization''s vault, and never sent back. A plan (openai, anthropic) or a provider sign-in (xai) is accepted only once the person has signed in to that provider through OpenBot (startPersonalAiSignIn) and the sign-in was approved: the server keeps that sign-in for them alone and renews it itself. Without one it is refused, since the server runs the person''s Bots and can''t use a sign-in held on a computer. With several connections of their own (listPersonalAiConnections) this changes their default: the connection saved becomes the default, in place of the provider''s own connection where they already had one (its id stays the provider), and a default of another provider stays connected as one of the others, no longer the default. Recorded on the audit trail, never with a key. Only the person themselves may set it, and only where available is true.'
       security:
         - webSession: []
         - appOAuth:
@@ -5359,7 +5363,7 @@ paths:
         - Models
       operationId: startPersonalAiSignIn
       summary: Start signing in to an AI provider
-      description: 'Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude''s page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies anything: Desktop listens on the person''s own computer for the provider''s redirect and the app sends what arrives with finishPersonalAiSignIn. For Claude, loopbackPort names the port Desktop listens on; ChatGPT''s browser sign-in always redirects to localhost:1455. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan''s sign-in (connect with login plan), or a Google or xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true.'
+      description: 'Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude''s page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies anything: Desktop listens on the person''s own computer for the provider''s redirect and the app sends what arrives with finishPersonalAiSignIn. For Claude, loopbackPort names the port Desktop listens on; ChatGPT''s browser sign-in always redirects to localhost:1455. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan''s sign-in (connect with login plan), or an xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true. Google is refused: Gemini connects with an API key only.'
       security:
         - webSession: []
         - appOAuth:
@@ -6567,7 +6571,7 @@ paths:
         - Apps
       operationId: listAppDirectory
       summary: List the apps that can be added
-      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue) in the catalogue''s own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. An app that connects with a key but signs in through its vendor is listed once, as the sign-in, with keyVersion naming the same app connected with its key. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included. While the organization''s apps are open (getAppsSetting), anybody may add what they find (createApp); where they''re locked down an administrator adds it, and anybody else asks for it (createAppAccessRequest). Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
+      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue) in the catalogue''s own order, then apps from the wider directory (source directory), the ones a person signs in to before the ones that take a key, each by title, ignoring case, and then by id. So a screen can show the pages as they arrive, in the order it shows them. appId names the app an entry was added as, or is null. An app that connects with a key but signs in through its vendor is listed once, as the sign-in, with keyVersion naming the same app connected with its key. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included. While the organization''s apps are open (getAppsSetting), anybody may add what they find (createApp); where they''re locked down an administrator adds it, and anybody else asks for it (createAppAccessRequest). Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
       security:
         - webSession: []
         - appOAuth:
@@ -9751,7 +9755,7 @@ paths:
         - Devices
       operationId: registerDevice
       summary: Register a device for push notifications
-      description: Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. A device is registered in one organization, the one the address names, and gets push notifications only from the person's Bots there. A person in several organizations registers the phone in each one they want notifications from, under the same id. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications (listNotificationTransports).
+      description: Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. A device is registered in one organization, the one the address names, and gets push notifications only from the person's Bots there. A person in several organizations registers the phone in each one they want notifications from, under the same id. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications to phones (its OpenBot phone app's project is set up).
       security:
         - webSession: []
         - appOAuth:
@@ -10340,7 +10344,7 @@ paths:
         - Notification settings
       operationId: listNotificationTransports
       summary: List the ways OpenBot can reach people here
-      description: 'Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push needs the OpenBot phone app''s project, Slack and Microsoft Teams need the OpenTag pairing, and text messages need Twilio. A person''s settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push is always there for browsers (web push, saveWebPushSubscription) and reaches phones once the OpenBot phone app''s project is set up, Slack and Microsoft Teams need the OpenTag pairing, and text messages need Twilio. A person''s settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -12925,6 +12929,143 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/people/me/account-deletion:
+    get:
+      tags:
+        - People
+      operationId: getAccountDeletion
+      summary: Read where deleting the caller's account stands
+      description: 'Return whether the caller''s account is scheduled to be deleted, and when, and what stops it being deleted now. An account belongs to the person, not to an organization, so this sits outside every organization''s address. blockers lists each organization the person has to deal with first, as GitHub does: one where they are the only owner (only_owner), which they hand to another owner or delete, and one where they are an owner beside others (owner_must_leave), which they leave, and one with no owner where they are the only admin (only_admin, as a self-hosted OpenBot''s one organization is run), where they make another member an admin. Other memberships end with the account and block nothing; so does the person''s own organization when they are its only member. Once a deletion is scheduled, every other operation answers 403 with the code ACCOUNT_PENDING_DELETION until it is cancelled or the account is gone; this one, cancelAccountDeletion and requestAccountDeletion still answer, so the apps can say when the account goes and offer to cancel it or to delete it now, and so do listOrganizations and getPerson for the person themselves, so an app opened afresh knows who they are. Only the person themselves may read it, signed in to OpenBot or its app, never with an API key.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - people:read
+      responses:
+        '200':
+          description: Where deleting the account stands.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDeletion'
+              examples:
+                blocked:
+                  $ref: '#/components/examples/AccountDeletionBlockedExample'
+                clear:
+                  $ref: '#/components/examples/AccountDeletionClearExample'
+                scheduled:
+                  $ref: '#/components/examples/AccountDeletionScheduledExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDeletionSignInOnly'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - People
+      operationId: requestAccountDeletion
+      summary: Delete the caller's account
+      description: 'Schedule the caller''s account to be deleted, 14 days from now, or at once with immediate true. From this moment the person is signed out everywhere, their API keys, app sign-ins and connections end, their Bots, routines and computers stop, and nothing runs for them. Their memberships read as deactivated. Signing in again before the deletion is allowed only to see when it happens, to cancel it (cancelAccountDeletion), or to delete it now: asked again with immediate true, the deletion already scheduled is made due at once; asked again without it, the deletion is answered as it stands. When the wait ends, the account is deleted on its own, with everything the person owns. What they wrote in organizations shared with others stays, shown as from a deleted user, and security log entries are kept for 180 days without their name or email. The person confirms by sending the email address they sign in with and the words delete my account; either one wrong is refused with 422. The session must have signed in within the last 10 minutes: an older one is refused with 403 and the code REAUTHENTICATE, and the apps send the person through sign-in again. An organization that blocks it (getAccountDeletion''s blockers) refuses it with 409 and the code ACCOUNT_DELETION_BLOCKED, listing them. Only the person themselves may do this, signed in to OpenBot or its app, never with an API key.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - people:write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestAccountDeletionRequest'
+            examples:
+              inFourteenDays:
+                value:
+                  confirmEmail: dana@acme.com
+                  confirmPhrase: delete my account
+              now:
+                value:
+                  confirmEmail: dana@acme.com
+                  confirmPhrase: delete my account
+                  immediate: true
+      responses:
+        '202':
+          description: The deletion is scheduled. With immediate true it has already started.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduledAccountDeletion'
+              examples:
+                scheduled:
+                  $ref: '#/components/examples/ScheduledAccountDeletionExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDeletionForbidden'
+        '409':
+          $ref: '#/components/responses/AccountDeletionConflict'
+        '422':
+          $ref: '#/components/responses/AccountDeletionNotConfirmed'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/people/me/account-deletion/cancel:
+    post:
+      tags:
+        - People
+      operationId: cancelAccountDeletion
+      summary: Cancel deleting the caller's account
+      description: 'Cancel a scheduled deletion of the caller''s account, any time before it starts. The account is the person''s again: they use OpenBot as before, their memberships are active again, and they sign in afresh on their other devices, make new API keys and reconnect what was ended when they asked. Cancelling when nothing is scheduled changes nothing. A deletion already under way can''t be cancelled: that answers 409 with the code ACCOUNT_DELETION_UNDER_WAY. Only the person themselves may cancel, signed in to OpenBot or its app, never with an API key.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - people:write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Nothing is scheduled any more.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelledAccountDeletion'
+              examples:
+                cancelled:
+                  value:
+                    status: none
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDeletionSignInOnly'
+        '409':
+          $ref: '#/components/responses/AccountDeletionUnderWay'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/teams:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -14100,7 +14241,7 @@ paths:
         - Approvals
       operationId: runComputerStep
       summary: Take a step on a Bot's computer, asking first when it must
-      description: 'Run one computer action a Bot called from the person''s open conversation, through the same approval rules every other action goes through. The body names the Bot and carries the conversation with the unanswered call in it. The answer says what came of it: done, with what the computer answered; waiting, when the person must approve it first, and then the decision runs it once and carries the conversation on; or held, when the computer is held for a person, with what to tell them. Only computer tools may be called this way, and the call must match an unanswered one in the conversation. Only the person themselves may take a step.'
+      description: 'Run one computer action a Bot called from the person''s open conversation, through the same approval rules every other action goes through. The body names the Bot and carries the conversation with the unanswered call in it. The answer says what came of it: done, with what the computer answered; waiting, when the person must approve it first, and then the decision runs it once and carries the conversation on; held, when the computer is held for a person, with what to tell them; or taken, when the server already ran, or is running, this step (the same tool call in the same conversation), so it is not run a second time, with the first run''s result once it has one. Only computer tools may be called this way, and the call must match an unanswered one in the conversation. Only the person themselves may take a step.'
       security:
         - webSession: []
         - appOAuth:
@@ -14157,6 +14298,10 @@ paths:
                   $ref: '#/components/examples/ComputerStepWaitingExample'
                 held:
                   $ref: '#/components/examples/ComputerStepHeldExample'
+                taken:
+                  $ref: '#/components/examples/ComputerStepTakenExample'
+                takenRunning:
+                  $ref: '#/components/examples/ComputerStepTakenRunningExample'
         '400':
           $ref: '#/components/responses/ApprovalRefused'
         '401':
@@ -17445,13 +17590,16 @@ paths:
         - Computers
       operationId: readComputerPage
       summary: Read the page a Bot's browser is on
-      description: Return the text of the page the Bot's browser is showing, with its address and title.
+      description: Return the text of the page the Bot's browser is showing, with its address and title. Asked with the Bot's threadId and toolCallId, the step runs once, however many times it is asked.
       x-openbot-singleton: true
       security:
         - webSession: []
         - appOAuth:
             - computers:read
         - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/ComputerStepThreadIdQuery'
+        - $ref: '#/components/parameters/ComputerStepToolCallIdQuery'
       responses:
         '200':
           description: The page's address, title and text.
@@ -17947,7 +18095,7 @@ paths:
         - Computers
       operationId: snapshotComputer
       summary: List what a Bot can act on in the page
-      description: 'Return the page''s elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot''s tool call made through the app: the answer is the tool''s outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.'
+      description: 'Return the page''s elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot''s tool call made through the app: the answer is the tool''s outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again. The body is optional: sent with the Bot''s threadId and toolCallId, the step runs once, however many times it is asked.'
       security:
         - webSession: []
         - appOAuth:
@@ -17955,6 +18103,17 @@ paths:
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComputerSnapshotAsk'
+            examples:
+              request:
+                value:
+                  threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+                  toolCallId: call_8c1f
       responses:
         '200':
           description: The elements, and the snapshot they belong to.
@@ -23691,6 +23850,226 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/runs/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+      - $ref: '#/components/parameters/ConversationRunId'
+    get:
+      tags:
+        - Conversations
+      operationId: getConversationRun
+      summary: See how a Bot's run in a conversation ended
+      description: 'Say how one of a Bot''s runs in the conversation ended, as the run''s own last event said: it finished, it stopped to ask a person, it was stopped, or it failed. The run is named by the runId its events carry (RUN_STARTED on the threadStream channel of api/asyncapi.yaml). A client that stopped hearing a run before its end asks this, once createConversationJoinToken says the conversation has no run going, to tell a run that finished from one that stopped part way. outcome is null while the run is going, and for a run that ended without saying how (its server stopped under it). A run this server keeps no record of, or one of another conversation, is not found. Only a person in the conversation may ask, about the thread they see there.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The run, and how it ended.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationRunResponse'
+              examples:
+                finished:
+                  $ref: '#/components/examples/ConversationRunResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationRunNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/conversations/{conversationId}/approvals:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/ApprovalConversationId'
+    get:
+      tags:
+        - Approvals
+      operationId: listConversationApprovals
+      summary: List a person's approvals in one conversation
+      description: 'Return one page of the actions a person''s Bots asked them about in one of their conversations, however long ago: the ones still waiting and every one already decided, newest first. Unlike the person''s whole list, which keeps only the last hundred, this reaches every approval the conversation has, so an old conversation can still show what the person answered. What an action was called with is cut short for showing, with values that look like secrets masked. Only the person themselves may read them, and only the approvals they were asked: anybody else''s conversation, and one that does not exist, reads as an empty list. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - approvals:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the conversation's approvals.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalPage'
+              examples:
+                answered:
+                  $ref: '#/components/examples/ConversationApprovalPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ApprovalsOwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/web-push-key:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Web push
+      operationId: getWebPushKey
+      summary: Read the key a browser subscribes to push notifications with
+      description: 'Return this OpenBot''s public application server key (VAPID, RFC 8292), the key a browser passes as applicationServerKey when it subscribes to push notifications, so that only this OpenBot can send to the subscription. It is the same in every organization here and stays the same across restarts and upgrades. A browser holding a subscription made with a different key unsubscribes and subscribes again with this one. Anybody signed in to the organization may read it: it is public by design.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - devices:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The key.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushKey'
+              examples:
+                key:
+                  $ref: '#/components/examples/WebPushKeyExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/web-push-subscriptions/{subscriptionId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/WebPushSubscriptionId'
+    put:
+      tags:
+        - Web push
+      operationId: saveWebPushSubscription
+      summary: Save this browser's push subscription
+      description: 'Save the push subscription a browser made, under the id the app made for that browser, so the person''s Bots send push notifications to it from this organization: replies, questions, approvals and sign-in requests, as the person''s notification settings route push. Saving again replaces what the id holds; the app saves on every start, so a subscription the browser renewed replaces the old one. A subscription is saved once in each organization: saving its address under another id, or as another person, moves it there, so a browser that changes hands notifies only whoever saved it last. The address must be a browser push service''s (Apple''s, Google''s, Mozilla''s or Microsoft''s). A subscription the push service says has ended is removed when the next notification to it is refused. Only the person themselves may save their subscriptions.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - devices:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveWebPushSubscriptionRequest'
+            examples:
+              chrome:
+                value:
+                  endpoint: https://fcm.googleapis.com/fcm/send/dQw4w9WgXcQ:APA91bHPRgkF3JUikC4ENAHEeMrd41Zxv3hVZjC9KtT8OvPVGJ-hQMRKRrZuJAEcl7B338qju59zJMjw2DELjzEvxwYv7hH5Ynpc1ODQ0aT4U4OFEeBkpI1ffakVCgWq4CwOI5tHxN3n
+                  keys:
+                    p256dh: BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM
+                    auth: tBHItJI5svbpez7KI4CCXg
+      responses:
+        '200':
+          description: The subscription, saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushSubscriptionResponse'
+              examples:
+                saved:
+                  $ref: '#/components/examples/WebPushSubscriptionResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidWebPushSubscription'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Web push
+      operationId: deleteWebPushSubscription
+      summary: Stop push notifications to this browser
+      description: Stop sending push notifications to a browser from this organization. Its subscriptions in the person's other organizations stay. The app does this when the person turns notifications off in that browser and when they sign out of it. Only the person themselves may remove their subscriptions. One already removed is not found, which a client can read as done.
+      security:
+        - webSession: []
+        - appOAuth:
+            - devices:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The browser gets no more push notifications from this organization.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/WebPushSubscriptionNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -23770,8 +24149,8 @@ components:
             components:write: Tell OpenBot which components the app can draw, and, when the signed-in person is an admin, write, publish and delete components and choose which Bots and data each may use.
             skills:read: Read the skills the signed-in person can use, and for an admin everybody's.
             skills:write: Write and delete the signed-in person's skills, and for an admin the organization's and anybody's.
-            devices:read: Read the phones the signed-in person registered for push notifications.
-            devices:write: Register the signed-in person's phones for push notifications, and remove them.
+            devices:read: Read the phones the signed-in person registered for push notifications, and the key a browser subscribes to push notifications with.
+            devices:write: Register the signed-in person's phones and browsers for push notifications, and remove them.
             destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
             destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams and text message destinations.
             deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
@@ -24424,6 +24803,20 @@ components:
         maxLength: 200
         pattern: \S
       example: call_8fK2mQ
+    ComputerStepThreadIdQuery:
+      name: threadId
+      in: query
+      required: false
+      description: The conversation's thread the Bot's tool call is in. Sent with toolCallId.
+      schema:
+        $ref: '#/components/schemas/ComputerStepThreadId'
+    ComputerStepToolCallIdQuery:
+      name: toolCallId
+      in: query
+      required: false
+      description: The Bot's tool call this step answers. Sent with threadId.
+      schema:
+        $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerControlRequestId:
       name: requestId
       in: query
@@ -24597,6 +24990,26 @@ components:
         maxLength: 64
         pattern: ^[A-Za-z0-9_-]+$
       example: imp_0e1f2a3b4c5d6f1d
+    ConversationRunId:
+      name: runId
+      in: path
+      required: true
+      description: The run's id, as its events carry it.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+        pattern: \S
+      example: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+    WebPushSubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      description: 'The browser''s id: a UUID the app makes once in that browser and keeps, so saving again replaces rather than adds.'
+      schema:
+        type: string
+        format: uuid
+      example: 6d0f2a4b-8c1e-4f3a-9b5d-7e2c4a6f8b10
   headers:
     PrivateNoStore:
       description: A Bot is private to the caller.
@@ -24957,7 +25370,7 @@ components:
           $ref: '#/components/schemas/BotInstructions'
         harness:
           type: string
-          description: 'The framework an agent somebody runs themselves is built on, by its id in OpenBot''s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot''s own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and an administrator may switch new Bots back to the built-in agent.'
+          description: 'The framework an agent somebody runs themselves is built on, by its id in OpenBot''s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot''s own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, a ChatGPT plan signed in on OpenBot Desktop the OpenAI Agents SDK engine, and an administrator may switch new Bots back to the built-in agent.'
           enum:
             - ''
             - crewai
@@ -24970,6 +25383,7 @@ components:
             - pydantic-ai
             - microsoft-agent-framework
             - claude-agent-sdk
+            - openai-agents-sdk
             - strands
             - ag2
             - langroid
@@ -27674,8 +28088,8 @@ components:
     BotRoleDescription:
       type: string
       minLength: 1
-      maxLength: 1000
-      description: What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint runs on these words.
+      maxLength: 5000
+      description: What it does, 1 to 5000 characters once trimmed. A Bot with no endpoint runs on these words.
     BotEndpoint:
       type: string
       description: 'The AG-UI address it runs at: empty, or an absolute http or https address, the only kinds the server has ever taken. Empty or absent on create means it runs inside OpenBot; empty or absent on a change leaves it as it is. An address that fits can still be refused: the server refuses one this deployment may not reach, such as a private network address on a deployment that keeps Bots off it.'
@@ -27691,8 +28105,8 @@ components:
     BotInstructions:
       type: string
       minLength: 1
-      maxLength: 1000
-      description: New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
+      maxLength: 5000
+      description: New instructions for the starter Bot, 1 to 5000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
     ServiceTermsVersionId:
       type: string
       minLength: 1
@@ -27859,7 +28273,7 @@ components:
           $ref: '#/components/schemas/ClientRelease'
     ConversationWork:
       type: object
-      description: 'Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).'
+      description: 'Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), a routine running into it (routine), or the person''s own turn, which the server is carrying on with no page open (turn).'
       required:
         - kind
         - key
@@ -27869,15 +28283,17 @@ components:
       properties:
         kind:
           type: string
-          enum:
+          x-extensible-enum:
             - handoff
             - routine
+            - turn
+          description: 'What kind of work it is. turn holds from the turn''s first step the server runs until the Bot answers or the turn waits on the person, between one run and the next too, so a page opened in the middle reads the conversation as working. A kind the app doesn''t know is still work: the conversation is working. The server lists turn only for a caller that names the capability conversation-work-turn in its OpenBot-Capabilities header. Any other caller gets work without the turn, and busy true on the conversation in its list instead, because 1.2.1 drew any work that was not a handoff as a routine.'
         key:
           type: string
           description: Names this piece of work, so two asks of one Bot are two entries.
         botId:
           type: string
-          description: The Bot that was asked, or that the routine runs as.
+          description: The Bot that was asked, that the routine runs as, or that is answering the turn.
         botName:
           type:
             - string
@@ -27886,7 +28302,7 @@ components:
         since:
           type: string
           format: date-time
-          description: When it started.
+          description: When it started. For a turn, when the server took it on.
         routineId:
           type: string
           description: The routine, for a routine.
@@ -28461,6 +28877,7 @@ components:
             - CAPABILITY_REQUIRED
             - PLAN_REQUIRED
             - AI_CONNECTION_STOPPED
+            - BOT_ENGINE_UNAVAILABLE
           description: Why it was refused, as the refusal's problem code.
         detail:
           type: string
@@ -28991,7 +29408,7 @@ components:
       description: 'The AI provider OpenBot''s Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI''s API, at an address given. The list can grow: a client shows a provider it doesn''t know by its id. A request still names one of AiConnectionProvider.'
     AiConnectionLogin:
       type: string
-      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person''s Google or xAI sign-in (google, xai).'
+      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person''s xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.'
       enum:
         - plan
         - api-key
@@ -29012,7 +29429,8 @@ components:
             - unreachable
             - no-key
             - no-default
-          description: 'sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn''t answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default.'
+            - sign-in-retired
+          description: 'sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn''t answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider''s sign-in (a Google sign-in for Gemini), so it can''t run, and signing in again isn''t offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.'
         detail:
           type: string
           description: One sentence a person reads, saying what to do.
@@ -29223,7 +29641,7 @@ components:
     AiConnectionInput:
       type: object
       additionalProperties: false
-      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused.
+      description: 'The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.'
       required:
         - provider
         - login
@@ -29298,7 +29716,7 @@ components:
           description: Whether the person can set an AI connection of their own here. False where the organization's AI is the only one.
         signIns:
           type: array
-          description: 'The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), Google and xAI sign-ins, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.'
+          description: 'The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), an xAI sign-in, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.'
           items:
             $ref: '#/components/schemas/AiConnectionProviderAnswer'
     AiSignInInput:
@@ -30101,7 +30519,7 @@ components:
       properties:
         entries:
           type: array
-          description: The catalogue in its own order, then the wider directory by title, ignoring case, and then by id.
+          description: 'The catalogue in its own order, then the wider directory: apps a person signs in to before apps that take a key (connectsWith key), each by title, ignoring case, and then by id.'
           items:
             $ref: '#/components/schemas/AppDirectoryEntry'
         nextCursor:
@@ -30111,6 +30529,10 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+        total:
+          type: integer
+          minimum: 0
+          description: How many entries the whole list holds for this search and source, across every page, so a screen can say how many there are while it reads only the first page.
     AppSetup:
       type: object
       description: How apps are set up on this OpenBot. Never a key.
@@ -32235,7 +32657,7 @@ components:
         - slack
         - teams
         - sms
-      description: 'A way OpenBot reaches a person outside it: push notifications to their phones, Slack, Microsoft Teams, or text messages.'
+      description: 'A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.'
     DeliveryKind:
       type: string
       enum:
@@ -34116,6 +34538,9 @@ components:
         notOpenedYet:
           type: boolean
           description: 'True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn''t opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, and email is empty when none is known. An owner or an admin removes them by that id, as any member (removable says whether they can be). They can''t be given another role here until they open OpenBot (assignableRoles is empty). Absent for everybody else.'
+        deactivated:
+          type: boolean
+          description: 'True while this person''s account is scheduled to be deleted (requestAccountDeletion): they can''t use OpenBot, nothing runs for them, and the membership ends when the account is deleted, unless they cancel first. The server''s verdict. False or absent for everybody else.'
     OrganizationMemberPage:
       type: object
       required:
@@ -34393,6 +34818,115 @@ components:
       properties:
         invitation:
           $ref: '#/components/schemas/Invitation'
+    AccountDeletionStatus:
+      type: string
+      x-extensible-enum:
+        - none
+        - scheduled
+      description: 'Whether the account is to be deleted. none: nothing is scheduled. scheduled: it is deleted at deleteAfter, unless the person cancels first. A later OpenBot may add a state; read one you don''t know as scheduled.'
+    AccountDeletionBlocker:
+      type: object
+      description: An organization the person has to deal with before their account can be deleted, and why.
+      required:
+        - organizationId
+        - organizationName
+        - reason
+      properties:
+        organizationId:
+          type: string
+          description: The organization's id.
+        organizationName:
+          type: string
+          description: The organization's name, as its members see it.
+        reason:
+          type: string
+          x-extensible-enum:
+            - only_owner
+            - owner_must_leave
+            - only_admin
+          description: 'only_owner: the person is its only owner, so they make another member an owner or delete the organization. owner_must_leave: it has other owners, so the person leaves it. only_admin: it has no owner and the person is its only admin, so they make another member an admin. A later OpenBot may add a reason; read one you don''t know as having to leave it.'
+    AccountDeletion:
+      type: object
+      description: Where deleting the caller's account stands. blockers is the server's verdict; a client renders it and never recomputes it.
+      required:
+        - status
+        - blockers
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountDeletionStatus'
+        requestedAt:
+          type: string
+          format: date-time
+          description: When the person asked. Only while a deletion is scheduled.
+        deleteAfter:
+          type: string
+          format: date-time
+          description: When the account is deleted. Only while a deletion is scheduled.
+        blockers:
+          type: array
+          description: The organizations that stop the account being deleted now. Empty when nothing does.
+          items:
+            $ref: '#/components/schemas/AccountDeletionBlocker'
+    RequestAccountDeletionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - confirmEmail
+        - confirmPhrase
+      properties:
+        confirmEmail:
+          type: string
+          minLength: 1
+          maxLength: 320
+          pattern: ^[^\x00]*$
+          description: The email address the person signs in with, typed by them. Matched without regard to case or the spaces around it.
+        confirmPhrase:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[^\x00]*$
+          description: The words delete my account, typed by the person. Matched without regard to case or the spaces around it.
+        immediate:
+          type: boolean
+          default: false
+          description: true deletes the account now instead of after the wait, and it can't be cancelled.
+    ScheduledAccountDeletion:
+      type: object
+      description: A deletion, scheduled.
+      required:
+        - status
+        - requestedAt
+        - deleteAfter
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountDeletionStatus'
+        requestedAt:
+          type: string
+          format: date-time
+          description: When the person asked.
+        deleteAfter:
+          type: string
+          format: date-time
+          description: When the account is deleted. Now, for immediate true, when the deletion has already started.
+    AccountDeletionProblem:
+      description: 'A refused account deletion: the shared problem details, with the organizations that block it (ACCOUNT_DELETION_BLOCKED).'
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            blockers:
+              type: array
+              description: The organizations to deal with first, as getAccountDeletion lists them.
+              items:
+                $ref: '#/components/schemas/AccountDeletionBlocker'
+    CancelledAccountDeletion:
+      type: object
+      description: Nothing is scheduled any more.
+      required:
+        - status
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountDeletionStatus'
     TeamSource:
       type: string
       description: 'Where a team comes from. openbot is a team made here. directory is a group of the company''s directory, kept in step with it: its name and its people are the directory''s and can''t be changed here.'
@@ -35296,18 +35830,43 @@ components:
           type: string
         handoff:
           $ref: '#/components/schemas/ComputerStepHandoff'
+    ComputerStepTaken:
+      type: object
+      description: 'The server already ran, or is running, this step: the same tool call in the same conversation. It is not run a second time. While the first run goes on, running is true and there is no result yet; ask again for it. Once the first run has ended, result is what it answered. A first run that was cut off before it answered has, as its result, a note that its outcome is unknown, to check before doing it again. Sent only to a request whose OpenBot-Capabilities header names computer-step-taken.'
+      required:
+        - outcome
+        - threadId
+        - toolCallId
+        - running
+      properties:
+        outcome:
+          type: string
+          const: taken
+        threadId:
+          type: string
+          description: The conversation's thread the step belongs to.
+        toolCallId:
+          type: string
+          description: The tool call the step answers.
+        running:
+          type: boolean
+          description: True while the first run of the step has not ended.
+        result:
+          description: What the first run answered, as the tool's result, once it has ended. Any JSON value.
     ComputerStepOutcome:
       description: What came of a computer step, by its outcome.
       oneOf:
         - $ref: '#/components/schemas/ComputerStepDone'
         - $ref: '#/components/schemas/ComputerStepWaiting'
         - $ref: '#/components/schemas/ComputerStepHeld'
+        - $ref: '#/components/schemas/ComputerStepTaken'
       discriminator:
         propertyName: outcome
         mapping:
           done: '#/components/schemas/ComputerStepDone'
           waiting: '#/components/schemas/ComputerStepWaiting'
           held: '#/components/schemas/ComputerStepHeld'
+          taken: '#/components/schemas/ComputerStepTaken'
     ApprovalActionKindPolicy:
       type: string
       description: What the organization lets people do about one kind of action. open, the default, asks, and the person can allow it once, for the conversation, or always. ask asks every time, with allow once and deny only. hand_off leaves it to the person to do themselves.
@@ -38000,6 +38559,18 @@ components:
           oneOf:
             - $ref: '#/components/schemas/ComputerPageFrame'
             - type: 'null'
+    ComputerStepThreadId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: \S
+      description: The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.
+    ComputerStepToolCallId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: \S
+      description: 'The Bot''s tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation''s turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.'
     ComputerChallenge:
       type: object
       description: A check the page raised that only a person can pass, and the request raised for them to take over.
@@ -38106,6 +38677,9 @@ components:
           description: What the person is needed for.
         toolCallId:
           type: string
+          description: The Bot's tool call that asked. Sent with threadId, the step also runs once, however many times it is asked (ComputerStepToolCallId says how).
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
         source:
           type: string
           enum:
@@ -38140,6 +38714,10 @@ components:
         label:
           type: string
           description: What to ask the person for, such as your bank password.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerSecretValue:
       type: object
       additionalProperties: false
@@ -38202,6 +38780,14 @@ components:
           type: number
         url:
           type: string
+    ComputerSnapshotAsk:
+      type: object
+      additionalProperties: false
+      properties:
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerSnapshotElement:
       type: object
       required:
@@ -38271,7 +38857,9 @@ components:
           description: The web address to open.
         toolCallId:
           type: string
-          description: The tool call that asked, so a picture of the page is kept under it.
+          description: The tool call that asked, so a picture of the page is kept under it. Sent with threadId, the step also runs once, however many times it is asked (ComputerStepToolCallId says how).
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
     ComputerNavigation:
       type: object
       required:
@@ -38312,6 +38900,10 @@ components:
         snapshotId:
           type: integer
           description: The snapshot the ref came from.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerActionResult:
       type: object
       required:
@@ -38378,6 +38970,10 @@ components:
         submit:
           type: boolean
           description: Send the field's form afterwards.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerKey:
       type: object
       additionalProperties: false
@@ -38394,6 +38990,10 @@ components:
           description: The element to press it on. With it, snapshotId.
         snapshotId:
           type: integer
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerScroll:
       type: object
       additionalProperties: false
@@ -38401,6 +39001,10 @@ components:
         deltaY:
           type: number
           description: Pixels to scroll down, or up when negative. Without it the computer scrolls its own default distance.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerCommand:
       type: object
       additionalProperties: false
@@ -38415,6 +39019,10 @@ components:
           type: integer
           minimum: 1000
           maximum: 600000
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerCommandResult:
       type: object
       required:
@@ -38450,6 +39058,10 @@ components:
         path:
           type: string
           description: A folder of the workspace. Without it, the workspace itself.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerFileEntry:
       type: object
       required:
@@ -38490,6 +39102,10 @@ components:
           type: string
           minLength: 1
           pattern: \S
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerFileText:
       type: object
       required:
@@ -38525,6 +39141,10 @@ components:
         append:
           type: boolean
           description: Add to the end of the file instead of replacing it.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerFileWritten:
       type: object
       required:
@@ -41168,6 +41788,7 @@ components:
         - pydantic-ai
         - microsoft-agent-framework
         - claude-agent-sdk
+        - openai-agents-sdk
         - strands
         - ag2
         - langroid
@@ -41914,6 +42535,107 @@ components:
           description: The apps that came across connected.
           items:
             $ref: '#/components/schemas/CarriedApp'
+    ConversationRun:
+      type: object
+      description: One of a Bot's runs in a conversation, and how it ended.
+      required:
+        - id
+        - outcome
+        - endedAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: The run's id, as its events carry it.
+        outcome:
+          type:
+            - string
+            - 'null'
+          x-extensible-enum:
+            - succeeded
+            - interrupted
+            - cancelled
+            - failed
+          description: 'How the run ended, as its own last event said. succeeded: it finished. interrupted: it stopped to ask a person (an approval, a missing value). cancelled: it was stopped. failed: it ended with an error, or its stream failed, or its server ended it on the way down. Null while the run is going, and for a run that ended without saying how.'
+        endedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the run ended, or null while outcome is null.
+    ConversationRunResponse:
+      type: object
+      required:
+        - run
+      properties:
+        run:
+          $ref: '#/components/schemas/ConversationRun'
+    WebPushKey:
+      type: object
+      required:
+        - publicKey
+      properties:
+        publicKey:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{87}$
+          description: 'The public key: an uncompressed P-256 point (65 bytes), in URL-safe base64 with no padding, as the Push API''s applicationServerKey takes it.'
+    WebPushSubscriptionKeys:
+      type: object
+      additionalProperties: false
+      required:
+        - p256dh
+        - auth
+      description: The keys the browser encrypts with (RFC 8291), as the subscription's getKey() or toJSON() gives them, in URL-safe base64.
+      properties:
+        p256dh:
+          type: string
+          minLength: 87
+          maxLength: 88
+          pattern: ^[A-Za-z0-9_-]+=?$
+          description: The browser's P-256 public key, uncompressed (65 bytes).
+        auth:
+          type: string
+          minLength: 22
+          maxLength: 24
+          pattern: ^[A-Za-z0-9_-]+={0,2}$
+          description: The authentication secret (16 bytes).
+    SaveWebPushSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - endpoint
+        - keys
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: ^https://
+          description: 'The subscription''s endpoint, the address its push service gave it. It is a credential: OpenBot never sends it back.'
+        keys:
+          $ref: '#/components/schemas/WebPushSubscriptionKeys'
+    WebPushSubscription:
+      type: object
+      description: A browser that gets push notifications for the person, from every one of their Bots in this organization. Never its endpoint or keys.
+      required:
+        - id
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The id the app made for the browser.
+        createdAt:
+          type: string
+          format: date-time
+          description: When OpenBot first saved a subscription under this id.
+    WebPushSubscriptionResponse:
+      type: object
+      required:
+        - webPushSubscription
+      properties:
+        webPushSubscription:
+          $ref: '#/components/schemas/WebPushSubscription'
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -41990,7 +42712,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     Forbidden:
-      description: The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
+      description: The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED). Or the caller's account is scheduled to be deleted (ACCOUNT_PENDING_DELETION), which every operation but getAccountDeletion and cancelAccountDeletion answers until the deletion is cancelled.
       headers:
         X-Request-Id:
           $ref: '#/components/headers/RequestId'
@@ -42017,6 +42739,17 @@ components:
                 status: 403
                 detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
                 code: SSO_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            accountPendingDeletion:
+              value:
+                type: https://open.bot/errors/account-pending-deletion
+                title: Your account is being deleted.
+                status: 403
+                detail: Your account is scheduled to be deleted. Cancel the deletion to use OpenBot again.
+                code: ACCOUNT_PENDING_DELETION
                 category: permission
                 retryable: false
                 requestId: req_example
@@ -43657,7 +44390,19 @@ components:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
-                detail: Google Gemini doesn't take a plan. Pick an API key or a sign-in.
+                detail: xAI doesn't take a plan. Pick an API key or a sign-in.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            googleSignInRetired:
+              summary: A Google sign-in for Gemini, which OpenBot no longer offers.
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
@@ -43765,7 +44510,7 @@ components:
                 type: https://open.bot/errors/ai-connection-refused
                 title: OpenBot couldn't use that connection.
                 status: 422
-                detail: Sign in to Google first, then try again.
+                detail: Sign in to xAI first, then try again.
                 code: AI_CONNECTION_SIGN_IN_MISSING
                 category: validation
                 retryable: false
@@ -45815,6 +46560,170 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    AccountDeletionSignInOnly:
+      description: The request was signed with an API key rather than by the person signed in to OpenBot or its app.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            key:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: An API key can't delete an account. Sign in to OpenBot to do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionForbidden:
+      description: The session signed in more than 10 minutes ago, so the person signs in again first (REAUTHENTICATE). Or the account is already scheduled to be deleted (ACCOUNT_PENDING_DELETION). Or the request was signed with an API key.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            reauthenticate:
+              value:
+                type: https://open.bot/errors/reauthenticate
+                title: Sign in again.
+                status: 403
+                detail: To delete your account, sign in again first.
+                code: REAUTHENTICATE
+                category: auth
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            pendingDeletion:
+              value:
+                type: https://open.bot/errors/account-pending-deletion
+                title: Your account is being deleted.
+                status: 403
+                detail: Your account is scheduled to be deleted. Cancel the deletion to use OpenBot again.
+                code: ACCOUNT_PENDING_DELETION
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            key:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: An API key can't delete an account. Sign in to OpenBot to do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionConflict:
+      description: 'An organization stops the account being deleted (ACCOUNT_DELETION_BLOCKED): blockers lists each. Or the Idempotency-Key was already used for a different request.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/AccountDeletionProblem'
+          examples:
+            blocked:
+              value:
+                type: https://open.bot/errors/account-deletion-blocked
+                title: Deal with your organizations first.
+                status: 409
+                detail: You're the only owner of Acme. Make someone else an owner, or delete the organization, then try again.
+                code: ACCOUNT_DELETION_BLOCKED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                blockers:
+                  - organizationId: org_acme
+                    organizationName: Acme
+                    reason: only_owner
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionNotConfirmed:
+      description: The email address isn't the one the person signs in with, or the words aren't delete my account.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            email:
+              value:
+                type: https://open.bot/errors/account-deletion-not-confirmed
+                title: The confirmation doesn't match.
+                status: 422
+                detail: That isn't the email address you sign in with.
+                code: ACCOUNT_DELETION_NOT_CONFIRMED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            phrase:
+              value:
+                type: https://open.bot/errors/account-deletion-not-confirmed
+                title: The confirmation doesn't match.
+                status: 422
+                detail: Type delete my account to confirm.
+                code: ACCOUNT_DELETION_NOT_CONFIRMED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionUnderWay:
+      description: The account is already being deleted, so it's too late to cancel (ACCOUNT_DELETION_UNDER_WAY). Or the Idempotency-Key was already used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            underWay:
+              value:
+                type: https://open.bot/errors/account-deletion-under-way
+                title: Your account is already being deleted.
+                status: 409
+                detail: Your account is already being deleted, so it can't be cancelled.
+                code: ACCOUNT_DELETION_UNDER_WAY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     InvalidTeam:
       description: The name, the description or the parent is missing or malformed, the parent is not a team that can hold this one, or the Idempotency-Key is malformed.
       headers:
@@ -46935,7 +47844,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     ComputerActionConflict:
-      description: 'Nothing is broken, and the caller has something else to do first: take a new snapshot, wait for the person driving, clear what is in the way, or send the call through its conversation. Or the Idempotency-Key was already used for a different request.'
+      description: 'Nothing is broken, and the caller has something else to do first: take a new snapshot, wait for the person driving, clear what is in the way, or send the call through its conversation. Or the Idempotency-Key was already used for a different request. Or the call named a step, by threadId and toolCallId, that the server is running now (COMPUTER_STEP_RUNNING: ask again with the same ids for its result) or that was cut off before it answered (COMPUTER_STEP_OUTCOME_UNKNOWN: check before doing it again).'
       headers:
         X-Request-Id:
           $ref: '#/components/headers/RequestId'
@@ -46944,6 +47853,10 @@ components:
           schema:
             $ref: '#/components/schemas/ComputerProblem'
           examples:
+            stepRunning:
+              $ref: '#/components/examples/ComputerStepRunningProblemExample'
+            stepOutcomeUnknown:
+              $ref: '#/components/examples/ComputerStepOutcomeUnknownProblemExample'
             stale:
               value:
                 type: https://open.bot/errors/computer-snapshot-stale
@@ -47079,7 +47992,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     ComputerAnswerNotKept:
-      description: 'Either the action was already done with this Idempotency-Key, and its answer is never kept, so it is not sent again (ANSWER_NOT_KEPT: it ran once; send a new key to run it again). Or the caller has something else to do first: take a new snapshot, wait for the person driving, clear what is in the way, or send the call through its conversation. Or the Idempotency-Key was already used for a different request.'
+      description: 'Either the action was already done with this Idempotency-Key, and its answer is never kept, so it is not sent again (ANSWER_NOT_KEPT: it ran once; send a new key to run it again). Or the caller has something else to do first: take a new snapshot, wait for the person driving, clear what is in the way, or send the call through its conversation. Or the Idempotency-Key was already used for a different request. Or the call named a step, by threadId and toolCallId, that the server is running now (COMPUTER_STEP_RUNNING: ask again with the same ids for its result) or that was cut off before it answered (COMPUTER_STEP_OUTCOME_UNKNOWN: check before doing it again).'
       headers:
         X-Request-Id:
           $ref: '#/components/headers/RequestId'
@@ -47088,6 +48001,10 @@ components:
           schema:
             $ref: '#/components/schemas/ComputerProblem'
           examples:
+            stepRunning:
+              $ref: '#/components/examples/ComputerStepRunningProblemExample'
+            stepOutcomeUnknown:
+              $ref: '#/components/examples/ComputerStepOutcomeUnknownProblemExample'
             answerNotKept:
               value:
                 type: https://open.bot/errors/answer-not-kept
@@ -48831,6 +49748,69 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    ConversationRunNotFound:
+      description: The conversation does not exist, or the caller is not in it, or this server keeps no record of a run by that id in the conversation.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/conversation-run-not-found
+                title: Run not found.
+                status: 404
+                detail: Couldn't find that run in this conversation.
+                code: CONVERSATION_RUN_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidWebPushSubscription:
+      description: The request doesn't match the API, or the endpoint is not a browser push service's address.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAPushService:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That address isn't a browser push service's, so OpenBot can't send notifications to it.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    WebPushSubscriptionNotFound:
+      description: 'The person has no such subscription in this organization: it was removed already, or never saved. Or the organization does not exist.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/web-push-subscription-not-found
+                title: Subscription not found.
+                status: 404
+                detail: Subscription not found.
+                code: WEB_PUSH_SUBSCRIPTION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
   examples:
     ReactionPageLast:
       summary: Every reaction in a conversation, on one page.
@@ -50203,7 +51183,7 @@ components:
         detail: null
         interval: 5
     AiConnectionPageExample:
-      summary: A Claude plan as the default, and a Google sign-in that ended.
+      summary: A Claude plan as the default, an xAI sign-in that ended, and a Google sign-in OpenBot no longer offers.
       value:
         connections:
           - id: anthropic
@@ -50215,6 +51195,17 @@ components:
             ready: true
             problem: null
             connectedAt: '2026-11-20T09:00:00.000Z'
+          - id: xai
+            provider: xai
+            login: oauth
+            model: grok-4.7
+            endpointHost: null
+            isDefault: false
+            ready: false
+            problem:
+              code: sign-in-ended
+              detail: Your xAI sign-in ended. Sign in again to use it.
+            connectedAt: '2026-11-21T09:00:00.000Z'
           - id: google
             provider: google
             login: oauth
@@ -50223,14 +51214,13 @@ components:
             isDefault: false
             ready: false
             problem:
-              code: sign-in-ended
-              detail: Your Google sign-in ended. Sign in again to use it.
-            connectedAt: '2026-11-21T09:00:00.000Z'
+              code: sign-in-retired
+              detail: Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.
+            connectedAt: '2026-11-22T09:00:00.000Z'
         nextCursor: null
         signIns:
           - openai
           - anthropic
-          - google
           - xai
     AiConnectionPageNoDefaultExample:
       summary: Two connections left after an older app disconnected the default, neither the default.
@@ -50482,6 +51472,7 @@ components:
             scopedActionCount: 26
             connectsWith: sign-in
         nextCursor: null
+        total: 2
     AppSetupExample:
       summary: An OpenBot with the app directory set up.
       value:
@@ -51860,6 +52851,34 @@ components:
           role: member
           active: false
           personal: false
+    AccountDeletionBlockedExample:
+      summary: Two organizations to deal with first
+      value:
+        status: none
+        blockers:
+          - organizationId: org_acme
+            organizationName: Acme
+            reason: only_owner
+          - organizationId: org_globex
+            organizationName: Globex
+            reason: owner_must_leave
+    AccountDeletionClearExample:
+      summary: Nothing stops it
+      value:
+        status: none
+        blockers: []
+    AccountDeletionScheduledExample:
+      summary: Scheduled
+      value:
+        status: scheduled
+        requestedAt: '2026-11-25T10:00:00.000Z'
+        deleteAfter: '2026-12-09T10:00:00.000Z'
+        blockers: []
+    ScheduledAccountDeletionExample:
+      value:
+        status: scheduled
+        requestedAt: '2026-11-25T10:00:00.000Z'
+        deleteAfter: '2026-12-09T10:00:00.000Z'
     TeamPageLast:
       summary: An organization's teams, on one page.
       value:
@@ -52099,6 +53118,22 @@ components:
         outcome: held
         error: 'Not done: the person has control of the computer right now. Tell them you''ll do this once they hand it back.'
         humanHasControl: true
+    ComputerStepTakenExample:
+      summary: The server already ran this step, and this is what it answered.
+      value:
+        outcome: taken
+        threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+        toolCallId: call_8c1f
+        running: false
+        result:
+          ok: true
+    ComputerStepTakenRunningExample:
+      summary: The server is running this step, and it has not answered yet.
+      value:
+        outcome: taken
+        threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+        toolCallId: call_8c1f
+        running: true
     ApprovalSettingsExample:
       summary: Payments are left to the person, and everything else is open.
       value:
@@ -52778,6 +53813,30 @@ components:
         title: Pricing
         text: Starter is free. Team is 12 dollars a person each month.
         truncated: false
+    ComputerStepRunningProblemExample:
+      summary: The server is running this step now.
+      value:
+        type: https://open.bot/errors/computer-step-running
+        title: This step is already being run.
+        status: 409
+        detail: This step is already being run, and has not finished yet. Ask again in a moment for its result.
+        code: COMPUTER_STEP_RUNNING
+        category: conflict
+        retryable: true
+        requestId: req_example
+        traceId: trace_example
+    ComputerStepOutcomeUnknownProblemExample:
+      summary: The step was cut off before it answered.
+      value:
+        type: https://open.bot/errors/computer-step-outcome-unknown
+        title: This step's outcome is unknown.
+        status: 409
+        detail: This step was started once and stopped before it finished, so it may or may not have been done. Check before doing it again.
+        code: COMPUTER_STEP_OUTCOME_UNKNOWN
+        category: conflict
+        retryable: false
+        requestId: req_example
+        traceId: trace_example
     ComputerControlExample:
       summary: The Bot is driving, and nothing is asked.
       value:
@@ -53781,3 +54840,50 @@ components:
           - appId: gmail
             appName: Gmail
             accountLabel: sam@example.com
+    ConversationRunResponseExample:
+      summary: A run that finished
+      value:
+        run:
+          id: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          outcome: succeeded
+          endedAt: '2026-11-14T12:04:10.000Z'
+    ConversationApprovalPageExample:
+      summary: One conversation's only approval, answered, on the last page.
+      value:
+        approvals:
+          - id: 6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b
+            status: completed
+            decision: allow_once
+            result: null
+            createdAt: '2026-08-03T09:12:44.501Z'
+            decidedAt: '2026-08-03T09:13:02.118Z'
+            consumedAt: '2026-08-03T09:13:02.640Z'
+            completedAt: '2026-08-03T09:13:09.902Z'
+            action:
+              botId: research-assistant
+              toolRef: mcp/gmail/send_email
+              effect: write
+              scope: gmail
+              threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+              toolCallId: call_8c1f
+              args:
+                to: sam.okafor@acme.com
+                subject: Q4 numbers
+              target:
+                app: gmail
+              policy:
+                behaviour: ask
+                source: safety
+                reason: Sending a message asks first.
+                kind: sending
+        nextCursor: null
+    WebPushKeyExample:
+      summary: This OpenBot's key.
+      value:
+        publicKey: BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U
+    WebPushSubscriptionResponseExample:
+      summary: A browser, saved.
+      value:
+        webPushSubscription:
+          id: 6d0f2a4b-8c1e-4f3a-9b5d-7e2c4a6f8b10
+          createdAt: '2026-11-26T18:04:12.000Z'

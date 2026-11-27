@@ -47,7 +47,7 @@ import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
 /*
- * A team's models: the Models row on a team's page, its dialog, and the line on Admin, Providers
+ * A team's models: the Models row on a team's page, its dialog, and the line on Admin, AI providers
  * naming the teams with a list of their own.
  *
  * The server is the spec's own: the MSW handlers Orval generates beside the client, at the API's
@@ -686,7 +686,7 @@ test("Activity draws a run refused for its model as Blocked, says whose list lef
 });
 
 test("models are named where a person reads them: Allowed models, Usage and the team's dialog", async () => {
-  // Providers' Allowed models row.
+  // AI providers' Allowed models row.
   const providers = open("/admin/providers");
   expect(
     await providers.view.findByText("GPT-6 Sol, GPT-5.6 Terra"),

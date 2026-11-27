@@ -20,12 +20,13 @@ import {
 } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
+  awaitingFirstReply,
   type GroupMessage,
   groupKeys,
   groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import {
   BotMarkdown,
   markdownComponents,
@@ -33,6 +34,7 @@ import {
   replyRemarkPlugins,
 } from "@/lib/markdown";
 import { newId } from "@/lib/new-id";
+import { DELETED_USER, isDeletedUser } from "@/lib/people/deleted-user";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
 import { Composer, toAgentOptions } from "./composer";
@@ -190,8 +192,11 @@ export function GroupChat({ channelId }: { channelId: string }) {
                   ? (names.get(message.agentId) ?? "A Bot no longer here")
                   : message.ownerUserId === me?.id
                     ? "You"
-                    : // Only the people still in it are named: someone taken out is no longer the reader's to see.
-                      people.get(message.ownerUserId) || "Someone who left"
+                    : // A message whose sender deleted their account stays, with no sender: a deleted user's.
+                      !message.ownerUserId || isDeletedUser(message.ownerUserId)
+                      ? DELETED_USER
+                      : // Only the people still in it are named: someone taken out is no longer the reader's to see.
+                        people.get(message.ownerUserId) || "Someone who left"
               }
               answeredBy={
                 message.answeredBy
@@ -201,6 +206,20 @@ export function GroupChat({ channelId }: { channelId: string }) {
               mine={message.ownerUserId === me?.id}
             />
           ))}
+          {/*
+           * A person's message the server has taken and no Bot has started on yet. Each Bot's line
+           * says "Thinking" once its run starts, but the page only learns that on its next read, up
+           * to a second and a half later: a first message sat alone under the box for that long,
+           * and read as broken. Which Bot goes first is the server's to say, so the line names none.
+           */}
+          {awaitingFirstReply(group.data) ? (
+            <p
+              className="tool-line-running text-sm text-muted-foreground"
+              role="status"
+            >
+              Thinking
+            </p>
+          ) : null}
         </div>
       </div>
       {/* The same column and the same compact composer as a conversation with one Bot. */}

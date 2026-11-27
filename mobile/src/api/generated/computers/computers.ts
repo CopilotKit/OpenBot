@@ -32,6 +32,7 @@ import type {
   ComputerSecretSupplied,
   ComputerSecretValue,
   ComputerSnapshot,
+  ComputerSnapshotAsk,
   ComputerStatus,
   ComputerStopped,
   ComputerTarget,
@@ -40,6 +41,7 @@ import type {
   GetComputerControlParams,
   GetWorkspaceSnapshotsParams,
   ListComputersParams,
+  ReadComputerPageParams,
   WorkspaceSnapshots,
 } from "../model";
 
@@ -398,21 +400,35 @@ export const getComputerPageFrame = async (
 export const getReadComputerPageUrl = (
   organizationId: string,
   botId: string,
+  params?: ReadComputerPageParams,
 ) => {
-  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/page`;
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/page?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/page`;
 };
 
 /**
- * Return the text of the page the Bot's browser is showing, with its address and title.
+ * Return the text of the page the Bot's browser is showing, with its address and title. Asked with the Bot's threadId and toolCallId, the step runs once, however many times it is asked.
  * @summary Read the page a Bot's browser is on
  */
 export const readComputerPage = async (
   organizationId: string,
   botId: string,
+  params?: ReadComputerPageParams,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<ComputerPageText> => {
   return apiRequest<ComputerPageText>(
-    getReadComputerPageUrl(organizationId, botId),
+    getReadComputerPageUrl(organizationId, botId, params),
     {
       ...options,
       method: "GET",
@@ -833,19 +849,46 @@ export const getSnapshotComputerUrl = (
 };
 
 /**
- * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again. The body is optional: sent with the Bot's threadId and toolCallId, the step runs once, however many times it is asked.
  * @summary List what a Bot can act on in the page
  */
 export const snapshotComputer = async (
   organizationId: string,
   botId: string,
+  computerSnapshotAsk?: ComputerSnapshotAsk,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<ComputerSnapshot> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return apiRequest<ComputerSnapshot>(
     getSnapshotComputerUrl(organizationId, botId),
     {
       ...options,
       method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(computerSnapshotAsk),
     },
   );
 };

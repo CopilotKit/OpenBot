@@ -2,12 +2,17 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { BotLookProvider } from "../components/agents/bot-look";
 import { HeldOutGate } from "../components/auth/company-sign-in-page";
+import { PendingDeletionGate } from "../components/auth/pending-deletion-page";
+import { WebPushKeeper } from "../components/delivery/web-push-keeper";
 import { OpenFromApp } from "../components/desktop/open-from-app";
 import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
 import { CommandMenu } from "../components/navigation/command-menu";
 import { NewOrganizationDialog } from "../components/organizations/new-organization-dialog";
 import { OrganizationBoundary } from "../components/organizations/organization-boundary";
 import { CardNeededDialog } from "../components/plan/card-needed-dialog";
+import { ResumeAccountDeletion } from "../components/settings/delete-account";
+import { showPendingDeletion } from "../lib/account-deletion/pending";
+import { scheduledDeletion } from "../lib/account-deletion/queries";
 import { aiConnectionRequired } from "../lib/ai-connection/queries";
 import {
   connectedThroughDesktop,
@@ -44,6 +49,16 @@ export const Route = createFileRoute("/_authed")({
         await signOutThroughDesktop().catch(() => undefined);
       }
       throw redirect({ to: "/sign" });
+    }
+    /*
+     * An account scheduled to be deleted, before everything else: the app is only the page that
+     * says when and offers to cancel (`PendingDeletionGate`). A server that refuses every other
+     * request for it is found out the same way, by the first refusal (lib/error-reporting.tsx).
+     */
+    const scheduled = await scheduledDeletion(context.queryClient);
+    if (scheduled) {
+      showPendingDeletion({ deleteAfter: scheduled.deleteAfter });
+      return;
     }
     /*
      * Terms to agree to (OpenBot Cloud), before onboarding and everything else: from anywhere to
@@ -101,10 +116,13 @@ export const Route = createFileRoute("/_authed")({
   // Mounted INSIDE the authed boundary, not at the root: the runtime endpoint requires a session, so
   // a provider above the sign-in gate would open a run for a visitor who has not signed in yet.
   component: () => (
-    // The held page in place of all of it, the moment the organization holds the person out while it is open.
-    <HeldOutGate>
-      <AuthedApp />
-    </HeldOutGate>
+    // The pending page in place of all of it, from the moment the account is scheduled to be deleted.
+    <PendingDeletionGate>
+      {/* The held page in place of all of it, the moment the organization holds the person out while it is open. */}
+      <HeldOutGate>
+        <AuthedApp />
+      </HeldOutGate>
+    </PendingDeletionGate>
   ),
 });
 
@@ -119,6 +137,8 @@ function AuthedApp() {
          */}
         <SkinBotLook>
           <AppHotkeys />
+          {/* This browser's push subscription, saved again in each organization OpenBot starts in. */}
+          <WebPushKeeper />
           {/* The skin saved on the account, drawn over the browser's cached one once it loads. */}
           <SkinAccountSync />
           {/* Opened by the "OpenBot for Business" entry (personal edition and OpenBot Cloud), from whichever skin draws it. */}
@@ -132,6 +152,8 @@ function AuthedApp() {
           <NewOrganizationDialog />
           {/* The command palette, from Cmd/Ctrl+K and from the skins' menus. */}
           <CommandMenu />
+          {/* Back from signing in again to delete the account: General settings, where the dialog opens again. */}
+          <ResumeAccountDeletion />
           <Outlet />
         </SkinBotLook>
       </CopilotProvider>

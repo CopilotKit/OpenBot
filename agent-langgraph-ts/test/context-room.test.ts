@@ -13,14 +13,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeProvider, type Recorded, type Turn } from "./fake-provider.ts";
-import {
-  conversation,
-  type Event,
-  run,
-  toolCallback,
-  types,
-  withEngine,
-} from "./helpers.ts";
+import { conversation, type Event, run, types, withEngine } from "./helpers.ts";
 
 const RESULTS = 60;
 const RESULT_CHARS = 8_000;
@@ -266,27 +259,68 @@ const lookupOnce = (_: Recorded, answered: number): Turn =>
     ? { calls: [{ id: "call_new", name: "lookup", args: { q: "next page" } }] }
     : { text: "Done. FINAL_WORDS" };
 
+/**
+ * The run OpenBot sends after answering `call_new`, which the first run handed back: the same
+ * thread with that call and `result` after it.
+ */
+function continued(
+  input: Record<string, unknown>,
+  result: string,
+): Record<string, unknown> {
+  return {
+    ...input,
+    runId: "run-2",
+    messages: [
+      ...(input.messages as unknown[]),
+      {
+        id: "a-new",
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call_new",
+            type: "function",
+            function: {
+              name: "lookup",
+              arguments: JSON.stringify({ q: "next page" }),
+            },
+          },
+        ],
+      },
+      { id: "t-new", role: "tool", toolCallId: "call_new", content: result },
+    ],
+  };
+}
+
+/** A step, then the run that carries it on with `result`, on one engine. */
+async function stepAndContinue(
+  env: Record<string, string>,
+  input: Record<string, unknown>,
+  result: string,
+) {
+  return withEngine({ env }, async (base) => {
+    const first = await run(base, input);
+    assert.equal(runEnd(first.events).type, "RUN_FINISHED");
+    const second = await run(base, continued(input, result));
+    assert.equal(runEnd(second.events).type, "RUN_FINISHED");
+    return { first, second };
+  });
+}
+
 test("OpenAI: a conversation past the model's window keeps going, old results cleared from what is sent", async () => {
   const provider = await fakeProvider(
     behindWindow(128_000, OPENAI_TOO_LONG, lookupOnce),
   );
-  const callback = await toolCallback(() => resultBody(RESULTS));
   try {
-    const env = {
-      ...openAIEnv(provider.base),
-      AGENT_TOOL_TOKEN: "tool-token",
-      OPENBOT_TOOL_URL: callback.url,
-    };
+    const env = openAIEnv(provider.base);
     const input = longThread();
-    input.forwardedProps = {
-      openbotModel: OPENAI_MODEL,
-      openbotDeploymentTools: ["lookup"],
-      openbotRun: "signed-run-statement",
-    };
-    const result = await withEngine({ env }, (base) => run(base, input));
-    assert.equal(runEnd(result.events).type, "RUN_FINISHED");
+    input.forwardedProps = { openbotModel: OPENAI_MODEL };
+    const { first: result } = await stepAndContinue(
+      env,
+      input,
+      resultBody(RESULTS),
+    );
     assert.equal(provider.requests.length, 2, "no request was refused");
-    assert.equal(callback.calls.length, 1);
 
     const first = provider.requests[0]!.body;
     const { whole, notes } = shape(first);
@@ -321,7 +355,7 @@ test("OpenAI: a conversation past the model's window keeps going, old results cl
       true,
     );
 
-    // The next step clears again, the new result is whole.
+    // The next step, in the run that carries the turn on, clears again; the new result is whole.
     const second = shape(provider.requests[1]!.body);
     assert.ok(second.whole.includes("call_new"));
     assert.equal(second.whole.length, 12);
@@ -333,12 +367,11 @@ test("OpenAI: a conversation past the model's window keeps going, old results cl
     const stored = (snapshot.messages as Block[]).filter(
       (message) => message.role === "tool",
     );
-    assert.equal(stored.length, RESULTS + 1);
+    assert.equal(stored.length, RESULTS);
     for (let i = 0; i < RESULTS; i += 1)
       assert.equal(stored[i]!.content, resultBody(i));
   } finally {
     await provider.close();
-    await callback.close();
   }
 });
 
@@ -346,21 +379,11 @@ test("Claude: every request carries context editing and its beta, with the whole
   const provider = await fakeProvider(
     behindWindow(128_000, ANTHROPIC_TOO_LONG, lookupOnce),
   );
-  const callback = await toolCallback(() => "a short result");
   try {
-    const env = {
-      ...anthropicEnv(provider.base),
-      AGENT_TOOL_TOKEN: "tool-token",
-      OPENBOT_TOOL_URL: callback.url,
-    };
+    const env = anthropicEnv(provider.base);
     const input = longThread();
-    input.forwardedProps = {
-      openbotModel: CLAUDE_MODEL,
-      openbotDeploymentTools: ["lookup"],
-      openbotRun: "signed-run-statement",
-    };
-    const result = await withEngine({ env }, (base) => run(base, input));
-    assert.equal(runEnd(result.events).type, "RUN_FINISHED");
+    input.forwardedProps = { openbotModel: CLAUDE_MODEL };
+    await stepAndContinue(env, input, "a short result");
     assert.equal(provider.requests.length, 2, "no request was refused");
     for (const request of provider.requests) {
       assert.equal(request.path, "/v1/messages");
@@ -376,7 +399,6 @@ test("Claude: every request carries context editing and its beta, with the whole
     }
   } finally {
     await provider.close();
-    await callback.close();
   }
 });
 
@@ -418,27 +440,19 @@ test("Claude behind a proxy that refuses context editing: cleared here instead, 
   }
 });
 
-test("A smaller window: the refused call is retried cleared harder, and the run keeps that stage", async () => {
+test("A smaller window: the refused call is retried cleared harder, and the run that carries it on gets through the same way", async () => {
   // Ten whole results are too many for this window; three fit.
   const provider = await fakeProvider(
     behindWindow(25_000, OPENAI_TOO_LONG, lookupOnce),
   );
-  const callback = await toolCallback(() => resultBody(61));
   try {
-    const env = {
-      ...openAIEnv(provider.base),
-      AGENT_TOOL_TOKEN: "tool-token",
-      OPENBOT_TOOL_URL: callback.url,
-    };
+    const env = openAIEnv(provider.base);
     const input = longThread();
-    input.forwardedProps = {
-      openbotModel: OPENAI_MODEL,
-      openbotDeploymentTools: ["lookup"],
-      openbotRun: "signed-run-statement",
-    };
-    const result = await withEngine({ env }, (base) => run(base, input));
-    assert.equal(runEnd(result.events).type, "RUN_FINISHED");
-    // Refused once, then the stage that fit, for this step and the next: never refused again.
+    input.forwardedProps = { openbotModel: OPENAI_MODEL };
+    const { second } = await stepAndContinue(env, input, resultBody(61));
+    // The first run: refused once, then the stage that fits. The thread keeps that stage, so the
+    // run after the hand-back starts there and is not refused first: a long task carried on step
+    // after step is refused once, not once a step.
     assert.equal(provider.requests.length, 3);
     assert.equal(shape(provider.requests[0]!.body).whole.length, 12);
     const retried = shape(provider.requests[1]!.body);
@@ -450,10 +464,23 @@ test("A smaller window: the refused call is retried cleared harder, and the run 
       "call_59",
     ]);
     const next = shape(provider.requests[2]!.body);
+    assert.deepEqual(next.whole, [
+      "call_0",
+      "call_1",
+      "call_58",
+      "call_59",
+      "call_new",
+    ]);
     assert.equal(next.notes.length, RESULTS - 2 - 2);
+    assert.equal(
+      second.events
+        .filter((event) => event.type === "TEXT_MESSAGE_CONTENT")
+        .map((event) => event.delta)
+        .join(""),
+      "Done. FINAL_WORDS",
+    );
   } finally {
     await provider.close();
-    await callback.close();
   }
 });
 
@@ -522,22 +549,13 @@ test("recall_earlier_results reads a cleared result back whole by call_id, and f
         : { text: "Found them." },
     ),
   );
-  const callback = await toolCallback();
   try {
-    const env = {
-      ...openAIEnv(provider.base),
-      AGENT_TOOL_TOKEN: "tool-token",
-      OPENBOT_TOOL_URL: callback.url,
-    };
+    const env = openAIEnv(provider.base);
     const input = longThread();
-    input.forwardedProps = {
-      openbotModel: OPENAI_MODEL,
-      openbotDeploymentTools: ["lookup"],
-      openbotRun: "signed-run-statement",
-    };
+    input.forwardedProps = { openbotModel: OPENAI_MODEL };
     const result = await withEngine({ env }, (base) => run(base, input));
     assert.equal(runEnd(result.events).type, "RUN_FINISHED");
-    assert.equal(callback.calls.length, 0, "a recall is answered here");
+    assert.equal(provider.requests.length, 2, "a recall is answered here");
 
     const first = provider.requests[0]!.body;
     assert.deepEqual(
@@ -572,7 +590,6 @@ test("recall_earlier_results reads a cleared result back whole by call_id, and f
     assert.ok(found.length < 20_100);
   } finally {
     await provider.close();
-    await callback.close();
   }
 });
 

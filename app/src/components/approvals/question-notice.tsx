@@ -24,6 +24,7 @@ import {
   dismissPersonQuestionMutationOptions,
 } from "@/lib/approvals";
 import { type Failure, failureSaid } from "@/lib/load-failure";
+import { ANSWER_PREFIX } from "@/lib/question-answer";
 import { queryClient } from "@/query-client";
 
 export type WaitingQuestion = ApprovalInboxData["questions"][number];
@@ -72,11 +73,9 @@ export function askedSinceLastMessage(messages: readonly Message[]): boolean {
 }
 
 /**
- * The id the server stores an answer under, and the message it is stored as: see
- * `person-response-sweep.ts` and `questionResponseMessage` in server/src/approvals/questions.ts.
+ * The message an answer is stored as, under the id the server stores it under (`ANSWER_PREFIX`).
  * Drawn here under the same id, so the stored copy read back later replaces this one.
  */
-const ANSWER_PREFIX = "person-response:";
 const ANSWER_LEAD = "In response to your question: ";
 
 export function answerMessage(

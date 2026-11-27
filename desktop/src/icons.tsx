@@ -15,6 +15,7 @@ import {
   CloudIcon,
   CloudServerIcon,
   ComputerIcon,
+  File02Icon,
   Files01Icon,
   HistoryIcon,
   LaptopIcon,
@@ -99,6 +100,7 @@ export const IconCode = defineIcon("code", SourceCodeIcon);
 export const IconDeviceDesktop = defineIcon("device-desktop", ComputerIcon);
 export const IconDeviceLaptop = defineIcon("device-laptop", LaptopIcon);
 export const IconFiles = defineIcon("files", Files01Icon);
+export const IconFileText = defineIcon("file-text", File02Icon);
 export const IconHistory = defineIcon("history", HistoryIcon);
 export const IconListCheck = defineIcon("list-check", CheckListIcon);
 export const IconLogin2 = defineIcon("login-2", Login01Icon);

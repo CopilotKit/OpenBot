@@ -18,6 +18,7 @@ import {
 import { cleanup, render, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
+import { DESKTOP_DOWNLOAD_URL } from "@/components/app-sidebar/desktop-app-item";
 import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
 import { CommandMenu } from "@/components/navigation/command-menu";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -483,6 +484,62 @@ test.each(["user", "admin"] as const)(
     ).toBeTruthy();
   },
 );
+
+/*
+ * Reported from OpenBot Cloud: the web app had no way to get OpenBot Desktop. On OpenBot Cloud the
+ * account menu offers it, opening the download page in a new tab. An OpenBot a company runs itself
+ * doesn't offer it, and neither does OpenBot Desktop's own window, which already is the app.
+ */
+test.each(["user", "admin"] as const)(
+  "on OpenBot Cloud the account menu offers the desktop app, for a %s, in a new tab",
+  async (role) => {
+    const { view, user } = renderSidebar(role, "team", undefined, true);
+    await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+    const menu = await view.findByRole("menu");
+    const entry = within(menu).getByRole("menuitem", {
+      name: "Get the desktop app",
+    });
+    expect(entry.getAttribute("href")).toBe(DESKTOP_DOWNLOAD_URL);
+    expect(DESKTOP_DOWNLOAD_URL).toBe("https://open.bot/");
+    expect(entry.getAttribute("target")).toBe("_blank");
+    expect(entry.getAttribute("rel")).toBe("noopener noreferrer");
+    // After the account's pages, before Get troubleshooting logs.
+    expect(entry.nextElementSibling).toBe(
+      within(menu).getByRole("menuitem", { name: "Get troubleshooting logs" }),
+    );
+  },
+);
+
+test("an OpenBot a company runs itself doesn't offer the desktop app", async () => {
+  const { view, user } = renderSidebar("admin", "team");
+  await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+  const menu = await view.findByRole("menu");
+  expect(within(menu).getByRole("menuitem", { name: "Settings" })).toBeTruthy();
+  expect(
+    within(menu).queryByRole("menuitem", { name: "Get the desktop app" }),
+  ).toBeNull();
+});
+
+test("OpenBot Desktop signed in to OpenBot Cloud doesn't offer the desktop app", async () => {
+  const shell = window as { __TAURI_INTERNALS__?: unknown };
+  shell.__TAURI_INTERNALS__ = {
+    invoke: async () => undefined,
+    transformCallback: () => 0,
+  };
+  try {
+    const { view, user } = renderSidebar("user", "team", undefined, true);
+    await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+    const menu = await view.findByRole("menu");
+    expect(
+      within(menu).getByRole("menuitem", { name: "OpenBot for Business" }),
+    ).toBeTruthy();
+    expect(
+      within(menu).queryByRole("menuitem", { name: "Get the desktop app" }),
+    ).toBeNull();
+  } finally {
+    delete shell.__TAURI_INTERNALS__;
+  }
+});
 
 test("the personal edition's menu is the same whatever the sign-in", () => {
   for (const role of ["user", "admin"])

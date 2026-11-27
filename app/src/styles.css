@@ -517,3 +517,23 @@
     transform: translateY(3px);
   }
 }
+
+/*
+ * Opened by OpenBot Desktop's setup (lib/desktop/from-setup.ts): setup faded out to the window's
+ * ground, the sidebar's colour, and the first paint fades up from that same ground, so the switch
+ * reads as one dissolve. From the first thing the app draws, not from the empty page. Only opacity,
+ * and only without reduced motion (index.html does not mark the page then).
+ */
+html[data-from-setup] body {
+  background: var(--sidebar);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html[data-from-setup] #root:not(:empty) {
+    animation: from-setup 320ms ease-out both;
+  }
+}
+@keyframes from-setup {
+  from {
+    opacity: 0;
+  }
+}

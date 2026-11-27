@@ -14,9 +14,6 @@ on:
     branches: [main]
     paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "shared/fixtures/client-version/**", "package.json", ".github/workflows/desktop.yml", ".github/workflows/desktop-build.yml"]
   workflow_call:
-    secrets:
-      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:
-        required: false
 
 permissions:
   contents: read
@@ -40,6 +37,7 @@ jobs:
   changes:
     name: changes
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 5 # usually under half a minute
     permissions:
       contents: read
       actions: read
@@ -69,6 +67,7 @@ jobs:
     if: needs.changes.outputs.core == 'true'
     # Clippy over the whole crate is CPU-bound: the 16-core larger runner, except for forks.
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 30 # usually about a minute from the Rust cache; a cold clippy takes longer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -109,6 +108,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 30 # usually about 6 minutes
     strategy:
       fail-fast: false
       matrix:
@@ -191,5 +191,3 @@ jobs:
       manifest_artifact: ""
       retention_days: 7
       platforms: '["macos","windows","linux"]'
-    secrets:
-      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}

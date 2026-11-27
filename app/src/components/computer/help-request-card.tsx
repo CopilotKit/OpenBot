@@ -14,6 +14,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { useComputerControl } from "@/lib/computers/use-control";
+import { isWaitingForPerson } from "@/lib/copilot/approval-context";
 import { useConversation } from "@/lib/copilot/conversation";
 import { useToolPlace } from "@/lib/copilot/tool-place";
 import { ComputerView } from "./computer-view";
@@ -42,6 +43,8 @@ function outcomeOf(result: string | undefined): HelpOutcome | undefined {
   if (result === undefined) return undefined;
   try {
     const parsed: unknown = JSON.parse(result);
+    // The stand-in for a request the server holds (`heldByServer`): not answered yet.
+    if (isWaitingForPerson(parsed)) return undefined;
     return parsed && typeof parsed === "object" ? (parsed as HelpOutcome) : {};
   } catch {
     // The runtime stringifies a handler that threw as "Error: <message>".

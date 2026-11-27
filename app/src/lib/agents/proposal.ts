@@ -130,7 +130,7 @@ export const proposedBotSchema = z.object({
   roleDescription: z
     .string()
     .describe(
-      "The coworker's standing instructions, written as directions to it in the imperative, up to 1000 characters. Say what it does, what it must not conclude, and what it says when the evidence is thin. This text is given to a model on every turn in every channel, so write the rules that should always hold rather than a description of the coworker in the third person. Do not address the person talking to it.",
+      "The coworker's standing instructions, written as directions to it in the imperative, up to 5000 characters. Say what it does, what it must not conclude, and what it says when the evidence is thin. This text is given to a model on every turn in every channel, so write the rules that should always hold rather than a description of the coworker in the third person. Do not address the person talking to it.",
     ),
   skills: z
     .array(z.string())

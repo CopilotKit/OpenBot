@@ -1,5 +1,5 @@
 /**
- * Settings → Providers: several AI connections at once (plans/multiple-ai-connections-spec.md,
+ * Settings → AI providers: several AI connections at once (plans/multiple-ai-connections-spec.md,
  * step 2), each on a page of its own (`openbot-screen-layout`, Screens, Not Dialogs).
  *
  * The list (the organization's, and a person's own on OpenBot Cloud) has one row per connection,
@@ -45,6 +45,8 @@ import {
   GetPersonalAiConnectionResponse,
   ListAiConnectionsResponse,
   MakeAiConnectionDefaultResponse,
+  ReplaceAiConnectionBody,
+  ReplaceAiConnectionResponse,
   StartAiSignInBody,
 } from "@/lib/api/generated/models/models.zod";
 import { queryClient } from "@/query-client";
@@ -110,6 +112,8 @@ const PERSONAL: PersonalAiConnection = {
 type Call = { method: string; path: string; body?: unknown };
 
 let calls: Call[];
+/** The organization's connection in use, as getAiConnection answers it. */
+let orgConnection: AiConnection;
 /** The organization's list, or null for a server older than it (404). */
 let orgList: AiConnectionEntry[] | null;
 let orgSignIns: AiConnectionProvider[];
@@ -152,7 +156,31 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit) {
     typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
   calls.push({ method, path, body });
   if (path === `${ORG}/ai-connection` && method === "GET")
-    return json(200, GetAiConnectionResponse.parse(ORG_CONNECTION));
+    return json(200, GetAiConnectionResponse.parse(orgConnection));
+  if (path === `${ORG}/ai-connection` && method === "PUT") {
+    // As the server answers: the default changes in place, on its provider's id.
+    const input = ReplaceAiConnectionBody.parse(body);
+    orgConnection = {
+      ...orgConnection,
+      provider: input.provider,
+      login: input.login,
+      model: input.model ?? null,
+      endpointHost: input.baseUrl ? new URL(input.baseUrl).host : null,
+      ready: true,
+    };
+    if (orgList) {
+      const replaced = entry(input.provider, {
+        login: input.login,
+        model: input.model ?? null,
+        isDefault: true,
+      });
+      const at = orgList.findIndex((one) => one.provider === input.provider);
+      if (at >= 0) orgList.splice(at, 1, replaced);
+      else orgList.push(replaced);
+      for (const one of orgList) one.isDefault = one.id === input.provider;
+    }
+    return json(200, ReplaceAiConnectionResponse.parse(orgConnection));
+  }
   if (path === `${ORG}/people/me/ai-connection` && method === "GET") {
     if (personalDelay > 0)
       await new Promise((done) => setTimeout(done, personalDelay));
@@ -252,6 +280,7 @@ const originalFetch = global.fetch;
 beforeAll(() => GlobalRegistrator.register({ url: "http://127.0.0.1:3010/" }));
 beforeEach(() => {
   calls = [];
+  orgConnection = ORG_CONNECTION;
   orgList = null;
   orgSignIns = [];
   personalList = null;
@@ -274,7 +303,7 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-/** The Providers screens at `path`, as Settings routes them. */
+/** The AI providers screens at `path`, as Settings routes them. */
 function renderAt(path: string) {
   const root = createRootRoute({ component: Outlet });
   const list = createRoute({
@@ -514,13 +543,58 @@ test("Connect another AI is a page: it marks connected providers and posts conne
       },
     ]),
   );
-  // Then the new connection's own page, saying what connecting it did.
+  /*
+   * Then back to the list, still on Connect another AI, with OpenAI checked: never the new
+   * connection's own page, which read as a detour after adding one.
+   */
+  const openai = await view.findByRole("button", { name: /^OpenAI/ });
   await waitFor(() =>
-    expect(at(router)).toBe("/settings/providers/openai?connected=added"),
+    expect(
+      within(openai).getByRole("img", { name: "Connected" }),
+    ).toBeDefined(),
   );
+  expect(at(router)).toBe("/settings/providers/new");
+  expect(within(openai).getByText("Uses your OpenAI API key.")).toBeDefined();
+  expect(view.getByRole("status").textContent).toBe("OpenAI is connected.");
+  // Nothing to cancel now: Done goes back to AI providers, where it is listed.
+  expect(view.queryByRole("button", { name: "Cancel" })).toBeNull();
+  await user.click(view.getByRole("button", { name: "Done" }));
+  await waitFor(() => expect(at(router)).toBe("/settings/providers"));
+  expect(await view.findByRole("link", { name: /^OpenAI/ })).toBeDefined();
+});
+
+test("Connect another AI goes back to its list after each one, so a second connects from there", async () => {
+  orgList = [];
+  const user = userEvent.setup({ document });
+  const { view, router } = renderAt("/settings/providers/new");
+  await view.findByRole("heading", { name: "Connect an AI" });
+  await user.click(await view.findByRole("button", { name: /^OpenAI/ }));
+  await user.type(view.getByLabelText(/API key/), "sk-example");
+  await user.click(view.getByRole("button", { name: /Connect/ }));
+  // The first is connected: the page now connects another, with OpenAI checked in its list.
+  await view.findByRole("heading", { name: "Connect another AI" });
+  const openai = view.getByRole("button", { name: /^OpenAI/ });
+  expect(within(openai).getByRole("img", { name: "Connected" })).toBeDefined();
+  await user.click(view.getByRole("button", { name: /^Anthropic/ }));
+  await user.type(view.getByLabelText(/API key/), "sk-ant-example");
+  await user.click(view.getByRole("button", { name: /Connect/ }));
+  const anthropic = await view.findByRole("button", { name: /^Anthropic/ });
+  await waitFor(() =>
+    expect(
+      within(anthropic).getByRole("img", { name: "Connected" }),
+    ).toBeDefined(),
+  );
+  expect(view.getAllByRole("img", { name: "Connected" })).toHaveLength(2);
+  // The first stays the default, and says so now that there are two.
   expect(
-    await view.findByText(/Pick one of its models in a conversation/),
+    within(view.getByRole("button", { name: /^OpenAI/ })).getByText("Default"),
   ).toBeDefined();
+  expect(view.getByRole("status").textContent).toBe("Anthropic is connected.");
+  expect(at(router)).toBe("/settings/providers/new");
+  expect(writes().map((call) => call.path)).toEqual([
+    `${ORG}/ai-connections`,
+    `${ORG}/ai-connections`,
+  ]);
 });
 
 test("Connect another AI tags the default among several, and a stopped one offers Reconnect on its own way in", async () => {
@@ -625,27 +699,126 @@ test("a person's own connection's page posts to their own connections", async ()
 });
 
 test("a stopped sign-in leads with Sign in again, a page that opens its provider ready to sign in", async () => {
-  orgSignIns = ["google"];
+  orgSignIns = ["xai"];
   orgList = [
     entry("anthropic", { isDefault: true }),
-    entry("google", {
+    entry("xai", {
       login: "oauth",
-      model: "gemini-3.8-flash",
+      model: "grok-4.7",
       ready: false,
-      problem: { code: "sign-in-ended", detail: "Your Google sign-in ended." },
+      problem: { code: "sign-in-ended", detail: "Your xAI sign-in ended." },
     }),
   ];
   const user = userEvent.setup({ document });
-  const { view, router } = renderAt("/settings/providers/google");
+  const { view, router } = renderAt("/settings/providers/xai");
   await user.click(await view.findByRole("link", { name: /Sign in again/ }));
   expect(
-    await view.findByRole("heading", { name: "Reconnect Google sign-in" }),
+    await view.findByRole("heading", { name: "Reconnect xAI sign-in" }),
   ).toBeDefined();
-  expect(at(router)).toBe("/settings/providers/google/change");
-  expect(
-    view.getByRole("button", { name: "Sign in with Google" }),
-  ).toBeDefined();
+  expect(at(router)).toBe("/settings/providers/xai/change");
+  expect(view.getByRole("button", { name: "Sign in with xAI" })).toBeDefined();
 });
+
+/** The server's words for a Google sign-in OpenBot no longer offers (problem `sign-in-retired`). */
+const GOOGLE_RETIRED = {
+  code: "sign-in-retired",
+  detail:
+    "Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.",
+};
+
+/*
+ * Gemini takes an API key only. A Google sign-in saved before that is still listed, never hidden:
+ * its page says the sign-in ended, and its one button opens Google Gemini's API key, which saves
+ * on the same connection (its id stays `google`), so every Bot that used it runs on the key.
+ */
+for (const isDefault of [false, true]) {
+  test(`a retired Google sign-in ${isDefault ? "in use as the default" : "beside the default"} says so, and its one button saves a Gemini API key on the same connection`, async () => {
+    // An older server may still name Google among its sign-ins: Google is offered its key alone.
+    orgSignIns = ["google", "xai"];
+    orgList = [
+      entry("anthropic", { isDefault: !isDefault }),
+      entry("google", {
+        login: "oauth",
+        model: "gemini-3-pro",
+        isDefault,
+        ready: false,
+        problem: GOOGLE_RETIRED,
+      }),
+    ];
+    if (isDefault)
+      orgConnection = {
+        ...ORG_CONNECTION,
+        provider: "google",
+        login: "oauth",
+        model: "gemini-3-pro",
+        ready: false,
+      };
+    const user = userEvent.setup({ document });
+    const { view, router } = renderAt("/settings/providers");
+    // Listed, with the server's words.
+    await view.findByText(GOOGLE_RETIRED.detail);
+    await user.click(view.getByRole("link", { name: /Google sign-in/ }));
+
+    // Its page: the notice and its one button, and no way to sign in to Google again.
+    const notice = await view.findByRole("alert");
+    expect(
+      within(notice).getByText("Google sign-in for Gemini has ended"),
+    ).toBeDefined();
+    expect(
+      within(notice).getByText(
+        "Add a Gemini API key to keep your Bots running on Gemini.",
+      ),
+    ).toBeDefined();
+    expect(view.queryByRole("link", { name: /Sign in again/ })).toBeNull();
+    await user.click(
+      within(notice).getByRole("button", { name: "Add a Gemini API key" }),
+    );
+
+    // One press: Google Gemini's API key, prefilled to Google, with no sign-in offered.
+    expect(
+      await view.findByRole("heading", { name: "Add a Gemini API key" }),
+    ).toBeDefined();
+    expect(at(router)).toBe("/settings/providers/google/change");
+    expect(view.queryByRole("tab", { name: "Sign in" })).toBeNull();
+    expect(view.queryByRole("button", { name: /Sign in with/ })).toBeNull();
+    await user.type(
+      view.getByLabelText("Google Gemini API key"),
+      "synthetic-gemini-key",
+    );
+    await user.click(view.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() =>
+      expect(writes()).toEqual([
+        {
+          method: isDefault ? "PUT" : "POST",
+          path: isDefault ? `${ORG}/ai-connection` : `${ORG}/ai-connections`,
+          body: {
+            provider: "google",
+            login: "endpoint",
+            apiKey: "synthetic-gemini-key",
+            baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+            model: "gemini-3.8-flash",
+          },
+        },
+      ]),
+    );
+    // The same connection, now the key, and running.
+    await waitFor(() =>
+      expect(at(router)).toMatch(/^\/settings\/providers\/google\?connected=/),
+    );
+    expect(
+      await view.findByRole("heading", { name: "Google Gemini API key" }),
+    ).toBeDefined();
+    expect(view.queryByRole("alert")).toBeNull();
+    expect(
+      orgList?.map(({ id, login, ready }) => ({ id, login, ready })),
+    ).toEqual(
+      expect.arrayContaining([
+        { id: "google", login: "endpoint", ready: true },
+      ]),
+    );
+  });
+}
 
 test("a stopped key leads with Replace key, a page that opens its provider's key field", async () => {
   orgList = [
@@ -764,7 +937,7 @@ test("disconnecting the default with exactly one other left removes it alone, an
   );
 });
 
-test("after a disconnect the page goes back to Providers, not to the provider it just disconnected", async () => {
+test("after a disconnect the page goes back to AI providers, not to the provider it just disconnected", async () => {
   orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
   const user = userEvent.setup({ document });
   const { view, router } = renderAt("/settings/providers/openai");
@@ -835,29 +1008,38 @@ test("Change on a connection that isn't the default keeps to its provider: its t
   expect(view.getByLabelText(/API key/)).toBeDefined();
 });
 
-async function connectWithKey(provider: RegExp) {
-  const { view, router } = renderAt("/settings/providers/new");
+/** Change one connection with a new key, from its own page's Change. */
+async function changeWithKey(path: string) {
+  const { view, router } = renderAt(path);
   const user = userEvent.setup({ document });
-  await user.click(await view.findByRole("button", { name: provider }));
-  await user.type(view.getByLabelText(/API key/), "sk-example");
+  await user.type(await view.findByLabelText(/API key/), "sk-example");
   await user.click(view.getByRole("button", { name: /Connect/ }));
   return { view, router };
 }
 
-test("after connecting, it says what the server answered: beside the default, even with no default", async () => {
-  orgList = [entry("openai")];
-  const { view } = await connectWithKey(/Anthropic/);
+test("after changing one, it says what the server answered: beside the default, even with no default", async () => {
+  orgList = [entry("openai"), entry("anthropic", { login: "api-key" })];
+  const { view, router } = await changeWithKey(
+    "/settings/providers/anthropic/change",
+  );
   expect(
     await view.findByText(/Pick one of its models in a conversation/),
   ).toBeDefined();
+  // Changing one goes back to its own page, where the person started.
+  expect(at(router)).toBe("/settings/providers/anthropic?connected=added");
 });
 
-test("after connecting the provider that is the default again, it says the next message runs on it", async () => {
-  orgList = [
+test("after changing the provider that is the default, it says the next message runs on it", async () => {
+  personal = PERSONAL;
+  personalList = [
     entry("openai", { isDefault: true }),
     entry("anthropic", { login: "api-key" }),
   ];
-  const { view, router } = await connectWithKey(/^OpenAI/);
+  const { view, router } = await changeWithKey(
+    "/settings/providers/openai/change?owner=personal",
+  );
   expect(await view.findByText(/Your next message runs on it/)).toBeDefined();
-  expect(at(router)).toBe("/settings/providers/openai?connected=in-use");
+  expect(at(router)).toBe(
+    "/settings/providers/openai?owner=personal&connected=in-use",
+  );
 });

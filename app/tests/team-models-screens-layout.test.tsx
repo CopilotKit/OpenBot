@@ -20,13 +20,14 @@ import {
   settingsBody,
 } from "./admin-settings-api";
 import { marksPlugin } from "./marks-plugin";
+import { still } from "./page-still";
 
 /**
  * A team's models, set by an admin and read by anybody, in a real browser.
  *
  * An admin opens a team in Admin, picks one model in the Models dialog, saves, and reads the
  * model's name on the row; then lets the team use everything the organization allows again. A
- * member opens the same team in the app and reads the row, with nothing to press. Admin, Providers
+ * member opens the same team in the app and reads the row, with nothing to press. Admin, AI providers
  * names the teams with a list of their own, each a link to its team. Every step in light and dark,
  * in a wide window and at a phone's width: the page never scrolls sideways, every control is whole
  * inside the window, a row's words are never under its actions, and a dialog fits the window.
@@ -505,7 +506,7 @@ async function restyle(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   // Rows ease in and a dialog scales up: looked at once they are still.
-  await page.waitForTimeout(400);
+  await still(page);
 }
 
 /** What a person would see wrong: sideways scroll, a control cut off, words under a button. */
@@ -890,7 +891,7 @@ describe.skipIf(!asked)("a team's models", () => {
           }
         }, 60_000);
 
-        test(`Admin, Providers names the teams with their own list, in ${tag}`, async () => {
+        test(`Admin, AI providers names the teams with their own list, in ${tag}`, async () => {
           const world = new World("admin", {
             team_sales: ["openai/gpt-6-sol"],
             team_success: ["openai/gpt-5.6-terra"],
@@ -908,7 +909,7 @@ describe.skipIf(!asked)("a team's models", () => {
               .locator("[data-slot=item]")
               .filter({ hasText: "Teams with their own list" });
             await line.scrollIntoViewIfNeeded();
-            await page.waitForTimeout(200);
+            await still(page);
             expect(
               await line
                 .getByRole("link")
@@ -932,7 +933,7 @@ describe.skipIf(!asked)("a team's models", () => {
               .locator("section")
               .filter({ has: page.getByRole("heading", { name: "Usage" }) });
             await usage.scrollIntoViewIfNeeded();
-            await page.waitForTimeout(200);
+            await still(page);
             expect(
               await usage
                 .locator("[data-slot=item-title]")

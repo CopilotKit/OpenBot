@@ -7426,20 +7426,51 @@ fn main() {
         }
     }
 
+    /**
+    A listener on `[::1]` alone, on a port the system never hands out by itself.
+
+    The tests that use it let go of it and then expect its port to read free. A port from the
+    system's own range (`[::1]:0`) could not be expected to: while `[::1]` holds a port, Linux hands
+    the same number to another test's `127.0.0.1:0` listener (5 of 5 tries, measured on a CI-sized
+    box), and that listener answers on the port once this one is gone. Below 32768 is outside every
+    system's default range (Linux 32768-60999, macOS and Windows 49152-65535), so only a port taken
+    by number can be there, and one that answers already is passed over.
+    */
     fn ipv6_loopback_listener() -> Option<std::net::TcpListener> {
-        match std::net::TcpListener::bind("[::1]:0") {
-            Ok(listener) => Some(listener),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
-                ) =>
-            {
-                eprintln!("IPv6 loopback unavailable; skipping IPv6 socket regression: {error}");
-                None
+        const FIRST: u16 = 20_000;
+        const COUNT: u16 = 12_000;
+        let start = (std::process::id() % u32::from(COUNT)) as u16;
+        for step in 0..COUNT {
+            let port = FIRST + (start + step) % COUNT;
+            if something_answers(port) {
+                continue;
             }
-            Err(error) => panic!("could not bind the IPv6 regression listener: {error}"),
+            match std::net::TcpListener::bind(("::1", port)) {
+                Ok(listener) => return Some(listener),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
+                    ) =>
+                {
+                    eprintln!(
+                        "IPv6 loopback unavailable; skipping IPv6 socket regression: {error}"
+                    );
+                    return None;
+                }
+                // Taken by number, or reserved by the system (Windows keeps ranges for Hyper-V).
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
+                    ) => {}
+                Err(error) => panic!("could not bind the IPv6 regression listener: {error}"),
+            }
         }
+        panic!(
+            "no port from {FIRST} to {} was free on [::1]",
+            FIRST + COUNT - 1
+        );
     }
 
     fn host_command_line(name: &str) -> &'static str {
@@ -10063,6 +10094,27 @@ fn main() {
         assert_eq!(port_already_taken(&ports), None);
     }
 
+    /// FOUND IN CI: the test above read its port still taken after letting it go, by a listener
+    /// another test had been handed the same number for on `127.0.0.1`. The port the IPv6 tests
+    /// hold is one the system never hands out, so no other test's listener can land on it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_ipv6_port_tests_hold_a_port_the_system_never_hands_out() {
+        let Some(listener) = ipv6_loopback_listener() else {
+            return;
+        };
+        let port = listener.local_addr().unwrap().port();
+        let range = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range").unwrap();
+        let mut bounds = range
+            .split_whitespace()
+            .map(|bound| bound.parse::<u16>().unwrap());
+        let (first, last) = (bounds.next().unwrap(), bounds.next().unwrap());
+        assert!(
+            !(first..=last).contains(&port),
+            "port {port} is in the range {first}-{last} the system hands to listeners on port 0"
+        );
+    }
+
     #[test]
     fn an_ipv6_only_port_is_not_clear_while_its_listener_is_held() {
         // It needs its port free again once it lets go, as the test above does.
@@ -11477,8 +11529,8 @@ fn main() {
                         published("openbot-agent-claude-sdk", 'c'),
                     ),
                     (
-                        "agent-langgraph-agui",
-                        published("openbot-agent-langgraph-agui", 'a'),
+                        "agent-openai-agents",
+                        published("openbot-agent-openai-agents", 'a'),
                     ),
                 ],
             ),
@@ -11502,8 +11554,8 @@ fn main() {
                         published("openbot-agent-claude-sdk", 'c'),
                     ),
                     (
-                        "agent-langgraph-agui",
-                        published("openbot-agent-langgraph-agui", digest),
+                        "agent-openai-agents",
+                        published("openbot-agent-openai-agents", digest),
                     ),
                 ],
             ),
@@ -11707,7 +11759,7 @@ fn main() {
                 running_earlier_release_with_images(&path, &engine, &format!("images-{name}"));
             let earlier = [
                 published("openbot-agent-computer", 'a'),
-                published("openbot-agent-langgraph-agui", 'a'),
+                published("openbot-agent-openai-agents", 'a'),
                 published("openbot-server", 'a'),
             ];
             let shared = published("openbot-agent-claude-sdk", 'c');
@@ -11738,7 +11790,7 @@ fn main() {
                 EARLIER_DATABASE.to_string(),
                 THIS_DATABASE.to_string(),
                 published("openbot", 'b'),
-                published("openbot-agent-langgraph-agui", 'b'),
+                published("openbot-agent-openai-agents", 'b'),
                 shared,
             ]);
             expected.sort();
@@ -11944,7 +11996,7 @@ fn main() {
                 running_earlier_release_with_images(&path, &engine, &format!("images-used-{name}"));
             let computer = published("openbot-agent-computer", 'a');
             let server = published("openbot-server", 'a');
-            let sign_in = published("openbot-agent-langgraph-agui", 'a');
+            let sign_in = published("openbot-agent-openai-agents", 'a');
             let mut containers = std::fs::read_to_string(root.join(".fixture-containers")).unwrap();
             containers.push_str("computer-ada-1\topenbot-desktop-computers\tcomputer\n");
             containers.push_str("elsewhere-1\tanother-project\tserver\n");
@@ -12080,8 +12132,8 @@ fn main() {
             [
                 published("openbot-agent-claude-sdk", 'c'),
                 published("openbot-agent-computer", 'a'),
-                published("openbot-agent-langgraph-agui", 'a'),
-                published("openbot-agent-langgraph-agui", 'b'),
+                published("openbot-agent-openai-agents", 'a'),
+                published("openbot-agent-openai-agents", 'b'),
                 published("openbot-server", 'a'),
                 published("openbot", 'b'),
             ]
@@ -12090,8 +12142,8 @@ fn main() {
             crate::superseded_images::remove(&docker, &root),
             [
                 published("openbot-agent-computer", 'a'),
-                published("openbot-agent-langgraph-agui", 'a'),
-                published("openbot-agent-langgraph-agui", 'b'),
+                published("openbot-agent-openai-agents", 'a'),
+                published("openbot-agent-openai-agents", 'b'),
                 published("openbot", 'b'),
             ]
         );
@@ -12100,7 +12152,7 @@ fn main() {
         for image in [
             server,
             published("openbot", 'd'),
-            published("openbot-agent-langgraph-agui", 'd'),
+            published("openbot-agent-openai-agents", 'd'),
             published("openbot-agent-claude-sdk", 'c'),
         ] {
             assert!(left.contains(&image), "{image} is gone");

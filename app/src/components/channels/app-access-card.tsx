@@ -123,14 +123,23 @@ function LiveAppAccessCard({
    */
   const fallsBack =
     Boolean(live.error) && (prompt.reason ?? "connect") === "connect";
-  const { carried, inHand, offer } = useCarryOn({
+  // A refusal was blocked by definition; `show_app_access` says what it found.
+  const blockedWhenAsked =
+    prompt.reason !== "access" || prompt.blocked === true;
+  const { carried, inHand, offer, sawBlocked } = useCarryOn({
     // The Connect card drawn instead carries on for this call; this one, never ready, must not wait.
     place: fallsBack ? undefined : place,
     ready: access ? access.state === "ready" : null,
-    // A refusal was blocked by definition; `show_app_access` says what it found.
-    blockedWhenAsked: prompt.reason !== "access" || prompt.blocked === true,
+    blockedWhenAsked,
     app: name,
   });
+  /*
+   * "IS READY NOW" ONLY FOR AN APP THAT WAS NOT. FOUND IN DOGFOODING: asked to connect a personal
+   * mailbox beside a connected work one, a Bot showed Gmail's card, and because the card was the
+   * latest thing in the conversation it read "Gmail is ready now", as if the job were done. Gmail had
+   * been ready all along. A card whose app was ready when the Bot asked says what is true of it.
+   */
+  const becameReady = blockedWhenAsked || sawBlocked;
   if (fallsBack) return <ConnectAppCard {...prompt} place={place} />;
   return (
     <div
@@ -162,7 +171,7 @@ function LiveAppAccessCard({
                     admins,
                     open,
                   )
-                : carried || inHand || offer
+                : becameReady && (carried || inHand || offer)
                   ? `${name} is ready now.`
                   : prompt.reason !== "access"
                     ? `${name} is ready now. Ask again and the Bot can use it.`

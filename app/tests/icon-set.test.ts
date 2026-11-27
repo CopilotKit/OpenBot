@@ -5,8 +5,8 @@ import { join, relative } from "node:path";
 /*
  * One icon set in every app (docs/design-system.md, "The rest of the look"): Hugeicons' free set,
  * in the web app, the extension and OpenBot Desktop. A screen takes its icons from
- * app/src/components/icons (Desktop, a package of its own, from desktop/src/icons.tsx) and never
- * names the set, so changing a glyph or the set is a change to those two files. A second set
+ * app/src/components/icons (Desktop, a package of its own, from desktop/src/icons.tsx; Desktop's
+ * workbench, which draws with the app's components, from the app's) and never names the set, so changing a glyph or the set is a change to those two files. A second set
  * imported beside it, or the set imported around them, is how two looks of icon come back.
  */
 
@@ -33,6 +33,7 @@ const FILES = [
   "extension/src",
   "extension/tests",
   "desktop/src",
+  "desktop/workbench",
 ].flatMap(sourceFiles);
 
 /** The modules a file imports, from its `import … from` and `import(…)`. */

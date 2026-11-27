@@ -25,6 +25,7 @@ import {
 } from "@/lib/api/generated/models/models.zod";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import { personBody } from "./accounts-api";
+import { still } from "./page-still";
 
 /**
  * Connect your AI, on an OpenBot that provides no AI of its own (OpenBot Cloud).
@@ -39,10 +40,10 @@ import { personBody } from "./accounts-api";
  * - Somebody who finished onboarding before the step existed is sent to it as their only step, and
  *   its button takes them in without finishing onboarding again.
  * - Every provider the server signs in to offers its sign-in first and a key as the alternative,
- *   as the setup window does. xAI, Google and Unbiased AI sign in on their own pages and are read
- *   until approved; a Claude plan finishes with the code Claude's page shows. A ChatGPT plan signs
- *   in with a code first, read until approved like xAI's, with the ChatGPT setting it needs and
- *   its link said before it starts, and again when ChatGPT gives no code. The other way, below
+ *   as the setup window does. xAI and Unbiased AI sign in on their own pages and are read
+ *   until approved; Google Gemini takes an API key only, whatever the server lists; a Claude
+ *   plan finishes with the code Claude's page shows. A ChatGPT plan signs in with a code first,
+ *   read until approved like xAI's, with the ChatGPT setting it needs and its link said before it starts, and again when ChatGPT gives no code. The other way, below
  *   it, finishes with the address ChatGPT sends the browser to.
  *   Failed and expired sign-ins say why and sign in again, and leaving the row stops the reading.
  *   Inside OpenBot Desktop the sign-in is still the server's, never Desktop's.
@@ -128,8 +129,8 @@ const BAD_KEY = "sk-ant-api03-refused";
 type Start = "none" | "organization";
 
 /**
- * The person's AI connection as the spec's example for `start` says it, on a server set up for
- * Google's sign-in as well (the examples' server is not, so lists the other four).
+ * The person's AI connection as the spec's example for `start` says it, on an older server that
+ * still names Google among its sign-ins: the page offers Gemini its API key alone all the same.
  */
 function personalFor(start: Start): PersonalAiConnection {
   const found = example(
@@ -154,10 +155,9 @@ type SignIn = {
 
 /**
  * A sign-in as the server starts it for each provider: the spec's own examples for ChatGPT (in the
- * browser, or with a code when `method` is device), Claude and Unbiased AI, and for xAI and Google
- * the shape of ChatGPT's code sign-in with what their pages give. Both finish by themselves (poll):
- * xAI's device page asks for the code shown here, and Google's page sends the person back to
- * OpenBot, with no code at all.
+ * browser, or with a code when `method` is device), Claude and Unbiased AI, and for xAI the shape
+ * of ChatGPT's code sign-in with what its page gives. It finishes by itself (poll): xAI's device
+ * page asks for the code shown here.
  */
 function signInStarted(
   provider: AiConnectionProvider,
@@ -177,14 +177,6 @@ function signInStarted(
       provider,
       url: "https://accounts.x.ai/oauth2/device?user_code=MQ7T-WD4X",
       userCode: "MQ7T-WD4X",
-    };
-  if (provider === "google")
-    return {
-      ...example("AiSignInChatGptExample"),
-      id: "Z29vZ2xlLXNpZ24taW4",
-      provider,
-      url: "https://accounts.google.com/o/oauth2/v2/auth?client_id=example&redirect_uri=https%3A%2F%2Fopenbot.test%2Fapi%2Fexample-callback&response_type=code&state=example",
-      userCode: null,
     };
   return example("AiSignInExample");
 }
@@ -307,6 +299,32 @@ function signInStatus(
           : null,
     interval: 1,
   });
+}
+
+/** One of the person's own connections, as their list answers it. */
+function connectedEntry(
+  provider: AiConnectionProvider,
+  login: AiConnectionEntry["login"],
+  model: string | null,
+  isDefault: boolean,
+): AiConnectionEntry {
+  return ListPersonalAiConnectionsResponse.parse({
+    connections: [
+      {
+        id: provider,
+        provider,
+        login,
+        model,
+        endpointHost: null,
+        isDefault,
+        ready: true,
+        problem: null,
+        connectedAt: "2026-11-25T09:00:00.000Z",
+      },
+    ],
+    signIns: [],
+    nextCursor: null,
+  }).connections[0] as AiConnectionEntry;
 }
 
 /**
@@ -974,7 +992,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(
@@ -2248,7 +2266,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           await page.evaluate(() =>
             window.scrollTo(0, document.documentElement.scrollHeight),
           );
-          await page.waitForTimeout(100);
+          await still(page);
           const room = await page.evaluate(() => {
             const footer = document.querySelector("footer");
             const signOut = [...document.querySelectorAll("button")].find(
@@ -2878,7 +2896,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 90_000);
 
   for (const engine of engines)
-    test(`xAI signs in with the code on its page, and Google on its own page, in ${engine}`, async () => {
+    test(`xAI signs in with the code on its page, and Google offers its API key alone, in ${engine}`, async () => {
       const server = new FakeServer("none", true);
       const page = await open(
         "/onboarding?step=ai",
@@ -2900,9 +2918,12 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           .click();
         await chooser.getByText("MQ7T-WD4X").waitFor();
         await chooser.getByText("Signed in to xAI.").waitFor();
-        expect(await chooser.getByLabel("Model name").inputValue()).toBe(
-          "grok-4.7",
-        );
+        /*
+         * Nothing to type: a sign-in asks for no model, as a key or a plan doesn't. The picker
+         * offers what xAI lists for it; the connection names xAI's usual one for runs nobody picked.
+         */
+        expect(await chooser.getByLabel("Model name").count()).toBe(0);
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
         await chooser.getByRole("button", { name: "Connect" }).click();
         const connected = chooser.getByRole("status");
         await connected.waitFor();
@@ -2928,39 +2949,141 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await heading(second, "Connect your AI");
         const chooser = second.locator("[data-ai-chooser]");
         await chooser.getByRole("button", { name: /^Google Gemini/ }).click();
-        expect(await chooser.getByRole("tab").allTextContents()).toEqual([
-          "Sign in",
-          "Use an API key",
-        ]);
-        // Google's own words beside its G: "Sign in with Google".
-        await chooser
-          .getByRole("button", { name: "Sign in with Google", exact: true })
-          .click();
-        // Google's page sends the person back to OpenBot: no code to check or paste, only the wait.
-        await chooser
-          .getByText("Waiting for you to approve it in your browser…")
-          .waitFor();
-        expect(await chooser.getByText("Verification code").count()).toBe(0);
-        expect(await chooser.getByLabel("Code from your browser").count()).toBe(
-          0,
-        );
-        await chooser.getByText("Signed in to Google Gemini.").waitFor();
-        expect(google.signIns).toEqual([{ provider: "google" }]);
-        expect(google.finishes).toEqual([]);
-        expect(google.opened[0]).toStartWith(
-          "https://accounts.google.com/o/oauth2/v2/auth",
-        );
-        await chooser.getByRole("button", { name: "Connect" }).click();
-        const connected = chooser.getByRole("status");
-        await connected.waitFor();
-        expect(google.replaces).toEqual([
-          { provider: "google", login: "oauth", model: "gemini-3.8-flash" },
-        ]);
-        expect(await connected.textContent()).toContain(
-          "Signed in with your Google account. Model: gemini-3.8-flash",
-        );
+        /*
+         * Gemini takes an API key only: its key, and no sign-in, though this server still names
+         * Google among its sign-ins.
+         */
+        await chooser.getByLabel("Google Gemini API key").waitFor();
+        expect(await chooser.getByRole("tab").count()).toBe(0);
+        expect(
+          await chooser.getByRole("button", { name: /^Sign in/ }).count(),
+        ).toBe(0);
+        expect(google.signIns).toEqual([]);
       } finally {
         await second.close();
+      }
+    }, 90_000);
+
+  /*
+   * Settings → AI providers → Connect another AI, as it was reported on 1.2.0: xAI's sign-in asked for
+   * a model name typed in raw, and once connected the page went on to xAI's own page. Now nothing is
+   * typed, and Connect goes back to the list with xAI checked, as onboarding's Connect your AI does.
+   */
+  for (const engine of engines)
+    for (const theme of THEMES)
+      for (const window of [WIDE, PHONE])
+        test(`Settings' Connect another AI signs in to xAI with nothing to type, and goes back to its list with xAI checked, in ${engine}, ${theme}, ${window.width}`, async () => {
+          // Their organization has an AI, so the app doesn't hold them at Connect your AI.
+          const server = new FakeServer("organization", true);
+          server.list = [connectedEntry("anthropic", "api-key", null, true)];
+          const page = await open(
+            "/settings/providers/new?owner=personal",
+            server,
+            engine,
+            theme,
+            window,
+          );
+          try {
+            await heading(page, "Connect another AI");
+            const chooser = page.locator("[data-ai-chooser]");
+            await chooser.getByRole("button", { name: /^xAI/ }).click();
+            await chooser
+              .getByRole("button", { name: "Sign in with xAI", exact: true })
+              .click();
+            await chooser.getByText("Signed in to xAI.").waitFor();
+            await shoot(page, "settings-xai-signed-in", engine, theme, window);
+            expect(await measured(page)).toEqual(FINE);
+            // Read now, said after Connect, so both screens are seen whatever they hold.
+            const fields = await chooser.getByRole("textbox").count();
+
+            await chooser.getByRole("button", { name: "Connect" }).click();
+            const xai = chooser.getByRole("button", { name: /^xAI/ });
+            const checked = xai.getByRole("img", { name: "Connected" });
+            // Wherever Connect leads, it is seen first, then held to where it should lead.
+            await checked
+              .or(page.getByText(/Pick one of its models in a conversation/))
+              .waitFor();
+            await shoot(page, "settings-xai-connected", engine, theme, window);
+            // Nothing to type: no model name, no field at all.
+            expect(fields).toBe(0);
+            expect(new URL(page.url()).pathname).toBe(
+              "/settings/providers/new",
+            );
+            expect(await checked.count()).toBe(1);
+            expect(await xai.textContent()).toContain(
+              "Signed in with your xAI account.",
+            );
+            // Two now: the first stays the default, and says so.
+            expect(
+              await chooser
+                .getByRole("button", { name: /^Anthropic/ })
+                .textContent(),
+            ).toContain("Default");
+            expect(
+              await page
+                .getByRole("status")
+                .filter({ hasText: "xAI is connected." })
+                .count(),
+            ).toBe(1);
+            expect(await measured(page)).toEqual(FINE);
+            expect(server.connects).toEqual([
+              { provider: "xai", login: "oauth", model: "grok-4.7" },
+            ]);
+
+            // Nothing to cancel: Done goes back to AI providers, xAI listed there.
+            expect(
+              await chooser.getByRole("button", { name: "Cancel" }).count(),
+            ).toBe(0);
+            await chooser.getByRole("button", { name: "Done" }).click();
+            await page.waitForURL(
+              (url) => url.pathname === "/settings/providers",
+            );
+            await page.getByRole("link", { name: /^xAI/ }).waitFor();
+            await shoot(page, "settings-providers", engine, theme, window);
+          } finally {
+            await page.close();
+          }
+        }, 90_000);
+
+  for (const engine of engines)
+    test(`signing in again to a sign-in that names its own model keeps that model, in ${engine}`, async () => {
+      const server = new FakeServer("organization", true);
+      server.list = [
+        connectedEntry("anthropic", "api-key", null, true),
+        {
+          ...connectedEntry("xai", "oauth", "grok-4.3", false),
+          ready: false,
+          problem: {
+            code: "sign-in-ended",
+            detail: "Your xAI sign-in ended. Sign in again.",
+          },
+        },
+      ];
+      const page = await open(
+        "/settings/providers/xai/change?owner=personal",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser
+          .getByRole("button", { name: "Sign in with xAI", exact: true })
+          .click();
+        await chooser.getByText("Signed in to xAI.").waitFor();
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        // Changing one still goes back to its own page, where the person started.
+        await page.waitForURL(
+          (url) => url.pathname === "/settings/providers/xai",
+        );
+        // The model it named before, not xAI's usual one: an upgrade changes nothing it runs on.
+        expect(server.connects).toEqual([
+          { provider: "xai", login: "oauth", model: "grok-4.3" },
+        ]);
+      } finally {
+        await page.close();
       }
     }, 90_000);
 
@@ -3080,7 +3203,10 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           await heading(page, "Connect your AI");
           const chooser = page.locator("[data-ai-chooser]");
           await chooser.getByRole("button", { name: row }).click();
-          await chooser.getByRole("tab", { name: "Use an API key" }).click();
+          // Google Gemini has no other way in, so no tabs: its key is all it asks for.
+          const tab = chooser.getByRole("tab", { name: "Use an API key" });
+          if (body.provider !== "google") await tab.click();
+          else expect(await tab.count()).toBe(0);
           await chooser.getByLabel(label).fill("sk-typed-key");
           await chooser.getByRole("button", { name: "Connect" }).click();
           await chooser.getByRole("status").waitFor();
@@ -3246,8 +3372,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           for (const window of [WIDE, PHONE]) {
             const server = new FakeServer("none", true);
             // ChatGPT waits with its code, then gives none, then waits for its address; Claude
-            // finishes by its code; Google stays waiting; xAI fails once.
-            server.outcomes = ["never", "never", "approved", "never", "failed"];
+            // finishes by its code; xAI fails once.
+            server.outcomes = ["never", "never", "approved", "failed"];
             const page = await open(
               "/onboarding?step=ai",
               server,
@@ -3319,15 +3445,10 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               await look("sign-in-claude-signed-in");
               await back();
 
+              // Gemini takes an API key only: its key form, with no sign-in.
               await row(/^Google Gemini/);
-              await look("sign-in-google");
-              await chooser
-                .getByRole("button", { name: "Sign in with Google" })
-                .click();
-              await chooser
-                .getByText("Waiting for you to approve it in your browser…")
-                .waitFor();
-              await look("sign-in-google-waiting");
+              await chooser.getByLabel("Google Gemini API key").waitFor();
+              await look("key-google");
               await back();
 
               await row(/^xAI/);

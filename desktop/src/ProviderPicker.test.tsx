@@ -50,8 +50,8 @@ const cloudProviders = [
   {
     id: "google",
     name: "Google Gemini",
-    // Google's guidelines allow only "Sign in with Google" beside its G.
-    signsInWith: "Google",
+    // Gemini takes an API key only: no sign-in.
+    signsInWith: null,
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     model: "gemini-3.8-flash",
     keyUrl: "https://aistudio.google.com/apikey",
@@ -137,6 +137,10 @@ mock.module("./Mark", () => ({
   // vendored file, which needs Vite's glob.
   ButtonMark: ({ id }: { id: string | null }) =>
     id ? <img alt="" data-mark={id} /> : null,
+  // A cloud's mark, named, as OpenBot for Business's Self-Hosted row lists them.
+  MarkImage: ({ id, name }: { id: string; name: string }) => (
+    <img alt={name} data-mark={id} />
+  ),
 }));
 
 const { ProviderPicker } = await import("./ProviderPicker");
@@ -208,6 +212,210 @@ async function pick(view: ReturnType<typeof render>, name: RegExp) {
   await userEvent.click(await view.findByRole("radio", { name }));
 }
 
+test("provider catalogue scrolls separately from the anchored selection and actions", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return allProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = render(
+    <ProviderPicker
+      chosen={null}
+      held={{}}
+      root="/tmp/openbot-provider-root"
+      onBack={() => {}}
+      onChoose={() => {}}
+      failure={<p>Start needs another attempt.</p>}
+      status={<p>Setting up OpenBot meanwhile.</p>}
+    />,
+  );
+  await view.findByRole("radio", { name: /^OpenAI-compatible/ });
+  const sheet = view
+    .getByRole("heading", { name: "Connect your AI" })
+    .closest<HTMLElement>(".sheet");
+  const body = sheet?.querySelector<HTMLElement>(":scope > .setup-body");
+  const footer = view
+    .getByRole("button", { name: "Continue" })
+    .closest<HTMLElement>(".setup-footer");
+  if (!sheet || !body || !footer) {
+    throw new Error("Provider layout must have a sheet, body and footer.");
+  }
+  expect(sheet.classList.contains("provider-layout")).toBe(true);
+  expect(
+    sheet?.querySelector(":scope > .setup-header-block h1"),
+  ).not.toBeNull();
+  expect(body).not.toBeNull();
+  expect(footer?.parentElement).toBe(sheet);
+  expect(
+    view.getByRole("button", { name: "Back" }).closest(".setup-footer"),
+  ).toBe(footer);
+  expect(view.getByText("Setting up OpenBot meanwhile.").parentElement).toBe(
+    footer,
+  );
+  expect(view.getByText("Start needs another attempt.").parentElement).toBe(
+    body,
+  );
+  expect(
+    view.getByRole("group", { name: "Model provider" }).parentElement,
+  ).toBe(body);
+  expect(body?.querySelector(".setup-panel")).toBeNull();
+
+  body.scrollTop = 100;
+  await pick(view, /^OpenAI-compatible/);
+  expect(body.scrollTop).toBe(0);
+  expect(
+    document.activeElement ===
+      view.getByRole("radio", { name: /^OpenAI-compatible/ }),
+  ).toBe(true);
+  expect(
+    view
+      .getByRole("group", { name: "Model provider" })
+      .closest(".setup-provider-identity")?.parentElement,
+  ).toBe(sheet);
+  expect(
+    view
+      .getByLabelText("Base URL")
+      .closest(".setup-content.setup-panel.chosen-provider")?.parentElement,
+  ).toBe(body);
+  await userEvent.click(view.getByText("Advanced compatible endpoint options"));
+  expect(
+    view
+      .getByLabelText("Container Base URL, if different")
+      .closest(".setup-body"),
+  ).toBe(body);
+  await userEvent.click(
+    view.getByRole("button", { name: "Choose a different provider" }),
+  );
+  expect(
+    view.getByRole("group", { name: "Model provider" }).parentElement,
+  ).toBe(body);
+  expect(body?.querySelector(".setup-panel")).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Continue" }).closest(".setup-footer"),
+  ).toBe(footer);
+});
+
+for (const returnKey of ["{Enter}", "{Escape}"]) {
+  test(`returning to the catalogue with ${returnKey} restores the previous provider focus`, async () => {
+    invokeHandler = async (command) => {
+      if (command === "providers") return providers;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const choices: unknown[] = [];
+    const view = await renderPicker((choice) => choices.push(choice));
+    const user = userEvent.setup({ document });
+
+    // Repeat with both providers: the return target must follow the latest choice.
+    for (const name of [/^Anthropic/, /^OpenAI/, /^Anthropic/]) {
+      const radio = await view.findByRole("radio", { name });
+      radio.focus();
+      await user.keyboard(" ");
+      expect(document.activeElement === view.getByRole("radio", { name })).toBe(
+        true,
+      );
+      expect(view.getAllByRole("radio")).toHaveLength(1);
+      expect(
+        view
+          .getByRole("tab", { name: "Sign in with my plan" })
+          .getAttribute("aria-selected"),
+      ).toBe("true");
+
+      view.getByRole("button", { name: "Choose a different provider" }).focus();
+      await user.keyboard(returnKey);
+      expect(view.getAllByRole("radio")).toHaveLength(providers.length);
+      expect(document.activeElement === view.getByRole("radio", { name })).toBe(
+        true,
+      );
+      expect(
+        view
+          .getAllByRole("radio")
+          .every((input) => !(input as HTMLInputElement).checked),
+      ).toBe(true);
+    }
+    expect(choices).toEqual([]);
+    expect(invokeCalls.map(({ command }) => command)).toEqual(["providers"]);
+  });
+}
+
+test("provider focus restoration does not steal focus from fields or unrelated updates", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const onChoose = () => {};
+  const view = await renderPicker(onChoose);
+  const radio = await view.findByRole("radio", { name: /^Anthropic/ });
+  const back = view.getByRole("button", { name: "Back" });
+  back.focus();
+  // A selection dispatched while another control owns focus must not claim it.
+  fireEvent.click(radio);
+  expect(document.activeElement === back).toBe(true);
+  await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+  const key = view.getByLabelText("Anthropic API key");
+  await userEvent.type(key, "test-key");
+  view.rerender(
+    <ProviderPicker
+      chosen={null}
+      held={{}}
+      root=" /tmp/openbot-provider-root "
+      onBack={() => {}}
+      onChoose={onChoose}
+      status="Updated setup progress"
+    />,
+  );
+  expect(document.activeElement === key).toBe(true);
+  expect((key as HTMLInputElement).value).toBe("test-key");
+  await userEvent.setup({ document }).keyboard("{Escape}");
+  expect(view.getAllByRole("radio")).toHaveLength(1);
+  expect(document.activeElement === key).toBe(true);
+});
+
+test("plan wait, signed-in confirmation and API key share one body with stable footer actions", async () => {
+  const finished = deferred<string>();
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    if (command === "finish_chatgpt_sign_in") return finished.promise;
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  await pick(view, /^OpenAI/);
+  const identity = view.getByRole("group", { name: "Model provider" });
+  const footer = view
+    .getByRole("button", { name: "Continue" })
+    .closest<HTMLElement>(".setup-footer");
+  const panel = view.container.querySelector(
+    ".setup-body > .setup-content.setup-panel.chosen-provider",
+  );
+  expect(panel).not.toBeNull();
+  expect(footer).not.toBeNull();
+  if (!footer) throw new Error("Provider actions must have a footer.");
+  expect(identity.closest(".setup-provider-identity")?.parentElement).toBe(
+    footer.parentElement,
+  );
+  expect(identity.closest(".setup-body")).toBeNull();
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
+  );
+  expect(
+    (await view.findByText("Waiting for you to approve it…")).closest(
+      ".chosen-provider",
+    ),
+  ).toBe(panel);
+  await act(async () => finished.resolve("chatgpt-token"));
+  expect(
+    (await view.findByText(/Signed in to OpenAI/)).closest(".chosen-provider"),
+  ).toBe(panel);
+  await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+  expect(
+    view.getByLabelText("OpenAI API key").closest(".chosen-provider"),
+  ).toBe(panel);
+  expect(view.getByRole("group", { name: "Model provider" })).toBe(identity);
+  expect(
+    view.getByRole("button", { name: "Continue" }).closest(".setup-footer"),
+  ).toBe(footer);
+});
+
 /*
  * Every "Sign in with" button carries the mark of the provider it signs in to, as the web app's
  * sign-in buttons do. They carried none, and Google's and xAI's rows had no mark to carry.
@@ -216,14 +424,6 @@ test("every Sign in with button carries its provider's mark", async () => {
   const marked: Provider[] = [
     { ...providers[0], mark: "openai" },
     { ...providers[1], mark: "anthropic" },
-    {
-      id: "google",
-      name: "Google Gemini",
-      summary: "Use an API key or sign in.",
-      logins: ["endpoint", "oauth"],
-      mark: "google-color",
-      caution: null,
-    },
     {
       id: "xai",
       name: "xAI",
@@ -248,9 +448,7 @@ test("every Sign in with button carries its provider's mark", async () => {
     const name =
       provider.id === "anthropic"
         ? "Sign in again with Anthropic"
-        : provider.id === "google"
-          ? "Sign in with Google"
-          : `Sign in with ${provider.name}`;
+        : `Sign in with ${provider.name}`;
     const button = view.getByRole("button", { name });
     expect(button.querySelector("img")?.getAttribute("data-mark")).toBe(
       provider.mark,
@@ -561,6 +759,13 @@ test.each([
     expect(view.getByRole("status").textContent).toBe(
       "Waiting for you to approve it…",
     );
+    // The current wait must appear before the secondary reopen link.
+    expect(
+      view.getByRole("status").nextElementSibling ===
+        view
+          .getByRole("link", { name: "Open the sign-in page" })
+          .closest(".fallback"),
+    ).toBe(true);
     // The browser comes back: signed in, with nothing typed.
     await act(async () => finished.resolve(`synthetic-${signIn}-plan-token`));
     await view.findByText(new RegExp(`Signed in to ${name}`));
@@ -616,7 +821,7 @@ test("a saved provider-scoped plan session enables continue without exposing a t
 
   await pick(view, /OpenAI/);
   expect(view.getByText(/A saved OpenAI sign-in will be checked/)).toBeTruthy();
-  expect(view.getByText(/Your Bot will use LangChain/)).toBeTruthy();
+  expect(view.getByText(/Your Bot will use OpenAI Agents SDK/)).toBeTruthy();
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 
   expect(choices).toEqual([
@@ -1198,7 +1403,7 @@ test("OAuth tab switch cancels a late authorization before opening the browser",
   );
 });
 
-for (const provider of cloudProviders) {
+for (const provider of cloudProviders.filter((row) => row.signsInWith)) {
   test(`${provider.name} OAuth completes through native storage without exposing tokens`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers")
@@ -1253,6 +1458,59 @@ for (const provider of cloudProviders) {
     });
   });
 }
+
+/*
+ * Gemini takes an API key only. A Google sign-in saved before that is not resumed: the screen says
+ * it ended, and its one button opens Google Gemini's API key, which then goes on as any key does.
+ */
+test("a saved Google sign-in says it ended and its button opens Gemini's API key", async () => {
+  const { recordedModel } = await import("./ProviderPicker");
+  const held: HeldConfiguration = {
+    OPENAI_BASE_URL: "http://127.0.0.1:3001/api/model-provider/v1",
+    BOT_MODEL: "gemini-3-pro",
+    saved: { model: "google-oauth", modelSessions: { google: true } },
+  };
+  expect(recordedModel(held)).toBeNull();
+  invokeHandler = async (command) => {
+    if (command === "providers") return allProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const choices: unknown[] = [];
+  const view = await renderPickerWithHeld(held, (choice) =>
+    choices.push(choice),
+  );
+  const notice = await view.findByRole("alert");
+  expect(notice.textContent).toContain("Google sign-in for Gemini has ended");
+  expect(notice.textContent).toContain(
+    "Add a Gemini API key to keep your Bots running on Gemini.",
+  );
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(
+    await view.findByRole("button", { name: "Add a Gemini API key" }),
+  );
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByRole("tab", { name: "Sign in" })).toBeNull();
+  expect(view.getByLabelText("Model name")).toHaveProperty(
+    "value",
+    "gemini-3.8-flash",
+  );
+  await user.type(
+    view.getByLabelText("Google Gemini API key"),
+    "synthetic-gemini-key",
+  );
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  expect(choices).toEqual([
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+      model: "gemini-3.8-flash",
+      apiKey: "synthetic-gemini-key",
+    },
+  ]);
+  // Nothing about a Google sign-in reached the native side.
+  expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
+});
 
 for (const provider of [...cloudProviders, unbiased, trustedRouter]) {
   test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {
@@ -1617,4 +1875,68 @@ test("the Claude plan's caution is said with the plan sign-in, not under the API
     view.getByRole("tab", { name: "Sign in with my plan" }),
   );
   expect(view.getByText(/separate monthly pool/)).toBeTruthy();
+});
+
+/*
+ * What runs behind the AI step is said at the sidebar's foot, not under the form: nothing in the
+ * step moves as it comes and goes. The step's own line about it stays in the page.
+ */
+test("the background install is at the sidebar's foot, and never in the page", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected command ${command}`);
+  };
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <ProviderPicker
+        chosen={null}
+        held={{}}
+        root="/tmp/openbot-provider-root"
+        onBack={() => {}}
+        onChoose={() => {}}
+        status={<p>Setting up OpenBot meanwhile.</p>}
+        background={<p>Installing OpenBot in the background.</p>}
+      />,
+    );
+  });
+  const page = view
+    .getByRole("heading", { name: "Connect your AI" })
+    .closest(".sheet") as HTMLElement;
+  const behind = view.getByText("Installing OpenBot in the background.");
+  expect(behind.closest("aside.rail > .rail-foot")).not.toBeNull();
+  expect(page.contains(behind)).toBe(false);
+  expect(page.previousElementSibling).toBe(behind.closest("aside.rail"));
+  expect(page.contains(view.getByText("Setting up OpenBot meanwhile."))).toBe(
+    true,
+  );
+  // The sections head the sidebar, with AI the step it is on.
+  expect(
+    view
+      .getByRole("list", { name: "Setup" })
+      .querySelector('[aria-current="step"]')?.textContent,
+  ).toBe("AI");
+});
+
+test("refreshing the AI connection has no sections and no foot, with nothing behind it", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected command ${command}`);
+  };
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <ProviderPicker
+        chosen={null}
+        held={{}}
+        root="/tmp/openbot-provider-root"
+        returning
+        onBack={() => {}}
+        onChoose={() => {}}
+      />,
+    );
+  });
+  await view.findByRole("heading", { name: "Refresh your AI connection" });
+  expect(view.queryByRole("list", { name: "Setup" })).toBeNull();
+  expect(view.container.querySelector(".rail-foot")).toBeNull();
 });

@@ -41,7 +41,11 @@ export function BusinessLink() {
 
   return (
     <span className="flex items-center gap-1">
-      <Button onClick={openTeamFeatures} size="sm" variant="outline">
+      <Button
+        onClick={() => openTeamFeatures("home")}
+        size="sm"
+        variant="outline"
+      >
         <OpenBotLogo />
         <span>
           Meet OpenBot for Business

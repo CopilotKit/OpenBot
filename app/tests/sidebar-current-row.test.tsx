@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 
 /**
  * On the invitations page no row of the sidebar looks like the page that is open.
@@ -247,7 +248,7 @@ describe.skipIf(!asked)("the sidebar on the invitations page", () => {
         (botsNow?.y ?? 0) + (botsNow?.height ?? 0) / 2,
         { steps: 4 },
       );
-      await page.waitForTimeout(100);
+      await still(page);
       expect((await rows(page)).filled).toEqual(["Bots"]);
     }, 120_000);
   }

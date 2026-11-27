@@ -29,6 +29,7 @@ from ag_ui_adk import ADKAgent, AGUIToolset, add_adk_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from google.adk.agents import Agent
+from google.adk.apps.app import App, EventsCompactionConfig
 from google.adk.events import Event
 from google.adk.models.lite_llm import LiteLlm
 from google.adk.sessions import InMemorySessionService
@@ -369,14 +370,36 @@ async def health():
     return {"ok": True, "harness": "google-adk"}
 
 
-agent = WholeThreadADKAgent(
-    adk_agent=Agent(
+# Room in the conversation for a long task. The session keeps the whole history between runs, and
+# `ag_ui_adk` sends the model that history plus only the messages it has not seen, so the thread
+# the server sends, with its old tool results cleared, never reaches a live session. ADK's own
+# events compaction does it here instead (https://adk.dev/context/compaction/): after a run whose
+# prompt reached `token_threshold` tokens, the events before the newest `event_retention_size` are
+# summarised by the Bot's own model, and later prompts carry the summary in their place. The same
+# numbers OpenBot's other engines use: past 100,000 tokens, and about the last ten tool calls and
+# their results (one event each) kept as they were.
+COMPACTION_TOKEN_THRESHOLD = 100_000
+COMPACTION_EVENT_RETENTION = 20
+
+
+def _app() -> App:
+    return App(
         name="openbot",
-        tools=[AGUIToolset()],
-        model=CompleteToolCallsLiteLlm(model=_model_id()),
-        instruction="Answer the question you are asked, briefly and correctly.",
-    ),
-    app_name="openbot",
+        root_agent=Agent(
+            name="openbot",
+            tools=[AGUIToolset()],
+            model=CompleteToolCallsLiteLlm(model=_model_id()),
+            instruction="Answer the question you are asked, briefly and correctly.",
+        ),
+        events_compaction_config=EventsCompactionConfig(
+            token_threshold=COMPACTION_TOKEN_THRESHOLD,
+            event_retention_size=COMPACTION_EVENT_RETENTION,
+        ),
+    )
+
+
+agent = WholeThreadADKAgent.from_app(
+    _app(),
     user_id="openbot",
     # The session is a cache of the thread the server sends every run, never its record. The
     # library forgets a session idle for 20 minutes, but its ledger of messages already seen is

@@ -20,6 +20,7 @@ import {
   frontendApprovalSnapshot,
   WAITING_FOR_PERSON,
 } from "./approval-context";
+import { heldByServer } from "./server-owned-interrupts";
 import { inStepOrder } from "./tool-steps";
 
 type RenderProps = { toolCallId: string; [key: string]: unknown };
@@ -147,6 +148,13 @@ export function useFrontendTool<T extends Record<string, unknown>>(
     handler: tool.handler
       ? async (args, context) => {
           /*
+           * A call the server holds is the server's: its run stopped on the server's own wait for
+           * the person, and the server carries the conversation on once they have done their part.
+           * Acted on here as well, a sign-in opened a second form. It waits, as a held step does.
+           */
+          if (heldByServer(context.agent, context.toolCall?.id))
+            return WAITING_FOR_PERSON;
+          /*
            * A computer action waits for the ones asked for before it in its step, and is not
            * taken after one that failed (`inStepOrder`), whether it goes to the gate or straight
            * to the computer.
@@ -224,6 +232,17 @@ export function useFrontendTool<T extends Record<string, unknown>>(
           reason: "The assistant's computer could not be reached.",
         };
       }
+      /*
+       * A STEP THE SERVER IS RUNNING ALREADY IS NOT RUN HERE. The server runs a Bot's computer steps
+       * itself and runs each once, whoever asks; one it has started is `taken`, and is asked about
+       * again, with the same step, until its run answers. Its answer is this step's (below).
+       */
+      if (step.outcome === "taken" && step.running) {
+        await pause(START_ASK_AGAIN_MS, context.signal);
+        if (context.signal?.aborted)
+          return { ok: false, reason: "Stopped.", stopped: true };
+        continue;
+      }
       if (!stillStarting(step)) break;
       const left = COMPUTER_START_WAIT_MS - (Date.now() - startedAt);
       if (left <= 0) break;
@@ -231,6 +250,13 @@ export function useFrontendTool<T extends Record<string, unknown>>(
       if (context.signal?.aborted)
         return { ok: false, reason: "Stopped.", stopped: true };
     }
+    // Already run by the server: what that run answered is this step's answer, and nothing runs again.
+    if (step.outcome === "taken")
+      return step.result !== undefined
+        ? step.result
+        : failedComputerCall(200, {
+            error: "The computer action returned no result.",
+          });
     if (step.outcome === "waiting") {
       if (!context.agent)
         throw new Error("The interrupted conversation is unavailable.");

@@ -16,6 +16,11 @@ import {
   toAgentOptions,
 } from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
+import {
+  forgetSendingDraft,
+  rememberSendingDraft,
+  sendingDraftLeftBehind,
+} from "@/components/channels/composer/saved-draft";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
@@ -61,6 +66,9 @@ import { newId } from "../../../../lib/new-id";
  */
 /** What the API's `getBot` answers for a Bot this person cannot see. */
 const AGENT_NOT_FOUND = "Couldn't find that Bot.";
+
+/** The name new conversations keep a Send still making its conversation under (`saved-draft.ts`). */
+const SENDING_FROM = "new";
 
 /** Said when a draft holding files is sent to two or more Bots. */
 const GROUP_TAKES_NO_FILES =
@@ -134,7 +142,16 @@ function NewConversation({ composition }: { composition: string }) {
   const [creatingBot, setCreatingBot] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const navigate = Route.useNavigate();
-  const { startChosen, startGroup, startPicked, pending } = useStartChannel();
+  /*
+   * Where this page's unsent message is kept. Its own, unless a page before it died while its Send
+   * was still making the conversation: those words open here, so they are never left where no page
+   * looks. The box's message is kept there until its conversation has it.
+   */
+  const [draftKey] = useState(
+    () => sendingDraftLeftBehind(SENDING_FROM) ?? `new:${composition}`,
+  );
+  const { startChosen, startGroup, startPicked, pending } =
+    useStartChannel(draftKey);
   const {
     data: profiles,
     isError: rosterError,
@@ -291,6 +308,8 @@ function NewConversation({ composition }: { composition: string }) {
         throw new Error(GROUP_TAKES_NO_FILES);
       }
       setError(null);
+      // The message, and "Thinking" under it, while the group is made and the message sent to it.
+      setSent(seedMessage(draft.text, newId()));
       try {
         // An `@` addresses one Bot, as it does in every later message of the group.
         await startGroup(
@@ -299,6 +318,7 @@ function NewConversation({ composition }: { composition: string }) {
           draft.agentId,
         );
       } catch (caught) {
+        setSent(null);
         setError(failureOf(caught, "Couldn't start the group. Try again."));
         throw caught;
       }
@@ -474,7 +494,7 @@ function NewConversation({ composition }: { composition: string }) {
          */
         holdsFilesUntilSent={!group}
         // This new conversation's unsent message, kept with it as its Bots are (`composition`).
-        draftKey={`new:${composition}`}
+        draftKey={draftKey}
         attachmentLimits={attachmentLimits}
         modelPicker={
           <ModelPicker
@@ -502,6 +522,13 @@ function NewConversation({ composition }: { composition: string }) {
             }
           : {})}
         messages={sent ? [sent] : []}
+        /*
+         * Sent, and the Bot has the turn from here: the "Thinking" line under the message, as the
+         * conversation draws it. Making the conversation can take seconds (OpenBot picking the Bot
+         * is a model call), and the message alone under a box that had emptied read as broken. A
+         * group's first message too: its transcript says "Thinking" under it once it opens.
+         */
+        busy={sent !== null}
         starterSuggestions={
           !group && !sent ? (
             <StarterSuggestions
@@ -533,7 +560,15 @@ function NewConversation({ composition }: { composition: string }) {
             </p>
           ) : null
         }
-        onSubmit={submit}
+        onSubmit={async (draft) => {
+          // Until its conversation is made, a page that dies leaves these words to the next one.
+          rememberSendingDraft(SENDING_FROM, draftKey);
+          try {
+            await submit(draft);
+          } finally {
+            forgetSendingDraft(SENDING_FROM);
+          }
+        }}
         pending={pending}
       />
     </div>

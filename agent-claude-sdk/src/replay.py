@@ -6,7 +6,7 @@ thread, so a restart, or the 30-minute idle eviction, leaves the Bot answering t
 alone. The worker also builds its options once, so context and grants changed after the first run
 never reached it. Here each query gets a fresh worker, built from this run's input, and the
 conversation as its prompt: all of it, or as much as fits `REPLAY_BUDGET_TOKENS`, always with the
-person's first message (see `conversation_content`).
+person's first and latest messages (see `conversation_content`).
 
 Client-tool continuations do not take this path: the adapter resolves their PostToolUse hook in the
 same SDK query that emitted the tool use. The exceptions are answered by a fresh query from here: a
@@ -25,7 +25,13 @@ import tempfile
 from contextlib import suppress
 from datetime import datetime
 
-from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, StateSnapshotEvent
+from ag_ui.core import (
+    EventType,
+    RunErrorEvent,
+    RunFinishedEvent,
+    StateSnapshotEvent,
+    SystemMessage,
+)
 from ag_ui_claude_sdk.session import SessionWorker
 
 logger = logging.getLogger(__name__)
@@ -42,6 +48,15 @@ MODEL_QUERY_TIMEOUT_SECONDS = 300
 # The browser inserts system rows too (a skill's instructions arrive that way), and those are part
 # of the conversation, not the Bot's instructions.
 SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
+# And the Bot's learned Skills catalog (`RemoteLearnedSkillsMiddleware` in
+# server/src/learning/remote.ts), which the server also drops from a request and writes itself.
+SERVER_INSTRUCTION_IDS = frozenset({"openbot:learned-skills"})
+
+# Context entries that carry data and never instructions: the person's memory, its records quoted
+# as untrusted data by the server (`PersonalMemoryMiddleware` in server/src/memory/tools.ts).
+DATA_CONTEXT = frozenset({"OpenBot personal memory"})
+# The row a data entry is replayed as, among the conversation, never in the system prompt.
+DATA_ROW_ID = "openbot:personal-memory"
 
 # How much of the thread one query replays, in estimated tokens.
 #
@@ -66,9 +81,16 @@ CHARS_PER_TOKEN = 1.5
 # The most visual tokens one image costs on any current model: a 2,576 px long edge on Claude 4.7
 # and later (https://platform.claude.com/docs/en/build-with-claude/vision).
 IMAGE_TOKENS = 4_784
-# What is kept of an earlier turn's tool result when the thread is over the budget; see
-# `fit_to_budget`. Enough for the head of a listing or a document and the ids in it.
+# What is kept of an older tool result when the thread is over the budget; see `fit_to_budget`.
+# Enough for the head of a listing or a document and the ids in it.
 OLD_RESULT_CHARS = 4_000
+# The newest tool results, which a replay over the budget keeps whole and never leaves out: a Bot
+# is told to batch about five reads at once, and a step must see the whole of its latest batch.
+# The same number OpenBot's other engines keep (`KEEP_RESULTS` in agent-langgraph-ts).
+KEEP_WHOLE_RESULTS = 10
+# The tool OpenBot offers for reading a cleared result back, answered from the whole conversation
+# it stores (shared/recall-earlier-results.ts). A replay names it only when the run offers it.
+RECALL = "recall_earlier_results"
 # The most of one tool result a model is shown, in characters: what Claude Code keeps inline for one
 # of OpenBot's tools (`INLINE_RESULT_CHARS` in the adapter). In a running query Claude Code saves a
 # larger result to a file and shows a preview; a replay is one prompt, and a result in it was sent
@@ -85,6 +107,19 @@ def cut_note(cut):
     )
 
 
+def cleared_note(call_id, recall):
+    """What a tool result cleared from a replay says in its place, naming the call it answered."""
+    if recall:
+        return (
+            "[This result was cleared to make room in the conversation. Call "
+            f'{RECALL} with call_id "{call_id}" to read it again.]'
+        )
+    return (
+        f'[This result (call_id "{call_id}") was cleared to make room in the conversation. If '
+        "you need it again, call the tool again.]"
+    )
+
+
 def _cut_result(message, keep):
     """A tool message with its result cut to its first `keep` characters, saying so."""
     content = message.content
@@ -97,11 +132,63 @@ def is_server_instruction(message):
     return (
         message.role == "system"
         and isinstance(message.id, str)
-        and message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+        and (
+            message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+            or message.id in SERVER_INSTRUCTION_IDS
+        )
     )
 
 
-def conversation_content(messages, model_only=True, fit_results=False):
+def as_sent_to_model(input_data):
+    """The run with its context sorted into instructions and data, before anything reads it.
+
+    Upstream appends every AG-UI context entry to the system prompt
+    (`build_state_context_addendum`), which gives each the authority of the Bot's own role.
+    - A context entry that repeats one of the server's instruction rows goes: the row is already
+      in the system prompt (`system_instructions`), so it is said once.
+    - The person's memory ("OpenBot personal memory") is data, never an instruction. It leaves the
+      context and is replayed among the conversation as a labelled system row, quoted like any
+      other row that is not the server's own, unless the thread already carries it.
+    Every other context entry is left for upstream, as before.
+    """
+    messages = list(input_data.messages or [])
+    instructions = {
+        message.content.strip()
+        for message in messages
+        if is_server_instruction(message) and isinstance(message.content, str)
+    }
+    carried = {
+        message.content.strip()
+        for message in messages
+        if message.role == "system" and isinstance(message.content, str)
+    }
+    context = []
+    data = []
+    for entry in input_data.context or []:
+        value = str(entry.value)
+        if value.strip() in instructions:
+            continue
+        if entry.description in DATA_CONTEXT:
+            if value.strip() not in carried:
+                data.append(SystemMessage(id=DATA_ROW_ID, role="system", content=value))
+            continue
+        context.append(entry)
+    if len(context) == len(input_data.context or []) and not data:
+        return input_data
+    # After the server's instruction rows, ahead of the conversation they describe.
+    first_turn = next(
+        (index for index, message in enumerate(messages) if not is_server_instruction(message)),
+        len(messages),
+    )
+    return input_data.model_copy(
+        update={
+            "context": context,
+            "messages": [*messages[:first_turn], *data, *messages[first_turn:]],
+        }
+    )
+
+
+def conversation_content(messages, model_only=True, fit_results=False, recall=False):
     """Replay completed history as labelled data; keep attached images as images.
 
     ClaudeSDKClient.query accepts user input, not an arbitrary assistant history.
@@ -113,28 +200,32 @@ def conversation_content(messages, model_only=True, fit_results=False):
     `model_only` also refuses a part the model cannot be shown. The full harness names such a
     file in the history instead of failing the whole run.
 
-    A thread over `REPLAY_BUDGET_TOKENS` is fitted to it: earlier turns' tool results are cut
-    first (`fit_to_budget`), then the oldest messages are left out (`replay_start`), and the replay
-    says so where they were. The person's first message is always kept: it is the request a long
-    task is being carried out under, and a few short replies later ("skip that one, go on") are
-    meaningless without it.
+    A thread over `REPLAY_BUDGET_TOKENS` is fitted to it: older tool results are cut, then
+    cleared, keeping the newest `KEEP_WHOLE_RESULTS` whole (`fit_to_budget`), then the oldest
+    messages are left out (`replay_start`), and the replay says so where they were. The person's
+    first message is always kept: it is the request a long task is being carried out under, and a
+    few short replies later ("skip that one, go on") are meaningless without it. So is their
+    latest: a turn hundreds of steps long leaves out its own oldest steps, never what it answers.
 
     No tool result is replayed longer than `RESULT_CHARS`. `fit_results` is the retry after the
     model refused the turn as too long (see `OpenBotClaudeAgentAdapter._pump`): every tool result
     is cut to its first `OLD_RESULT_CHARS`, this turn's included, because the window that refused
     it was smaller than the budget assumes.
+
+    `recall` says the run offers `recall_earlier_results`, which a cleared result then names.
     """
     kept = [
         message
         for message in messages
         if message.role != "system"
+        or message.id == DATA_ROW_ID
         or not (model_only or is_server_instruction(message))
     ]
     entries = fit_to_budget(
         kept,
         [_entry_blocks(_cut_result(message, RESULT_CHARS), strict=model_only) for message in kept],
-        budget=0 if fit_results else None,
-        current_turn=fit_results,
+        cut_all=fit_results,
+        recall=recall,
     )
     content = [
         {
@@ -143,7 +234,7 @@ def conversation_content(messages, model_only=True, fit_results=False):
         }
     ]
     first = _first_request(kept)
-    start = replay_start(
+    start, skipped = replay_plan(
         kept,
         [estimated_tokens(blocks) for blocks in entries],
         pinned=first,
@@ -167,8 +258,22 @@ def conversation_content(messages, model_only=True, fit_results=False):
                 ),
             }
         )
-    for blocks in entries[start:]:
-        content.extend(blocks)
+    for index in range(start, len(entries)):
+        if skipped and index == skipped.start:
+            content.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"The person's latest message is above. The {len(skipped)} oldest "
+                        "messages of this turn since then, earlier tool calls and their results, "
+                        "are not shown: they were left out to fit the context window. The newest "
+                        "steps of this turn follow."
+                    ),
+                }
+            )
+        if index in skipped:
+            continue
+        content.extend(entries[index])
     if _read_as_a_command(content[-1]):
         content.append({"type": "text", "text": HISTORY_ENDS})
     return content
@@ -236,53 +341,93 @@ def _latest_request(messages):
     return users[-1] if users else len(messages)
 
 
-def fit_to_budget(messages, entries, budget=None, current_turn=False):
-    """The replay's entries, with the results of earlier turns' tool calls cut to fit `budget`.
+def _is_result(message):
+    return message.role == "tool" and isinstance(message.content, str)
+
+
+def fit_to_budget(messages, entries, budget=None, cut_all=False, recall=False):
+    """The replay's entries, with older tool results cut, then cleared, to fit `budget`.
 
     A tool result is the largest thing in a thread by far: a page of email, an app's tool list, a
     report. A few of them put a thread over the budget, and leaving out its oldest messages
     (`replay_start`) left out the person's own request: the Bot said it could no longer see the
-    task it was half-way through. So the results of earlier turns are cut first, oldest first
-    and only as far as the budget needs, each to its first `OLD_RESULT_CHARS` characters and a
-    line saying how much was left out. The current turn's results (from the latest user message
-    on) are cut only with `current_turn`, after every earlier one: they are what the Bot is working
-    from now, and are cut only when the model refused the turn as too long without it.
+    task it was half-way through. So results go first, oldest first and only as far as the budget
+    needs, in three passes:
+
+    1. Earlier turns' results, each cut to its first `OLD_RESULT_CHARS` characters and a line
+       saying how much was left out.
+    2. The current turn's results (from the latest user message on), the same way. A long task is
+       one turn of hundreds of steps, which the server carries on call by call, and replayed whole
+       it was refused as too long.
+    3. Any result, cleared to a note naming its call (`cleared_note`).
+
+    The newest `KEEP_WHOLE_RESULTS` results are never cut or cleared here: they are what the Bot
+    is working from now. `cut_all` is the retry after the model refused the turn as too long:
+    every result is cut to `OLD_RESULT_CHARS` first, these included.
     """
     budget = REPLAY_BUDGET_TOKENS if budget is None else budget
     entries = list(entries)
     costs = [estimated_tokens(blocks) for blocks in entries]
     total = sum(costs)
-    for index in range(len(messages) if current_turn else _latest_request(messages)):
-        if total <= budget:
-            break
-        message = messages[index]
-        if message.role != "tool" or not isinstance(message.content, str):
-            continue
-        if len(message.content) <= OLD_RESULT_CHARS:
-            continue
-        entries[index] = _entry_blocks(_cut_result(message, OLD_RESULT_CHARS), strict=False)
+    results = [index for index, message in enumerate(messages) if _is_result(message)]
+    newest = set(results[-KEEP_WHOLE_RESULTS:])
+    latest = _latest_request(messages)
+
+    def replace(index, message):
+        nonlocal total
+        entries[index] = _entry_blocks(message, strict=False)
         cost = estimated_tokens(entries[index])
         total += cost - costs[index]
         costs[index] = cost
+
+    if cut_all:
+        for index in results:
+            replace(index, _cut_result(messages[index], OLD_RESULT_CHARS))
+    passes = [
+        ([index for index in results if index < latest], "cut"),
+        ([index for index in results if index > latest and index not in newest], "cut"),
+        ([index for index in results if index not in newest], "clear"),
+    ]
+    for indices, how in passes:
+        for index in indices:
+            if total <= budget:
+                return entries
+            message = messages[index]
+            if how == "cut":
+                if len(message.content) > OLD_RESULT_CHARS:
+                    replace(index, _cut_result(message, OLD_RESULT_CHARS))
+                continue
+            note = cleared_note(message.tool_call_id, recall)
+            if len(message.content) > len(note):
+                replace(index, message.model_copy(update={"content": note}))
     return entries
 
 
 def replay_start(messages, costs, budget=None, pinned=None):
-    """Where the replay starts: the oldest message the newest messages that fit `budget` reach.
+    """Where the replay starts, for a thread whose current turn is replayed whole; see `replay_plan`."""
+    return replay_plan(messages, costs, budget, pinned)[0]
 
-    Everything from the latest user message on is always kept, whatever it costs: it is what this
-    run answers, and any tool calls and results this turn has made since are part of it. The start
-    never falls between a tool call and its result, or on a result, so no call is replayed without
-    its answer and no answer without its call.
+
+def replay_plan(messages, costs, budget=None, pinned=None):
+    """Which messages the replay leaves out to fit `budget`: `(start, skipped)`.
+
+    The replay is the messages from `start` on, less the range `skipped`, after the person's
+    `pinned` first message. It keeps the newest messages that fit, newest first, and always:
+    - the person's latest message: it is what this run answers;
+    - everything from the call of the newest `KEEP_WHOLE_RESULTS` results on, whatever it costs:
+      the steps the Bot is working from now. A turn with fewer results is kept whole.
+    A turn too long to fit leaves out its own oldest steps, between the person's latest message and
+    its newest steps (`skipped`). Nothing earlier is replayed then.
+
+    Neither `start` nor the end of `skipped` falls between a tool call and its result, or on a
+    result, so no call is replayed without its answer and no answer without its call.
 
     `pinned` is the index of a message replayed whatever the start is, the person's first one
-    (see `conversation_content`), so its cost comes out of the budget first.
+    (see `conversation_content`), so its cost comes out of the budget first, with the latest's.
     """
     budget = REPLAY_BUDGET_TOKENS if budget is None else budget
     if sum(costs) <= budget:
-        return 0
-    if pinned is not None:
-        budget -= costs[pinned]
+        return 0, range(0)
     called_at = {}
     for index, message in enumerate(messages):
         for call in getattr(message, "tool_calls", None) or []:
@@ -294,17 +439,28 @@ def replay_start(messages, costs, budget=None, pinned=None):
             if message.tool_call_id in called_at:
                 inside.update(range(called_at[message.tool_call_id] + 1, index + 1))
     users = [index for index, message in enumerate(messages) if message.role == "user"]
-    start = users[-1] if users else len(messages) - 1
-    while start > 0 and start in inside:
-        start -= 1
-    total = sum(cost for index, cost in enumerate(costs[start:], start) if index != pinned)
+    latest = users[-1] if users else len(messages) - 1
+    kept = {index for index in (pinned, latest if users else None) if index is not None}
+    budget -= sum(costs[index] for index in kept)
+    # The newest steps of the turn: from the call of its oldest result still kept whole.
+    tail = latest
+    results = [index for index in range(latest + 1, len(messages)) if messages[index].role == "tool"]
+    if len(results) > KEEP_WHOLE_RESULTS:
+        oldest = results[-KEEP_WHOLE_RESULTS]
+        tail = max(latest, called_at.get(messages[oldest].tool_call_id, oldest))
+    while tail > 0 and tail in inside:
+        tail -= 1
+    start = tail
+    total = sum(cost for index, cost in enumerate(costs[start:], start) if index not in kept)
     for index in range(start - 1, -1, -1):
-        total += 0 if index == pinned else costs[index]
+        total += 0 if index in kept else costs[index]
         if total > budget:
             break
         if index not in inside:
             start = index
-    return start
+    if users and start > latest:
+        return latest, range(latest + 1, start)
+    return start, range(0)
 
 
 def _content_block(part):
@@ -536,7 +692,10 @@ async def run_replayed_query(adapter, input_data, fit_results=False):
             "message": {
                 "role": "user",
                 "content": conversation_content(
-                    input_data.messages, model_only=model_only, fit_results=fit_results
+                    input_data.messages,
+                    model_only=model_only,
+                    fit_results=fit_results,
+                    recall=any(tool.name == RECALL for tool in input_data.tools or []),
                 ),
             },
             "parent_tool_use_id": None,

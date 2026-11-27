@@ -105,7 +105,7 @@ const SOURCE_VENDORS: Partial<Record<ModelSource, string>> = {
 };
 
 /**
- * Admin, Providers: the organization's AI (getAiConnection), with Change and Disconnect in the same
+ * Admin, AI providers: the organization's AI (getAiConnection), with Change and Disconnect in the same
  * dialog and chooser Settings and Connect your AI use. And on OpenBot Cloud, where each person can
  * bring their own AI, the viewer's own beside it, with the way to change it in Settings.
  *
@@ -347,7 +347,7 @@ export function useNoOrganizationAi(): boolean | undefined {
 }
 
 /**
- * Admin, Providers: what people pick from in a conversation. Every model the credential lists,
+ * Admin, AI providers: what people pick from in a conversation. Every model the credential lists,
  * until a team's admin narrows it below; then the models allowed there, with the default. On
  * OpenBot Cloud with no organization AI, every model each person's own AI lists.
  */
@@ -509,7 +509,7 @@ export function allowedSummary(
   return `${named.slice(0, 3).join(", ")} and ${named.length - 3} more`;
 }
 
-/** Admin, Providers: the allowlist every Bot's model is checked against. */
+/** Admin, AI providers: the allowlist every Bot's model is checked against. */
 export function ModelAllowlistSection() {
   const [open, setOpen] = useState(false);
   // The models by name, from the listing the allowlist is chosen from.
@@ -910,7 +910,7 @@ export function usageSourceWords(model: string, source: string): string {
 }
 
 /**
- * Admin, Providers: which models Bots ran on in the last 30 days. Only a team has an allowlist, so
+ * Admin, AI providers: which models Bots ran on in the last 30 days. Only a team has an allowlist, so
  * only a team is told that refused runs are counted.
  */
 export function ModelUsageSection({ team }: { team: boolean }) {

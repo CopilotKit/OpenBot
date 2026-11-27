@@ -411,6 +411,7 @@ export function StartJourney({
   open,
   now: happening = null,
   releaseDue = false,
+  description,
 }: {
   sequence: LocalSequence;
   open: readonly Progress[];
@@ -421,6 +422,7 @@ export function StartJourney({
   now?: string | null;
   /** Start updates OpenBot itself (`upgrade_due`). */
   releaseDue?: boolean;
+  description?: string;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -472,6 +474,7 @@ export function StartJourney({
           )}
         </span>
       </div>
+      {description && <p className="journey-description">{description}</p>}
       <progress
         aria-label="How far along"
         aria-valuetext={`${Math.round(view.fraction * 100)}%, ${leftSaid(view.left)}`}

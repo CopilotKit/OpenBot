@@ -1,6 +1,7 @@
 import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import {
+  readAnotherAccountPrompt,
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
@@ -14,6 +15,7 @@ import {
   answersTheModel,
   connectorName,
   ownToolAttempt,
+  ownToolFailedLabel,
   readToolName,
 } from "@openbot/shared/tool-name";
 import {
@@ -256,7 +258,15 @@ function cardApp(item: ToolItem): string | null {
     : item.toolCall.function.name === SHOW_APP_ACCESS_TOOL
       ? readConnectPrompt(answer)
       : null;
-  return prompt ? `${prompt.agentId ?? ""}\u0000${prompt.serverId}` : null;
+  if (prompt) return `${prompt.agentId ?? ""}\u0000${prompt.serverId}`;
+  // The card for one more account is a question of its own, kept apart from the app's own card.
+  const another =
+    item.toolCall.function.name === SHOW_APP_ACCESS_TOOL
+      ? readAnotherAccountPrompt(answer)
+      : null;
+  return another
+    ? `another\u0000${another.agentId ?? ""}\u0000${another.serverId}`
+    : null;
 }
 
 /**
@@ -511,9 +521,11 @@ function detailsOf(step: ToolItem, folders: FolderNames): StepDetails {
       ...outcome,
       kind: "tool",
       // Beside "Blocked", what was tried: "Save a file", not "Saved a file", which did not happen.
+      // So too beside "Didn't work", for a step that then did not happen: "Draw an interface".
       label:
-        (refused ? ownToolAttempt(name) : null) ??
-        readToolName(name, outcome.pending).label,
+        (refused || (outcome.failed && ownToolFailedLabel(name))
+          ? ownToolAttempt(name)
+          : null) ?? readToolName(name, outcome.pending).label,
       ...(folderSubject ? { detail: folderSubject } : {}),
       pages: 0,
     };

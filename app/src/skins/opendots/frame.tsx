@@ -18,6 +18,7 @@ import {
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { DesktopAppMenuItem } from "@/components/app-sidebar/desktop-app-item";
 import { TroubleshootingLogsMenuItem } from "@/components/app-sidebar/troubleshooting-logs-item";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
@@ -119,6 +120,7 @@ function RailUserMenu() {
           <OpenBotVersion className="-mt-1 max-w-56 px-1.5 pb-1 text-[10px] leading-3 text-muted-foreground" />
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
+        <DesktopAppMenuItem className="gap-2 px-2 py-1.5" />
         <TroubleshootingLogsMenuItem className="gap-2 px-2 py-1.5" />
         {signOutOffered ? (
           <DropdownMenuItem

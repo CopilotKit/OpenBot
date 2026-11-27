@@ -112,8 +112,46 @@ export type Token = keyof typeof scheme.light;
 `;
 }
 
+/**
+ * The web app's manifest: its name and its icons (app/scripts/web-icons.ts writes them) for a
+ * phone's home screen or an installed app, and the light page's ground for the colors a phone
+ * paints around it. JSON has no comments, so it is written whole rather than as a region.
+ */
+function webManifest() {
+  const background = oklchToHex(scheme.light.background);
+  const icon = (size: number, maskable: boolean) => ({
+    src: `/icon-${maskable ? "maskable-" : ""}${size}.png`,
+    sizes: `${size}x${size}`,
+    type: "image/png",
+    ...(maskable ? { purpose: "maskable" } : {}),
+  });
+  /*
+   * `display: standalone` makes OpenBot added to a phone's Home Screen an app of its own, which is
+   * also what lets an iPhone or iPad give it push notifications (Settings, Notifications). `id` and
+   * `scope` say it is one app, the whole of this address.
+   */
+  const manifest = {
+    id: "/",
+    name: "OpenBot",
+    short_name: "OpenBot",
+    start_url: "/",
+    scope: "/",
+    display: "standalone",
+    background_color: background,
+    theme_color: background,
+    icons: [
+      icon(192, false),
+      icon(512, false),
+      icon(192, true),
+      icon(512, true),
+    ],
+  };
+  return `${JSON.stringify(manifest, null, 2)}\n`;
+}
+
 const WHOLE: Record<(typeof WHOLE_FILES)[number], () => string> = {
   "mobile/src/scheme.ts": mobileScheme,
+  "app/public/manifest.webmanifest": webManifest,
 };
 
 /** Every generated file, by its path from the repository root, as it should be. */

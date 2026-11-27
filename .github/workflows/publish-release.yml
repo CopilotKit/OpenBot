@@ -31,6 +31,7 @@ jobs:
   metadata:
     name: classify
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # reads the release, in seconds
     permissions:
       contents: read
       pull-requests: read
@@ -119,6 +120,7 @@ jobs:
     needs: metadata
     if: needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60 # checks the release before it is published
     # Reading the releases is all the decision below needs.
     permissions:
       contents: read
@@ -373,8 +375,6 @@ jobs:
       manifest_artifact: ${{ needs.images.outputs.manifest-artifact }}
       retention_days: 30
       platforms: '["macos","windows"]'
-    secrets:
-      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
     permissions:
       contents: read
 
@@ -393,6 +393,7 @@ jobs:
       needs.verify.result == 'success' && needs.images.result == 'success' &&
       needs.image-list.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 60 # uploads the release's files
     permissions:
       contents: write
       id-token: write
@@ -720,6 +721,7 @@ jobs:
       !cancelled() && needs.metadata.outputs.final_from_candidate == 'true' &&
       needs.github-release.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 20 # opens the merge back to main
     permissions:
       contents: write
       pull-requests: write
@@ -814,6 +816,7 @@ jobs:
       needs.metadata.outputs.is_release == 'true' &&
       needs.github-release.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 60 # moves main's images to the release
     permissions:
       contents: write
       pull-requests: write

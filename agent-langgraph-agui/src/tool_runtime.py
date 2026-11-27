@@ -476,19 +476,86 @@ def model_messages(messages):
     Only here, at the model's door, is a system row that is not the server's own relabelled. The
     graph state keeps it as it arrived, so the snapshot the Bot returns gives the thread back as
     the server sent it.
+
+    A context entry that repeats one of the server's instruction rows is not said again. OpenBot
+    sends a Bot's standing role, its tool guidance and its learned Skills catalog both as system
+    messages and as reserved context entries ("OpenBot standing role", "OpenBot granted tools
+    guidance", "OpenBot learned skills"), with the same text, so that an agent reading only one
+    still sees them. Here the thread carries them, so the model is told each once, as an
+    instruction. Only an instruction row counts: a context entry that repeats a row this function
+    quotes as conversation is not dropped for it.
+
+    The person's memory ("OpenBot personal memory", which OpenBot sends as context alone) is data,
+    never an instruction: it is said once, quoted as conversation, after the instructions.
     """
+    thread = convert_to_messages(messages)
+    instructions = {
+        _text(message.content).strip()
+        for message in thread
+        if is_server_instruction(message)
+    }
+    quoted = {
+        _text(message.content).strip()
+        for message in thread
+        if isinstance(message, SystemMessage) and not is_server_instruction(message)
+    }
+    context = [
+        entry
+        for entry in current_tools().context
+        if str(entry.value).strip() not in instructions
+    ]
+    data = [
+        _as_conversation_data(entry)
+        for entry in context
+        if entry.description in DATA_CONTEXT and str(entry.value).strip() not in quoted
+    ]
+    said = [
+        _as_conversation(message)
+        if isinstance(message, SystemMessage) and not is_server_instruction(message)
+        else message
+        for message in thread
+    ]
+    # The data goes after the system messages the thread opens with, so every instruction stays
+    # ahead of every turn of conversation, as a provider that takes one system prompt needs.
+    first_turn = next(
+        (index for index, message in enumerate(said) if not isinstance(message, SystemMessage)),
+        len(said),
+    )
     return [
         *[
             SystemMessage(content=f"{entry.description}\n{entry.value}")
-            for entry in current_tools().context
+            for entry in context
+            if entry.description not in DATA_CONTEXT
         ],
-        *[
-            _as_conversation(message)
-            if isinstance(message, SystemMessage) and not is_server_instruction(message)
-            else message
-            for message in convert_to_messages(messages)
-        ],
+        *said[:first_turn],
+        *data,
+        *said[first_turn:],
     ]
+
+
+# Context entries that carry data and never instructions: the person's memory, its records quoted
+# as untrusted data by the server (`PersonalMemoryMiddleware` in server/src/memory/tools.ts).
+DATA_CONTEXT = frozenset({"OpenBot personal memory"})
+
+
+def _as_conversation_data(entry):
+    """A context entry that is data, as a labelled entry in the conversation, like a quoted row."""
+    return HumanMessage(
+        content=f"{CONVERSATION_SYSTEM_ROW}\n"
+        + json.dumps({"role": "context", "description": entry.description, "content": entry.value})
+    )
+
+
+def _text(content) -> str:
+    """A message's words, whether its content is a string or a list of parts."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "") if isinstance(part, dict) and part.get("type") == "text" else ""
+            for part in content
+        )
+    return ""
 
 
 def bind_tools(model):

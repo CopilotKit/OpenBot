@@ -125,11 +125,11 @@ fn repository(image: &str) -> Option<(String, String)> {
 The two images only a plan runs, by their published names. Each runs only on that vendor's plan:
 
 - `plan::SIGN_IN_IMAGE`, the Claude Agent SDK, is the Bot a Claude plan runs on.
-- `plan::CHATGPT_SIGN_IN_IMAGE`, the Python LangGraph image, is a ChatGPT plan's model service
-  beside the Bot (`plan::CHATGPT_PLAN_SERVICE`), and runs its sign-in.
+- `plan::CHATGPT_SIGN_IN_IMAGE`, the OpenAI Agents SDK, is the Bot a ChatGPT plan runs on
+  (`plan::CHATGPT_PLAN_SERVICE`).
 
-Install pulls one only for an installation on its plan ([`plan_images`]). A ChatGPT plan's sign-in
-pulls its image. A Claude plan's sign-in needs none: it is native (`claude_sign_in`). A Start on a
+Install pulls one only for an installation on its plan ([`plan_images`]). Neither plan's sign-in
+needs an image: both are native (`claude_sign_in`, `chatgpt_sign_in`). A Start on a
 plan pulls whatever its Bot and services need that is not there, each showing the download as
 Install does (`main.rs`). So a switch to a plan downloads its image then.
 */
@@ -173,7 +173,12 @@ pub fn plan_images(root: &Path) -> Vec<&'static str> {
     if engine == Some("agent-claude-plan") && !images.contains(&crate::plan::SIGN_IN_IMAGE) {
         images.push(crate::plan::SIGN_IN_IMAGE);
     }
-    if named("CHATGPT_AUTH_FILE") || engine == Some(crate::plan::CHATGPT_PLAN_SERVICE) {
+    // Only when the release laid out here has the ChatGPT plan's engine: a release from before the
+    // OpenAI Agents SDK engine has none, and the plan's engine comes with the release that does, when
+    // Start moves the folder to it (as `harness::the_release_includes` does for the Bot).
+    if (named("CHATGPT_AUTH_FILE") || engine == Some(crate::plan::CHATGPT_PLAN_SERVICE))
+        && deployment::reference(root, crate::plan::CHATGPT_SIGN_IN_IMAGE).is_ok()
+    {
         images.push(crate::plan::CHATGPT_SIGN_IN_IMAGE);
     }
     images

@@ -11,8 +11,8 @@ import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
+import { NotificationsOfferRow } from "@/components/notifications/notifications-offer-row";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
-import { Button } from "@/components/ui/button";
 import {
   Item,
   ItemActions,
@@ -41,10 +41,6 @@ import {
   botLifecycleQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { loadFailure } from "@/lib/load-failure";
-import {
-  requestNotificationPermission,
-  useNotificationPermission,
-} from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
 import { BotActivityGlance, BotActivityRow } from "./activity";
 import { BotPausedBanner } from "./pause-banner";
@@ -101,8 +97,6 @@ export function BotProfile({
   const { done } = useNeedsYou(agent.id);
   const pause = useMutation(setBotPausedMutationOptions(queryClient));
   const notify = useMutation(setBotNotifyMutationOptions(queryClient));
-  // The browser's answer, shared with the prompt a conversation offers, so a yes there shows here.
-  const permission = useNotificationPermission();
 
   return (
     <>
@@ -201,32 +195,11 @@ export function BotProfile({
                 </Select>
               </ItemActions>
             </Item>
-            {permission === "default" ? (
-              <>
-                <Separator />
-                <Item size="sm">
-                  <ItemMedia variant="icon">
-                    <IconBell />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>Browser notifications</ItemTitle>
-                    <ItemDescription>
-                      Off in this browser. Turn them on to hear when a Bot needs
-                      you.
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <Button
-                      onClick={() => void requestNotificationPermission()}
-                      size="sm"
-                      variant="outline"
-                    >
-                      Turn on
-                    </Button>
-                  </ItemActions>
-                </Item>
-              </>
-            ) : null}
+            {/*
+             * Browser notifications, until they are on: the same one press as the offer in a
+             * conversation and Settings' switch, which all read one state, so a yes anywhere shows here.
+             */}
+            <NotificationsOfferRow />
             <Separator />
             <Item
               render={<Link to="/channel/new" search={{ agent: agent.id }} />}

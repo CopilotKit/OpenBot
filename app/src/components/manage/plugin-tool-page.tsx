@@ -25,6 +25,10 @@ import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 
+/** Said under a connected Bot that holds the tool and has no key: see `mayNeedKey`. */
+export const KEY_FOR_OWN_CALLS =
+  "If its agent calls OpenBot's tools itself, make a key in its Setup.";
+
 /**
  * One tool, and which Bots hold it.
  *
@@ -57,19 +61,31 @@ export function PluginToolPage({
   /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
   const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
   /*
-   * Whether a call from this Bot could be authenticated at all.
+   * Whether to add that a Bot's agent needs a key, for the one case where it might.
    *
-   * Its own issued credential, or the deployment's shared one. Separate from the grant: the switch
-   * decides whether the tool is offered to the model, this decides whether the call it makes gets
-   * past the front door. A Bot with the grant and neither credential produced "May call this tool"
-   * beside a tool that refused every call, with no audit row, because the call never arrived.
+   * A KEY IS NOT WHAT LETS A BOT CALL A TOOL. OpenBot offers a granted tool to every Bot in the
+   * run's AG-UI `tools`, and a Bot at an address hands the call back for OpenBot to run, through the
+   * grant, the boundaries and the audit trail, with no key. This row used to say "Every call is
+   * refused" for any Bot without one, beside a connected Bot that had just used the tool.
+   *
+   * The key is for an agent that calls OpenBot's tools itself, at its own door. Only a Bot at an
+   * address can be one, and only when it has neither its own key nor the shared one, so the row
+   * mentions the key there and nowhere else. A Bot OpenBot runs is handed its key on every run.
    */
   const sharedCallback = setup.data?.botsMayCallBack === true;
-  const canCallBack = (bot: { id: string }) =>
-    sharedCallback ||
-    [...(agents ?? []), ...(hiddenAgents ?? [])].find(
+  const mayNeedKey = (bot: { id: string }) => {
+    if (sharedCallback) return false;
+    const agent = [...(agents ?? []), ...(hiddenAgents ?? [])].find(
       (one) => one.id === bot.id,
-    )?.hasCallbackToken === true;
+    );
+    return (
+      agent !== undefined &&
+      Boolean(agent.endpoint) &&
+      agent.builtIn !== true &&
+      agent.keyFromOpenBot !== true &&
+      agent.hasCallbackToken !== true
+    );
+  };
   // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
   const [error, setError] = useState<Failure | null>(null);
 
@@ -228,11 +244,9 @@ export function PluginToolPage({
                       <ItemDescription>
                         {bot.hidden ? "Hidden from your roster. " : ""}
                         {held
-                          ? canCallBack(bot)
-                            ? `Can call this tool. Every call is still checked against boundaries and logged in ${paths.auditLabel}.`
-                            : paths.hosted
-                              ? "Allowed, but this Bot has no callback token. Every call is refused. Issue one on its page."
-                              : "Allowed, but this Bot has no callback token. Every call is refused. Issue one on its page, or set AGENT_TOOL_TOKEN."
+                          ? `Can call this tool. Every call is still checked against boundaries and logged in ${paths.auditLabel}.${
+                              mayNeedKey(bot) ? ` ${KEY_FOR_OWN_CALLS}` : ""
+                            }`
                           : "Can't call this tool. The Bot never sees it."}
                       </ItemDescription>
                     </ItemContent>

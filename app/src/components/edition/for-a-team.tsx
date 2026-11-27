@@ -30,7 +30,11 @@ export function ForATeam({ children }: { children?: ReactNode }) {
   return (
     <PageEmpty
       action={
-        <Button onClick={openTeamFeatures} size="sm" variant="outline">
+        <Button
+          onClick={() => openTeamFeatures("admin")}
+          size="sm"
+          variant="outline"
+        >
           <OpenBotLogo />
           <span>
             Meet OpenBot for Business

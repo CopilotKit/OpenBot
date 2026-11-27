@@ -27,9 +27,10 @@ import {
   MODEL_USAGE_PATH,
   overviewResponse,
 } from "./admin-settings-api";
+import { still } from "./page-still";
 
 /**
- * Admin → Providers: an admin changes the organization's AI, disconnects it and connects another,
+ * Admin → AI providers: an admin changes the organization's AI, disconnects it and connects another,
  * with the same chooser Settings and Connect your AI use. On OpenBot Cloud it says which AI is the
  * organization's and which is the admin's own, and links to Settings → Your AI to change their own.
  * Somebody who isn't an admin never reaches it.
@@ -510,9 +511,10 @@ beforeAll(async () => {
   }
 }, 120_000);
 
+// Closing two browsers takes longer than a hook's five seconds when the machine runs eight files at once.
 afterAll(async () => {
-  for (const browser of browsers.values()) await browser.close();
-});
+  await Promise.all([...browsers.values()].map((browser) => browser.close()));
+}, 30_000);
 
 /** The page at `path`, its server answering from `server`. */
 async function open(
@@ -593,7 +595,7 @@ async function style(page: Page) {
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
   // A dialog scales in: looked at once it is still.
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(
@@ -658,7 +660,7 @@ function section(page: Page, title: string) {
   });
 }
 
-describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
+describe.skipIf(!asked)("Admin → AI providers: the organization's AI", () => {
   for (const engine of engines)
     for (const theme of THEMES)
       for (const window of [WIDE, PHONE])
@@ -1089,11 +1091,11 @@ describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
 /**
  * On OpenBot Cloud an admin shares their own plan or provider sign-in as the organization's AI:
  * they sign in exactly as Connect your AI signs them in (the server runs it and keeps it for them),
- * or share the one they already have in one press. Providers then says whose it is, and says when
+ * or share the one they already have in one press. AI providers then says whose it is, and says when
  * it stopped working. Inside OpenBot Desktop the chooser keeps Desktop's own plan sign-ins.
  */
 describe.skipIf(!asked)(
-  "Admin → Providers: an admin's own sign-in, shared as the organization's AI",
+  "Admin → AI providers: an admin's own sign-in, shared as the organization's AI",
   () => {
     for (const engine of engines)
       for (const theme of THEMES)
@@ -1273,7 +1275,7 @@ describe.skipIf(!asked)(
     for (const engine of engines)
       for (const theme of THEMES)
         for (const window of [WIDE, PHONE])
-          test(`Providers says whose sign-in it is and when it stopped working, in ${engine}, ${theme}, ${window.width}`, async () => {
+          test(`AI providers says whose sign-in it is and when it stopped working, in ${engine}, ${theme}, ${window.width}`, async () => {
             const server = new FakeServer();
             server.connection = GetAiConnectionResponse.parse(
               spec.components.examples.AiConnectionSharedPlanExample?.value,

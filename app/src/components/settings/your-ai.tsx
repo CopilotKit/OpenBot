@@ -48,7 +48,7 @@ import { failureSaid } from "@/lib/load-failure";
 import { AiConnectionRows, SEVERAL } from "./ai-connection-list";
 
 /**
- * Settings → Providers → Your AI: the AI a person's Bots use when they work for them, on an OpenBot
+ * Settings → AI providers → Your AI: the AI a person's Bots use when they work for them, on an OpenBot
  * where each person can bring their own (getPersonalAiConnection's `available`, OpenBot Cloud).
  * Theirs alone: it follows them into every organization they are in, and nobody else's runs use it.
  *

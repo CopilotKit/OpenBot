@@ -700,6 +700,61 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/conversations/{conversationId}/approvals:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/ApprovalConversationId'
+    get:
+      tags: [Approvals]
+      operationId: listConversationApprovals
+      summary: List a person's approvals in one conversation
+      description: >-
+        Return one page of the actions a person's Bots asked them about in one
+        of their conversations, however long ago: the ones still waiting and
+        every one already decided, newest first. Unlike the person's whole list,
+        which keeps only the last hundred, this reaches every approval the
+        conversation has, so an old conversation can still show what the person
+        answered. What an action was called with is cut short for showing, with
+        values that look like secrets masked. Only the person themselves may
+        read them, and only the approvals they were asked: anybody else's
+        conversation, and one that does not exist, reads as an empty list. A
+        missing cursor starts at the first page and nextCursor null ends the
+        list.
+      security:
+        - webSession: []
+        - appOAuth: [approvals:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the conversation's approvals.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalPage'
+              examples:
+                answered:
+                  $ref: '#/components/examples/ConversationApprovalPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ApprovalsOwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/computer-steps:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
@@ -714,11 +769,13 @@ paths:
         through. The body names the Bot and carries the conversation with the
         unanswered call in it. The answer says what came of it: done, with what
         the computer answered; waiting, when the person must approve it first,
-        and then the decision runs it once and carries the conversation on; or
-        held, when the computer is held for a person, with what to tell them.
-        Only computer tools may be called this way, and the call must match an
-        unanswered one in the conversation. Only the person themselves may take
-        a step.
+        and then the decision runs it once and carries the conversation on;
+        held, when the computer is held for a person, with what to tell them;
+        or taken, when the server already ran, or is running, this step (the
+        same tool call in the same conversation), so it is not run a second
+        time, with the first run's result once it has one. Only computer tools
+        may be called this way, and the call must match an unanswered one in
+        the conversation. Only the person themselves may take a step.
       security:
         - webSession: []
         - appOAuth: [approvals:write]
@@ -774,6 +831,10 @@ paths:
                   $ref: '#/components/examples/ComputerStepWaitingExample'
                 held:
                   $ref: '#/components/examples/ComputerStepHeldExample'
+                taken:
+                  $ref: '#/components/examples/ComputerStepTakenExample'
+                takenRunning:
+                  $ref: '#/components/examples/ComputerStepTakenRunningExample'
         '400':
           $ref: '#/components/responses/ApprovalRefused'
         '401':
@@ -3237,18 +3298,49 @@ components:
           type: string
         handoff:
           $ref: '#/components/schemas/ComputerStepHandoff'
+    ComputerStepTaken:
+      type: object
+      description: >-
+        The server already ran, or is running, this step: the same tool call
+        in the same conversation. It is not run a second time. While the first
+        run goes on, running is true and there is no result yet; ask again
+        for it. Once the first run has ended, result is what it answered. A
+        first run that was cut off before it answered has, as its result, a
+        note that its outcome is unknown, to check before doing it again.
+        Sent only to a request whose OpenBot-Capabilities header names
+        computer-step-taken.
+      required: [outcome, threadId, toolCallId, running]
+      properties:
+        outcome:
+          type: string
+          const: taken
+        threadId:
+          type: string
+          description: The conversation's thread the step belongs to.
+        toolCallId:
+          type: string
+          description: The tool call the step answers.
+        running:
+          type: boolean
+          description: True while the first run of the step has not ended.
+        result:
+          description: >-
+            What the first run answered, as the tool's result, once it has
+            ended. Any JSON value.
     ComputerStepOutcome:
       description: What came of a computer step, by its outcome.
       oneOf:
         - $ref: '#/components/schemas/ComputerStepDone'
         - $ref: '#/components/schemas/ComputerStepWaiting'
         - $ref: '#/components/schemas/ComputerStepHeld'
+        - $ref: '#/components/schemas/ComputerStepTaken'
       discriminator:
         propertyName: outcome
         mapping:
           done: '#/components/schemas/ComputerStepDone'
           waiting: '#/components/schemas/ComputerStepWaiting'
           held: '#/components/schemas/ComputerStepHeld'
+          taken: '#/components/schemas/ComputerStepTaken'
     ApprovalActionKinds:
       type: object
       additionalProperties: false
@@ -5365,6 +5457,36 @@ components:
                 reason: Sending a message asks first.
                 kind: sending
         nextCursor: null
+    ConversationApprovalPageExample:
+      summary: One conversation's only approval, answered, on the last page.
+      value:
+        approvals:
+          - id: 6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b
+            status: completed
+            decision: allow_once
+            result: null
+            createdAt: '2026-08-03T09:12:44.501Z'
+            decidedAt: '2026-08-03T09:13:02.118Z'
+            consumedAt: '2026-08-03T09:13:02.640Z'
+            completedAt: '2026-08-03T09:13:09.902Z'
+            action:
+              botId: research-assistant
+              toolRef: mcp/gmail/send_email
+              effect: write
+              scope: gmail
+              threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+              toolCallId: call_8c1f
+              args:
+                to: sam.okafor@acme.com
+                subject: Q4 numbers
+              target:
+                app: gmail
+              policy:
+                behaviour: ask
+                source: safety
+                reason: Sending a message asks first.
+                kind: sending
+        nextCursor: null
     QuestionPageExample:
       summary: One question waiting, on the last page.
       value:
@@ -5480,6 +5602,22 @@ components:
         outcome: held
         error: "Not done: the person has control of the computer right now. Tell them you'll do this once they hand it back."
         humanHasControl: true
+    ComputerStepTakenExample:
+      summary: The server already ran this step, and this is what it answered.
+      value:
+        outcome: taken
+        threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+        toolCallId: call_8c1f
+        running: false
+        result:
+          ok: true
+    ComputerStepTakenRunningExample:
+      summary: The server is running this step, and it has not answered yet.
+      value:
+        outcome: taken
+        threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+        toolCallId: call_8c1f
+        running: true
     ApprovalSettingsExample:
       summary: Payments are left to the person, and everything else is open.
       value:

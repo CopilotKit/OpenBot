@@ -136,17 +136,33 @@ export type DirectoryAppInput = {
 export function addDirectoryAppMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (input: DirectoryAppInput): Promise<string> => {
-      const app = await createApp(
-        organizationId(),
-        {
-          from: "directory",
-          directoryEntryId: input.directoryEntryId,
-          ...(input.connectsWith ? { connectsWith: input.connectsWith } : {}),
-        },
-        { "Idempotency-Key": idempotencyKey() },
-        { fallback: "That app could not be added." },
-      );
-      return app.id;
+      try {
+        const app = await createApp(
+          organizationId(),
+          {
+            from: "directory",
+            directoryEntryId: input.directoryEntryId,
+            ...(input.connectsWith ? { connectsWith: input.connectsWith } : {}),
+          },
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: "That app could not be added." },
+        );
+        return app.id;
+      } catch (thrown) {
+        /*
+         * ALREADY HERE IS THE ANSWER, NOT A FAILURE. An entry the directory offers as a sign-in
+         * (Fireflies, through its own server) is refused 409 where that server is already added,
+         * naming it. The press wanted that app, so it goes on with the app that stands: a Reconnect
+         * that re-added Fireflies was refused three times and never reached the connect.
+         */
+        if (
+          thrown instanceof ClientError &&
+          thrown.code === "APP_ALREADY_ADDED" &&
+          typeof thrown.body?.appId === "string"
+        )
+          return thrown.body.appId;
+        throw thrown;
+      }
     },
     onSettled: () => invalidatePlugins(queryClient),
   });

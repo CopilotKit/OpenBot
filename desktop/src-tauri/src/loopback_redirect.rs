@@ -170,6 +170,24 @@ impl Listener {
         patience: Duration,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(Outcome, Reply), Ended> {
+        self.wait_with_query(state, patience, cancelled)
+            .map(|(outcome, _, reply)| (outcome, reply))
+    }
+
+    /// The redirect URI on `127.0.0.1` itself, for a provider that asks for the IP literal and
+    /// refuses `localhost` (Sign in with ChatGPT). The browser then only tries IPv4.
+    pub fn redirect_uri_ipv4(&self) -> String {
+        format!("http://127.0.0.1:{}{}", self.port, self.path)
+    }
+
+    /// [`Listener::wait`], also handing back every query parameter the matching redirect carried,
+    /// for a provider whose redirect says more than its code (an issued `client_id`, a `scope`).
+    pub fn wait_with_query(
+        &self,
+        state: &str,
+        patience: Duration,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(Outcome, std::collections::BTreeMap<String, String>, Reply), Ended> {
         let deadline = Instant::now() + patience;
         loop {
             if cancelled() {
@@ -190,7 +208,7 @@ impl Listener {
                 None => std::thread::sleep(POLL),
                 Some(Err(error)) => return Err(Ended::Failed(error.to_string())),
                 Some(Ok(stream)) => match self.receive(stream, state) {
-                    Received::Ours(outcome, reply) => return Ok((outcome, reply)),
+                    Received::Ours(outcome, query, reply) => return Ok((outcome, query, reply)),
                     Received::PortWanted => return Err(Ended::PortWanted),
                     Received::Answered => {}
                 },
@@ -219,7 +237,11 @@ impl Listener {
         let mut code = None;
         let mut error = None;
         let mut given = None;
+        let mut query = std::collections::BTreeMap::new();
         for (name, value) in parsed.query_pairs() {
+            query
+                .entry(name.clone().into_owned())
+                .or_insert_with(|| value.clone().into_owned());
             match name.as_ref() {
                 "code" if code.is_none() => code = Some(value.into_owned()),
                 "error" if error.is_none() => error = Some(value.into_owned()),
@@ -242,12 +264,12 @@ impl Listener {
             (None, Some(code)) => Outcome::Code { code, state },
             (None, None) => unreachable!("checked above"),
         };
-        Received::Ours(outcome, Reply(stream))
+        Received::Ours(outcome, query, Reply(stream))
     }
 }
 
 enum Received {
-    Ours(Outcome, Reply),
+    Ours(Outcome, std::collections::BTreeMap<String, String>, Reply),
     PortWanted,
     Answered,
 }

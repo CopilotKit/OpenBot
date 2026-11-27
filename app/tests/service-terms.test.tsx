@@ -12,6 +12,7 @@ import {
 } from "@/lib/api/generated/people/people.zod";
 import { afterTerms } from "@/lib/service-terms/queries";
 import { personBody } from "./accounts-api";
+import { still } from "./page-still";
 
 /**
  * The terms of service, on OpenBot Cloud and everywhere else.
@@ -369,7 +370,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(
@@ -402,7 +403,7 @@ async function shootEnd(
     const root = document.documentElement;
     root.scrollTop = root.scrollHeight;
   });
-  await page.waitForTimeout(100);
+  await still(page);
   mkdirSync(shots, { recursive: true });
   await page.screenshot({
     path: join(

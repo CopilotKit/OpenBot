@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 
 /**
  * A conversation opened while the OpenBot it is connected to can't be reached, in a real browser.
@@ -174,7 +175,7 @@ async function open(
   await page.getByText(PLACEHOLDER).waitFor({ timeout: 15_000 });
   await style(page);
   // The frame settles after the first styling (the sidebar measures itself), so again for what it drew then.
-  await page.waitForTimeout(1_000);
+  await still(page);
   await style(page);
   await page.evaluate(() => document.fonts.ready);
   return page;

@@ -110,37 +110,49 @@ export function types(list: Event[]): string[] {
 
 export const quietLog = { warn: () => {}, error: () => {} };
 
-export type Callback = {
+/** A run's RUN_FINISHED, and the calls it names as left for the caller (AG-UI `pendingToolCallIds`). */
+export function pendingOf(list: Event[]): string[] | undefined {
+  const finished = list.find((event) => event.type === "RUN_FINISHED");
+  const outcome = finished?.outcome as
+    | { type?: string; pendingToolCallIds?: string[] }
+    | undefined;
+  return outcome?.pendingToolCallIds;
+}
+
+export type Tripwire = {
   url: string;
-  calls: { name: string; args: unknown; run: unknown; token: unknown }[];
+  /** Every request that reached it, by path. */
+  hits: string[];
   close: () => Promise<void>;
 };
 
-/** The server's `/api/agent-tools/call`, answering every call it is sent. */
-export async function toolCallback(
-  answer = (name: string, _args?: unknown) => `result of ${name}`,
-  delay = (_name: string) => 0,
-): Promise<Callback> {
-  const calls: Callback["calls"] = [];
-  const server = createServer(async (request, response) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(chunk as Buffer);
-    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    calls.push({
-      name: body.name,
-      args: body.args,
-      run: body.run,
-      token: request.headers["x-openbot-agent-token"],
-    });
-    await new Promise((resolve) => setTimeout(resolve, delay(body.name)));
+/**
+ * An HTTP server where OpenBot's old tool callback used to be. The engine is given its address and
+ * a token, as a deployment from before the hand-back still sets them, and must never call it.
+ */
+export async function tripwire(): Promise<Tripwire> {
+  const hits: string[] = [];
+  const server = createServer((request, response) => {
+    hits.push(request.url ?? "/");
+    request.resume();
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ text: answer(body.name, body.args) }));
+    response.end(JSON.stringify({ text: "the old callback answered" }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${port}/api/agent-tools/call`,
-    calls,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    hits,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
   };
 }
+
+/** What a deployment from before the hand-back still sets: the old callback's address and token. */
+export const oldCallbackEnv = (wire: Tripwire) => ({
+  OPENBOT_TOOL_URL: wire.url,
+  AGENT_TOOL_TOKEN: "old-callback-token",
+});

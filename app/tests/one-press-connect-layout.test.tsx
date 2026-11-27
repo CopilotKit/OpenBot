@@ -144,7 +144,12 @@ async function style(page: Page) {
   // The transcript fades in once it is styled: wait for it, but not for a shimmer that never ends.
   await page.evaluate(() =>
     Promise.race([
-      Promise.all(document.getAnimations().map((motion) => motion.finished)),
+      // A motion cancelled on the way (WebKit rejects its `finished`) is finished too.
+      Promise.all(
+        document
+          .getAnimations()
+          .map((motion) => motion.finished.catch(() => undefined)),
+      ),
       new Promise((done) => setTimeout(done, 1_500)),
     ]),
   );
@@ -359,6 +364,77 @@ describe.skipIf(!asked)("one Connect on the chat card", () => {
           await shoot(page, "admin-after-press", name);
           await keyFormOpen(page);
           await shoot(page, "admin-key-form", name);
+        } finally {
+          await page.close();
+        }
+      }, 90_000);
+
+      /*
+       * FOUND IN DOGFOODING: Reconnect on Fireflies, whose key didn't pass its check, blanked the
+       * screen for seconds and then landed on a page where nothing reconnected it. One press now
+       * keeps the card where it is, saying it is working, then opens the key form over the account
+       * that stands; the new key is taken.
+       */
+      test(`Reconnect on a key that didn't pass opens the key form in one press, and the card stays until then, in ${engine}, ${theme}`, async () => {
+        const page = await open(
+          engine,
+          theme,
+          "/?edition=team&state=reconnect&held=1",
+        );
+        try {
+          const drawn = await card(page);
+          await shoot(page, "reconnect-card", name);
+          const button = drawn.getByRole("button", {
+            name: "Reconnect Fireflies",
+          });
+          expect(await button.textContent()).toBe("Reconnect");
+          await button.click();
+          // The app's page is still being read: the conversation stays, and the card says so.
+          await drawn
+            .getByRole("button", { name: "Connecting…" })
+            .waitFor({ timeout: 15_000 });
+          expect(new URL(page.url()).pathname).toBe("/");
+          await style(page);
+          await shoot(page, "reconnect-working", name);
+          expect(await fits(page)).toEqual({
+            inside: true,
+            oneLine: true,
+            sideways: false,
+          });
+          await page.evaluate(() =>
+            (window as unknown as { __release: () => void }).__release(),
+          );
+          await keyFormOpen(page);
+          await shoot(page, "reconnect-key-form", name);
+          await page.getByLabel("API key").fill("ff-new-key");
+          await page.getByLabel("API key").press("Enter");
+          await page
+            .getByText(/Connected with your key\. Last checked/)
+            .waitFor({ timeout: 15_000 });
+          await style(page);
+          await shoot(page, "reconnect-done", name);
+          expect(await page.getByRole("dialog").count()).toBe(0);
+        } finally {
+          await page.close();
+        }
+      }, 90_000);
+
+      test(`the app's page offers Reconnect beside Re-check for a key that didn't pass, in ${engine}, ${theme}`, async () => {
+        const page = await open(
+          engine,
+          theme,
+          `/connections/${FIREFLIES}?edition=team&state=reconnect`,
+        );
+        try {
+          const reconnect = page.getByRole("button", { name: "Reconnect" });
+          await reconnect.waitFor({ timeout: 15_000 });
+          await page.getByRole("button", { name: "Re-check" }).waitFor();
+          await style(page);
+          await shoot(page, "reconnect-page", name);
+          await reconnect.click();
+          await page.getByLabel("API key").waitFor({ timeout: 15_000 });
+          await style(page);
+          await shoot(page, "reconnect-page-form", name);
         } finally {
           await page.close();
         }

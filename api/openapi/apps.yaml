@@ -575,8 +575,10 @@ paths:
       description: >-
         Return one page of what can be added with createApp: the apps in
         OpenBot's own catalogue (source catalogue) in the catalogue's own
-        order, then apps from the wider directory (source directory) by title,
-        ignoring case, and then by id. appId names the app an entry was added
+        order, then apps from the wider directory (source directory), the ones
+        a person signs in to before the ones that take a key, each by title,
+        ignoring case, and then by id. So a screen can show the pages as they
+        arrive, in the order it shows them. appId names the app an entry was added
         as, or is null. An app that connects with a key but signs in through
         its vendor is listed once, as the sign-in, with keyVersion naming the
         same app connected with its key. search narrows the list to entries
@@ -1410,7 +1412,10 @@ components:
       properties:
         entries:
           type: array
-          description: The catalogue in its own order, then the wider directory by title, ignoring case, and then by id.
+          description: >-
+            The catalogue in its own order, then the wider directory: apps a
+            person signs in to before apps that take a key (connectsWith key),
+            each by title, ignoring case, and then by id.
           items:
             $ref: '#/components/schemas/AppDirectoryEntry'
         nextCursor:
@@ -1420,6 +1425,13 @@ components:
           description: >-
             Pass as cursor for the next page. Null ends the list. Written in
             URL-safe base64, the only form the cursor parameter accepts.
+        total:
+          type: integer
+          minimum: 0
+          description: >-
+            How many entries the whole list holds for this search and source,
+            across every page, so a screen can say how many there are while it
+            reads only the first page.
     AppSetup:
       type: object
       description: How apps are set up on this OpenBot. Never a key.
@@ -1968,6 +1980,7 @@ components:
             scopedActionCount: 26
             connectsWith: sign-in
         nextCursor: null
+        total: 2
     AppSetupExample:
       summary: An OpenBot with the app directory set up.
       value:

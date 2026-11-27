@@ -767,6 +767,10 @@ impl Inner {
         struct Restored {
             restored: Vec<String>,
         }
+        // Stop must not return while a request can still hand its folders back to the server.
+        // Keep the snapshot and HTTP exchange inside the same effect boundary as Stop. The
+        // broker's client bounds the wait to 15 seconds; the state lock is free during HTTP.
+        let _effect = self.effect_lock.lock().expect("host effect lock poisoned");
         let held = self
             .state
             .lock()
@@ -1631,6 +1635,9 @@ impl Inner {
         }
         start.arg(name);
         start.stdout(Stdio::piped()).stderr(Stdio::piped());
+        // Counted from before the engine starts the container, so it is never shorter than the
+        // time the sandbox's `timeout` counted inside it.
+        let started = Instant::now();
         let mut child = start.spawn().map_err(|error| {
             HostAccessError::Runtime(format!("Could not run container engine: {error}"))
         })?;
@@ -1674,6 +1681,7 @@ impl Inner {
             }
             thread::sleep(Duration::from_millis(100));
         }
+        let ran_for = started.elapsed();
         let status = child.wait().map_err(|error| {
             HostAccessError::Runtime(format!("Could not reap host process: {error}"))
         })?;
@@ -1690,6 +1698,7 @@ impl Inner {
             return Ok(Ran {
                 exit_code: 0,
                 oom_killed: false,
+                ran_for,
                 output,
                 truncated,
             });
@@ -1713,6 +1722,7 @@ impl Inner {
             Some(end) if end.engine_error.is_empty() && end.exit_code != 0 => Ok(Ran {
                 exit_code: end.exit_code,
                 oom_killed: end.oom_killed,
+                ran_for,
                 output,
                 truncated,
             }),
@@ -2278,6 +2288,8 @@ fn fresh_container_name(operation_id: &str) -> String {
 struct Ran {
     exit_code: i64,
     oom_killed: bool,
+    /// How long the container ran, from before the engine started it until it ended.
+    ran_for: Duration,
     output: Vec<u8>,
     /// Whether anything was dropped from the start of `output` to keep it under the limit.
     truncated: bool,
@@ -2343,16 +2355,27 @@ fn keep_tail(mut bytes: Vec<u8>, limit: usize) -> (Vec<u8>, bool) {
     (bytes, true)
 }
 
-/// What the sandbox itself stopped, whatever was running in it: too long, or too much memory.
+/**
+What the sandbox itself stopped, whatever was running in it: too long, or too much memory.
+
+The time limit's `timeout` stops a command only once it has run for the limit, so a command that
+ended sooner was not stopped for time, whatever its exit code. Before the limit, the memory limit is
+what kills a command (exit 137, SIGKILL): `timeout` sends its kill only after the limit, and the
+engine's only after the limit too. The engine's own `OOMKilled` is not enough to tell: Docker on
+cgroup v2 left it false for about one in nine commands its memory limit killed, measured, when the
+process killed was the command's and not the container's first, and it stayed false. Those were told
+they had run for more than 30 seconds, after half a second.
+*/
 fn stopped_by_sandbox(ran: &Ran, config: &HostAccessConfig) -> Option<HostAccessError> {
-    if ran.oom_killed {
+    let out_of_time = ran.ran_for >= config.operation_timeout;
+    if ran.oom_killed || (ran.exit_code == KILLED_EXIT && !out_of_time) {
         return Some(HostAccessError::Sandbox(format!(
             "The command used more than the local sandbox's {} of memory, so it was stopped. Work \
              on less at once, for example read a large file in parts.",
             config.memory
         )));
     }
-    if ran.exit_code == TIMEOUT_EXIT || ran.exit_code == KILLED_EXIT {
+    if out_of_time && (ran.exit_code == TIMEOUT_EXIT || ran.exit_code == KILLED_EXIT) {
         return Some(timed_out(config));
     }
     None
@@ -4206,6 +4229,71 @@ mod tests {
     }
 
     #[test]
+    fn stop_waits_for_a_folder_hand_back_already_in_flight() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (arrived_tx, arrived_rx) = mpsc::channel();
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            assert!(line.starts_with("POST /api/host-access/desktop/restore "));
+            let mut length = 0;
+            loop {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                if line.trim().is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse::<usize>().unwrap();
+                    }
+                }
+            }
+            reader.read_exact(&mut vec![0; length]).unwrap();
+            arrived_tx.send(()).unwrap();
+            reply_rx.recv().unwrap();
+            let answer = r#"{"restored":["grant"]}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", answer.len()).unwrap();
+        });
+        let inner = Arc::new(shown_inner(&base_url, Arc::new(DenyAllApprovalUi)));
+        let root = inner.state.lock().unwrap().grants["grant"].root.clone();
+        let restoring = inner.clone();
+        let restore = thread::spawn(move || restoring.restore_grants(&Client::new()));
+        arrived_rx.recv_timeout(Duration::from_secs(20)).unwrap();
+        let host = HostAccess { inner };
+        // The request has arrived and its response is held, so this checks the serialization
+        // boundary even if the scheduler delays the Stop thread below.
+        let restore_holds_effect_lock = host.inner.effect_lock.try_lock().is_err();
+        let stopping = host.inner.clone();
+        let (stopped_tx, stopped_rx) = mpsc::channel();
+        let stop = thread::spawn(move || {
+            let host = HostAccess { inner: stopping };
+            host.stop_with_machine_stopped();
+            stopped_tx.send(()).unwrap();
+        });
+        let finished_before_reply = stopped_rx.recv_timeout(Duration::from_millis(100)).is_ok();
+        // Always release and join the workers, including when checking the unfixed race.
+        reply_tx.send(()).unwrap();
+        restore.join().unwrap().unwrap();
+        stop.join().unwrap();
+        server.join().unwrap();
+        assert!(
+            restore_holds_effect_lock,
+            "hand-back bypassed Stop's effect lock"
+        );
+        assert!(
+            !finished_before_reply,
+            "Stop returned while a hand-back was still in flight"
+        );
+        assert!(!grant_is_live(&host));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn ordinary_child_folder_under_home_is_allowed_but_home_itself_is_not() {
         let Some(home) = home_dir() else {
             return;
@@ -4260,6 +4348,53 @@ mod tests {
         let raw = HostAccessError::Denied("Host path /Users/example/.ssh is unavailable".into());
         let said = public_error_message(&raw, &config);
         assert!(!said.contains("/Users/example"));
+    }
+
+    /*
+     * FOUND IN CI, on the live sandbox test: a command its 32m memory limit killed after 0.4 s was
+     * told it had run for more than 30 seconds. Docker on cgroup v2 reports `OOMKilled` false for
+     * some of the commands its memory limit kills (4 of 35 on a measured runner, and false still a
+     * second later), and exit 137 was read as the time limit's kill. The exit codes and timings are
+     * the ones measured there.
+     */
+    #[test]
+    fn a_kill_before_the_time_limit_is_the_memory_limit_and_never_the_time_limit() {
+        let mut config = HostAccessConfig::new(
+            "http://127.0.0.1:3001",
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        config.memory = "32m".into();
+        let said = |exit_code, oom_killed, ran_for| {
+            let ran = Ran {
+                exit_code,
+                oom_killed,
+                ran_for,
+                output: Vec::new(),
+                truncated: false,
+            };
+            stopped_by_sandbox(&ran, &config).map(|stopped| stopped.to_string())
+        };
+        let memory = Some(
+            "The command used more than the local sandbox's 32m of memory, so it was stopped. \
+             Work on less at once, for example read a large file in parts."
+                .to_owned(),
+        );
+        let time = Some(timed_out_sentence(&config));
+        let (soon, late) = (Duration::from_millis(400), config.operation_timeout);
+
+        // Killed by its memory limit, with the flag and without it.
+        assert_eq!(said(137, true, soon), memory);
+        assert_eq!(said(137, false, soon), memory);
+        // Stopped by its time limit: TERM was enough, or it took the KILL after it.
+        assert_eq!(said(124, false, late + Duration::from_secs(1)), time);
+        assert_eq!(said(137, false, late + Duration::from_secs(1)), time);
+        // A 124 of the command's own, before the limit, is its exit code and not the sandbox's.
+        assert_eq!(said(124, false, soon), None);
+        assert_eq!(said(1, false, soon), None);
+        assert_eq!(said(0, false, soon), None);
     }
 }
 
