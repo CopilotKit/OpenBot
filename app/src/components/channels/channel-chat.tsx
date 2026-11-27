@@ -703,12 +703,8 @@ export function ChannelChat({
    */
   const [first] = useState(() => {
     const pending = takeFirstMessage(channel.id);
-    if (!pending) {
-      // A first message an earlier page kept and never sent goes back in the message box, which
-      // reads its draft as it mounts, after this. See `kept-first-message.ts`.
-      putBackFirstMessage(channel.id);
-      return null;
-    }
+    // A first message an earlier page kept is decided on once the thread has been read (the join).
+    if (!pending) return null;
     const attachments = [...pending.attachments];
     // Drawn with its files, as `deliver` will send it, so they do not appear only once it runs.
     const seed: Message =
@@ -862,6 +858,11 @@ export function ChannelChat({
    * so a replay is never laid over messages already on screen.
    */
   const [joins, setJoins] = useState(0);
+  /**
+   * How many times the message box has been opened again: once for a first message put back after
+   * it first opened, which it reads from its draft only as it opens.
+   */
+  const [composerOpenings, setComposerOpenings] = useState(0);
   const unanswered = useRef(false);
   const connection = useConnectionLost();
   useReconnected(() => {
@@ -1049,6 +1050,19 @@ export function ChannelChat({
           setUnreadable(stored.unreadable);
           setHistoryAvailability("ready");
           setHistoryReadFailed(false);
+          /*
+           * A FIRST MESSAGE AN EARLIER PAGE KEPT GOES BACK IN THE BOX ONLY IF THE SERVER NEVER GOT IT.
+           * Its page can die after the server has started the run and before the run's start reaches
+           * it, and the words then came back under their own answer, asking to be sent twice. So it is
+           * decided now the thread has been read: a message of the person's in it, stored or
+           * replayed by the join, is the server having it (a run it took carries the message), and
+           * the kept copy is let go. See `kept-first-message.ts`.
+           */
+          const delivered =
+            stored.messages.some((message) => message.role === "user") ||
+            agent.messages.some((message) => message.role === "user");
+          if (putBackFirstMessage(channel.id, delivered))
+            setComposerOpenings((count) => count + 1);
         }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
@@ -2572,6 +2586,7 @@ export function ChannelChat({
             channelId={channel.id}
             // An unsent reply stays with this conversation when somebody looks at another one.
             draftKey={`conversation:${channel.id}`}
+            composerOpening={composerOpenings}
             attachmentLimits={attachmentLimits}
             starterSuggestions={
               channel.agentIds.length === 1 ? (

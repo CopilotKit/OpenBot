@@ -14,9 +14,9 @@ import {
  * killed in that moment never sent it: the conversation was made, and opened again empty, with the
  * words gone. So the message is kept here from the moment its conversation exists until the server
  * has started the run that answers it. Opened again after a page that never got that far, the
- * conversation puts the words and files back in its message box (`putBackFirstMessage`), for the
- * person to send. They are never sent again by themselves: a message the server may already hold is
- * one the person decides about.
+ * conversation reads its thread, and only if the server never got the message does it put the words
+ * and files back in its message box (`putBackFirstMessage`), for the person to send. They are never
+ * sent again by themselves.
  *
  * Kept as a saved draft of its own (`saved-draft.ts`), under the person and the organization, so it
  * is somebody's, and is forgotten after as long as any draft.
@@ -66,20 +66,25 @@ export function forgetFirstMessage(channelId: string): void {
 }
 
 /**
- * Put back, as the conversation's own draft, a first message an earlier page kept and never got to
- * the server. Called as the conversation opens, before its message box reads its draft. A draft the
- * person has typed there since is left as it is.
+ * Settle a first message an earlier page kept, once the conversation's thread has been read.
+ * `delivered`: the thread shows the server got it (a message of the person's, or a run), and the
+ * kept copy is let go. Otherwise it is put back as the conversation's own draft, unless the person
+ * has typed one there since. Answers whether it was put back, so the message box can read it.
  */
-export function putBackFirstMessage(channelId: string): void {
-  if (sendingHere.has(channelId)) return;
+export function putBackFirstMessage(
+  channelId: string,
+  delivered: boolean,
+): boolean {
+  if (sendingHere.has(channelId)) return false;
   const key = keptKey(channelId);
   const draftKey = draftKeyOf(channelId);
-  if (!key || !draftKey) return;
+  if (!key || !draftKey) return false;
   const kept = readSavedDraft(key);
-  if (!kept) return;
+  if (!kept) return false;
   writeSavedDraft(key, undefined);
-  if (readSavedDraft(draftKey)) return;
+  if (delivered || readSavedDraft(draftKey)) return false;
   writeSavedDraft(draftKey, { ...kept, savedAt: Date.now() });
+  return true;
 }
 
 /** For a test: forget which first messages this page is sending, as a new page would. */
