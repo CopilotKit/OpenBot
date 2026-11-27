@@ -580,7 +580,25 @@ describe.skipIf(!asked)("Home while it loads", () => {
           if (!first) throw new Error("no frame was recorded");
           await page.mouse.move(width / 2, height / 2);
           await page.mouse.wheel(0, 2000);
-          await page.waitForTimeout(300);
+          // Until the scroll has come to rest: the last card stays where it is for three frames.
+          await page.evaluate(async () => {
+            const frame = () =>
+              new Promise<void>((done) => requestAnimationFrame(() => done()));
+            let last = Number.NaN;
+            let same = 0;
+            for (let frames = 0; same < 3; frames++) {
+              if (frames > 600)
+                throw new Error("the scroll never came to rest");
+              await frame();
+              const bottom = [
+                ...document.querySelectorAll('[data-intro="explore"] li'),
+              ]
+                .at(-1)
+                ?.getBoundingClientRect().bottom;
+              same = bottom === last ? same + 1 : 0;
+              last = bottom ?? Number.NaN;
+            }
+          });
           const reach = await page.evaluate(() => {
             const last = [
               ...document.querySelectorAll('[data-intro="explore"] li'),
