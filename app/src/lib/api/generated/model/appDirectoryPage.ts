@@ -13,4 +13,9 @@ export interface AppDirectoryPage {
    * @pattern ^[A-Za-z0-9_-]+$
    */
   nextCursor: string | null;
+  /**
+   * How many entries the whole list holds for this search and source, across every page, so a screen can say how many there are while it reads only the first page.
+   * @minimum 0
+   */
+  total?: number;
 }

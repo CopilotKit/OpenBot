@@ -1420,6 +1420,13 @@ components:
           description: >-
             Pass as cursor for the next page. Null ends the list. Written in
             URL-safe base64, the only form the cursor parameter accepts.
+        total:
+          type: integer
+          minimum: 0
+          description: >-
+            How many entries the whole list holds for this search and source,
+            across every page, so a screen can say how many there are while it
+            reads only the first page.
     AppSetup:
       type: object
       description: How apps are set up on this OpenBot. Never a key.
@@ -1968,6 +1975,7 @@ components:
             scopedActionCount: 26
             connectsWith: sign-in
         nextCursor: null
+        total: 2
     AppSetupExample:
       summary: An OpenBot with the app directory set up.
       value:

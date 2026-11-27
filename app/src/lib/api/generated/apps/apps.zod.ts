@@ -1907,6 +1907,7 @@ export const listAppDirectoryResponseNextCursorMax = 4096;
 export const listAppDirectoryResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
+export const listAppDirectoryResponseTotalMin = 0;
 
 export const ListAppDirectoryResponse = zod.object({
   entries: zod
@@ -2026,6 +2027,13 @@ export const ListAppDirectoryResponse = zod.object({
     .nullable()
     .describe(
       "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
+  total: zod
+    .int()
+    .min(listAppDirectoryResponseTotalMin)
+    .optional()
+    .describe(
+      "How many entries the whole list holds for this search and source, across every page, so a screen can say how many there are while it reads only the first page.",
     ),
 });
 
