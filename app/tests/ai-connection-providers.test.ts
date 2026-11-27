@@ -51,7 +51,7 @@ function catalogue() {
 
 test("Settings lists the setup window's providers, in its order and words", () => {
   const desktop = catalogue();
-  expect(desktop.length).toBe(7);
+  expect(desktop.length).toBe(8);
   expect<unknown>(
     AI_PROVIDERS.map(({ id, name, summary, logins, mark }) => ({
       id,

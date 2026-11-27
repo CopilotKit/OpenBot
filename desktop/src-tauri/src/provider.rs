@@ -4,7 +4,9 @@
 //! presets with API keys; their official addresses are supplied by the frontend. Unbiased AI signs in
 //! through its own device authorization, which ends in an API key for the same named endpoint
 //! shape, so the key is then carried like a typed one. TrustedRouter is a named endpoint preset
-//! with an API key and no sign-in.
+//! with an API key and no sign-in. Cloudflare has one way in, its own sign-in: the session sends
+//! model calls through the account's AI Gateway, which bills them to the account's credits, and an
+//! API token for the same gateway is a compatible endpoint like any other.
 //!
 //! The row that asks for a URL is the last one, and it is the only one that asks. Keeping it there
 //! is what keeps a base URL off the main path, which the audience rule at the top of the build doc
@@ -114,6 +116,30 @@ pub fn catalogue() -> Vec<Provider> {
             caution: None,
         },
         Provider {
+            id: "cloudflare".into(),
+            name: "Cloudflare".into(),
+            summary: "Sign in with Cloudflare to use AI Gateway models on your credits.".into(),
+            /*
+             * Sign-in alone. What it yields is not a key for a provider but a session on the
+             * account's AI Gateway, which serves OpenAI's, Anthropic's, Google's and Workers AI's
+             * models under one address and bills the account's own credits. There is no key tab
+             * because a Cloudflare API token needs an account id beside it, which is the
+             * compatible endpoint row's shape already.
+             */
+            logins: vec![Login::Oauth],
+            mark: Some("cloudflare".into()),
+            // Said before it happens, as the Claude plan's is: a new Cloudflare account has no
+            // credits, and the first message would otherwise fail with nothing to explain it.
+            caution: Some(Caution {
+                says: "Model calls are billed to your Cloudflare account's AI Gateway credits. \
+                       With no credits loaded, Bots cannot answer until you add some."
+                    .into(),
+                reads_more_at:
+                    "https://developers.cloudflare.com/ai-gateway/features/unified-billing/"
+                        .into(),
+            }),
+        },
+        Provider {
             id: "unbiased".into(),
             name: "Unbiased AI".into(),
             summary: "Sign in with Unbiased AI to use Pareto, or use an API key.".into(),
@@ -209,6 +235,7 @@ mod tests {
                 "anthropic",
                 "google",
                 "xai",
+                "cloudflare",
                 "unbiased",
                 "trustedrouter",
                 "openai-compatible"

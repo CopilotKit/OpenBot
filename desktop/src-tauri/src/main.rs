@@ -308,6 +308,8 @@ struct SavedModelSessions {
     google: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     xai: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cloudflare: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -4636,7 +4638,7 @@ impl ChosenModel {
             ("google", "oauth") => Err(Problem::plain(
                 openbot_desktop_lib::provider_oauth::GOOGLE_SIGN_IN_ENDED,
             )),
-            ("xai", "oauth") => {
+            ("xai" | "cloudflare", "oauth") => {
                 let saved = openbot_desktop_lib::provider_oauth::read(root, &self.provider)
                     .map_err(Problem::plain)?;
                 let model = given(self.model);
@@ -11130,6 +11132,7 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
                 ),
                 google: hint(Category::GoogleOauth, false),
                 xai: hint(Category::XaiOauth, false),
+                cloudflare: hint(Category::CloudflareOauth, false),
             },
             model: intent.model,
             chatgpt_sign_in_changed: openbot_env::chatgpt_sign_in_changed(&root),

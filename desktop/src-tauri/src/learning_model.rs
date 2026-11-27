@@ -13,7 +13,7 @@ the bundled CLI made, so it needs a model of its own. It gets the person's, in t
    way the Bots are answered. The key Learning sends there is a secret minted once per installation
    ([`TOKEN`]) and given to the server and the Learning agent alone.
 
-Anything else (a Google or xAI sign-in, an endpoint of their own) has neither, and Learning is left
+Anything else (a Google, xAI or Cloudflare sign-in, an endpoint of their own) has neither, and Learning is left
 without a model. The server says why on Settings, Learning ([`UNAVAILABLE`]).
 
 There is no CopilotKit key behind any of this. Nobody gets a model through CopilotKit.

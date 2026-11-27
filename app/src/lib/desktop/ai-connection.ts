@@ -63,6 +63,12 @@ function signedIn(
         signIn: "xAI account",
         said: "Signed in with your xAI account.",
       };
+    case "cloudflare-oauth":
+      return {
+        provider: "Cloudflare",
+        signIn: "Cloudflare account",
+        said: "Signed in with your Cloudflare account.",
+      };
     case "compatible-endpoint": {
       const preset = host ? PRESET_HOSTS[host] : undefined;
       if (preset)
