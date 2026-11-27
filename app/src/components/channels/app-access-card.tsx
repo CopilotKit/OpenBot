@@ -282,6 +282,7 @@ function refusedSentence(
       gives,
       admins,
       ownersGive,
+      access.request !== null,
     );
   }
   if (
@@ -301,8 +302,9 @@ function refusedSentence(
 /**
  * "Calendar Bot can't change an event's colour yet.", from the Bot's own few words for what the
  * actions do. Without them, the app is named instead. A person who can't give the actions is told
- * who can: the Bot's owner where apps are open and the app is open to owners (`ownersGive`), else an
- * admin, by name where the admins are known.
+ * who can: the Bot's owner or an admin where apps are open and the app is open to owners
+ * (`ownersGive`), with Request access beside it to ask, else an admin, by name where the admins are
+ * known.
  */
 function toolsSentence(
   app: string,
@@ -311,6 +313,7 @@ function toolsSentence(
   gives: boolean,
   admins: readonly AdminName[],
   ownersGive = false,
+  requested = false,
 ): string {
   const who = bot ?? "This Bot";
   const doing = plainNeed(need);
@@ -318,7 +321,8 @@ function toolsSentence(
     ? `${who} can't ${doing} yet.`
     : `${who} needs more of ${app} for this.`;
   if (gives) return first;
-  if (ownersGive) return `${first} Its owner can give it that.`;
+  if (ownersGive)
+    return `${first} Only its owner or an admin can give it that.${requested ? "" : " Request access to ask for it."}`;
   return withAdmins(`${first} Only an admin can give it that.`, admins);
 }
 
