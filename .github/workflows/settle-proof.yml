@@ -1,0 +1,86 @@
+# TEMPORARY: removed before merge. Runs every browser test that now waits for a still page,
+# together, eight at a time, in Chromium and WebKit, several rounds side by side.
+name: settle proof
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  round:
+    name: round ${{ matrix.round }}
+    runs-on: openbot-ubuntu-16core
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        round: [1, 2, 3, 4, 5, 6]
+    env:
+      PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun run generate:app-config
+      - run: |
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test --parallel=8 \
+              app/tests/admin-people-remove-layout.test.tsx \
+              app/tests/admin-providers-connection.test.tsx \
+              app/tests/ai-connection-dialog.test.tsx \
+              app/tests/audit-computer-limit-layout.test.tsx \
+              app/tests/bot-long-instructions-layout.test.tsx \
+              app/tests/bot-screen-record-layout.test.tsx \
+              app/tests/bots-panel-start-conversation.test.tsx \
+              app/tests/checkbox-contrast.test.tsx \
+              app/tests/chunk-recovery.test.tsx \
+              app/tests/composer-keeps-draft-browser.test.tsx \
+              app/tests/computer-panel-phone-layout.test.tsx \
+              app/tests/connect-your-ai.test.tsx \
+              app/tests/connected-bot-mistakes-layout.test.tsx \
+              app/tests/conversation-refusal-layout.test.tsx \
+              app/tests/delete-account-layout.test.tsx \
+              app/tests/home-no-answer.test.tsx \
+              app/tests/large-picture-tile.test.tsx \
+              app/tests/member-rows-long-names.test.tsx \
+              app/tests/model-picker-phone-layout.test.tsx \
+              app/tests/move-to-cloud-settings.test.tsx \
+              app/tests/moved-elsewhere.test.tsx \
+              app/tests/needs-you-board-layout.test.tsx \
+              app/tests/offline-conversation-layout.test.tsx \
+              app/tests/organization-members-remove.test.tsx \
+              app/tests/people-lists.test.tsx \
+              app/tests/plan-notices-layout.test.tsx \
+              app/tests/routine-run-now-layout.test.tsx \
+              app/tests/run-ended-unheard-layout.test.tsx \
+              app/tests/section-strip-routines.test.tsx \
+              app/tests/service-terms.test.tsx \
+              app/tests/settings-tool-cards-admin-layout.test.tsx \
+              app/tests/settings-tool-cards-personal.test.tsx \
+              app/tests/sidebar-current-row.test.tsx \
+              app/tests/sidebar-window-buttons.test.tsx \
+              app/tests/task-report-chip.test.tsx \
+              app/tests/team-grants-screens-layout.test.tsx \
+              app/tests/team-models-screens-layout.test.tsx \
+              app/tests/teams-screens-layout.test.tsx \
+              app/tests/web-push-browser.test.tsx \
+              app/tests/workspace-snapshots-layout.test.tsx \
+              app/tests/organization-held-actions.test.tsx \
+              app/tests/organization-held-recovery.test.tsx \
+              app/tests/organization-held-reload.test.tsx \
+              app/tests/organization-moving.test.tsx \
+              app/tests/organization-removed.test.tsx \
+              app/tests/organization-unavailable-admin-pages.test.tsx \
+              app/tests/organization-unavailable-chat.test.tsx \
+              app/tests/organization-unavailable-pages.test.tsx \
+              app/tests/strip-version-layout.test.tsx
