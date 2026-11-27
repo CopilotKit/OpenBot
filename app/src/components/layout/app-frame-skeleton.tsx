@@ -21,7 +21,8 @@ import {
   sectionHasPanel,
 } from "@/lib/sections";
 import { cn } from "@/lib/utils";
-import { useActiveSkin } from "@/skins/registry";
+import { useSkinId } from "@/skins/store";
+import { skinDrawsOwnFrame } from "@/skins/types";
 
 /*
  * The pages `_authed` draws without `_app`'s frame. Admin and Settings have a frame of their own,
@@ -109,11 +110,11 @@ function ConversationRow({ index }: { index: number }) {
  * under a skin that draws its own frame, or on a page `_app` doesn't frame.
  */
 export function AppFrameSkeleton(): JSX.Element | null {
-  const { Frame } = useActiveSkin();
+  const ownFrame = skinDrawsOwnFrame(useSkinId());
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
-  if (!wasSignedIn() || Frame || outsideTheFrame(pathname)) return null;
+  if (!wasSignedIn() || ownFrame || outsideTheFrame(pathname)) return null;
 
   // A page no section owns opens on Conversations, as `SectionProvider` does on a first page.
   const section = sectionForPath(pathname, SECTION_ROUTES) ?? CONVERSATIONS;

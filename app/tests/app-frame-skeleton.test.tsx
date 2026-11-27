@@ -6,6 +6,7 @@ import {
   expect,
   test,
 } from "bun:test";
+import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -310,4 +311,13 @@ test("a page change never shows the frame skeleton", async () => {
   seen.disconnect();
   expect(mounts).toBe(0);
   expect(stripOf(view)).toBeNull();
+});
+
+test("the skeleton does not import the skin registry", () => {
+  // The registry pulls every skin's frame into the main script, which the skeleton is part of.
+  const source = readFileSync(
+    new URL("../src/components/layout/app-frame-skeleton.tsx", import.meta.url),
+    "utf8",
+  );
+  expect(source).not.toContain("skins/registry");
 });
