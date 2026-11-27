@@ -126,6 +126,7 @@ describe("a step the server is running already", () => {
   test("is asked about again with the same step, never run here, and its answer is the call's", async () => {
     const clock = fakeClock();
     const bodies: unknown[] = [];
+    const understood: (string | null)[] = [];
     globalThis.fetch = (async (
       url: Parameters<typeof fetch>[0],
       init?: Parameters<typeof fetch>[1],
@@ -133,6 +134,7 @@ describe("a step the server is running already", () => {
       if (String(url) !== CLICK || init?.method !== "POST")
         return Response.json({ error: "Not found." }, { status: 404 });
       bodies.push(JSON.parse(String(init.body)));
+      understood.push(new Headers(init.headers).get("OpenBot-Capabilities"));
       if (bodies.length < 3)
         return new Response(
           JSON.stringify({
@@ -164,6 +166,10 @@ describe("a step the server is running already", () => {
     );
 
     expect(outcome).toEqual({ ok: true, clicked: "e1" });
+    // Every ask said this page understands a step the server has taken, which is what lets the
+    // server answer that way at all (OpenBot-Capabilities).
+    for (const value of understood)
+      expect(value?.split(" ")).toContain("computer-step-taken");
     // Every ask named the same step, so the server answered it from its own run of it.
     expect(bodies).toHaveLength(3);
     for (const body of bodies)

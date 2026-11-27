@@ -406,16 +406,31 @@ function ComputerSteps() {
   );
 }
 
-function app() {
+/** The conversation as the roster has it: its work too, which the socket keeps up to date. */
+function app(shown: AgentChannel = channel) {
   return (
     <QueryClientProvider client={queryClient}>
       <CopilotKitProvider runtimeUrl="http://localhost/api/copilotkit">
         <ComputerSteps />
-        <ChannelChat channel={channel} runtimeAgentId={BOT} />
+        <ChannelChat channel={shown} runtimeAgentId={BOT} />
       </CopilotKitProvider>
     </QueryClientProvider>
   );
 }
+
+/** The conversation's work while the server carries the person's turn on. */
+const CARRYING: AgentChannel = {
+  ...channel,
+  work: [
+    {
+      kind: "turn",
+      key: "turn-1",
+      botId: BOT,
+      botName: "Carried Bot",
+      since: "2026-11-26T00:00:00.000Z",
+    } as never,
+  ],
+};
 
 async function send(view: ReturnType<typeof render>, text: string) {
   const user = userEvent.setup({ document: view.container.ownerDocument });
@@ -605,6 +620,83 @@ test("a run whose stream is lost here while it goes on is rejoined and followed 
   view.getByText(/computer_run_command answered .*1234/);
   expect(view.queryByTestId("transcript-stopped")).toBeNull();
   expect(view.queryByText(LOST)).toBeNull();
+  expect(stepsRunHere).toBe(0);
+  expect(runs).toHaveLength(1);
+}, 30_000);
+
+/*
+ * The server hands a long turn to a fresh run when the server running it leaves, and between the two
+ * no run is going. The conversation's work says the server is still carrying the turn (`turn`), so
+ * the conversation stays working through the gap, a message typed then waits, and the next run is
+ * followed to the answer when it starts.
+ */
+test("between two runs of a turn the server carries, the conversation stays working and follows the next run to its answer", async () => {
+  let whole: Message[] = [];
+  onRun = (input) => {
+    const person = input.messages.filter((message) => message.role === "user");
+    whole = wholeTurn(person);
+    stored = whole.slice(0, person.length + 2);
+    endings.set(input.runId, "succeeded");
+    return sse([
+      { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+      ...said("about", ABOUT_TO),
+      ...serverStep(
+        "save",
+        "computer_write_file",
+        { path: SAVED, contents: "1000\n234" },
+        "about",
+        { ok: true, path: SAVED, bytes: 8 },
+      ),
+      { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+    ]);
+  };
+  const view = render(app());
+  await send(view, ASKED);
+  await view.findByText(
+    /computer_write_file answered .*numbers\.txt/,
+    {},
+    { timeout: 15_000 },
+  );
+  // The socket says the server is carrying the turn on; no run is going yet.
+  view.rerender(app(CARRYING));
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  // Still working, and nothing says it stopped.
+  expect(view.getByRole("log").getAttribute("aria-busy")).toBe("true");
+  expect(view.queryByTestId("transcript-stopped")).toBeNull();
+  expect(view.queryByText(/running a routine/)).toBeNull();
+
+  // The next run starts on the server, and streams in here.
+  live = { runId: "carried-on", events: [], followers: new Set() };
+  await waitFor(() => expect(live?.followers.size ?? 0).toBeGreaterThan(0), {
+    timeout: 15_000,
+  });
+  for (const event of serverStep(
+    "add",
+    "computer_run_command",
+    { command: COMMAND },
+    "adds",
+    { ok: true, exitCode: 0, stdout: PRINTED },
+  ))
+    emit(event);
+  for (const event of said("done", DONE)) emit(event);
+  stored = whole;
+  endings.set("carried-on", "succeeded");
+  emit({
+    type: "RUN_FINISHED",
+    threadId: channel.threadId,
+    runId: "carried-on",
+  });
+  endLive();
+  expect(await view.findByText(DONE, {}, { timeout: 15_000 })).toBeTruthy();
+  view.getByText(/computer_run_command answered .*1234/);
+
+  // The turn is over: the conversation is free again.
+  view.rerender(app());
+  await waitFor(
+    () => expect(view.getByRole("log").getAttribute("aria-busy")).toBe("false"),
+    { timeout: 15_000 },
+  );
+  expect(view.queryByTestId("transcript-stopped")).toBeNull();
   expect(stepsRunHere).toBe(0);
   expect(runs).toHaveLength(1);
 }, 30_000);

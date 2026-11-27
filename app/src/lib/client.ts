@@ -12,6 +12,12 @@
  * guessed the envelope would be a client that had to be argued with.
  */
 
+import {
+  CAPABILITIES_HEADER,
+  COMPUTER_STEP_TAKEN,
+  CONVERSATION_WORK_TURN,
+  capabilitiesValue,
+} from "@openbot/shared/client-capabilities";
 import { CLIENT_HEADER, clientToken } from "@openbot/shared/client-version";
 import {
   pendingWrite,
@@ -31,33 +37,58 @@ import { PLAN_REQUIRED, showCardNeeded } from "@/lib/plan/card-needed";
 export const CLIENT_NAME = clientToken("web");
 
 /**
- * `headers` with this app named in them, in the same shape they were given: a record, a `Headers`,
- * or a list of pairs. For the few requests the app makes to OpenBot without the client: the
- * runtime's, sign-in's and finishing a consent. A file's own address is read like a picture's,
- * which carries no header either, and can be sent on to wherever the file is kept.
+ * The newer answers this app understands, as it lists them to its OpenBot (shared/
+ * client-capabilities.ts): a server sends a newer shape only to an app that names it.
+ *
+ * - `computer-step-taken`: a computer step the server already ran, or is running, is answered as
+ *   such, and never run here a second time (`approval-tools.tsx`, `lib/computers/call.ts`).
+ * - `conversation-work-turn`: a conversation's work names the person's own turn the server is
+ *   carrying on, and the conversation reads as working and follows it (`carriedByServer` in
+ *   channel-chat.tsx); its work rows draw nothing for it.
+ */
+export const PAGE_CAPABILITIES: readonly string[] = [
+  COMPUTER_STEP_TAKEN,
+  CONVERSATION_WORK_TURN,
+];
+
+/** {@link PAGE_CAPABILITIES} as the header and the conversation events socket carry it. */
+export const CAPABILITIES = capabilitiesValue(PAGE_CAPABILITIES);
+
+/**
+ * `headers` with this app named in them, and what it understands ({@link CAPABILITIES}), in the same
+ * shape they were given: a record, a `Headers`, or a list of pairs. For the few requests the app
+ * makes to OpenBot without the client: the runtime's, sign-in's and finishing a consent. A file's
+ * own address is read like a picture's, which carries no header either, and can be sent on to
+ * wherever the file is kept.
  */
 export function withClientName(
   headers: Record<string, string>,
 ): Record<string, string>;
 export function withClientName(headers?: HeadersInit): HeadersInit;
 export function withClientName(headers?: HeadersInit): HeadersInit {
-  const header = CLIENT_HEADER.toLowerCase();
+  const own = new Set([
+    CLIENT_HEADER.toLowerCase(),
+    CAPABILITIES_HEADER.toLowerCase(),
+  ]);
   if (headers instanceof Headers) {
     const named = new Headers(headers);
     named.set(CLIENT_HEADER, CLIENT_NAME);
+    named.set(CAPABILITIES_HEADER, CAPABILITIES);
     return named;
   }
   if (Array.isArray(headers)) {
     return [
-      ...headers.filter(([name]) => name.toLowerCase() !== header),
+      ...headers.filter(([name]) => !own.has(name.toLowerCase())),
       [CLIENT_HEADER, CLIENT_NAME],
+      [CAPABILITIES_HEADER, CAPABILITIES],
     ];
   }
   const named: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers ?? {})) {
-    if (name.toLowerCase() !== header) named[name] = value;
+    if (!own.has(name.toLowerCase())) named[name] = value;
   }
   named[CLIENT_HEADER] = CLIENT_NAME;
+  named[CAPABILITIES_HEADER] = CAPABILITIES;
   return named;
 }
 

@@ -182,12 +182,13 @@ test("a change goes to the server's gate even when nothing about approvals has l
  * on one dropdown, and the conversation simply stopped.
  */
 async function clickAgainstGate(
-  answer: () => Promise<Response>,
+  answer: (init?: RequestInit) => Promise<Response>,
 ): Promise<unknown> {
   const originalFetch = global.fetch;
-  global.fetch = Object.assign(async () => answer(), {
-    preconnect: originalFetch.preconnect,
-  });
+  global.fetch = Object.assign(
+    async (_url: unknown, init?: RequestInit) => answer(init),
+    { preconnect: originalFetch.preconnect },
+  );
   try {
     render(
       <QueryClientProvider client={new QueryClient()}>
@@ -320,8 +321,10 @@ test("a step on a computer still starting is asked again, and the Bot gets what 
  */
 test("a step the server is running is asked about again, never run here, and gets the server's answer", async () => {
   const asked: unknown[] = [];
-  const result = await clickAgainstGate(async () => {
+  const understood: (string | null)[] = [];
+  const result = await clickAgainstGate(async (init) => {
     asked.push("step");
+    understood.push(new Headers(init?.headers).get("OpenBot-Capabilities"));
     return asked.length === 1
       ? Response.json({
           outcome: "taken",
@@ -339,6 +342,9 @@ test("a step the server is running is asked about again, never run here, and get
   });
   // Only the gate was asked, twice, and nothing went to the computer from here.
   expect(asked).toEqual(["step", "step"]);
+  // Each time saying this page understands a step the server has taken (OpenBot-Capabilities).
+  for (const value of understood)
+    expect(value?.split(" ")).toContain("computer-step-taken");
   expect(result).toEqual({
     ok: true,
     clicked: "e7",

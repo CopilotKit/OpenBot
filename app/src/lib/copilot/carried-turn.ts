@@ -42,6 +42,22 @@ export function turnAnswered(messages: readonly Message[]): boolean {
 }
 
 /**
+ * Whether a conversation's work names the person's own turn, which the server is carrying on with no
+ * page open (`turn`), between one run and the next too. Sent only to an app that says it understands
+ * it (`conversation-work-turn`, `lib/client.ts`).
+ */
+export function isTurnWork(entry: { kind: string }): boolean {
+  return entry.kind === "turn";
+}
+
+/** Whether a conversation's work says the server is carrying the person's turn on. */
+export function serverCarriesTurn(
+  work: readonly { kind: string }[] | undefined,
+): boolean {
+  return work?.some(isTurnWork) ?? false;
+}
+
+/**
  * Whether a turn's messages end on a step's answer. A run the server ends to carry the turn on ends
  * on one, past the last step it answered.
  */

@@ -91,6 +91,7 @@ import {
   endsOnStep,
   followCarriedRun,
   followServerTurn,
+  serverCarriesTurn,
   turnAnswered,
   waitsOnPerson,
 } from "@/lib/copilot/carried-turn";
@@ -199,6 +200,28 @@ function rosterSaysWorking(channelId: string): boolean {
     ?.pages.flatMap((page) => page.channels)
     .find((channel) => channel.id === channelId);
   return (row?.busy ?? false) || (row?.work?.length ?? 0) > 0;
+}
+
+/**
+ * Resolves when the roster next changes (the socket patched it, or it was read again), or after `ms`.
+ */
+function nextRosterChange(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    const listKey = JSON.stringify(channelKeys.list());
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        event.type === "updated" &&
+        JSON.stringify(event.query.queryKey) === listKey
+      )
+        done();
+    });
+  });
 }
 
 /**
@@ -930,7 +953,13 @@ export function ChannelChat({
           keptEnded === "over" &&
           keptRunId !== null &&
           (await askRunEnding(channel.id, keptRunId)) === "finished";
-        if (!finished && current && turnsRef.current === 0) {
+        // Not a turn the server says it is still carrying on: see `carriedByServer`.
+        if (
+          !finished &&
+          current &&
+          turnsRef.current === 0 &&
+          !carriedByServerRef.current
+        ) {
           saidStopped = {
             message: keptEnded === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,
           };
@@ -1445,6 +1474,53 @@ export function ChannelChat({
     wasCarryingOn.current = carryingOn;
   }, [carryingOn]);
 
+  /*
+   * THE FOURTH: THE SERVER IS CARRYING THE PERSON'S TURN ON, between one run and the next too. It
+   * hands a long turn to a fresh run when the server running it leaves, and in the moment between
+   * the two no run is going, so a page that asked then heard "no run" and its turn ended: no working
+   * dot, and a page that slept through it said "The Bot stopped before it finished". The
+   * conversation's work says so the whole time (`turn`, `carried-turn.ts`), so while it does the
+   * conversation reads as working, Stop is up, and the next run is joined as it appears.
+   */
+  const carriedByServer = serverCarriesTurn(channel.work);
+  const carriedByServerRef = useRef(carriedByServer);
+  carriedByServerRef.current = carriedByServer;
+  useEffect(() => {
+    if (!carriedByServer || !isReady) return;
+    let current = true;
+    void (async () => {
+      // After the conversation has joined its thread: a run going then streams in through that join.
+      await joinedPromise;
+      while (current && carriedByServerRef.current) {
+        const target = agentRef.current;
+        // This tab's own turn follows the server's runs itself (`deliver`), and a join is a run.
+        const busyHere = turnsRef.current > 0 || target.isRunning;
+        const followed = busyHere
+          ? null
+          : await followServerTurn({
+              agent: target,
+              conversationId: channel.id,
+              heard: null,
+              join: () =>
+                whileObserved(target, () =>
+                  copilotkit.connectAgent({ agent: target }),
+                ),
+              quietMs: quietRunPeriod.ms,
+              stopped: () =>
+                !current || !carriedByServerRef.current || turnsRef.current > 0,
+            });
+        if (followed !== null) continue;
+        // Nothing going yet: asked again when the conversation's work next changes, or after a while.
+        await nextRosterChange(quietRunPeriod.ms);
+      }
+      // The turn is over: what the server wrote is read, its answer among it.
+      if (current) pullHistoryRef.current?.();
+    })();
+    return () => {
+      current = false;
+    };
+  }, [carriedByServer, isReady, channel.id, copilotkit, joinedPromise]);
+
   /**
    * Tell the roster what was just said. Failures here must not block the conversation.
    */
@@ -1845,6 +1921,11 @@ export function ChannelChat({
               continue;
             }
           }
+          /*
+           * Nor while the server says it is still carrying the turn on, between one run and the next:
+           * the conversation follows its next run as it appears (`carriedByServer`).
+           */
+          if (carriedByServerRef.current) break;
           setRunError({
             message: ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE,
           });
@@ -2024,7 +2105,9 @@ export function ChannelChat({
     if (
       turnsRef.current > 0 ||
       agentRef.current.isRunning ||
-      turnsGoingAway(channel.id) > 0
+      turnsGoingAway(channel.id) > 0 ||
+      // And while the server carries the last turn on: the next message waits for it to be over.
+      carriedByServerRef.current
     ) {
       // Its own kind, so a drained queue tries again once the Bot is free (`StillWorkingError`).
       throw new StillWorkingError();
@@ -2434,6 +2517,7 @@ export function ChannelChat({
                     agent.isRunning ||
                     turnsInFlight > 0 ||
                     carryingOn ||
+                    carriedByServer ||
                     Boolean(question) ||
                     call.active ||
                     runModel.saving
@@ -2459,7 +2543,8 @@ export function ChannelChat({
               agent.isRunning ||
               turnsInFlight > 0 ||
               turnsAway > 0 ||
-              carryingOn
+              carryingOn ||
+              carriedByServer
             }
             // The `/` menu exposes only skills granted to this Bot.
             commands={skillCommands}
@@ -2598,7 +2683,8 @@ export function ChannelChat({
               agent.isRunning ||
               turnsInFlight > 0 ||
               turnsAway > 0 ||
-              carryingOn
+              carryingOn ||
+              carriedByServer
             }
             /*
              * A channel outlives its turns, so it is the screen where waiting is worth offering. A
