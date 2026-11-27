@@ -231,6 +231,9 @@ function nextRosterChange(ms: number): Promise<void> {
  */
 const SEND_WITHOUT_RUNTIME_AFTER_MS = 1500;
 
+/** What a Stop the server didn't take says, under the turn that goes on. */
+const STOP_FAILED = "Couldn't stop the Bot. Try again.";
+
 /** What a turn that never left the browser says, with the person's words back in the box. */
 const NOT_SENT = "Your message wasn't sent. Try again.";
 
@@ -2430,16 +2433,12 @@ export function ChannelChat({
     const routed =
       (agent as { runtimeAgentId?: string }).runtimeAgentId ?? agent.agentId;
     if (!routed) return;
-    stopCarriedTurn(routed, agent.threadId).catch((error: unknown) => {
+    // The runtime's refusal is written for a program ("Thread access denied"): a person reads theirs.
+    stopCarriedTurn(routed, agent.threadId).catch(() => {
       setStoppedCarried((stopped) =>
         stopped === carried.key ? null : stopped,
       );
-      setRunError({
-        message:
-          error instanceof Error
-            ? error.message
-            : "Couldn't stop the Bot. Try again.",
-      });
+      setRunError({ message: STOP_FAILED });
     });
   };
 

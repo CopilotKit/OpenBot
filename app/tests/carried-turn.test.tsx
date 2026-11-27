@@ -86,6 +86,8 @@ let onRun: (input: RunAgentInput) => Response = () => {
 let stepsRunHere = 0;
 /** The stops the runtime was asked for, by address. */
 let stops: string[] = [];
+/** Whether the server refuses a Stop, as it does for a turn that is not the asker's. */
+let stopRefused = false;
 let originalFetch: typeof fetch;
 
 const frame = (event: unknown) =>
@@ -254,7 +256,12 @@ beforeAll(() => {
       }
       if (/\/agent\/[^/]+\/stop\//.test(url.pathname)) {
         stops.push(url.pathname);
-        return NativeResponse.json({ stopped: true });
+        return stopRefused
+          ? NativeResponse.json(
+              { error: "Thread access denied" },
+              { status: 403 },
+            )
+          : NativeResponse.json({ stopped: true });
       }
       if (url.pathname.match(/\/threads\/[^/]+\/messages$/))
         return NativeResponse.json({ messages: stored });
@@ -351,6 +358,7 @@ beforeEach(() => {
   live = null;
   stepsRunHere = 0;
   stops = [];
+  stopRefused = false;
   sessionStorage.clear();
   queryClient.clear();
   queryClient.setQueryData<InfiniteData<ChannelPage>>(channelKeys.list(), {
@@ -711,7 +719,8 @@ test("between two runs of a turn the server carries, the conversation stays work
  * no run is going for a Stop to reach. It asks the server to stop the turn in the thread, and the
  * conversation stops reading as working at once, with nothing saying the Bot stopped on its own.
  */
-test("Stop between two runs of a turn the server carries stops the turn, and the conversation is free at once", async () => {
+/** A turn the server carries, between its runs, with Stop up and pressed. */
+async function stopInTheGap() {
   onRun = (input) => {
     const person = input.messages.filter((message) => message.role === "user");
     stored = wholeTurn(person).slice(0, person.length + 2);
@@ -746,14 +755,18 @@ test("Stop between two runs of a turn the server carries stops the turn, and the
   stops = [];
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await user.click(stop);
-
-  // The server is asked to stop the turn in this thread, and the conversation is free at once.
+  // The server is asked to stop the turn in this thread.
   await waitFor(() => expect(stops.length).toBeGreaterThan(0), {
     timeout: 5_000,
   });
   expect(
     stops.every((path) => path.endsWith(`/stop/${channel.threadId}`)),
   ).toBe(true);
+  return view;
+}
+
+test("Stop between two runs of a turn the server carries stops the turn, and the conversation is free at once", async () => {
+  const view = await stopInTheGap();
   await waitFor(
     () => expect(view.getByRole("log").getAttribute("aria-busy")).toBe("false"),
     { timeout: 5_000 },
@@ -761,4 +774,19 @@ test("Stop between two runs of a turn the server carries stops the turn, and the
   expect(view.queryByRole("button", { name: "Stop the Bot" })).toBeNull();
   expect(view.queryByTestId("transcript-stopped")).toBeNull();
   expect(runs).toHaveLength(1);
+}, 30_000);
+
+test("a Stop the server refuses says so, and the turn it didn't stop still reads as working", async () => {
+  stopRefused = true;
+  const view = await stopInTheGap();
+  const said = await view.findByTestId(
+    "transcript-stopped",
+    {},
+    { timeout: 5_000 },
+  );
+  // The person's words, never the runtime's ("Thread access denied").
+  expect(said.textContent).toContain("Couldn't stop the Bot. Try again.");
+  expect(said.textContent).not.toContain("Thread access denied");
+  expect(view.getByRole("log").getAttribute("aria-busy")).toBe("true");
+  expect(view.getByRole("button", { name: "Stop the Bot" })).toBeTruthy();
 }, 30_000);
