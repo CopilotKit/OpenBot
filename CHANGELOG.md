@@ -2249,6 +2249,11 @@ or a script has to say.
   sees anything new. The organization settings' read-only `context` gains `computerMode`
   (`per-person`, `shared` or `none`).
 
+### Conversations
+
+- Personal Assistant has clearer instructions for interactive answers, including editable plans and
+  labeled charts, while keeping simple replies brief.
+
 ### Personal edition
 
 - **OpenBot for one person asks once to be starred on GitHub.** In the personal edition only, once

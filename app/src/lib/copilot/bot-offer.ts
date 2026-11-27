@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect } from "react";
 import { defer, from, mergeMap } from "rxjs";
 import { agentQueryOptions } from "@/lib/agents/queries";
 import { agentComponentsQueryOptions } from "@/lib/components/queries";
+import { withPersonalAssistantUiGuidance } from "@/lib/copilot/a2ui-guidance";
 import { botOfAgent } from "@/lib/copilot/active-bot";
 import {
   type CapabilityKey,
@@ -41,8 +42,10 @@ import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 export type BotFacts = {
   /** The components this Bot may answer with, by name, with their published descriptions. */
   components: ReadonlyMap<string, string> | undefined;
-  /** Who the Bot belongs to, as far as driving its computer goes. Undefined: could not be read. */
-  profile: { visibility: string; canManage: boolean } | undefined;
+  /** The Bot's ownership and starter-package identity. Undefined: could not be read. */
+  profile:
+    | { visibility: string; canManage: boolean; packageBotId?: string | null }
+    | undefined;
   /** What this deployment lets the person do at all. Undefined: could not be read. */
   capabilities: Partial<Record<CapabilityKey, boolean>> | undefined;
   /** The skills this Bot holds, by slug. */
@@ -232,7 +235,12 @@ export function offerItsOwnTools(
       mergeMap((bot) => {
         const tools = offerFor(input.tools, bot);
         narrowed.add(tools);
-        return next.run({ ...input, tools });
+        return next.run(
+          withPersonalAssistantUiGuidance(
+            { ...input, tools },
+            bot.profile?.packageBotId,
+          ),
+        );
       }),
     );
   });
