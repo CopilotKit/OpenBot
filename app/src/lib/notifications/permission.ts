@@ -10,9 +10,10 @@ import { desktopShell, type ShellIpc } from "@/lib/desktop/shell";
  * web push, which the person turns on in Settings, Notifications (lib/web-push), and which asks
  * this same permission.
  *
- * ONE ANSWER FOR THE WHOLE PAGE. Onboarding's step and a Bot's page both offer to turn them on,
- * and a press on either has to show on the other, so the state lives here once and both read it
- * through `useNotificationPermission`.
+ * ONE ANSWER FOR THE WHOLE PAGE. The offer in a conversation, a Bot's page and Settings all offer
+ * to turn them on (`useNotificationsOffer`, components/notifications), and a press on one has to
+ * show on the others, so the state lives here once and each reads it through
+ * `useNotificationPermission`.
  *
  * IN OPENBOT DESKTOP the answer is the desktop app's, not the window's. The window is the system's
  * web view, and on macOS its own Notification API cannot be granted: asked, WKWebView answers

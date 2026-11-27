@@ -14,6 +14,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   conversation. On iPhone and iPad it works once OpenBot is added to the Home Screen, on iOS 16.4 or
   later, and the screen says so there. The app's manifest now opens OpenBot from a Home Screen as an
   app of its own (`display: standalone`). Signing out turns notifications off in that browser.
+  Enable notifications in a conversation and Turn on on a Bot's page do the same as the switch: they
+  used to allow only the notices a page shows while it is open. On an iPhone or iPad in Safari, both
+  say to add OpenBot to the Home Screen first instead of offering a button that can't work.
 
 - **A Bot's "can't run" stays under the message it couldn't answer.** When a Bot's engine isn't
   answering, the sentence that says so stays under that message after the next message is answered,

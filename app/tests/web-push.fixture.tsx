@@ -1,3 +1,4 @@
+import { IconPlayerPause } from "@tabler/icons-react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
   createBrowserHistory,
@@ -11,7 +12,21 @@ import {
 import type { ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { WebPushKeeper } from "@/components/delivery/web-push-keeper";
+import {
+  PageRows,
+  PageSection,
+  PageShell,
+} from "@/components/layout/page-shell";
+import { NotificationsOfferRow } from "@/components/notifications/notifications-offer-row";
+import { NotifyPrompt } from "@/components/notifications/notify-prompt";
 import { ThemeProvider } from "@/components/theme-provider";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { useServiceWorkerOpenRequests } from "@/lib/web-push/open-requests";
@@ -45,6 +60,37 @@ function Conversation() {
   return <p className="p-8 text-sm">Conversation {channelId}</p>;
 }
 
+/** The offer above a conversation's message box, in the composer's column as the conversation lays it. */
+function ConversationOffer() {
+  return (
+    <div className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pt-12 pb-4">
+      <NotifyPrompt />
+    </div>
+  );
+}
+
+/** A Bot's page's card, with its notifications row as the page draws it under the rows above it. */
+function BotOffer() {
+  return (
+    <PageShell description="Finds what you need to know." title="Research">
+      <PageSection>
+        <PageRows>
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconPlayerPause />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Working</ItemTitle>
+              <ItemDescription>It runs its routines.</ItemDescription>
+            </ItemContent>
+          </Item>
+          <NotificationsOfferRow />
+        </PageRows>
+      </PageSection>
+    </PageShell>
+  );
+}
+
 function Root() {
   useServiceWorkerOpenRequests();
   return (
@@ -71,6 +117,16 @@ const router = createRouter({
       getParentRoute: () => rootRoute,
       path: "/channel/$channelId",
       component: Conversation,
+    }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/conversation-offer",
+      component: ConversationOffer,
+    }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/bot-offer",
+      component: BotOffer,
     }),
   ]),
   history: createBrowserHistory(),

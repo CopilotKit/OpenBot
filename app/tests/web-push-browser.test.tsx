@@ -328,13 +328,17 @@ function standInPushManager() {
  * Allow.
  */
 function standInPermission(initial: NotificationPermission) {
-  let permission = initial;
+  // Kept for the tab, as a browser keeps a site's answer across its pages.
+  const KEY = "test:notification-permission";
+  let permission =
+    (sessionStorage.getItem(KEY) as NotificationPermission | null) ?? initial;
   Object.defineProperty(Notification, "permission", {
     configurable: true,
     get: () => permission,
   });
   Notification.requestPermission = async () => {
     if (permission === "default") permission = "granted";
+    sessionStorage.setItem(KEY, permission);
     return permission;
   };
 }
@@ -364,6 +368,9 @@ async function openNotifications(
     window?: { width: number; height: number };
     permission?: NotificationPermission | "granted-by-browser";
     iphone?: boolean;
+    /** Another place that offers them, and the words it is waited on by. */
+    path?: string;
+    shows?: string;
   } = {},
 ): Promise<{ context: BrowserContext; page: Page }> {
   const theme = options.theme ?? "light";
@@ -386,8 +393,10 @@ async function openNotifications(
   }
   const page = await context.newPage();
   page.on("pageerror", (error) => console.error(error));
-  await page.goto(`${origin}/settings/notifications?theme=${theme}`);
-  await page.getByText(TITLE, { exact: true }).waitFor();
+  await page.goto(
+    `${origin}${options.path ?? "/settings/notifications"}?theme=${theme}`,
+  );
+  await page.getByText(options.shows ?? TITLE, { exact: true }).waitFor();
   // Unstyled, the switch has no size and can't be pressed.
   await style(page);
   return { context, page };
@@ -629,6 +638,95 @@ describe.skipIf(!asked || !engines.includes("chromium"))(
   },
 );
 
+/** The offer a conversation makes above its message box once a task has started (`NotifyPrompt`). */
+const OFFER = "Get notified when your Bot finishes or needs your approval.";
+/** A Bot's page's row (`NotificationsOfferRow`). */
+const BOT_ROW = "Browser notifications";
+
+/**
+ * EVERY PLACE THAT TURNS THEM ON ENDS IN THE SAME STATE. Found on 1.2.1 and after web push: a
+ * conversation's "Enable notifications" asked only for the page's permission, which shows notices
+ * while OpenBot is open, and saved no push subscription, so nothing reached a browser with OpenBot
+ * closed unless the person also found Settings' switch.
+ */
+describe.skipIf(!asked || !engines.includes("chromium"))(
+  "every place that turns notifications on, in Chromium",
+  () => {
+    test("Enable notifications in a conversation saves this browser's push subscription, as Settings' switch does", async () => {
+      seen.length = 0;
+      pushServer.saved.clear();
+      const browser = await launch("chromium");
+      // Not asked yet, as the person meets it, and they answer Allow.
+      const { context, page } = await openNotifications(browser, {
+        permission: "default",
+        path: "/conversation-offer",
+        shows: OFFER,
+      });
+      await page.getByRole("button", { name: "Enable notifications" }).click();
+      await until(() => saves().length === 1, "the subscription is saved");
+      await page
+        .getByText(OFFER, { exact: true })
+        .waitFor({ state: "detached" });
+      const held = await page.evaluate(async () => {
+        const registration = await navigator.serviceWorker.getRegistration("/");
+        return (await registration?.pushManager.getSubscription())?.toJSON();
+      });
+      expect(saves()[0]?.body).toEqual({
+        endpoint: held?.endpoint,
+        keys: held?.keys,
+      });
+      // Settings says it is on: one state, whichever place it was turned on from.
+      await page.goto(`${origin}/settings/notifications`);
+      await style(page);
+      await page.getByRole("switch", { name: TITLE, checked: true }).waitFor();
+      await context.close();
+    }, 60_000);
+
+    test("Turn on on a Bot's page saves it too, and the row goes", async () => {
+      seen.length = 0;
+      pushServer.saved.clear();
+      const browser = await launch("chromium");
+      const { context, page } = await openNotifications(browser, {
+        permission: "default",
+        path: "/bot-offer",
+        shows: BOT_ROW,
+      });
+      await page.getByRole("button", { name: "Turn on" }).click();
+      await until(() => saves().length === 1, "the subscription is saved");
+      await page
+        .getByText(BOT_ROW, { exact: true })
+        .waitFor({ state: "detached" });
+      expect(pushServer.saved.size).toBe(1);
+      await context.close();
+    }, 60_000);
+
+    test("on an iPhone in Safari, each offer says to add OpenBot to the Home Screen, with no button that can't work", async () => {
+      const browser = await launch("chromium");
+      for (const [path, shows, button] of [
+        ["/conversation-offer", OFFER, "Enable notifications"],
+        ["/bot-offer", BOT_ROW, "Turn on"],
+      ] as const) {
+        const { context, page } = await openNotifications(browser, {
+          iphone: true,
+          path,
+          shows,
+        });
+        const row = page
+          .getByText(shows, { exact: true })
+          .locator("xpath=ancestor::*[@data-slot='item'][1]");
+        expect(await row.innerText()).toContain(
+          "add OpenBot to your Home Screen first",
+        );
+        expect(await row.innerText()).toContain("iOS 16.4 or later");
+        expect(await page.getByRole("button", { name: button }).count()).toBe(
+          0,
+        );
+        await context.close();
+      }
+    }, 60_000);
+  },
+);
+
 describe.skipIf(!asked)("notifications in this browser, on screen", () => {
   for (const engine of engines)
     for (const theme of THEMES)
@@ -698,3 +796,67 @@ describe.skipIf(!asked)("notifications in this browser, on screen", () => {
           }, 60_000);
         }
 });
+
+/** The offer in a conversation and on a Bot's page, as a browser sees them and on an iPhone. */
+const OFFERS = [
+  { surface: "conversation", path: "/conversation-offer", shows: OFFER },
+  { surface: "bot", path: "/bot-offer", shows: BOT_ROW },
+] as const;
+
+describe.skipIf(!asked)(
+  "the offers to turn notifications on, on screen",
+  () => {
+    for (const engine of engines)
+      for (const theme of THEMES)
+        for (const window of WINDOWS)
+          for (const { surface, path, shows } of OFFERS)
+            for (const iphone of [false, true]) {
+              const state = iphone ? "iphone" : "offer";
+              test(`${surface} ${state}, in ${engine}, ${theme}, ${window.width}px`, async () => {
+                const browser = await launch(engine);
+                const { context, page } = await openNotifications(browser, {
+                  theme,
+                  window,
+                  iphone,
+                  path,
+                  shows,
+                  permission:
+                    engine === "chromium" ? "granted-by-browser" : "default",
+                });
+                if (shots) {
+                  mkdirSync(shots, { recursive: true });
+                  await page.screenshot({
+                    path: join(
+                      shots,
+                      `web-push-${surface}-${state}-${engine}-${theme}-${window.width}.png`,
+                    ),
+                    fullPage: true,
+                  });
+                }
+                const sideways = await page.evaluate(
+                  () =>
+                    document.documentElement.scrollWidth > innerWidth ||
+                    document.body.scrollWidth > innerWidth,
+                );
+                expect(sideways).toBe(false);
+                const row = page
+                  .getByText(shows, { exact: true })
+                  .locator("xpath=ancestor::*[@data-slot='item'][1]");
+                const rowBox = await row.boundingBox();
+                expect(rowBox).toBeTruthy();
+                // Every button inside its row, on a phone too.
+                for (const button of await row.getByRole("button").all()) {
+                  const box = await button.boundingBox();
+                  expect(box && rowBox).toBeTruthy();
+                  if (box && rowBox) {
+                    expect(box.x).toBeGreaterThanOrEqual(rowBox.x);
+                    expect(box.x + box.width).toBeLessThanOrEqual(
+                      rowBox.x + rowBox.width,
+                    );
+                  }
+                }
+                await context.close();
+              }, 60_000);
+            }
+  },
+);
