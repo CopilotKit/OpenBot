@@ -291,15 +291,20 @@ describe.skipIf(!asked)("the row with Hand back", () => {
           const at = await measured(page, SAID);
           expect(at).not.toBeNull();
           if (!at) return;
-          // The whole sentence, the Bot's reason with it, wrapped inside the window: none of it cut off.
-          expect(at.clipped).toBe(false);
+          expect({
+            // The whole sentence, the Bot's reason with it: none of it cut off.
+            clipped: at.clipped,
+            // No blank band: the row starts the card's own gap under the Bot's browser, and no further (a pixel's
+            // rounding aside).
+            blankUnderPage: Math.max(
+              0,
+              at.wheel.top - at.frame.bottom - at.gap - 1,
+            ),
+          }).toEqual({ clipped: false, blankUnderPage: 0 });
+          // Wrapped inside the window, beside Hand back.
           expect(at.line.left).toBeGreaterThanOrEqual(0);
           expect(at.line.right).toBeLessThanOrEqual(at.handBack.left);
           expect(at.handBack.right).toBeLessThanOrEqual(at.window.width);
-          // No blank band: the row starts the card's own gap under the Bot's browser, and no further.
-          expect(at.wheel.top - at.frame.bottom).toBeLessThanOrEqual(
-            at.gap + 1,
-          );
         } finally {
           await page.close();
         }
