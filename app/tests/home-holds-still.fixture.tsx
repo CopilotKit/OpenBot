@@ -1,6 +1,7 @@
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
+  type AnyRoute,
   createBrowserHistory,
   createRootRoute,
   createRoute,
@@ -29,7 +30,8 @@ import { Route as HomeRoute } from "@/routes/_authed/_app/index";
  * route and composer, drawn the way the app draws them once the gate has read who is signed in and
  * which edition this is (`?edition=personal` or `?edition=business`). The Bots list and the
  * conversation list are NOT here: they are requests the test answers after a pause, as a server
- * does, so the page is seen while they are on their way.
+ * does. Home's own `beforeLoad` and `loader` run, so the loader warms both lists and waits for them
+ * as long as it does in the app, and the page is seen while an answer slower than that is on its way.
  *
  * Started in `default`, the organization those routes answer for, as every test does.
  */
@@ -64,15 +66,20 @@ const rootRoute = createRootRoute({
     </SidebarShell>
   ),
 });
+/** Home's own `beforeLoad` and `loader`, which are typed for the app's route tree, not this one. */
+const home = HomeRoute.options as unknown as Record<string, unknown>;
 const router = createRouter({
   history: createBrowserHistory(),
+  // What the app hands every route's `beforeLoad` and `loader` (main.tsx).
+  context: { queryClient },
   routeTree: rootRoute.addChildren([
     createRoute({
       getParentRoute: () => rootRoute,
       path: "/",
       validateSearch: HomeRoute.options.validateSearch,
       component: HomeRoute.options.component,
-    }),
+      ...{ beforeLoad: home.beforeLoad, loader: home.loader },
+    } as never) as unknown as AnyRoute,
     createRoute({
       getParentRoute: () => rootRoute,
       path: "/start/$startId",

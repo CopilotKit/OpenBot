@@ -74,6 +74,71 @@ import { queryClient } from "@/query-client";
 const EXPLORE_SHOWN = 4;
 
 /**
+ * How long the heading waits for a conversation list the loader did not have in time. Long enough
+ * for a slow server or one failed read (retried once, a second later), short enough that a list that
+ * never comes leaves a page without a heading only briefly.
+ */
+const GREETING_WAIT_MS = 2000;
+
+/**
+ * Home's heading, said once and never changed: the words a person has started reading stay.
+ *
+ * Whether to greet somebody's first conversation by name depends on the conversation list. The
+ * loader waits for it only briefly, so when it has not come by the time the page draws, the line is
+ * kept, empty, until the list answers or fails or `GREETING_WAIT_MS` passes, and the greeting is
+ * chosen then. The kept line is as tall as the taller of the two greetings it could be (each is laid
+ * out unseen in the same place), so the box under it never moves when the words arrive.
+ */
+function Greeting() {
+  const { data: user } = useQuery(currentUserQueryOptions());
+  const channels = useInfiniteQuery(channelListQueryOptions());
+  const choose = () =>
+    firstConversationGreeting(
+      user,
+      channels.isSuccess && channels.data.length === 0,
+    );
+  // Whether the list was still on its way when the page drew, so the line has to be kept for it.
+  const [waits] = useState(() => channels.isPending);
+  const [greeting, setGreeting] = useState(() =>
+    channels.isPending ? undefined : choose(),
+  );
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    if (!waits) return;
+    const timer = setTimeout(() => setWaited(true), GREETING_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [waits]);
+  // Chosen in the render that sees the list settle, so no frame is drawn with the words known and
+  // not yet shown.
+  if (greeting === undefined && (!channels.isPending || waited))
+    setGreeting(choose());
+  const heading = "text-2xl font-semibold tracking-tight text-center";
+  if (!waits) return <h1 className={heading}>{greeting}</h1>;
+  const could = [
+    ...new Set([
+      firstConversationGreeting(user, true),
+      firstConversationGreeting(user, false),
+    ]),
+  ];
+  return (
+    <div className="grid items-end justify-items-center">
+      {could.map((words) => (
+        <span
+          aria-hidden
+          className={cn(heading, "invisible [grid-area:1/1]")}
+          key={words}
+        >
+          {words}
+        </span>
+      ))}
+      <h1 className={cn(heading, "[grid-area:1/1]", greeting && "home-said")}>
+        {greeting}
+      </h1>
+    </div>
+  );
+}
+
+/**
  * Said when the Bot a message went to takes no model pick, so the pick was not saved. The person
  * picked before OpenBot picked the Bot, and a pick that silently does nothing is a surprise. Whatever
  * the reason (a Bot connected from outside OpenBot, or one set to hand work out), the person reads
@@ -93,8 +158,8 @@ export const Route = createFileRoute("/_authed/_app/")({
    * box: nothing is sent until the person sends it.
    */
   validateSearch: z.object({ ask: z.string().max(2000).optional() }),
-  // The edition decides whether there is an Explore section at all, so it is read before the page draws and the
-  // composer never moves when it arrives.
+  // The edition decides whether there is an Explore section at all, so it is read before the page draws: the
+  // personal edition would otherwise show Explore's skeleton and then take it away.
   beforeLoad: async ({ context, preload }) => {
     /*
      * Somebody who opened an invitation's link before signing in lands here once they have, and
@@ -120,7 +185,6 @@ export const Route = createFileRoute("/_authed/_app/")({
 });
 
 function RouteComponent() {
-  const { data: user } = useQuery(currentUserQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
   const {
     data: agents,
@@ -147,14 +211,6 @@ function RouteComponent() {
   // Read once, as the box reads its words once: the words a link handed over (`ask`).
   const ask = useSearch({ strict: false }).ask;
   const [asked] = useState(ask);
-  // Chosen once: the conversation list arriving later must not change the words a person has
-  // already started reading.
-  const [greeting] = useState(() =>
-    firstConversationGreeting(
-      user,
-      channels.isSuccess && channels.data.length === 0,
-    ),
-  );
   const [restores, setRestores] = useState(0);
   const [error, setError] = useState<Failure | null>(restored?.error ?? null);
   // A hold is about now: said until the organization answers again, then gone (lib/held-ends.ts).
@@ -183,7 +239,6 @@ function RouteComponent() {
     [],
   );
 
-  /** Default recipient when the composer draft has no mention. */
   /*
    * Every skill any of the person's Bots offers. The Bot is not known until it is chosen with `@` or
    * routed to after sending, so the menu offers them all and sending picks a Bot that has the one
@@ -192,6 +247,7 @@ function RouteComponent() {
   const { commands: skillCommands } = useAnyBotSkillCommands(
     agents?.map((agent) => agent.id) ?? [],
   );
+  /** Default recipient when the composer draft has no mention. */
   const fallback = fallbackBot(agents);
   /*
    * The model and thinking effort to run on, picked before OpenBot has picked the Bot. It starts on
@@ -306,9 +362,7 @@ function RouteComponent() {
             margins collapse to nothing and the heading stays reachable. */}
         <div className="relative my-auto flex w-full flex-col items-center">
           <div className="flex flex-col items-center" data-intro="heading">
-            <h1 className="text-2xl font-semibold tracking-tight text-center">
-              {greeting}
-            </h1>
+            <Greeting />
           </div>
           <div
             className="mt-8 w-full flex flex-col items-center"
@@ -339,7 +393,7 @@ function RouteComponent() {
               // The box reads its words once, when it mounts; a start that fails while this page is
               // open is a new box with them in it.
               key={restores}
-              // Files wait in the box until the message has a conversation to go to; see `start`.
+              // Files wait in the box until the message has a conversation to go to; see `startBehind`.
               holdsFilesUntilSent
               // An unsent first message stays in the box when somebody looks elsewhere.
               draftKey="home"
@@ -425,9 +479,9 @@ function RouteComponent() {
             </div>
             {/*
              * Up to four Bots, two to a row, as compact cards that fill the column. A teaser under the
-             * composer, not the place to browse: more than four would push the composer up every time
-             * somebody shared another Bot, so the rest are one "All Bots" away. Every state below
-             * reserves the same two rows, so the composer above it does not move when the list settles.
+             * composer, not the place to browse: the rest are one "All Bots" away. Explore hangs below
+             * the centred heading and box, so none of its states can move them. Each state takes at least
+             * h-36, the room two rows of cards need, so a skeleton gives way to a list no shorter than it.
              */}
             <div className="mt-10 w-full max-w-2xl" data-intro="explore">
               {!personal && (loading || capabilities.isPending) ? (
@@ -475,7 +529,7 @@ function RouteComponent() {
                 // sentence here again read as two things wrong.
                 <>
                   <h2 className="font-semibold text-base">Explore Bots</h2>
-                  <Skeleton className="mt-4 h-[140px]" />
+                  <Skeleton className="mt-4 h-36" />
                 </>
               ) : failed && agents === undefined ? (
                 // `agents === undefined` narrows this to "the query has never once returned

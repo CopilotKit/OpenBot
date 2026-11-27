@@ -12,12 +12,13 @@ import { compile } from "tailwindcss";
  * Bots list came, and Explore Bots changed height with it. Home is centred in its column, so each of
  * these moved the heading and the box a person had already started reading and aiming at.
  *
- * In a real browser, through the app's own home route, with the edition and the person read before
- * the page draws (as the gate does) and the Bots list and conversation list answered after 400 ms,
- * as a server does. Every animation frame from the first draws is recorded: where the heading and
- * the box are, what the greeting says, and whether the hint line is there. Reduced motion is asked
- * for, so the page's rise on a first visit does not count as movement. Run for the personal and the
- * business edition, light and dark, on a first visit and on a later one.
+ * In a real browser, through the app's own home route and its loader, with the edition and the
+ * person read before the page draws (as the gate does) and the Bots list and conversation list
+ * answered after 400 ms, as a server does: later than the loader waits for them. Every animation
+ * frame from the first draws is recorded: where the heading and the box are, what the greeting says,
+ * and whether the hint line is there. Reduced motion is asked for, so the page's rise on a first
+ * visit does not count as movement. Run for the personal and the business edition, light and dark,
+ * on a first visit and on a later one.
  *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/home-holds-still.test.tsx
  *
@@ -40,8 +41,13 @@ const EDITIONS = [
 ] as const;
 const VISITS = ["first", "later"] as const;
 type Visit = (typeof VISITS)[number];
-/** How long the server takes to answer the two lists. */
+/** How long the server takes to answer the two lists: longer than Home's loader waits (route-data.ts). */
 const ANSWER_AFTER_MS = 400;
+/** How long a test waits for the page to ask for both lists and have them answered. */
+const ANSWERED_WITHIN_MS = 10_000;
+/** The person the fixture signs in, and what Home says to them before their first conversation. */
+const FIRST_CONVERSATION_GREETING =
+  "Hi Sam Rivera, what would you like to work on?";
 
 const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";
@@ -165,6 +171,8 @@ type Trail = {
   conversations: boolean;
   /** The Bots the list answers with; the one Bot by default. */
   list?: (typeof bot)[];
+  /** Whether the conversation list fails instead of answering with none. */
+  conversationsFail?: boolean;
 };
 
 /** What one frame of the page showed. */
@@ -174,6 +182,9 @@ type Frame = {
   boxHeight: number;
   greeting: string;
   hint: { visibility: string; text: string } | null;
+  /** The box's and the hint's opacity with their ancestors', as a person sees them. */
+  boxOpacity: number;
+  hintOpacity: number;
 };
 
 const bot = {
@@ -216,7 +227,15 @@ async function answer(route: Route, trail: Trail) {
   }
   if (route.request().method() === "GET" && path === CONVERSATIONS) {
     await new Promise((done) => setTimeout(done, ANSWER_AFTER_MS));
-    await route.fulfill({ json: { conversations: [], nextCursor: null } });
+    await route.fulfill(
+      trail.conversationsFail
+        ? {
+            status: 500,
+            json: { status: 500, detail: "Something went wrong." },
+            headers: { "content-type": "application/problem+json" },
+          }
+        : { json: { conversations: [], nextCursor: null } },
+    );
     trail.conversations = true;
     return;
   }
@@ -230,10 +249,18 @@ async function answer(route: Route, trail: Trail) {
 /**
  * The page's own recorder, installed before anything of the page runs: on every animation frame
  * from the first one in which the heading and the box exist, what they and the hint line look like.
+ * Opacity is the product of an element's own and its ancestors', since the page fades them in
+ * through the element that carries `data-intro`; a hidden hint counts as not seen at all.
  */
 function recordFrames() {
   const frames: Frame[] = [];
   (window as unknown as { __homeFrames: Frame[] }).__homeFrames = frames;
+  const effective = (element: Element) => {
+    let opacity = 1;
+    for (let at: Element | null = element; at; at = at.parentElement)
+      opacity *= Number(getComputedStyle(at).opacity);
+    return opacity;
+  };
   const tick = () => {
     const heading = document.querySelector('[data-intro="heading"]');
     const box = document.querySelector('[data-intro="box"]');
@@ -241,6 +268,7 @@ function recordFrames() {
       const hint = [...document.querySelectorAll("p")].find((line) =>
         line.textContent?.startsWith("OpenBot picks"),
       );
+      const hidden = !hint || getComputedStyle(hint).visibility === "hidden";
       frames.push({
         heading: heading.getBoundingClientRect().top,
         box: box.getBoundingClientRect().top,
@@ -252,6 +280,8 @@ function recordFrames() {
               text: hint.textContent ?? "",
             }
           : null,
+        boxOpacity: effective(box),
+        hintOpacity: hint && !hidden ? effective(hint) : 0,
       });
     }
     requestAnimationFrame(tick);
@@ -289,9 +319,20 @@ async function still(page: Page) {
   });
 }
 
-/** The CSS classes a bundle can draw: every word in it, so the sheet is there from the first frame. */
+/**
+ * The CSS classes a bundle can draw: every word between its quotes and spaces, so the sheet is there
+ * from the first frame. The box's classes hold brackets, parentheses and `=`
+ * (`has-data-[icon=inline-end]:pr-1.5`, `text-(length:--text-sm)`), so those cannot split a word.
+ * A class can also hold single quotes (`[&_svg:not([class*='size-'])]:size-4`), so the words are
+ * read once more with only double quotes and backticks as edges; Tailwind ignores what isn't a class.
+ */
 function wordsOf(code: string): string[] {
-  return [...new Set(code.match(/[^\s"'`<>=(){};,]+/g))];
+  return [
+    ...new Set([
+      ...(code.match(/[^\s"'`\\]+/g) ?? []),
+      ...(code.match(/[^\s"`\\]+/g) ?? []),
+    ]),
+  ];
 }
 
 async function open(
@@ -339,20 +380,46 @@ async function open(
   return page;
 }
 
-/** Open home and let it load: both lists answered, and then nothing moving. */
+/** Until both lists have been answered, failing with the one that never was. */
+async function answered(trail: Trail) {
+  const deadline = Date.now() + ANSWERED_WITHIN_MS;
+  while (!(trail.bots && trail.conversations)) {
+    if (Date.now() > deadline)
+      throw new Error(
+        `Home never had ${[
+          trail.bots ? null : "the Bots list",
+          trail.conversations ? null : "the conversation list",
+        ]
+          .filter(Boolean)
+          .join(" or ")} answered within ${ANSWERED_WITHIN_MS} ms`,
+      );
+    await new Promise((done) => setTimeout(done, 25));
+  }
+}
+
+/** Open home and let it load: both lists answered, a heading said, and then nothing moving. */
 async function loaded(
   engine: string,
   theme: Theme,
   edition: string,
   visit: Visit,
+  trail: Trail = { bots: false, conversations: false },
+  look: Parameters<typeof open>[5] = {},
 ): Promise<{ page: Page; frames: Frame[] }> {
-  const trail: Trail = { bots: false, conversations: false };
-  const page = await open(engine, theme, edition, visit, trail);
+  const page = await open(engine, theme, edition, visit, trail, look);
   await page.locator('[data-intro="box"]').waitFor();
-  while (!(trail.bots && trail.conversations))
-    await new Promise((done) => setTimeout(done, 25));
+  await answered(trail);
+  await page.locator("h1:not(:empty)").waitFor({ timeout: ANSWERED_WITHIN_MS });
   await still(page);
   return { page, frames: await framesOf(page) };
+}
+
+/**
+ * What the heading said on every frame it said anything, which must be one greeting from the first
+ * of them to the last: the heading may wait for the conversation list, but never changes its words.
+ */
+function greetingsOf(frames: Frame[]): string[] {
+  return [...new Set(frames.map((frame) => frame.greeting).filter(Boolean))];
 }
 
 describe.skipIf(!asked)("Home while it loads", () => {
@@ -413,7 +480,8 @@ describe.skipIf(!asked)("Home while it loads", () => {
             }
           }, 60_000);
 
-          test(`the greeting doesn't change after it is drawn, ${where}`, async () => {
+          // The person has no conversations yet, and the list says so later than the loader waits.
+          test(`the first conversation's greeting is the first one drawn and stays, ${where}`, async () => {
             const { page, frames } = await loaded(
               engine,
               theme,
@@ -421,15 +489,63 @@ describe.skipIf(!asked)("Home while it loads", () => {
               visit,
             );
             try {
-              const first = frames[0];
-              const last = frames.at(-1);
-              if (!first || !last) throw new Error("no frame was recorded");
-              expect(first.greeting).toBe(last.greeting);
+              expect(frames.at(-1)?.greeting).toBe(FIRST_CONVERSATION_GREETING);
+              expect(greetingsOf(frames)).toEqual([
+                FIRST_CONVERSATION_GREETING,
+              ]);
             } finally {
               await page.close();
             }
           }, 60_000);
         }
+
+  for (const engine of engines) {
+    test(`a conversation list that fails leaves the plain greeting, drawn once, in ${engine}`, async () => {
+      const { page, frames } = await loaded(
+        engine,
+        "light",
+        "business",
+        "later",
+        { bots: false, conversations: false, conversationsFail: true },
+      );
+      try {
+        expect(greetingsOf(frames)).toEqual(["Start a conversation"]);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+    // On a phone the first conversation's greeting takes two lines where the plain one takes one,
+    // so the line kept for it while the list is on its way must already be the taller of the two.
+    for (const visit of VISITS)
+      test(`a late greeting moves nothing on a phone, ${visit} visit, in ${engine}`, async () => {
+        const { page, frames } = await loaded(
+          engine,
+          "light",
+          "business",
+          visit,
+          { bots: false, conversations: false },
+          { width: 390, height: 800 },
+        );
+        try {
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot({
+              path: join(shots, `home-phone-greeting-${engine}-${visit}.png`),
+            });
+          }
+          const first = frames[0];
+          if (!first) throw new Error("no frame was recorded");
+          expect(greetingsOf(frames)).toEqual([FIRST_CONVERSATION_GREETING]);
+          for (const frame of frames) {
+            expect(Math.abs(frame.heading - first.heading)).toBeLessThan(0.5);
+            expect(Math.abs(frame.box - first.box)).toBeLessThan(0.5);
+          }
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+  }
 
   for (const engine of engines) {
     // Nothing on Home scrolls but Home itself, so Explore Bots hanging under the box must be
@@ -498,42 +614,25 @@ describe.skipIf(!asked)("Home while it loads", () => {
         }
       }, 60_000);
 
+    // From the very first frame the page draws, as the rise starts when Home mounts, and until the
+    // rise is over and nothing moves.
     test(`the hint is never more visible than the box on a first visit, in ${engine}`, async () => {
-      const trail: Trail = { bots: false, conversations: false };
-      const page = await open(engine, "light", "business", "first", trail, {
-        reducedMotion: "no-preference",
-      });
+      const { page, frames } = await loaded(
+        engine,
+        "light",
+        "business",
+        "first",
+        { bots: false, conversations: false },
+        { reducedMotion: "no-preference" },
+      );
       try {
-        // Both are recorded on every frame as the product of their own and their ancestors'
-        // opacity, since the page fades them in through the element that carries `data-intro`.
-        const seen = await page.evaluate(async () => {
-          const effective = (element: Element | null) => {
-            let opacity = 1;
-            for (let at = element; at; at = at.parentElement)
-              opacity *= Number(getComputedStyle(at).opacity);
-            return opacity;
-          };
-          const out: { box: number; hint: number }[] = [];
-          for (let frame = 0; frame < 150; frame += 1) {
-            await new Promise((done) => requestAnimationFrame(done));
-            const line = [...document.querySelectorAll("p")].find((p) =>
-              p.textContent?.startsWith("OpenBot picks"),
-            );
-            const box = document.querySelector('[data-intro="box"]');
-            if (!line || !box) continue;
-            out.push({
-              box: effective(box),
-              hint:
-                getComputedStyle(line).visibility === "hidden"
-                  ? 0
-                  : effective(line),
-            });
-          }
-          return out;
-        });
-        expect(seen.length).toBeGreaterThan(0);
-        for (const frame of seen)
-          expect(frame.hint).toBeLessThanOrEqual(frame.box + 0.001);
+        expect(frames.length).toBeGreaterThan(0);
+        // The rise was seen: the box starts out faded.
+        expect(frames[0]?.boxOpacity ?? 1).toBeLessThan(1);
+        for (const frame of frames)
+          expect(frame.hintOpacity).toBeLessThanOrEqual(
+            frame.boxOpacity + 0.001,
+          );
       } finally {
         await page.close();
       }
