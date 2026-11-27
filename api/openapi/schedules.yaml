@@ -108,6 +108,100 @@ paths:
           $ref: ./common.yaml#/components/responses/ServerError
         default:
           $ref: ./common.yaml#/components/responses/UnexpectedError
+  /api/v2/organizations/{organizationId}/routines/read:
+    parameters:
+      - $ref: ./common.yaml#/components/parameters/OrganizationId
+    post:
+      tags:
+        - Routines
+      operationId: readRoutineSentence
+      summary: Read a sentence as a routine's answers
+      description: "Read a sentence in English as New routine's answers: what the Bot
+        does, when it starts, the schedule and what ends it. It writes nothing.
+        createRoutine, createGoal or createCheckIn makes what it read. A
+        repeated request with the same Idempotency-Key and body returns the
+        first reading without asking the model again."
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:read
+        - apiKey: []
+      parameters:
+        - $ref: ./common.yaml#/components/parameters/IdempotencyKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoutineSentence"
+            examples:
+              request:
+                value:
+                  botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+                  sentence: Summarize my unread mail every weekday at 9.
+                  timezone: America/New_York
+      responses:
+        "200":
+          description: What the sentence says, or what is still missing from it.
+          headers: *a1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineReading"
+              examples:
+                ready:
+                  value:
+                    outcome: ready
+                    draft:
+                      does: act
+                      instruction: Summarize my unread mail.
+                      title: Morning mail summary
+                      starts: schedule
+                      cron: 0 9 * * 1-5
+                      timezone: America/New_York
+                      doneWhen: ""
+                      conversationId: null
+                      intervalMinutes: null
+                needsMore:
+                  value:
+                    outcome: needsMore
+                    draft:
+                      does: act
+                      instruction: Summarize my unread mail.
+                      title: Mail summary
+                      starts: unsaid
+                      cron: null
+                      timezone: America/New_York
+                      doneWhen: ""
+                      conversationId: null
+                      intervalMinutes: null
+                    missing: time
+                refused:
+                  value:
+                    outcome: refused
+                    detail: A routine can run at most every 15 minutes.
+                    fix: null
+                notRoutine:
+                  value:
+                    outcome: notRoutine
+        "400":
+          $ref: ./common.yaml#/components/responses/InvalidRequest
+        "401":
+          $ref: ./common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: ./common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: ./common.yaml#/components/responses/OrganizationNotFound
+        "409":
+          $ref: ./common.yaml#/components/responses/IdempotencyConflict
+        "500":
+          $ref: ./common.yaml#/components/responses/ServerError
+        "502":
+          $ref: ./common.yaml#/components/responses/ModelFailed
+        "503":
+          $ref: ./common.yaml#/components/responses/ModelNotConfigured
+        default:
+          $ref: ./common.yaml#/components/responses/UnexpectedError
   /api/v2/organizations/{organizationId}/routines/{routineId}:
     parameters:
       - $ref: ./common.yaml#/components/parameters/OrganizationId
@@ -2087,6 +2181,175 @@ components:
           type: string
           description: The goal this routine runs, when it runs one.
           maxLength: 200
+    RoutineSentence:
+      type: object
+      additionalProperties: false
+      required:
+        - botId
+        - sentence
+        - timezone
+      properties:
+        botId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: The Bot the routine is for.
+        sentence:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+          description: The routine in the person's own words. At most 2,000 characters.
+        timezone:
+          type: string
+          maxLength: 100
+          description: The IANA time zone the person is in, used to read a time of day.
+    RoutineDraft:
+      type: object
+      description: What a sentence says, as the answers New routine asks for.
+      required:
+        - does
+        - instruction
+        - title
+        - starts
+        - cron
+        - timezone
+        - doneWhen
+        - conversationId
+        - intervalMinutes
+      properties:
+        does:
+          type: string
+          enum:
+            - act
+            - tell
+          description: act carries out the instruction. tell only reports back.
+        instruction:
+          type: string
+          description: What the Bot does on each run.
+        title:
+          type: string
+          description: What to call it.
+        starts:
+          type: string
+          enum:
+            - schedule
+            - event
+            - now
+            - unsaid
+          description: What starts it. schedule is a time, event is something
+            that happens, now is straight away, and unsaid is a start the
+            sentence doesn't give.
+        cron:
+          type:
+            - string
+            - "null"
+          description: The schedule, as five cron fields. Set only when starts is
+            schedule, and null otherwise.
+        timezone:
+          type: string
+          description: The IANA time zone the schedule is read in.
+        doneWhen:
+          type: string
+          description: "The outcome that ends it, in the sentence's words. Empty when the
+            sentence gives none: on a schedule that makes a routine, and an
+            outcome makes a goal that ends when it is met."
+        conversationId:
+          type:
+            - string
+            - "null"
+          description: The conversation it posts in. Null means a new conversation.
+        intervalMinutes:
+          type:
+            - integer
+            - "null"
+          enum:
+            - 60
+            - 240
+            - 720
+            - 1440
+            - null
+          description: How often a check-in looks, in minutes. Set only when does is
+            tell, and null otherwise.
+    RoutineReadingReady:
+      type: object
+      description: The sentence says everything a routine needs.
+      required:
+        - outcome
+        - draft
+      properties:
+        outcome:
+          type: string
+          const: ready
+        draft:
+          $ref: "#/components/schemas/RoutineDraft"
+    RoutineReadingNeedsMore:
+      type: object
+      description: The sentence is a routine but leaves something out.
+      required:
+        - outcome
+        - draft
+        - missing
+      properties:
+        outcome:
+          type: string
+          const: needsMore
+        draft:
+          $ref: "#/components/schemas/RoutineDraft"
+        missing:
+          type: string
+          x-extensible-enum:
+            - time
+            - event
+            - once
+          description: What to ask next. time is when it runs, event is what
+            starts it, and once is whether it runs once or keeps going.
+    RoutineReadingRefused:
+      type: object
+      description: The sentence asks for something a routine can't do.
+      required:
+        - outcome
+        - detail
+        - fix
+      properties:
+        outcome:
+          type: string
+          const: refused
+        detail:
+          type: string
+          description: Why it can't, in a sentence for the person.
+        fix:
+          type:
+            - string
+            - "null"
+          x-extensible-enum:
+            - connectApp
+          description: What the person can do about it. connectApp is to connect an
+            app first. Null when there is nothing to do but ask differently.
+    RoutineReadingNotRoutine:
+      type: object
+      description: The sentence is not a request for a routine.
+      required:
+        - outcome
+      properties:
+        outcome:
+          type: string
+          const: notRoutine
+    RoutineReading:
+      description: A sentence read as a routine's answers, or why it can't be.
+      oneOf:
+        - $ref: "#/components/schemas/RoutineReadingReady"
+        - $ref: "#/components/schemas/RoutineReadingNeedsMore"
+        - $ref: "#/components/schemas/RoutineReadingRefused"
+        - $ref: "#/components/schemas/RoutineReadingNotRoutine"
+      discriminator:
+        propertyName: outcome
+        mapping:
+          ready: "#/components/schemas/RoutineReadingReady"
+          needsMore: "#/components/schemas/RoutineReadingNeedsMore"
+          refused: "#/components/schemas/RoutineReadingRefused"
+          notRoutine: "#/components/schemas/RoutineReadingNotRoutine"
     UpdateRoutineRequest:
       type: object
       additionalProperties: false
