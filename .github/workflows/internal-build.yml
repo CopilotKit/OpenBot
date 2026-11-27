@@ -26,6 +26,7 @@ jobs:
   prepare:
     name: prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # names the build, in seconds
     outputs:
       manifest_version: ${{ steps.version.outputs.manifest_version }}
     steps:
@@ -69,6 +70,7 @@ jobs:
     name: summary
     needs: [prepare, desktop]
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # writes the summary, in seconds
     permissions:
       actions: read
     steps:
