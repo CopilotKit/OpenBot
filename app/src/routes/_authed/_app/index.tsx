@@ -66,6 +66,7 @@ import { useDraftModel } from "@/lib/models/run-model";
 import { newId } from "@/lib/new-id";
 import { takeInvitationLink } from "@/lib/organizations/invitation-link";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
+import { loadFirstScreen } from "@/lib/route-data";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -109,6 +110,12 @@ export const Route = createFileRoute("/_authed/_app/")({
       });
     await editionOf(context.queryClient);
   },
+  loader: ({ context }) =>
+    loadFirstScreen(context.queryClient, [
+      channelListQueryOptions(),
+      agentListQueryOptions(),
+      deploymentCapabilitiesQueryOptions(),
+    ]),
   component: RouteComponent,
 });
 
