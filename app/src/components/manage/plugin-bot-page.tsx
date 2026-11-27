@@ -4,7 +4,7 @@ import {
   IconPlugOff,
   IconSearch,
   IconTool,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
 import { useState } from "react";

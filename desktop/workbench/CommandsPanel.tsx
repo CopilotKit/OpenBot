@@ -1,4 +1,4 @@
-import { IconChevronRight, IconSearch } from "@tabler/icons-react";
+import { IconChevronRight, IconSearch } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {

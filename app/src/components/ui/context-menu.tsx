@@ -1,5 +1,5 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
-import { IconCheck, IconChevronRight } from "@tabler/icons-react";
+import { IconCheck, IconChevronRight } from "@/components/icons";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 

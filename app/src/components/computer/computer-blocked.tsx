@@ -1,4 +1,4 @@
-import { IconDeviceDesktopOff } from "@tabler/icons-react";
+import { IconDeviceDesktopOff } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { buttonVariants } from "@/components/ui/button";

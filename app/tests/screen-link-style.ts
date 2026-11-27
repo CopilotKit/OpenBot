@@ -43,7 +43,7 @@ export function screenLinkLooks(
           href: link.getAttribute("href") ?? "",
           underlined: style.textDecorationLine.includes("underline"),
           chevron: Boolean(
-            svg?.classList.contains("tabler-icon-chevron-right") &&
+            svg?.classList.contains("icon-chevron-right") &&
               svg.getBoundingClientRect().left >=
                 link.getBoundingClientRect().left +
                   link.getBoundingClientRect().width / 2,

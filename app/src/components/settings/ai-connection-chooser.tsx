@@ -5,7 +5,7 @@ import {
   IconCloud,
   IconExternalLink,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   createContext,

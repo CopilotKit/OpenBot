@@ -3,7 +3,7 @@ import {
   SECURITY_FLOOR_HEADING,
   SECURITY_FLOOR_LINE,
 } from "@openbot/shared/security-floor";
-import { IconShieldExclamation } from "@tabler/icons-react";
+import { IconShieldExclamation } from "@/components/icons";
 import type * as React from "react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";

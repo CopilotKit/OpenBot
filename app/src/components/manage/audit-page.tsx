@@ -9,7 +9,7 @@ import {
   IconRefresh,
   IconSearch,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   keepPreviousData,
   useInfiniteQuery,

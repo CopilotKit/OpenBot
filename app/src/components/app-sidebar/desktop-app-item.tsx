@@ -1,4 +1,4 @@
-import { IconDeviceDesktopDown } from "@tabler/icons-react";
+import { IconDeviceDesktopDown } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";

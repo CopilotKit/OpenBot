@@ -1,4 +1,4 @@
-import { type Icon, IconLogout, IconMessages } from "@tabler/icons-react";
+import { type Icon, IconLogout, IconMessages } from "@/components/icons";
 import { Link, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";

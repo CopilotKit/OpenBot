@@ -1,4 +1,4 @@
-import { IconRobot } from "@tabler/icons-react";
+import { IconRobot } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import type { SettingsToolCardProps } from "./registry";

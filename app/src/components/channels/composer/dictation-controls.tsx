@@ -4,7 +4,7 @@ import {
   IconMicrophone,
   IconPlayerStopFilled,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";

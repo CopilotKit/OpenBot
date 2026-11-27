@@ -1,4 +1,4 @@
-import { IconMessages, IconRobot } from "@tabler/icons-react";
+import { IconMessages, IconRobot } from "@/components/icons";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
   createBrowserHistory,

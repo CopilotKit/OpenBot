@@ -11,7 +11,7 @@ import {
   IconLock,
   IconTag,
   IconTool,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";

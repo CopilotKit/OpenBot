@@ -1,5 +1,5 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
-import { IconCheck, IconChevronRight } from "@tabler/icons-react";
+import { IconCheck, IconChevronRight } from "@/components/icons";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 

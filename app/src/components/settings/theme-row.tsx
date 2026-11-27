@@ -1,4 +1,4 @@
-import { IconSunMoon } from "@tabler/icons-react";
+import { IconSunMoon } from "@/components/icons";
 import { useTheme } from "@/components/theme-provider";
 import {
   Item,

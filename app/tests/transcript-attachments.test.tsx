@@ -517,7 +517,7 @@ test("an Office file a person sent is drawn as its kind, with its size and a dow
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       sizeBytes: 14_336,
       label: "Excel workbook · 14 KB",
-      icon: "tabler-icon-file-type-xls",
+      icon: "icon-file-type-xls",
     },
     {
       filename: "memo.docx",
@@ -525,7 +525,7 @@ test("an Office file a person sent is drawn as its kind, with its size and a dow
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       sizeBytes: 2_411_724,
       label: "Word document · 2.3 MB",
-      icon: "tabler-icon-file-type-docx",
+      icon: "icon-file-type-docx",
     },
     {
       filename: "deck.pptx",
@@ -533,7 +533,7 @@ test("an Office file a person sent is drawn as its kind, with its size and a dow
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       sizeBytes: 31_457_280,
       label: "PowerPoint presentation · 30 MB",
-      icon: "tabler-icon-file-type-ppt",
+      icon: "icon-file-type-ppt",
     },
   ];
   const { container, getByRole, getByText, queryByText } = renderTranscript([

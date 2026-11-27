@@ -1,4 +1,4 @@
-import { IconBuilding } from "@tabler/icons-react";
+import { IconBuilding } from "@/components/icons";
 import { HOST_LABELS } from "@/components/approvals/rules";
 import type { SettingsToolCardProps } from "./registry";
 import {

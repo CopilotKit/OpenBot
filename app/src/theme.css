@@ -199,15 +199,6 @@ body {
     @apply font-sans;
   }
 
-  /*
-   * Tabler draws every outline icon with a `stroke-width="2"` attribute unless it is given a
-   * `stroke`, and a CSS property outranks an SVG attribute. So this lightens the default line only;
-   * an icon given its own `stroke` keeps it (docs/app-guidelines.md, "The look").
-   */
-  .tabler-icon[stroke-width="2"] {
-    stroke-width: 1.75;
-  }
-
   ::-webkit-scrollbar {
     width: 5px;
   }

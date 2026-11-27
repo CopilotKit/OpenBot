@@ -1,4 +1,4 @@
-import { IconBolt, IconPlugOff, IconTool } from "@tabler/icons-react";
+import { IconBolt, IconPlugOff, IconTool } from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {

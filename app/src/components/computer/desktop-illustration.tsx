@@ -1,4 +1,4 @@
-import { IconFolderFilled, IconLock } from "@tabler/icons-react";
+import { IconFolderFilled, IconLock } from "@/components/icons";
 import { motion, useReducedMotion } from "motion/react";
 import { EASE_OUT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -121,7 +121,7 @@ function PointerCursor({ still }: { still: boolean }) {
         scale: { ...TOUR, ease: [...CLICK_EASE] },
       }}
     >
-      {/* Tabler's pointer-2, inlined: the installed icon package predates it. */}
+      {/* Tabler's pointer-2, inlined: the illustration's pointer, not one of the app's icons. */}
       <svg
         aria-hidden="true"
         className="size-5 text-foreground drop-shadow-sm"

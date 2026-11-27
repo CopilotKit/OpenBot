@@ -4,7 +4,7 @@ import {
   IconCloudUpload,
   IconDatabaseOff,
   IconListCheck,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useEffect, useState } from "react";
 import { PageRows } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";

@@ -1,4 +1,4 @@
-import { IconArchive, IconBuilding, IconTrash } from "@tabler/icons-react";
+import { IconArchive, IconBuilding, IconTrash } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import {

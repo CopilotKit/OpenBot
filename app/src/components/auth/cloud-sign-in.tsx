@@ -1,4 +1,4 @@
-import { IconBuilding, IconChevronRight } from "@tabler/icons-react";
+import { IconBuilding, IconChevronRight } from "@/components/icons";
 import { useEffect, useRef, useState } from "react";
 import { Trademark } from "@/components/edition/brand-name";
 import {

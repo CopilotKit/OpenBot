@@ -1,4 +1,4 @@
-import { IconUserCircle } from "@tabler/icons-react";
+import { IconUserCircle } from "@/components/icons";
 import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
 import { HOST_LABELS } from "@/components/approvals/rules";
 import { Badge } from "@/components/gallery/frame";

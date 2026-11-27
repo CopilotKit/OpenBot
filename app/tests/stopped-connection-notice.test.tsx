@@ -280,15 +280,13 @@ test("the trigger shows the warning mark while stopped is set, and none after th
   );
   const trigger = view.getByRole("combobox", { name: /GPT-6.2 Sol/ });
   expect(trigger.getAttribute("aria-label")).toContain("can't run now");
-  expect(
-    trigger.querySelector("svg.tabler-icon-alert-triangle"),
-  ).not.toBeNull();
+  expect(trigger.querySelector("svg.icon-alert-triangle")).not.toBeNull();
   view.rerender(
     <ModelPicker catalogue={catalogue} onChange={() => {}} value={pick} />,
   );
   const after = view.getByRole("combobox", { name: /GPT-6.2 Sol/ });
   expect(after.getAttribute("aria-label")).not.toContain("can't run now");
-  expect(after.querySelector("svg.tabler-icon-alert-triangle")).toBeNull();
+  expect(after.querySelector("svg.icon-alert-triangle")).toBeNull();
 });
 
 const NO_DEFAULT = "Choose a default AI in Settings so Bots can start work.";

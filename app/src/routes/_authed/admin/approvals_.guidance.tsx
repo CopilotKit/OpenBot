@@ -1,4 +1,4 @@
-import { IconShieldLock } from "@tabler/icons-react";
+import { IconShieldLock } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";

@@ -1,4 +1,4 @@
-import { IconKey, IconPlug, IconSearch } from "@tabler/icons-react";
+import { IconKey, IconPlug, IconSearch } from "@/components/icons";
 import {
   type UseInfiniteQueryResult,
   useInfiniteQuery,

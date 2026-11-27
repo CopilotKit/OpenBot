@@ -1,5 +1,5 @@
 import type { Message } from "@ag-ui/core";
-import { IconX } from "@tabler/icons-react";
+import { IconX } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";

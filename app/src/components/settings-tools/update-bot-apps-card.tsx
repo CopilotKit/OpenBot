@@ -1,5 +1,5 @@
 import { appToolName, connectorName } from "@openbot/shared/tool-name";
-import { IconRobot } from "@tabler/icons-react";
+import { IconRobot } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { agentListQueryOptions } from "@/lib/agents/queries";

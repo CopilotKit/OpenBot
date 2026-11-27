@@ -5,7 +5,7 @@ import {
   IconListCheck,
   IconRobot,
   IconShieldCheck,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useReducedMotion } from "motion/react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 

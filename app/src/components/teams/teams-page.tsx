@@ -4,7 +4,7 @@ import {
   IconPlus,
   IconSearch,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";

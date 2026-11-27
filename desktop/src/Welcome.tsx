@@ -3,7 +3,7 @@ import {
   IconCloud,
   IconDeviceLaptop,
   IconServer2,
-} from "@tabler/icons-react";
+} from "./icons";
 import { type ReactNode, useEffect, useState } from "react";
 import { BusinessBooker, type BusinessWay } from "./BusinessBooker";
 import { CloudMarks } from "./CloudMarks";

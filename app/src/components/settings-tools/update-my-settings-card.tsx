@@ -2,8 +2,8 @@ import {
   IconBell,
   IconListCheck,
   IconSettings,
-  type TablerIcon,
-} from "@tabler/icons-react";
+  type Icon,
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import type { SettingsToolCardProps } from "./registry";
@@ -31,7 +31,7 @@ type Snapshot = {
 /** The screen the change lives on, with its title and icon, from what the call named. */
 export function settingsScreenOf(after: unknown): {
   title: string;
-  icon: TablerIcon;
+  icon: Icon;
   link: SettingsScreenLink;
 } {
   const named = (after && typeof after === "object" ? after : {}) as Snapshot;

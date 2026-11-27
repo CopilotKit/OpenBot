@@ -1,4 +1,4 @@
-import { IconChevronLeft } from "@tabler/icons-react";
+import { IconChevronLeft } from "@/components/icons";
 import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { cn } from "@/lib/utils";

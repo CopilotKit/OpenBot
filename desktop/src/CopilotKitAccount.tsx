@@ -1,4 +1,4 @@
-import { IconFileText } from "@tabler/icons-react";
+import { IconFileText } from "./icons";
 import {
   type ReactNode,
   useCallback,

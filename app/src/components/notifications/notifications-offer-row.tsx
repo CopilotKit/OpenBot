@@ -1,4 +1,4 @@
-import { IconBell } from "@tabler/icons-react";
+import { IconBell } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
   Item,

@@ -18,7 +18,7 @@ import {
   IconPuzzle,
   IconShieldCheck,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { PageRows } from "@/components/layout/page-shell";

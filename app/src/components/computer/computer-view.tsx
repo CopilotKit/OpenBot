@@ -1,7 +1,7 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import { COMPUTER_START_WAIT_MS } from "@openbot/shared/computer-start";
-import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
+import { IconLock, IconWorld, IconX } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   type CSSProperties,

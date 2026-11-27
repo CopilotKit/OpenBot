@@ -1,4 +1,4 @@
-import { IconDeviceDesktop } from "@tabler/icons-react";
+import { IconDeviceDesktop } from "@/components/icons";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { useComputerControl } from "@/lib/computers/use-control";

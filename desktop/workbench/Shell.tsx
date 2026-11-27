@@ -1,4 +1,4 @@
-import { IconAlertTriangle, IconChevronDown } from "@tabler/icons-react";
+import { IconAlertTriangle, IconChevronDown } from "@/components/icons";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {

@@ -7,7 +7,7 @@ import {
   IconMicrophone,
   IconMicrophoneOff,
   IconWaveSine,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useEffect, useRef, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-parts";
 import { RecorderCollectsRows } from "@/components/recorder/recorder-collects";

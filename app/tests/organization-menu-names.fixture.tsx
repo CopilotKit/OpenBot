@@ -1,4 +1,4 @@
-import { IconLogout, IconSettings } from "@tabler/icons-react";
+import { IconLogout, IconSettings } from "@/components/icons";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,

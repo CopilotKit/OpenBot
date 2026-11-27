@@ -12,7 +12,7 @@ import {
   whatIfTeamGroup,
   whatIfTeamOf,
 } from "@openbot/shared/what-if";
-import { IconChevronDown } from "@tabler/icons-react";
+import { IconChevronDown } from "@/components/icons";
 import { type ReactNode, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {

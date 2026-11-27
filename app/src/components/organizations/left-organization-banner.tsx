@@ -1,4 +1,4 @@
-import { IconX } from "@tabler/icons-react";
+import { IconX } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
   dismissLeftOrganization,

@@ -1,5 +1,5 @@
 import type { LearningProposal } from "@openbot/shared/learning";
-import { IconChevronRight, IconSparkles } from "@tabler/icons-react";
+import { IconChevronRight, IconSparkles } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
 import {

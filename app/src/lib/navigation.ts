@@ -5,7 +5,7 @@ import {
   IconSettings,
   IconShieldLock,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { currentUserQueryOptions } from "@/lib/auth/queries";

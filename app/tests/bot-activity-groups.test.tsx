@@ -313,16 +313,12 @@ test("a task the person stopped reads Stopped on its row, in its card's words, a
   const row = (title: string) =>
     view.getByText(title).closest("[data-slot=item]") as HTMLElement;
   expect(row("Task stopped").dataset.taskState).toBe("stopped");
-  expect(
-    row("Task stopped").querySelector(".tabler-icon-player-stop"),
-  ).not.toBeNull();
-  expect(
-    row("Task stopped").querySelector(".tabler-icon-alert-triangle"),
-  ).toBeNull();
+  expect(row("Task stopped").querySelector(".icon-player-stop")).not.toBeNull();
+  expect(row("Task stopped").querySelector(".icon-alert-triangle")).toBeNull();
   expect(row("Task stopped").querySelector(".bg-destructive")).toBeNull();
   expect(row("Task failed").dataset.taskState).toBe("failed");
   expect(
-    row("Task failed").querySelector(".tabler-icon-alert-triangle"),
+    row("Task failed").querySelector(".icon-alert-triangle"),
   ).not.toBeNull();
 
   // One that couldn't finish on its own still says so.

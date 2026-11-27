@@ -3,7 +3,7 @@ import {
   IconDots,
   IconRadar,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { stashFirstMessage } from "@/components/channels/transcript-messages";

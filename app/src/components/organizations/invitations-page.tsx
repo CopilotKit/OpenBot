@@ -1,4 +1,4 @@
-import { IconBuilding, IconMail, IconMailOff } from "@tabler/icons-react";
+import { IconBuilding, IconMail, IconMailOff } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { PageEmpty, PageRows, PageShell } from "@/components/layout/page-shell";

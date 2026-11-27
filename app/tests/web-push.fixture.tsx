@@ -1,4 +1,4 @@
-import { IconPlayerPause } from "@tabler/icons-react";
+import { IconPlayerPause } from "@/components/icons";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
   createBrowserHistory,

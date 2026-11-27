@@ -1,6 +1,6 @@
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import { RECORDER_COLLECTS_SHORT } from "@openbot/shared/recorder-disclosure";
-import { IconLock, IconPlayerStop } from "@tabler/icons-react";
+import { IconLock, IconPlayerStop } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useId } from "react";
 import {

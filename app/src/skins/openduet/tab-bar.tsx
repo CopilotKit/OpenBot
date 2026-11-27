@@ -1,4 +1,4 @@
-import { IconMessageCircle } from "@tabler/icons-react";
+import { IconMessageCircle } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import { useWaitingCount } from "@/components/bot-profile/attention";
 import { cn } from "@/lib/utils";

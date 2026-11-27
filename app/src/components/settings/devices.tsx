@@ -1,4 +1,4 @@
-import { IconDeviceMobile, IconDevices, IconSend } from "@tabler/icons-react";
+import { IconDeviceMobile, IconDevices, IconSend } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 import {

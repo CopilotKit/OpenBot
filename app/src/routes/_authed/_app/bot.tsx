@@ -1,5 +1,5 @@
 import { CopilotChat } from "@copilotkit/react-core/v2";
-import { IconPlus } from "@tabler/icons-react";
+import { IconPlus } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";

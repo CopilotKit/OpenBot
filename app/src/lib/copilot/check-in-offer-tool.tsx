@@ -1,6 +1,6 @@
 import { useRenderTool } from "@copilotkit/react-core/v2";
 import { OFFER_CHECK_IN_TOOL } from "@openbot/shared/check-in-offer";
-import { IconRadar } from "@tabler/icons-react";
+import { IconRadar } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { useState } from "react";

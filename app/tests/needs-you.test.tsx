@@ -655,7 +655,7 @@ test("a task the person stopped reads Stopped on the board, in its card's words,
       surface.getByText(title).closest("[data-slot=item]") as HTMLElement;
     expect(row("Chase the supplier").dataset.taskState).toBe("stopped");
     expect(
-      row("Chase the supplier").querySelector(".tabler-icon-player-stop"),
+      row("Chase the supplier").querySelector(".icon-player-stop"),
     ).not.toBeNull();
     expect(
       row("Chase the supplier").querySelector(".bg-warning\\/10"),

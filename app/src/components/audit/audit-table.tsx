@@ -3,7 +3,7 @@ import {
   IconArrowUp,
   IconCirclePlus,
   IconSearch,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   type ColumnDef,

@@ -3,7 +3,7 @@ import {
   IconCode,
   IconShieldX,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   keepPreviousData,
   useMutation,

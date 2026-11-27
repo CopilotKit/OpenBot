@@ -1,5 +1,5 @@
 import { RESEARCH_ROLES } from "@openbot/shared/research";
-import { IconChevronRight, IconPlugOff, IconWorld } from "@tabler/icons-react";
+import { IconChevronRight, IconPlugOff, IconWorld } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";

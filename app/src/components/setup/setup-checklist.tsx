@@ -4,7 +4,7 @@ import {
   IconDeviceDesktop,
   IconMessages,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 import { PageRows } from "@/components/layout/page-shell";

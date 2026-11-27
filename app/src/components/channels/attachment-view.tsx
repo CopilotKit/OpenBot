@@ -1,4 +1,4 @@
-import { IconAlertTriangle, IconX } from "@tabler/icons-react";
+import { IconAlertTriangle, IconX } from "@/components/icons";
 import { useEffect, useState } from "react";
 import {
   Dialog,

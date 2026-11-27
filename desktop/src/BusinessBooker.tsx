@@ -14,7 +14,7 @@ import {
   IconSparkles,
   IconUsers,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "./icons";
 import {
   type ReactNode,
   type Ref,

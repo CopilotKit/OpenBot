@@ -9,7 +9,7 @@ import {
   IconMicrophone,
   IconPointer,
   IconShieldLock,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { Fragment } from "react";
 import { PageRows } from "@/components/layout/page-parts";
 import {

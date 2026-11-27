@@ -2,7 +2,7 @@ import {
   IconBuilding,
   IconChevronDown,
   IconUserCircle,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useSyncExternalStore } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";

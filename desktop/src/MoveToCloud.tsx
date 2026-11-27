@@ -14,7 +14,7 @@ import {
   IconRobot,
   IconTarget,
   IconUser,
-} from "@tabler/icons-react";
+} from "./icons";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -780,7 +780,7 @@ function Sheet({ children }: { children: ReactNode }) {
 function Mark({ icon: Glyph }: { icon: Icon }) {
   return (
     <div className="mark-tile mark-icon" aria-hidden="true">
-      <Glyph stroke={1.75} />
+      <Glyph />
     </div>
   );
 }
@@ -840,7 +840,7 @@ function Choice({
             onChange={() => setPicked("business")}
           />
           <HostingMark>
-            <IconBuilding stroke={1.75} />
+            <IconBuilding />
           </HostingMark>
           <span className="tile-name">OpenBot for Business</span>
           <span className="tile-summary">{BUSINESS_SUMMARY}</span>
@@ -1020,7 +1020,7 @@ function Confirm({
             <ul className="move-counts" aria-label="What moves">
               {lines.map((line) => (
                 <li key={line.kind}>
-                  <line.icon stroke={1.75} aria-hidden="true" />
+                  <line.icon aria-hidden="true" />
                   {line.said}
                 </li>
               ))}
@@ -1156,7 +1156,7 @@ function AppMark({ app }: { app: ReconnectApp }) {
       {app.iconUrl && !broken ? (
         <img src={app.iconUrl} alt="" onError={() => setBroken(true)} />
       ) : (
-        <IconPlug stroke={1.75} />
+        <IconPlug />
       )}
     </span>
   );
@@ -1209,7 +1209,7 @@ function Done({ moved }: { moved: Moved }) {
       </p>
       {moved.removedBytes != null && moved.removedBytes > 0 && (
         <div className="move-freed">
-          <IconCircleCheck stroke={1.75} aria-hidden="true" />
+          <IconCircleCheck aria-hidden="true" />
           <div>
             <p>
               <strong>

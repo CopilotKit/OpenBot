@@ -4,7 +4,7 @@ import {
   IconChevronRight,
   IconDeviceMobileMessage,
   IconSend,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useEffect, useId, useState } from "react";

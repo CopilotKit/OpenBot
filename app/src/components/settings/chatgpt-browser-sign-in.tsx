@@ -2,7 +2,7 @@ import {
   IconClipboard,
   IconExternalLink,
   IconMoodSad,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { type ClipboardEvent, useEffect, useRef, useState } from "react";
 import { IllustrationFrame } from "@/components/onboarding/illustration-frame";
 import { Button } from "@/components/ui/button";

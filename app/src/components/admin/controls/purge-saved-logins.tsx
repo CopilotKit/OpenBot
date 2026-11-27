@@ -1,4 +1,4 @@
-import { IconTrash } from "@tabler/icons-react";
+import { IconTrash } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";

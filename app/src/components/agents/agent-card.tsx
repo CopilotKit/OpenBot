@@ -1,4 +1,4 @@
-import { IconArrowRight } from "@tabler/icons-react";
+import { IconArrowRight } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Button } from "@/components/ui/button";

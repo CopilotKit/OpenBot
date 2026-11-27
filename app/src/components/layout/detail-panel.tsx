@@ -1,4 +1,4 @@
-import { IconX } from "@tabler/icons-react";
+import { IconX } from "@/components/icons";
 import { motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";

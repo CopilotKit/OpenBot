@@ -1,4 +1,4 @@
-import { IconSettings } from "@tabler/icons-react";
+import { IconSettings } from "@/components/icons";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
