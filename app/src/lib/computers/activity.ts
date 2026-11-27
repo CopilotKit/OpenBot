@@ -5,6 +5,7 @@ import {
   declinedByPerson,
   doneByPerson,
   NOT_RUN_UNANSWERED,
+  OUTCOME_UNKNOWN,
   outcomeForPerson,
 } from "@openbot/shared/approval-outcomes";
 import type { DecisionToolName } from "@openbot/shared/decision-tools";
@@ -629,6 +630,12 @@ export function readOutcome(content: unknown): ToolOutcome | null {
    * Read as a refusal, a command a sleeping phone never ran was drawn "Blocked", in red.
    */
   if (text === NOT_RUN_UNANSWERED) return { ok: false, reason: text };
+  /*
+   * Nor one whose run was cut off before it answered, so nobody knows whether it happened, and which
+   * was not run again: the server says so of a step it ran itself. Nothing turned it away either.
+   */
+  if (text === OUTCOME_UNKNOWN || text.startsWith("Outcome unknown:"))
+    return { ok: false, outcomeUnknown: true, reason: text };
   return text.startsWith("Error:")
     ? { ok: false, reason: text.slice("Error:".length).trim() }
     : { ok: false, refused: true, reason: text };

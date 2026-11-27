@@ -1,4 +1,11 @@
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
 import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { CopilotKitProvider, useFrontendTool } from "@copilotkit/react-core/v2";
@@ -50,7 +57,8 @@ const channel: AgentChannel = {
 const NativeResponse = globalThis.Response;
 const encoder = new TextEncoder();
 
-const ASKED = "Write the numbers to a file, add them up, and tell me the total.";
+const ASKED =
+  "Write the numbers to a file, add them up, and tell me the total.";
 const ABOUT_TO = "I'll save the numbers and add them up on my computer.";
 const SAVED = "numbers.txt";
 const COMMAND = "paste -sd+ numbers.txt | bc";

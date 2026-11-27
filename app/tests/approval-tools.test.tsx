@@ -313,6 +313,39 @@ test("a step on a computer still starting is asked again, and the Bot gets what 
   });
 });
 
+/*
+ * A STEP THE SERVER HAS TAKEN IS NOT RUN TWICE. The server runs a Bot's computer steps itself, once,
+ * whoever asks. A page that asks for one the server is running is told it is `taken` and still going,
+ * asks again with the same step until the server's run answers, and that answer is the step's.
+ */
+test("a step the server is running is asked about again, never run here, and gets the server's answer", async () => {
+  const asked: unknown[] = [];
+  const result = await clickAgainstGate(async () => {
+    asked.push("step");
+    return asked.length === 1
+      ? Response.json({
+          outcome: "taken",
+          threadId: "thread",
+          toolCallId: "click-call",
+          running: true,
+        })
+      : Response.json({
+          outcome: "taken",
+          threadId: "thread",
+          toolCallId: "click-call",
+          running: false,
+          result: { ok: true, clicked: "e7" },
+        });
+  });
+  // Only the gate was asked, twice, and nothing went to the computer from here.
+  expect(asked).toEqual(["step", "step"]);
+  expect(result).toEqual({
+    ok: true,
+    clicked: "e7",
+    finishedAt: expect.any(String),
+  });
+});
+
 test("a gate that cannot be reached, or answers with no result, is still a result", async () => {
   expect(
     await clickAgainstGate(async () => {

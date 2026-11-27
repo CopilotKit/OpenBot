@@ -825,6 +825,7 @@ export function ChannelChat({
   });
 
   // Join the gateway socket, restore durable history, then release the first-message gate.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `joins` is the join asked for again when OpenBot answers again.
   useEffect(() => {
     if (!isReady) return;
     let current = true;
