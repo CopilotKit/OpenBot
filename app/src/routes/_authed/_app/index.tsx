@@ -129,7 +129,8 @@ function RouteComponent() {
    */
   const personal = capabilities.data?.edition === "personal";
   // The box's message is kept in its draft until its conversation has it; a suggestion has no draft.
-  const { startChosen, startPicked, pending } = useStartChannel("home");
+  const typedStart = useStartChannel("home");
+  const { pending } = typedStart;
   const suggested = useStartChannel();
   const router = useRouter();
   const navigate = useNavigate();
@@ -230,8 +231,16 @@ function RouteComponent() {
    * Runs on after this page has unmounted, which is the point. A failure goes back to the home
    * composer with the words and the reason, and the person is taken there only if they are still
    * looking at the placeholder; otherwise the next home page they open shows it.
+   *
+   * A starter task starts the same way, from its own click. It was never typed in the box, so the
+   * box keeps whatever the person had written there, and a failure puts back only its reason.
    */
-  const startBehind = async (pendingId: string, draft: ComposerDraft) => {
+  const startBehind = async (
+    pendingId: string,
+    draft: ComposerDraft,
+    starter = false,
+  ) => {
+    const { startChosen, startPicked } = starter ? suggested : typedStart;
     // A `/` skill stays at the start of the words, where the server finds it and gives the Bot its
     // instructions, only if the Bot holds it (server/src/plugins/picked-skill.ts).
     try {
@@ -259,18 +268,47 @@ function RouteComponent() {
         pickFor,
       });
     } catch (caught) {
-      stashFailedStart({
-        text: draft.text,
-        error: failureOf(caught, "Couldn't start the conversation. Try again."),
-        files: draft.attachments
-          .map(heldFileOf)
-          .filter((file) => file !== undefined),
-      });
+      stashFailedStart(
+        starter
+          ? {
+              text: "",
+              error: failureOf(caught, "Couldn't start that task. Try again."),
+            }
+          : {
+              text: draft.text,
+              error: failureOf(
+                caught,
+                "Couldn't start the conversation. Try again.",
+              ),
+              files: draft.attachments
+                .map(heldFileOf)
+                .filter((file) => file !== undefined),
+            },
+      );
       if (router.state.location.pathname === pendingStartPath(pendingId))
         await navigate({ replace: true, to: "/" });
     } finally {
       endPendingStart(pendingId);
     }
+  };
+
+  /**
+   * The conversation opens NOW, as a placeholder showing the message under the "Thinking" line, and
+   * the Bot is picked and the channel made behind it; see `pending-start.ts`. Waiting here for both
+   * is what kept send looking dead for seconds.
+   */
+  const send = async (draft: ComposerDraft, starter = false) => {
+    setError(null);
+    const pendingId = newId();
+    beginPendingStart(pendingId, {
+      text: draft.text,
+      agentId: draft.agentId,
+    });
+    await navigate({
+      params: { startId: pendingId },
+      to: "/start/$startId",
+    });
+    void startBehind(pendingId, draft, starter);
   };
 
   return (
@@ -313,9 +351,17 @@ function RouteComponent() {
             disabled={pending || suggested.pending}
             onSelect={async (message) => {
               if (!fallback) return;
-              const { pick, notUsed } = await pickFor(fallback.id);
-              await suggested.startChosen(fallback.id, message, pick);
-              notUsed?.();
+              // Sent as a message written in the box is, to the Bot the tasks are offered for.
+              await send(
+                {
+                  text: message,
+                  commandIds: [],
+                  attachments: [],
+                  agentId: fallback.id,
+                  isEmpty: false,
+                },
+                true,
+              );
             }}
           />
           <Composer
@@ -347,22 +393,7 @@ function RouteComponent() {
               : asked
                 ? { initialValue: asked, autoFocus: true }
                 : {})}
-            onSubmit={async (draft) => {
-              // The conversation opens NOW, as a placeholder showing the message, and the Bot is
-              // picked and the channel made behind it; see `pending-start.ts`. Waiting here for
-              // both is what kept send looking dead for seconds.
-              setError(null);
-              const pendingId = newId();
-              beginPendingStart(pendingId, {
-                text: draft.text,
-                agentId: draft.agentId,
-              });
-              await navigate({
-                params: { startId: pendingId },
-                to: "/start/$startId",
-              });
-              void startBehind(pendingId, draft);
-            }}
+            onSubmit={(draft) => send(draft)}
           />
           {fallback ? (
             // Said out loud: a message that silently reaches somebody you did not choose is the

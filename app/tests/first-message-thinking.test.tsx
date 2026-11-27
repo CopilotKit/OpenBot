@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { getGetBotResponseMock } from "@/lib/api/generated/bots/bots.msw";
-import { personBody } from "./accounts-api";
+import { PREFERENCES_PATH, personBody } from "./accounts-api";
 import { botGrantsBody } from "./bot-grants-api";
 import {
   CONVERSATIONS_PATH,
@@ -29,6 +29,11 @@ import { still } from "./page-still";
  * step the server takes is slow on purpose (picking the Bot, making the conversation, starting the
  * run, the model's first words), and every frame from Send is read in the page: "Thinking" shows
  * within 200 ms and stays, frame by frame, until the Bot's first words are drawn.
+ *
+ * A starter task is a first message too, sent with a click instead of Send. From home it waited for
+ * the conversation to be made before anything changed, with the task's row only greyed out: the
+ * same few seconds of nothing. It is read the same way, from home and from a new conversation with
+ * the Bot in To:, the two places the tasks are offered.
  *
  *   OPENBOT_APP_BROWSER=1 OPENBOT_APP_ENGINES=chromium,webkit bun test app/tests/first-message-thinking.test.tsx
  *
@@ -57,9 +62,13 @@ const SHOWN_WITHIN_MS = 200;
 /**
  * The hand-over from the line to the words. The line goes in the frame the reply arrives, and the
  * reply is written in from the next (`paced-reveal.ts`), so a frame or two before the first word is
- * that, not a wait with nothing on screen.
+ * that, not a wait with nothing on screen. Counted in frames as well as time: with eight files
+ * running at once in CI, a frame can take longer than 50 ms, and the hand-over frame with it.
  */
 const REVEAL_HANDOFF_MS = 50;
+const REVEAL_HANDOFF_FRAMES = 2;
+/** The starter task clicked: its title, which is the task's button. */
+const STARTER = "Chart Hacker News";
 
 const BOT = {
   ...getGetBotResponseMock().bot,
@@ -72,6 +81,8 @@ const BOT = {
   hidden: false,
   visibility: "public" as const,
   runsOnOpenBotModel: false,
+  // One of the Bots OpenBot starts with, whose composer offers the starter tasks.
+  packageBotId: "personal-assistant",
 };
 
 /** How long each step the server takes is held, in milliseconds; null holds it until released. */
@@ -102,6 +113,8 @@ const chunks = { asked: 0, sent: 0 };
 /** Steps held until the test lets them go (a `null` in the pace), by name. */
 const held = new Map<keyof Pace, () => void>();
 let made = 0;
+/** Whether making a conversation fails, for the start that cannot be made. */
+let refuseCreate = false;
 /** The conversations made, by id, with the thread each one's run answers on. */
 const conversations = new Map<string, { threadId: string; ran: boolean }>();
 
@@ -176,6 +189,14 @@ async function answer(request: Request, path: string): Promise<Response> {
   }
   if (path === CONVERSATIONS_PATH && request.method === "POST") {
     await wait("create");
+    if (refuseCreate)
+      return Response.json(
+        { status: 503, detail: "Conversations can't be made right now." },
+        {
+          status: 503,
+          headers: { "content-type": "application/problem+json" },
+        },
+      );
     made += 1;
     const id = `conversation-${made}`;
     conversations.set(id, { threadId: `thread-${made}`, ran: false });
@@ -221,6 +242,8 @@ async function answer(request: Request, path: string): Promise<Response> {
   if (/\/bots\/[^/]+\/grants$/.test(path)) return json(botGrantsBody());
   if (/\/bots\/[^/]+\/components$/.test(path))
     return json({ components: [], nextCursor: null });
+  // Nothing saved: the starter tasks have not been taken yet, so they are offered.
+  if (path === PREFERENCES_PATH) return json({});
   if (path === `${ORGANIZATION_PATH}/people/me/capabilities`)
     return json({ capabilities: {}, enforced: false });
   if (path === `${ORGANIZATION_PATH}/people/me`)
@@ -445,47 +468,78 @@ async function open(
 /** One frame as the page drew it: when, and what it showed. */
 type Frame = { at: number; path: string; thinking: boolean; words: boolean };
 
+/** How a first message is sent: written and sent with Enter, or a starter task clicked. */
+type By = "typing" | "starter";
+
 /**
- * Write the message, start reading every frame, and send it with Enter. Each frame is read in
- * `requestAnimationFrame`, just before it is drawn: whether the "Thinking" line is on screen, and
- * whether the Bot's words are. `sent` is when the page took the key.
+ * Start reading every frame. Each frame is read in `requestAnimationFrame`, just before it is
+ * drawn: whether the "Thinking" line is on screen, and whether the Bot's words are. `sent` is when
+ * the page took the Enter, or the click.
  */
-async function sendWatched(page: Page) {
+async function watchFrames(page: Page, by: By) {
+  await page.evaluate(
+    ({ firstWord, by }) => {
+      const watch = window as unknown as {
+        frames: Frame[];
+        sent: number | null;
+        watching: boolean;
+      };
+      watch.frames = [];
+      watch.sent = null;
+      watch.watching = true;
+      document.addEventListener(
+        by === "typing" ? "keydown" : "click",
+        (event) => {
+          if (
+            watch.sent === null &&
+            (by === "starter" || (event as KeyboardEvent).key === "Enter")
+          )
+            watch.sent = performance.now();
+        },
+        { capture: true },
+      );
+      const frame = (at: number) => {
+        if (!watch.watching) return;
+        const thinking = [...document.querySelectorAll('[role="status"]')].some(
+          (line) =>
+            line.textContent?.trim() === "Thinking" &&
+            line.getClientRects().length > 0,
+        );
+        const words = [...document.querySelectorAll('[role="log"]')].some(
+          (log) => log.textContent?.includes(firstWord),
+        );
+        watch.frames.push({ at, path: location.pathname, thinking, words });
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    },
+    { firstWord: FIRST_WORD, by },
+  );
+}
+
+/** Send a first message, written and sent with Enter or a starter task clicked, watching every frame. */
+async function sendWatched(page: Page, by: By) {
+  if (by === "starter") {
+    const task = page.getByRole("button", { name: STARTER });
+    await task.waitFor();
+    await watchFrames(page, by);
+    await task.click();
+    return;
+  }
   const box = page.getByRole("textbox", { name: "Message" });
   await box.click();
   await page.keyboard.type(QUESTION);
-  await page.evaluate((firstWord) => {
-    const watch = window as unknown as {
-      frames: Frame[];
-      sent: number | null;
-      watching: boolean;
-    };
-    watch.frames = [];
-    watch.sent = null;
-    watch.watching = true;
-    document.addEventListener(
-      "keydown",
-      (event) => {
-        if (event.key === "Enter" && watch.sent === null)
-          watch.sent = performance.now();
-      },
-      { capture: true },
-    );
-    const frame = (at: number) => {
-      if (!watch.watching) return;
-      const thinking = [...document.querySelectorAll('[role="status"]')].some(
-        (line) =>
-          line.textContent?.trim() === "Thinking" &&
-          line.getClientRects().length > 0,
-      );
-      const words = [...document.querySelectorAll('[role="log"]')].some((log) =>
-        log.textContent?.includes(firstWord),
-      );
-      watch.frames.push({ at, path: location.pathname, thinking, words });
-      requestAnimationFrame(frame);
-    };
-    requestAnimationFrame(frame);
-  }, FIRST_WORD);
+  await watchFrames(page, by);
+  await page.keyboard.press("Enter");
+}
+
+/** Send a first message as `sendWatched` does, without watching. */
+async function send(page: Page, by: By) {
+  if (by === "starter") {
+    await page.getByRole("button", { name: STARTER }).click();
+    return;
+  }
+  await page.getByRole("textbox", { name: "Message" }).fill(QUESTION);
   await page.keyboard.press("Enter");
 }
 
@@ -533,12 +587,18 @@ function read({ frames, sent }: { frames: Frame[]; sent: number }) {
   const before = words === -1 ? after : after.slice(0, words);
   const from = first ? before.indexOf(first) : before.length;
   const wordsAt = words === -1 ? Number.POSITIVE_INFINITY : after[words].at;
+  const handOver = new Set(
+    words === -1 ? [] : before.slice(-REVEAL_HANDOFF_FRAMES),
+  );
   return {
     shownAfterMs: first ? Math.round(first.at - sent) : null,
     framesWithout: before
       .slice(Math.max(from, 0))
       .filter(
-        (frame) => !frame.thinking && wordsAt - frame.at > REVEAL_HANDOFF_MS,
+        (frame) =>
+          !frame.thinking &&
+          !handOver.has(frame) &&
+          wordsAt - frame.at > REVEAL_HANDOFF_MS,
       )
       .map((frame) => `${Math.round(frame.at - sent)}ms ${frame.path}`),
     wordsDrawn: words !== -1,
@@ -556,21 +616,36 @@ const PLACES = [
   },
 ] as const;
 
+/**
+ * Every way a first message goes: written, from each place; and a starter task, from each place
+ * that offers them (a new conversation offers them for the Bot in To:, so not with nobody there).
+ */
+const SENDS = [
+  ...PLACES.map((where) => ({ ...where, by: "typing" as const })),
+  ...PLACES.filter(({ place }) => place !== "new-conversation").map(
+    (where) => ({ ...where, by: "starter" as const }),
+  ),
+];
+
+/** What a send is called in a test's name and a screenshot's. */
+const named = ({ place, by }: (typeof SENDS)[number]) =>
+  by === "starter" ? `a starter task on ${place}` : place;
+
 describe.skipIf(!asked)(
   "a first message, from Send to the Bot's first words",
   () => {
     for (const engine of engines)
-      for (const { place, path } of PLACES)
-        test(`shows "Thinking" within ${SHOWN_WITHIN_MS} ms and until the first words, from ${place}, in ${engine}`, async () => {
+      for (const sent of SENDS)
+        test(`shows "Thinking" within ${SHOWN_WITHIN_MS} ms and until the first words, from ${named(sent)}, in ${engine}`, async () => {
           pace = PACE;
-          const page = await open(engine, path);
+          const page = await open(engine, sent.path);
           try {
             await still(page);
             // Whatever the page fetched while it was open has arrived, as it has by the time
             // somebody has written a message. What it did not ask for, Send has to fetch.
             while (chunks.sent < chunks.asked)
               await new Promise((done) => setTimeout(done, 50));
-            await sendWatched(page);
+            await sendWatched(page, sent.by);
             const seen = read(await framesToWords(page));
             expect(new URL(page.url()).pathname).toStartWith(
               "/channel/conversation-",
@@ -586,6 +661,40 @@ describe.skipIf(!asked)(
             await page.close();
           }
         }, 60_000);
+
+    /*
+     * A starter task from home that cannot start goes back home, as a written message does, with
+     * the reason under the box. The task was never in the box, so what the person had written there
+     * is still there, and the tasks are offered again.
+     */
+    for (const engine of engines)
+      test(`a starter task from home that cannot start comes back home with its reason, the box's own words kept, in ${engine}`, async () => {
+        pace = { ...PACE, create: 300 };
+        refuseCreate = true;
+        const DRAFT = "A note to myself, not sent yet";
+        const page = await open(engine, "/");
+        try {
+          await page.getByRole("textbox", { name: "Message" }).fill(DRAFT);
+          await page.getByRole("button", { name: STARTER }).click();
+          await page.waitForURL(/\/start\//, { waitUntil: "commit" });
+          await page.waitForURL((url) => url.pathname === "/");
+          await page
+            .getByRole("alert")
+            .filter({ hasText: "Conversations can't be made right now." })
+            .waitFor();
+          expect(
+            await page.getByRole("textbox", { name: "Message" }).innerText(),
+          ).toBe(DRAFT);
+          await page.getByRole("button", { name: STARTER }).waitFor();
+          await shoot(
+            page,
+            `first-message-thinking-a-starter-task-on-home-failed-${engine}`,
+          );
+        } finally {
+          refuseCreate = false;
+          await page.close();
+        }
+      }, 60_000);
   },
 );
 
@@ -604,22 +713,19 @@ describe.skipIf(!asked || !shots)(
       test(`each step, wide and on a phone, light and dark, in ${engine}`, async () => {
         for (const width of [1440, 390])
           for (const theme of ["light", "dark"] as const)
-            for (const { place, path } of PLACES) {
+            for (const sent of SENDS) {
               pace = {
                 route: null,
                 create: null,
                 runStarts: null,
                 firstWords: null,
               };
-              const page = await open(engine, path, { theme, width });
+              const page = await open(engine, sent.path, { theme, width });
               const name = (step: string) =>
-                `first-message-thinking-${place}-${step}-${engine}-${width}-${theme}`;
+                `first-message-thinking-${named(sent).replaceAll(" ", "-")}-${step}-${engine}-${width}-${theme}`;
               try {
                 await shoot(page, name("1-before"));
-                await page
-                  .getByRole("textbox", { name: "Message" })
-                  .fill(QUESTION);
-                await page.keyboard.press("Enter");
+                await send(page, sent.by);
                 // What shows 300 ms after Send, while OpenBot picks the Bot (or, with one named,
                 // makes the conversation): a moment in time is the point, so the wait is fixed.
                 await page.waitForTimeout(300);
