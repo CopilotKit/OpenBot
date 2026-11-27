@@ -1,9 +1,10 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { personBody } from "./accounts-api";
+import { test } from "./renderer-crash";
 
 /**
  * The sidebar's edge narrows the sidebar well past where it used to stop, and the sidebar never

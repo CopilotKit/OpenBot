@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
@@ -6,6 +6,7 @@ import { compile } from "tailwindcss";
 import { getGetBotResponseMock } from "@/lib/api/generated/bots/bots.msw";
 import { personBody } from "./accounts-api";
 import { botGrantsBody } from "./bot-grants-api";
+import { test } from "./renderer-crash";
 
 /**
  * A Bot's reply reads as the conversation stored it, however a person switches between

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import {
   alerts,
   asked,
@@ -13,6 +13,7 @@ import {
   start,
   stop,
 } from "./organization-notices-browser";
+import { test } from "./renderer-crash";
 
 /**
  * Somebody removed from the organization they are working in is told so, plainly, and is taken to

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import {
   alerts,
   asked,
@@ -14,6 +14,7 @@ import {
   start,
   stop,
 } from "./organization-notices-browser";
+import { test } from "./renderer-crash";
 
 /**
  * While OpenBot moves an organization between databases, its screens say so in OpenBot's own

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page, Request } from "playwright-core";
@@ -12,6 +12,8 @@ import {
 } from "@/lib/api/generated/people/people.zod";
 import { afterTerms } from "@/lib/service-terms/queries";
 import { personBody } from "./accounts-api";
+import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * The terms of service, on OpenBot Cloud and everywhere else.
@@ -369,7 +371,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(
@@ -402,7 +404,7 @@ async function shootEnd(
     const root = document.documentElement;
     root.scrollTop = root.scrollHeight;
   });
-  await page.waitForTimeout(100);
+  await still(page);
   mkdirSync(shots, { recursive: true });
   await page.screenshot({
     path: join(

@@ -1,9 +1,10 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { marksPlugin } from "./marks-plugin";
+import { test } from "./renderer-crash";
 
 /**
  * A table of links a Bot writes, downloaded from the table's own controls in a real browser, keeps

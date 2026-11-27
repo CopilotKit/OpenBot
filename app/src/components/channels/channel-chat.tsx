@@ -27,6 +27,10 @@ import {
 import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
+import {
+  forgetFirstMessage,
+  putBackFirstMessage,
+} from "@/components/channels/composer/kept-first-message";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { StillWorkingError } from "@/components/channels/composer/queue";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
@@ -699,6 +703,7 @@ export function ChannelChat({
    */
   const [first] = useState(() => {
     const pending = takeFirstMessage(channel.id);
+    // A first message an earlier page kept is decided on once the thread has been read (the join).
     if (!pending) return null;
     const attachments = [...pending.attachments];
     // Drawn with its files, as `deliver` will send it, so they do not appear only once it runs.
@@ -713,6 +718,17 @@ export function ChannelChat({
     return { seed, text: pending.text, attachments };
   });
   const seed = first?.seed ?? null;
+
+  /*
+   * A CONVERSATION THIS PAGE HAS JUST MADE SENDS ITS FIRST MESSAGE AT ONCE. Its thread is new, so
+   * there is nothing to join, no history to read and no voice chat to bring in, and waiting for them
+   * held the message in this page for a second or two after it showed as sent. A phone locked or a
+   * tab closed in that time lost it: the conversation was made, and opened later empty, with no run
+   * in its thread. So the first message leaves before any of that (`deliver`), and the join is not
+   * made at all (the join effect): the run streams the turn here itself.
+   */
+  const fresh = first !== null;
+  const firstOfFresh = useRef(fresh);
 
   /** Cleared by the send-on-mount effect without restarting it. */
   const seedRef = useRef(first);
@@ -842,6 +858,11 @@ export function ChannelChat({
    * so a replay is never laid over messages already on screen.
    */
   const [joins, setJoins] = useState(0);
+  /**
+   * How many times the message box has been opened again: once for a first message put back after
+   * it first opened, which it reads from its draft only as it opens.
+   */
+  const [composerOpenings, setComposerOpenings] = useState(0);
   const unanswered = useRef(false);
   const connection = useConnectionLost();
   useReconnected(() => {
@@ -851,10 +872,17 @@ export function ChannelChat({
     else pullHistoryRef.current?.();
   });
 
-  // Join the gateway socket, restore durable history, then release the first-message gate.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `joins` is the join asked for again when OpenBot answers again.
+  // Join the gateway socket, restore durable history, then release the first-message gate. `joins`
+  // is the join asked for again when OpenBot answers again.
   useEffect(() => {
     if (!isReady) return;
+    // Just made here: nothing to join or read, and the first message is not held for it (`fresh`).
+    // Asked again when OpenBot answers again (`joins`), it is joined as any conversation is.
+    if (fresh && joins === 0) {
+      openJoined.current();
+      openJoinGate.current();
+      return;
+    }
     let current = true;
     const version = ++historyReadVersion.current;
     // Before the connect: it is handed the subscribers the agent has when it starts.
@@ -1022,6 +1050,19 @@ export function ChannelChat({
           setUnreadable(stored.unreadable);
           setHistoryAvailability("ready");
           setHistoryReadFailed(false);
+          /*
+           * A FIRST MESSAGE AN EARLIER PAGE KEPT GOES BACK IN THE BOX ONLY IF THE SERVER NEVER GOT IT.
+           * Its page can die after the server has started the run and before the run's start reaches
+           * it, and the words then came back under their own answer, asking to be sent twice. So it is
+           * decided now the thread has been read: a message of the person's in it, stored or
+           * replayed by the join, is the server having it (a run it took carries the message), and
+           * the kept copy is let go. See `kept-first-message.ts`.
+           */
+          const delivered =
+            stored.messages.some((message) => message.role === "user") ||
+            agent.messages.some((message) => message.role === "user");
+          if (putBackFirstMessage(channel.id, delivered))
+            setComposerOpenings((count) => count + 1);
         }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
@@ -1089,6 +1130,7 @@ export function ChannelChat({
     channel.threadId,
     runtimeAgentId,
     joins,
+    fresh,
   ]);
 
   /*
@@ -1642,23 +1684,28 @@ export function ChannelChat({
     // used throughout, so the message, the repair and the run cannot land on two different agents.
     // Give initial voice history time to restore, while keeping ordinary chat usable on failure.
     setVoiceContextNotice(null);
+    // The first message of a conversation just made here: no call has been had in it (`fresh`).
+    const first = firstOfFresh.current;
+    firstOfFresh.current = false;
     let voiceHistoryTimer: ReturnType<typeof setTimeout> | undefined;
-    const priorCalls = await Promise.race([
-      loadVoiceArchive(channel.id),
-      new Promise<never>((_resolve, reject) => {
-        voiceHistoryTimer = setTimeout(
-          () => reject(new Error("Voice history timed out")),
-          2000,
-        );
-      }),
-    ])
-      .catch(() => {
-        setVoiceContextNotice(
-          "Couldn’t bring in what was said on the call. You may need to repeat it.",
-        );
-        return cachedVoiceArchive(channel.id);
-      })
-      .finally(() => clearTimeout(voiceHistoryTimer));
+    const priorCalls = first
+      ? []
+      : await Promise.race([
+          loadVoiceArchive(channel.id),
+          new Promise<never>((_resolve, reject) => {
+            voiceHistoryTimer = setTimeout(
+              () => reject(new Error("Voice history timed out")),
+              2000,
+            );
+          }),
+        ])
+          .catch(() => {
+            setVoiceContextNotice(
+              "Couldn’t bring in what was said on the call. You may need to repeat it.",
+            );
+            return cachedVoiceArchive(channel.id);
+          })
+          .finally(() => clearTimeout(voiceHistoryTimer));
     const target = agentRef.current;
     /*
      * A call this screen holds no answer for is answered from the stored thread first, so the repair
@@ -1747,6 +1794,8 @@ export function ChannelChat({
       },
       // Live on the thread now: if this chat has closed, the one open for this conversation joins the run.
       onRunStartedEvent: () => {
+        // The server has the conversation's first message: no page needs to put it back now.
+        if (first) forgetFirstMessage(channel.id);
         if (!onScreen.current) runStartedAway(channel.id);
       },
     });
@@ -2537,6 +2586,7 @@ export function ChannelChat({
             channelId={channel.id}
             // An unsent reply stays with this conversation when somebody looks at another one.
             draftKey={`conversation:${channel.id}`}
+            composerOpening={composerOpenings}
             attachmentLimits={attachmentLimits}
             starterSuggestions={
               channel.agentIds.length === 1 ? (

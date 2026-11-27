@@ -11,6 +11,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Confirming a character with an input method editor no longer submits a free-text answer to a
   Bot question.
 
+- **Bots on Gemini 3 no longer stop at their second tool step.** On a Gemini key, through OpenBot
+  Cloud's AI connection or a key saved as Google's OpenAI-compatible endpoint, a Bot on the
+  TypeScript LangGraph engine stopped partway through a task with Google's "Function call is missing
+  a thought_signature in functionCall parts". Each tool call now keeps the thought signature Gemini
+  gave it, and sends it back with the call on the next step. A conversation that already lost one
+  goes on: the call is sent with Google's documented placeholder for calls it didn't make.
+
+- **The Google default model is `gemini-3.8-flash`.** It was `gemini-2.5-flash`, which Google no
+  longer serves to new keys ("This model models/gemini-2.5-flash is no longer available to new
+  users"), so a run nobody picked a model for failed on a new Gemini key. It applies where a Bot or
+  `BOT_PROVIDER=google` names no model.
+
 - **Notifications in the browser, with OpenBot closed.** Settings, Notifications has a new switch,
   Notifications in this browser. Turned on, a Bot's replies, questions and approvals reach that
   browser as push notifications, as "Where updates go" routes push, and a click opens the

@@ -7426,20 +7426,51 @@ fn main() {
         }
     }
 
+    /**
+    A listener on `[::1]` alone, on a port the system never hands out by itself.
+
+    The tests that use it let go of it and then expect its port to read free. A port from the
+    system's own range (`[::1]:0`) could not be expected to: while `[::1]` holds a port, Linux hands
+    the same number to another test's `127.0.0.1:0` listener (5 of 5 tries, measured on a CI-sized
+    box), and that listener answers on the port once this one is gone. Below 32768 is outside every
+    system's default range (Linux 32768-60999, macOS and Windows 49152-65535), so only a port taken
+    by number can be there, and one that answers already is passed over.
+    */
     fn ipv6_loopback_listener() -> Option<std::net::TcpListener> {
-        match std::net::TcpListener::bind("[::1]:0") {
-            Ok(listener) => Some(listener),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
-                ) =>
-            {
-                eprintln!("IPv6 loopback unavailable; skipping IPv6 socket regression: {error}");
-                None
+        const FIRST: u16 = 20_000;
+        const COUNT: u16 = 12_000;
+        let start = (std::process::id() % u32::from(COUNT)) as u16;
+        for step in 0..COUNT {
+            let port = FIRST + (start + step) % COUNT;
+            if something_answers(port) {
+                continue;
             }
-            Err(error) => panic!("could not bind the IPv6 regression listener: {error}"),
+            match std::net::TcpListener::bind(("::1", port)) {
+                Ok(listener) => return Some(listener),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
+                    ) =>
+                {
+                    eprintln!(
+                        "IPv6 loopback unavailable; skipping IPv6 socket regression: {error}"
+                    );
+                    return None;
+                }
+                // Taken by number, or reserved by the system (Windows keeps ranges for Hyper-V).
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
+                    ) => {}
+                Err(error) => panic!("could not bind the IPv6 regression listener: {error}"),
+            }
         }
+        panic!(
+            "no port from {FIRST} to {} was free on [::1]",
+            FIRST + COUNT - 1
+        );
     }
 
     fn host_command_line(name: &str) -> &'static str {
@@ -10061,6 +10092,27 @@ fn main() {
         drop(listener);
         wait_for_ports_to_clear(&[port], std::time::Duration::from_secs(3));
         assert_eq!(port_already_taken(&ports), None);
+    }
+
+    /// FOUND IN CI: the test above read its port still taken after letting it go, by a listener
+    /// another test had been handed the same number for on `127.0.0.1`. The port the IPv6 tests
+    /// hold is one the system never hands out, so no other test's listener can land on it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_ipv6_port_tests_hold_a_port_the_system_never_hands_out() {
+        let Some(listener) = ipv6_loopback_listener() else {
+            return;
+        };
+        let port = listener.local_addr().unwrap().port();
+        let range = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range").unwrap();
+        let mut bounds = range
+            .split_whitespace()
+            .map(|bound| bound.parse::<u16>().unwrap());
+        let (first, last) = (bounds.next().unwrap(), bounds.next().unwrap());
+        assert!(
+            !(first..=last).contains(&port),
+            "port {port} is in the range {first}-{last} the system hands to listeners on port 0"
+        );
     }
 
     #[test]

@@ -11,6 +11,7 @@ import {
   conversationPage,
   taskOf,
 } from "./conversations-api";
+import { still } from "./page-still";
 import { answerScheduleLists, pathOf } from "./schedules-api";
 
 /**
@@ -337,9 +338,9 @@ async function open(
   await style(page);
   await page.evaluate(() => document.fonts.ready);
   // Styled, the rows lay out again; a row that folds its actions does so once it is measured.
-  await page.waitForTimeout(400);
+  await still(page);
   await style(page);
-  await page.waitForTimeout(200);
+  await still(page);
   return page;
 }
 

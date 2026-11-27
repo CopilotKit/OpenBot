@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 import { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatGoogle } from "@langchain/google";
-import { ChatOpenAI, ChatOpenAICompletions } from "@langchain/openai";
+import { ChatOpenAI } from "@langchain/openai";
 // The one rule every Bot in the box decides by, imported rather than copied, so a model OpenAI
 // moves to the Responses API moves here in the same change. Node loads it through the JSON hook in
 // json-modules.ts (see there for why and how).
@@ -33,6 +33,7 @@ import { requiresResponsesApi } from "../../shared/model-providers.ts";
 import { withContextEditing } from "./context-room.ts";
 import { HarnessRunError, MODEL_UNREACHABLE } from "./errors.ts";
 import { PlanHarnessChatModel } from "./plan-model.ts";
+import { ChatCompletionsWithSignatures } from "./thought-signatures.ts";
 
 export type Env = Record<string, string | undefined>;
 
@@ -259,11 +260,22 @@ function openAIModel(model: string, run: RunModel, env: Env): BaseChatModel {
   //
   // LangChain's own Chat Completions client, whatever it prefers for the model name. Not ChatOpenAI
   // told never to use Responses: binding tools rebuilds a ChatOpenAI as a plain one
-  // (`ChatOpenAI.withConfig`), and that sent a model LangChain prefers on Responses there.
-  return new ChatOpenAICompletions({
+  // (`ChatOpenAI.withConfig`), and that sent a model LangChain prefers on Responses there. It sends
+  // Gemini's thought signatures back too (thought-signatures.ts), which LangChain's own drops.
+  return new ChatCompletionsWithSignatures({
     ...fields,
     ...(run.effort ? { modelKwargs: { reasoning_effort: run.effort } } : {}),
   });
+}
+
+/**
+ * Whether a Claude model thinks adaptively when a request leaves `thinking` out: every Claude of
+ * the fifth generation on (Opus, Sonnet, Haiku, Fable, Mythos), as Anthropic documents them.
+ * Earlier ones (Opus 4.7 and 4.8 included) run without thinking when it is left out.
+ */
+function thinksByDefault(model: string): boolean {
+  const generation = /^claude-[a-z]+-(\d+)/.exec(model.trim().toLowerCase());
+  return !!generation && Number(generation[1]) >= 5;
 }
 
 function anthropicModel(model: string, run: RunModel, env: Env): BaseChatModel {
@@ -279,6 +291,11 @@ function anthropicModel(model: string, run: RunModel, env: Env): BaseChatModel {
       ...(ANTHROPIC_EFFORTS.has(run.effort)
         ? { outputConfig: { effort: run.effort as never } }
         : {}),
+      // Said outright for a model that thinks adaptively anyway, so the request is the same. Left
+      // out, @langchain/anthropic checks its own default (`disabled`, which it never sends) against
+      // Opus 5's rule that disabled thinking can't run at xhigh or max, and throws before asking:
+      // a person who picked Opus 5.5 at Extra high got "The Bot stopped" and no answer.
+      ...(thinksByDefault(model) ? { thinking: { type: "adaptive" } } : {}),
     }),
   );
 }

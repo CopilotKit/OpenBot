@@ -9,6 +9,7 @@ import { GetPreferencesResponse } from "@/lib/api/generated/people/people.zod";
 import { personBody } from "./accounts-api";
 import { type AppsFixture, answerAppsApi } from "./apps-api";
 import { conversationPage } from "./conversations-api";
+import { still } from "./page-still";
 
 /**
  * In OpenBot Desktop on macOS the window's close, minimise and zoom buttons sit over the sidebar's
@@ -95,7 +96,7 @@ const CASES: Case[] = [
       await page.getByRole("button", { name: "Show sidebar" }).click();
       await page.locator('[data-slot="strip"]').waitFor();
       // The sheet slides in; measure where it comes to rest.
-      await page.waitForTimeout(600);
+      await still(page);
     },
   },
   {

@@ -1,8 +1,10 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page, Route } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * A message sent from home when OpenBot doesn't answer.
@@ -218,7 +220,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 /** Write in home's composer and send, as a person does. */

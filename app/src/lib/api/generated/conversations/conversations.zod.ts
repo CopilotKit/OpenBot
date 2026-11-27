@@ -218,7 +218,11 @@ export const ListConversationsResponse = zod.object({
           .array(
             zod
               .object({
-                kind: zod.enum(["handoff", "routine"]),
+                kind: zod
+                  .string()
+                  .describe(
+                    "What kind of work it is. turn holds from the turn's first step the server runs until the Bot answers or the turn waits on the person, between one run and the next too, so a page opened in the middle reads the conversation as working. A kind the app doesn't know is still work: the conversation is working. The server lists turn only for a caller that names the capability conversation-work-turn in its OpenBot-Capabilities header. Any other caller gets work without the turn, and busy true on the conversation in its list instead, because 1.2.1 drew any work that was not a handoff as a routine.",
+                  ),
                 key: zod
                   .string()
                   .describe(
@@ -227,7 +231,7 @@ export const ListConversationsResponse = zod.object({
                 botId: zod
                   .string()
                   .describe(
-                    "The Bot that was asked, or that the routine runs as.",
+                    "The Bot that was asked, that the routine runs as, or that is answering the turn.",
                   ),
                 botName: zod
                   .string()
@@ -235,14 +239,16 @@ export const ListConversationsResponse = zod.object({
                   .describe("That Bot's name when the work started."),
                 since: zod.iso
                   .datetime({ offset: true })
-                  .describe("When it started."),
+                  .describe(
+                    "When it started. For a turn, when the server took it on.",
+                  ),
                 routineId: zod
                   .string()
                   .optional()
                   .describe("The routine, for a routine."),
               })
               .describe(
-                "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).",
+                "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), a routine running into it (routine), or the person's own turn, which the server is carrying on with no page open (turn).",
               ),
           )
           .describe("What a Bot is still working on in it."),
@@ -342,7 +348,11 @@ export const CreateConversationResponse = zod.object({
         .array(
           zod
             .object({
-              kind: zod.enum(["handoff", "routine"]),
+              kind: zod
+                .string()
+                .describe(
+                  "What kind of work it is. turn holds from the turn's first step the server runs until the Bot answers or the turn waits on the person, between one run and the next too, so a page opened in the middle reads the conversation as working. A kind the app doesn't know is still work: the conversation is working. The server lists turn only for a caller that names the capability conversation-work-turn in its OpenBot-Capabilities header. Any other caller gets work without the turn, and busy true on the conversation in its list instead, because 1.2.1 drew any work that was not a handoff as a routine.",
+                ),
               key: zod
                 .string()
                 .describe(
@@ -351,7 +361,7 @@ export const CreateConversationResponse = zod.object({
               botId: zod
                 .string()
                 .describe(
-                  "The Bot that was asked, or that the routine runs as.",
+                  "The Bot that was asked, that the routine runs as, or that is answering the turn.",
                 ),
               botName: zod
                 .string()
@@ -359,14 +369,16 @@ export const CreateConversationResponse = zod.object({
                 .describe("That Bot's name when the work started."),
               since: zod.iso
                 .datetime({ offset: true })
-                .describe("When it started."),
+                .describe(
+                  "When it started. For a turn, when the server took it on.",
+                ),
               routineId: zod
                 .string()
                 .optional()
                 .describe("The routine, for a routine."),
             })
             .describe(
-              "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).",
+              "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), a routine running into it (routine), or the person's own turn, which the server is carrying on with no page open (turn).",
             ),
         )
         .optional()
@@ -503,7 +515,11 @@ export const GetConversationResponse = zod.object({
         .array(
           zod
             .object({
-              kind: zod.enum(["handoff", "routine"]),
+              kind: zod
+                .string()
+                .describe(
+                  "What kind of work it is. turn holds from the turn's first step the server runs until the Bot answers or the turn waits on the person, between one run and the next too, so a page opened in the middle reads the conversation as working. A kind the app doesn't know is still work: the conversation is working. The server lists turn only for a caller that names the capability conversation-work-turn in its OpenBot-Capabilities header. Any other caller gets work without the turn, and busy true on the conversation in its list instead, because 1.2.1 drew any work that was not a handoff as a routine.",
+                ),
               key: zod
                 .string()
                 .describe(
@@ -512,7 +528,7 @@ export const GetConversationResponse = zod.object({
               botId: zod
                 .string()
                 .describe(
-                  "The Bot that was asked, or that the routine runs as.",
+                  "The Bot that was asked, that the routine runs as, or that is answering the turn.",
                 ),
               botName: zod
                 .string()
@@ -520,14 +536,16 @@ export const GetConversationResponse = zod.object({
                 .describe("That Bot's name when the work started."),
               since: zod.iso
                 .datetime({ offset: true })
-                .describe("When it started."),
+                .describe(
+                  "When it started. For a turn, when the server took it on.",
+                ),
               routineId: zod
                 .string()
                 .optional()
                 .describe("The routine, for a routine."),
             })
             .describe(
-              "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).",
+              "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), a routine running into it (routine), or the person's own turn, which the server is carrying on with no page open (turn).",
             ),
         )
         .optional()

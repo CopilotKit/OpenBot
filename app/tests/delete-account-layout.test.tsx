@@ -1,8 +1,10 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * Deleting your account, in a real browser, in light and dark, wide and on a phone: General's
@@ -141,7 +143,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(400);
+  await still(page);
 }
 
 async function open(
