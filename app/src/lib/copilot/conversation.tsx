@@ -24,13 +24,17 @@ export function ConversationProvider({
   ask,
   children,
 }: {
-  ask: (text: string) => void;
+  /**
+   * Null while the conversation can't take a turn from what it draws: its components are then drawn
+   * as they are outside a conversation, with nothing in them that adds a turn or carries one on.
+   */
+  ask: ((text: string) => void) | null;
   children: ReactNode;
 }) {
   // One for the life of the conversation, whatever `ask` is from render to render.
   const [carryOn] = useState(() => new CarryOnGroup());
   // Keep context identity stable across unrelated composer renders.
-  const value = useMemo(() => ({ ask, carryOn }), [ask, carryOn]);
+  const value = useMemo(() => (ask ? { ask, carryOn } : null), [ask, carryOn]);
   return (
     <ConversationContext.Provider value={value}>
       {children}

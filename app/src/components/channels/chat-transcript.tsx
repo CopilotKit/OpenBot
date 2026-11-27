@@ -226,6 +226,12 @@ type ChatTranscriptProps = {
   /** History has been asked for and has not arrived. Drawn only when there is nothing else to draw. */
   restoring?: boolean;
   /**
+   * The message rows are for reading only: a press on anything in them, by pointer, key or form,
+   * goes nowhere, whatever drew it. Only the rows: queued messages, notices and the working rows
+   * stay live. See `holdPress` for how, and `ChannelChat` for why.
+   */
+  readOnly?: boolean;
+  /**
    * Why the last turn ended without an answer, if it did.
    *
    * A sentence rather than a flag, because the reasons are not interchangeable: a Bot that refused,
@@ -263,6 +269,38 @@ type ChatTranscriptProps = {
 /** One shared empty array, so a screen without a queue does not hand down a new one per render. */
 const EMPTY_QUEUE: readonly QueuedMessage[] = [];
 const NO_REFUSALS: ReadonlyMap<string, string> = new Map();
+
+/*
+ * HELD, NOT INERT, AND PER ROW. A read-only row has to stop every press in it, including ones no
+ * code here knows about: an A2UI surface's button sends its action straight to `runAgent`. `inert`
+ * on the rows would do that, but it also takes the history out of the accessibility tree, out of
+ * find-in-page and out of text selection for as long as it lasts, so a screen reader would get an
+ * empty log while the history is on screen. Instead each row catches presses on their way down:
+ * a capture handler on the row runs before any handler inside it, and stopping the event there
+ * stops React's and the DOM's own listeners below it (React's capture pass runs at the root,
+ * before the event reaches its target). React carries an event up its own tree, so a menu a row
+ * opened into a portal is held too. The text stays readable and selectable, since selecting is not
+ * a click. Links still open: following one changes nothing in the conversation.
+ */
+function holdPress(event: React.SyntheticEvent) {
+  if (event.target instanceof Element && event.target.closest("a[href]"))
+    return;
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+/* Enter and Space are how a key presses a control; any other key, Tab included, still moves. */
+function holdPressKey(event: React.KeyboardEvent) {
+  if (event.key === "Enter" || event.key === " ") holdPress(event);
+}
+
+/* What a read-only row carries; see `holdPress`. */
+const READ_ONLY_ROW = {
+  onClickCapture: holdPress,
+  onKeyDownCapture: holdPressKey,
+  onSubmitCapture: holdPress,
+} as const;
+const LIVE_ROW = {} as const;
 
 /** The person's message a row is part of: a message's attachments row is `<id>:attachments`. */
 function personMessageOf(rowId: string): string {
@@ -2251,6 +2289,7 @@ export function ChatTranscript({
   onSendQueuedNow,
   queued = EMPTY_QUEUE,
   restoring = false,
+  readOnly = false,
   stopped,
   refusals = NO_REFUSALS,
   stoppedNotice,
@@ -2730,6 +2769,7 @@ export function ChatTranscript({
    * task's thread a turn's work is one row, drawn where its first step is; the rest of it is drawn
    * inside that row.
    */
+  const rowGuard = readOnly ? READ_ONLY_ROW : LIVE_ROW;
   const renderRow = (item: TranscriptItem, index: number) => {
     const work = taskWork.folds.at.get(item.id);
     if (work)
@@ -2738,6 +2778,7 @@ export function ChatTranscript({
           key={work.id}
           messageId={work.id}
           {...openingProps(item.id)}
+          {...rowGuard}
         >
           <WorkedFor
             last={work.askId === taskWork.lastAskId}
@@ -2765,6 +2806,7 @@ export function ChatTranscript({
             : undefined
         }
         {...openingProps(item.id)}
+        {...rowGuard}
       >
         {rowContent(item, index)}
         {/*

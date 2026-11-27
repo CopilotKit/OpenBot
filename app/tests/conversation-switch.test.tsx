@@ -674,7 +674,12 @@ describe.skipIf(!asked)("switching conversations while a Bot answers", () => {
             expect(backAgain).toEqual(WHOLE_ONCE);
 
             // And opened again from nothing, as a reload or a new window does.
+            // The stored copy can be on screen before the page joins the thread again, so the
+            // join is waited for, and the answer read again once the replay has landed on it.
             await page.reload();
+            const joined = Date.now() + 15_000;
+            while (gateway.joins < 4 && Date.now() < joined) await sleep(100);
+            expect(gateway.joins).toBe(4);
             const reopened = await settled(page, 15_000);
             await shoot(page, "reopened", name);
             expect(reopened).toEqual(WHOLE_ONCE);
