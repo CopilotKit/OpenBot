@@ -14,7 +14,8 @@ type Props = {
     | "fetchNextPage"
     | "error"
   >;
-  scrollRoot: RefObject<HTMLDivElement | null>;
+  /** The list's scroller. Null for a list in the page's own scroller, watched against the window. */
+  scrollRoot: RefObject<HTMLDivElement | null> | null;
   searching: boolean;
 };
 
@@ -37,7 +38,7 @@ export function ChannelPagination({ query, scrollRoot, searching }: Props) {
       !hasNextPage ||
       isFetching ||
       isFetchNextPageError ||
-      !scrollRoot.current ||
+      (scrollRoot !== null && !scrollRoot.current) ||
       !sentinel.current ||
       typeof IntersectionObserver === "undefined"
     ) {
@@ -49,7 +50,7 @@ export function ChannelPagination({ query, scrollRoot, searching }: Props) {
           void fetchNextPage({ cancelRefetch: false });
         }
       },
-      { root: scrollRoot.current, rootMargin: "160px 0px" },
+      { root: scrollRoot?.current ?? null, rootMargin: "160px 0px" },
     );
     observer.observe(sentinel.current);
     return () => observer.disconnect();

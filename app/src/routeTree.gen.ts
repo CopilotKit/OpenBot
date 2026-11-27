@@ -23,6 +23,7 @@ import { Route as AuthedAppIndexRouteImport } from './routes/_authed/_app/index'
 import { Route as AuthedAppApprovalsRouteImport } from './routes/_authed/_app/approvals'
 import { Route as AuthedAppBotRouteImport } from './routes/_authed/_app/bot'
 import { Route as AuthedAppBrowserRouteImport } from './routes/_authed/_app/browser'
+import { Route as AuthedAppConversationsRouteImport } from './routes/_authed/_app/conversations'
 import { Route as AuthedAppMemoryRouteImport } from './routes/_authed/_app/memory'
 import { Route as AuthedAppReachabilityRouteImport } from './routes/_authed/_app/reachability'
 import { Route as AuthedAppReconnectRouteImport } from './routes/_authed/_app/reconnect'
@@ -212,6 +213,11 @@ const AuthedAppBotRoute = AuthedAppBotRouteImport.update({
 const AuthedAppBrowserRoute = AuthedAppBrowserRouteImport.update({
   id: '/browser',
   path: '/browser',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
+const AuthedAppConversationsRoute = AuthedAppConversationsRouteImport.update({
+  id: '/conversations',
+  path: '/conversations',
   getParentRoute: () => AuthedAppRoute,
 } as any)
 const AuthedAppMemoryRoute = AuthedAppMemoryRouteImport.update({
@@ -898,6 +904,7 @@ export interface FileRoutesByFullPath {
   '/approvals': typeof AuthedAppApprovalsRoute
   '/bot': typeof AuthedAppBotRoute
   '/browser': typeof AuthedAppBrowserRoute
+  '/conversations': typeof AuthedAppConversationsRoute
   '/memory': typeof AuthedAppMemoryRoute
   '/reachability': typeof AuthedAppReachabilityRoute
   '/reconnect': typeof AuthedAppReconnectRoute
@@ -1031,6 +1038,7 @@ export interface FileRoutesByTo {
   '/approvals': typeof AuthedAppApprovalsRoute
   '/bot': typeof AuthedAppBotRoute
   '/browser': typeof AuthedAppBrowserRoute
+  '/conversations': typeof AuthedAppConversationsRoute
   '/memory': typeof AuthedAppMemoryRoute
   '/reachability': typeof AuthedAppReachabilityRoute
   '/reconnect': typeof AuthedAppReconnectRoute
@@ -1168,6 +1176,7 @@ export interface FileRoutesById {
   '/_authed/_app/approvals': typeof AuthedAppApprovalsRoute
   '/_authed/_app/bot': typeof AuthedAppBotRoute
   '/_authed/_app/browser': typeof AuthedAppBrowserRoute
+  '/_authed/_app/conversations': typeof AuthedAppConversationsRoute
   '/_authed/_app/memory': typeof AuthedAppMemoryRoute
   '/_authed/_app/reachability': typeof AuthedAppReachabilityRoute
   '/_authed/_app/reconnect': typeof AuthedAppReconnectRoute
@@ -1307,6 +1316,7 @@ export interface FileRouteTypes {
     | '/approvals'
     | '/bot'
     | '/browser'
+    | '/conversations'
     | '/memory'
     | '/reachability'
     | '/reconnect'
@@ -1440,6 +1450,7 @@ export interface FileRouteTypes {
     | '/approvals'
     | '/bot'
     | '/browser'
+    | '/conversations'
     | '/memory'
     | '/reachability'
     | '/reconnect'
@@ -1576,6 +1587,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/approvals'
     | '/_authed/_app/bot'
     | '/_authed/_app/browser'
+    | '/_authed/_app/conversations'
     | '/_authed/_app/memory'
     | '/_authed/_app/reachability'
     | '/_authed/_app/reconnect'
@@ -1807,6 +1819,13 @@ declare module '@tanstack/react-router' {
       path: '/browser'
       fullPath: '/browser'
       preLoaderRoute: typeof AuthedAppBrowserRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/conversations': {
+      id: '/_authed/_app/conversations'
+      path: '/conversations'
+      fullPath: '/conversations'
+      preLoaderRoute: typeof AuthedAppConversationsRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/memory': {
@@ -2848,6 +2867,7 @@ interface AuthedAppRouteChildren {
   AuthedAppApprovalsRoute: typeof AuthedAppApprovalsRoute
   AuthedAppBotRoute: typeof AuthedAppBotRoute
   AuthedAppBrowserRoute: typeof AuthedAppBrowserRoute
+  AuthedAppConversationsRoute: typeof AuthedAppConversationsRoute
   AuthedAppMemoryRoute: typeof AuthedAppMemoryRoute
   AuthedAppReachabilityRoute: typeof AuthedAppReachabilityRoute
   AuthedAppReconnectRoute: typeof AuthedAppReconnectRoute
@@ -2906,6 +2926,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppApprovalsRoute: AuthedAppApprovalsRoute,
   AuthedAppBotRoute: AuthedAppBotRoute,
   AuthedAppBrowserRoute: AuthedAppBrowserRoute,
+  AuthedAppConversationsRoute: AuthedAppConversationsRoute,
   AuthedAppMemoryRoute: AuthedAppMemoryRoute,
   AuthedAppReachabilityRoute: AuthedAppReachabilityRoute,
   AuthedAppReconnectRoute: AuthedAppReconnectRoute,
