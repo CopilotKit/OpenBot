@@ -1517,6 +1517,18 @@ a:hover {
   line-height: 20px;
 }
 
+/*
+ * A notice above the list (a saved Google sign-in that ended): where the list would start, and apart
+ * from the first row, so it reads as the screen's and not as a row's.
+ */
+.setup-body > .blocker:first-child {
+  margin-top: 0;
+}
+
+.blocker + fieldset.picker {
+  margin-top: 16px;
+}
+
 /* A Windows prerequisite: wider than a step, because its commands are long and must stay legible. */
 .blocker-sheet {
   max-width: 44rem;

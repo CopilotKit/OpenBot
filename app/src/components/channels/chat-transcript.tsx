@@ -17,6 +17,7 @@ import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
   answersTheModel,
   ownToolAttempt,
+  ownToolFailedLabel,
   ownToolSubject,
   readToolName,
 } from "@openbot/shared/tool-name";
@@ -168,6 +169,7 @@ import {
 } from "./chat-messages";
 import { splitChatOrigin } from "./chat-origin";
 import type { QueuedMessage } from "./composer";
+import { transcriptColumn } from "./conversation-columns";
 import { FileTypeIcon } from "./file-icon";
 import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
 import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
@@ -2040,6 +2042,10 @@ export function ServerToolLine({
         : {})}
       // A blocked step did not happen: "Blocked: Save a file", never "Blocked: Saved a file".
       {...(refused ? { attempted: ownToolAttempt(name) ?? undefined } : {})}
+      // And one that did not work, where its label would say it happened: "Didn't draw an interface".
+      {...(failed && ownToolFailedLabel(name)
+        ? { failedLabel: ownToolFailedLabel(name) ?? undefined }
+        : {})}
       label={label}
       refused={refused}
       failed={failed}
@@ -2293,11 +2299,8 @@ export function ChatTranscript({
   const isDrawn = useDrawnTool();
   // Which calls draw a component, so one asked for too early is left out. See `shared/tool-steps.ts`.
   const isComponent = useComponentTest();
-  /**
-   * The transcript's column, shared by the restoring state and the scroller. 768px, wider than the
-   * composer's 672px, which is the reading width ChatGPT and Claude.ai give an answer.
-   */
-  const column = "mx-auto w-full max-w-3xl px-4";
+  /** The transcript's column, shared by the restoring state, the scroller and a group's lines. */
+  const column = transcriptColumn;
   /*
    * NOT MEMOISED, AND THAT IS DELIBERATE. `useMemo` keyed on `messages` looks obviously right and
    * silently broke the transcript: the agent hands back the SAME array and mutates it, so the

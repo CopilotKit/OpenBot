@@ -253,6 +253,12 @@ export const ALLOWED: Allowed[] = [
     why: "a conversation's stored runs, read back from the runtime to replay them",
   },
   {
+    file: "app/src/lib/copilot/carried-turn.ts",
+    what: "/api/copilotkit/agent/{}/stop/{}",
+    rule: "runtime",
+    why: "the runtime's stop for a thread, which also takes the person's turn the server is carrying on off its queue, between runs included",
+  },
+  {
     file: "shared/recorder-api.ts",
     what: "/api/copilotkit/trajectory/{}/connect",
     rule: "runtime",
@@ -452,6 +458,12 @@ export const ALLOWED: Allowed[] = [
     what: "fetch()",
     rule: "third-party",
     why: "image registries, never OpenBot's server",
+  },
+  {
+    file: "scripts/ci-watch.ts",
+    what: "fetch()",
+    rule: "third-party",
+    why: "GitHub's API, for a CI job's log, never OpenBot's server",
   },
   {
     file: "scripts/model-compat.ts",

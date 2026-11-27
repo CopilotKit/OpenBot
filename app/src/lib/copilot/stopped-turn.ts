@@ -350,6 +350,23 @@ export function requestNotMade(reported: unknown): boolean {
 }
 
 /**
+ * The code OpenBot's server puts on the RUN_ERROR of a run its Bot's engine couldn't take ("… can't
+ * run because OpenBot's LangGraph engine isn't answering"). The server keeps that turn as a refused
+ * one (`listRefusedTurns`, code BOT_ENGINE_UNAVAILABLE), so it is drawn as a refusal is: under the
+ * message it refused, for good, not as the last turn's ending, which the next turn clears.
+ */
+export const BOT_ENGINE_UNAVAILABLE = "BOT_ENGINE_UNAVAILABLE";
+
+/** Whether a RUN_ERROR ended a turn the server keeps as refused (`BOT_ENGINE_UNAVAILABLE`). */
+export function refusedRun(event: unknown): boolean {
+  return (
+    !!event &&
+    typeof event === "object" &&
+    (event as { code?: unknown }).code === BOT_ENGINE_UNAVAILABLE
+  );
+}
+
+/**
  * How the last run in a thread's history ended, heard while the history is replayed.
  *
  * THE FAILURE IS NOT IN THE MESSAGES. A run that fails ends with a RUN_ERROR, which is an event, and
@@ -366,6 +383,9 @@ export function requestNotMade(reported: unknown): boolean {
  *
  * A STOP IS NOT A FAILURE, and needs nothing special: a run the person stopped ends with
  * RUN_FINISHED, outcome cancelled, as the runtime records it.
+ *
+ * NOR IS A REFUSED TURN (`refusedRun`). The server keeps it, and it is drawn under its message from
+ * that record; read here too, it was said twice after a reload, the second time at the bottom.
  *
  * NOTHING WHEN THE REPLAY BROKE. A connect that failed part way may have stopped after an old failure
  * and before the run that answered it, and a stale failure is worse than none. The caller drops the
@@ -400,7 +420,7 @@ export function followLastRun(agent: Pick<AbstractAgent, "subscribe">): {
       running = false;
     },
     onRunErrorEvent: ({ event }) => {
-      failure = stoppedReason(event?.message);
+      failure = refusedRun(event) ? null : stoppedReason(event?.message);
       running = false;
     },
     onRunFailed: () => {

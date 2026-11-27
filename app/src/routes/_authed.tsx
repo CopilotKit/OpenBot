@@ -2,6 +2,8 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { BotLookProvider } from "../components/agents/bot-look";
 import { HeldOutGate } from "../components/auth/company-sign-in-page";
+import { PendingDeletionGate } from "../components/auth/pending-deletion-page";
+import { WebPushKeeper } from "../components/delivery/web-push-keeper";
 import { OpenFromApp } from "../components/desktop/open-from-app";
 import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
 import { AppFrameSkeleton } from "../components/layout/app-frame-skeleton";
@@ -9,6 +11,9 @@ import { CommandMenu } from "../components/navigation/command-menu";
 import { NewOrganizationDialog } from "../components/organizations/new-organization-dialog";
 import { OrganizationBoundary } from "../components/organizations/organization-boundary";
 import { CardNeededDialog } from "../components/plan/card-needed-dialog";
+import { ResumeAccountDeletion } from "../components/settings/delete-account";
+import { showPendingDeletion } from "../lib/account-deletion/pending";
+import { scheduledDeletion } from "../lib/account-deletion/queries";
 import { aiConnectionRequired } from "../lib/ai-connection/queries";
 import {
   connectedThroughDesktop,
@@ -59,11 +64,12 @@ export const Route = createFileRoute("/_authed")({
     }
     /*
      * The questions the gates below decide on go out together, so the wait is the slowest one and
-     * not the sum of them. They are decided in the order they always were: terms, onboarding, the
-     * AI connection, then the shortened tool names. A question an earlier gate never reads, because
-     * it redirected, must not become an unhandled rejection, so each keeps a handler on a side
-     * reference; a failure is still thrown where its gate awaits it.
+     * not the sum of them. They are decided in the order they always were: a scheduled deletion,
+     * terms, onboarding, the AI connection, then the shortened tool names. A question an earlier gate
+     * never reads, because it returned or redirected, must not become an unhandled rejection, so each
+     * keeps a handler on a side reference; a failure is still thrown where its gate awaits it.
      */
+    const scheduled = scheduledDeletion(context.queryClient);
     const terms = serviceTermsRequired(context.queryClient);
     const ai =
       location.pathname !== "/onboarding" && !needsOnboarding(user)
@@ -73,6 +79,22 @@ export const Route = createFileRoute("/_authed")({
     terms.catch(() => undefined);
     ai?.catch(() => undefined);
     toolNames.catch(() => undefined);
+    /*
+     * An account scheduled to be deleted, before everything else: the app is only the page that
+     * says when and offers to cancel (`PendingDeletionGate`). A server that refuses every other
+     * request for it is found out the same way, by the first refusal (lib/error-reporting.tsx).
+     * Asked alongside the others, its refusals of them are answered by the handlers above.
+     */
+    const deletion = await scheduled;
+    if (deletion) {
+      // Showing the page is the visit's to do, not a hover's. The page is drawn without the frame, so
+      // a flag left from an earlier visit would draw the frame first on every load.
+      if (!preload) {
+        forgetSignedIn();
+        showPendingDeletion({ deleteAfter: deletion.deleteAfter });
+      }
+      return;
+    }
     /*
      * Terms to agree to (OpenBot Cloud), before onboarding and everything else: from anywhere to
      * the terms screen, which remembers where they were headed. The terms screen itself is let
@@ -150,10 +172,13 @@ export const Route = createFileRoute("/_authed")({
   // Mounted INSIDE the authed boundary, not at the root: the runtime endpoint requires a session, so
   // a provider above the sign-in gate would open a run for a visitor who has not signed in yet.
   component: () => (
-    // The held page in place of all of it, the moment the organization holds the person out while it is open.
-    <HeldOutGate>
-      <AuthedApp />
-    </HeldOutGate>
+    // The pending page in place of all of it, from the moment the account is scheduled to be deleted.
+    <PendingDeletionGate>
+      {/* The held page in place of all of it, the moment the organization holds the person out while it is open. */}
+      <HeldOutGate>
+        <AuthedApp />
+      </HeldOutGate>
+    </PendingDeletionGate>
   ),
 });
 
@@ -168,6 +193,8 @@ function AuthedApp() {
          */}
         <SkinBotLook>
           <AppHotkeys />
+          {/* This browser's push subscription, saved again in each organization OpenBot starts in. */}
+          <WebPushKeeper />
           {/* The skin saved on the account, drawn over the browser's cached one once it loads. */}
           <SkinAccountSync />
           {/* Opened by the "OpenBot for Business" entry (personal edition and OpenBot Cloud), from whichever skin draws it. */}
@@ -181,6 +208,8 @@ function AuthedApp() {
           <NewOrganizationDialog />
           {/* The command palette, from Cmd/Ctrl+K and from the skins' menus. */}
           <CommandMenu />
+          {/* Back from signing in again to delete the account: General settings, where the dialog opens again. */}
+          <ResumeAccountDeletion />
           <Outlet />
         </SkinBotLook>
       </CopilotProvider>

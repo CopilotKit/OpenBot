@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "distribution": {
+    "id": "CopilotKit/OpenBot",
+    "repository": "CopilotKit/OpenBot",
+    "channel": "stable"
+  },
+  "version": "v1.2.0",
+  "source": {
+    "commit": "1ad2bf3a485105d1fc88729d9d60f6be62647d9f",
+    "upstreamRepository": "CopilotKit/openbot",
+    "upstreamCommit": "1ad2bf3a485105d1fc88729d9d60f6be62647d9f",
+    "modified": false
+  },
+  "artifacts": {
+    "source": {
+      "url": "https://github.com/CopilotKit/OpenBot/releases/download/v1.2.0/openbot-source.tar.gz",
+      "sha256": "9083d149a93e97e3f0cea455d4bc0db1b970cfb9c54ca85dd0d94c18ebfbd506"
+    },
+    "images": {
+      "agent-adk": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-adk@sha256:24a7eb52a1dd85a130c5ed102af62f3c24e03170d5d2e4ab5b99678e86af13ad"
+      },
+      "agent-ag2": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-ag2@sha256:afefc5f47506340fddce43f571d67db7f5ba9a6f610d31dfe9ef8f07ed37a10e"
+      },
+      "agent-agno": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-agno@sha256:e2372c4fe9cd789fd530efd7c434e581713033c14f19f3c98f951bd9c5bdbca1"
+      },
+      "agent-antigravity": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-antigravity@sha256:c2dde3c32b0b83ca9ed34f20309d622aaf794ae6b691f0ca0950f45077c8c1b8"
+      },
+      "agent-claude-sdk": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:cf796ceb613829d565952896e100880d1313e113a0c0ec0bcf977c6f86a164bc"
+      },
+      "agent-crewai": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-crewai@sha256:6a7aee2b99b0fa314ad2bc18b5bbad582e3f01edb9db787f147811830af55989"
+      },
+      "agent-langgraph-agui": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:8c405fffe1a156356d35fc936adfa11a3debc92a386ccbb5654beac8eb22cbd3"
+      },
+      "agent-langgraph-ts": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:e01cbfed60d391d2427517751da62da358648a22fe896b9f4dec01df20f6fb7f"
+      },
+      "agent-langroid": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-langroid@sha256:e46fb54cd7ec1aed0a377797d735d85322d8ecd4a258588b0e8d8bfae97a4966"
+      },
+      "agent-llamaindex": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-llamaindex@sha256:195b95bd182e0b68c1395866ce9b117edd820a40cca54c0d1b3023d2a2cefec4"
+      },
+      "agent-mastra": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-mastra@sha256:dd4ab62de2ee47bea8914bdbc6e3daaf46d821ceeac658c8bc4aaf8325ba877b"
+      },
+      "agent-microsoft": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-microsoft@sha256:992780bf6f7acdab124c2f5a8443dcf4d6bf8f97cb0c02bc660fde78d482a3e0"
+      },
+      "agent-pydantic-ai": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-pydantic-ai@sha256:cd6b5ca47ecf0485dae655ad17c0120cadf580ac14c29cf7e0eacabd78c5bff1"
+      },
+      "agent-strands": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-strands@sha256:9e710adc44f93c7e8207b82d17d7d198aa254e3f64b771d52c935347661f7afd"
+      },
+      "openbot": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:39bd6da4a2dab1d1eed98f698d0d21a52838869bd138b12a330d3d7a4f4c790d"
+      },
+      "supervisor": {
+        "reference": "ghcr.io/copilotkit/openbot-supervisor@sha256:a06d512853537f90143ed05ddfdb8003e1ac7fa50758d38f9b6ebea423afbc1e"
+      },
+      "server": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:39bd6da4a2dab1d1eed98f698d0d21a52838869bd138b12a330d3d7a4f4c790d"
+      },
+      "agent-computer": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:39bd6da4a2dab1d1eed98f698d0d21a52838869bd138b12a330d3d7a4f4c790d"
+      },
+      "agent-bot": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:39bd6da4a2dab1d1eed98f698d0d21a52838869bd138b12a330d3d7a4f4c790d"
+      },
+      "agent-langgraph": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:39bd6da4a2dab1d1eed98f698d0d21a52838869bd138b12a330d3d7a4f4c790d"
+      }
+    },
+    "chart": {
+      "version": "1.2.0",
+      "url": "https://github.com/CopilotKit/OpenBot/releases/download/v1.2.0/openbot-1.2.0.tgz",
+      "sha256": "400ebe3cb8046744b50312038f9fb3f742505439c27a22ba20ee8ba02d9ba91a"
+    }
+  },
+  "compatibility": {
+    "launcherApi": 1,
+    "configSchema": 1,
+    "extensionApi": 1,
+    "database": {
+      "from": [
+        "0181_organization_ai_sign_in_credentials",
+        "0164_schedules_held_by_move",
+        "0162_computer_restores",
+        "0161_ai_connection_shared_sign_in",
+        "0151_sign_up_switch",
+        "0137_ai_connections",
+        "0132_bot_task_runs",
+        "0088_approval_reviewer_guidance",
+        "0085_approval_rule_account",
+        "0083_learning_skill_approvals",
+        "0082_routine_goal",
+        "0077_channel_opening"
+      ],
+      "to": "0182_withdraw_default_source_imports",
+      "rollbackCompatible": false
+    },
+    "intelligenceCapabilities": []
+  },
+  "upgrade": {
+    "fromVersions": [
+      "v1.2.0-rc.5",
+      "v1.2.0-rc.4",
+      "v1.2.0-rc.3",
+      "v1.2.0-rc.2",
+      "v1.2.0-rc.1",
+      "v1.1.3",
+      "v1.1.2",
+      "v1.1.1",
+      "v1.1.0",
+      "v1.0.3",
+      "v1.0.2",
+      "v1.0.1",
+      "v1.0.0",
+      "v0.3.4",
+      "v0.3.3",
+      "v0.3.2",
+      "v0.3.1",
+      "v0.3.0"
+    ],
+    "requiresDowntime": false,
+    "recovery": "restore-backup"
+  }
+}

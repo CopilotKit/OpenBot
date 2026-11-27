@@ -229,7 +229,7 @@ test("A harness's error category is relayed with its words", async () => {
   }
 });
 
-test("On the last step the plan's model is sent no tools, and told it answers only", async () => {
+test("A call with tools switched off (tool_choice none) sends the plan's model no tools, and tells it it answers only", async () => {
   const fake = await harness(fixture("text"));
   try {
     const model = new PlanHarnessChatModel({

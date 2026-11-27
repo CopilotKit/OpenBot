@@ -287,7 +287,7 @@ export function appDirectoryEntries(
       : (fixture.directory ?? [])
           .filter((app) => app.connection.kind !== "unsupported")
           .filter((app) => holds(app.slug, app.name, app.description))
-          .map((app) => {
+          .map((app): AppDirectoryEntry => {
             const added = servers.find((server) => slugOf(server) === app.slug);
             return {
               id: `directory:${app.slug}`,
@@ -313,6 +313,23 @@ export function appDirectoryEntries(
                     : "sign-in",
               ...(app.keyVersion ? { keyVersion: app.keyVersion } : {}),
             };
+          })
+          /*
+           * As the server orders the wider directory: apps a person signs in to before apps that
+           * take a key, each by title without regard to case, then by id.
+           */
+          .sort((left, right) => {
+            const key = (entry: AppDirectoryEntry) =>
+              entry.source === "directory" && entry.connectsWith === "key"
+                ? 1
+                : 0;
+            const one = left.title.toLowerCase();
+            const other = right.title.toLowerCase();
+            return (
+              key(left) - key(right) ||
+              (one < other ? -1 : one > other ? 1 : 0) ||
+              (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+            );
           });
   return [...catalogue, ...directory];
 }
@@ -396,18 +413,16 @@ export function answerAppsApi(
       | "catalogue"
       | "directory"
       | null;
-    const page = pageOf(
-      appDirectoryEntries(
-        fixture,
-        source ?? undefined,
-        url.searchParams.get("search") ?? "",
-      ),
-      url,
-      fixture.pageSize,
+    const entries = appDirectoryEntries(
+      fixture,
+      source ?? undefined,
+      url.searchParams.get("search") ?? "",
     );
+    const page = pageOf(entries, url, fixture.pageSize);
     return NativeResponse.json({
       entries: page.items,
       nextCursor: page.nextCursor,
+      total: entries.length,
     });
   }
   if (path === APP_SETUP_PATH)

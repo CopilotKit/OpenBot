@@ -23,6 +23,7 @@ import {
   reduceQueue,
 } from "@/components/channels/composer";
 import { StillWorkingError } from "@/components/channels/composer/queue";
+import { ComposerColumn } from "@/components/channels/conversation-columns";
 import {
   NotifyPrompt,
   notifyPromptAnswered,
@@ -70,6 +71,7 @@ export function ConversationView({
   modelPicker,
   routine,
   draftKey,
+  composerOpening,
 }: {
   messages: readonly Message[];
   threadId?: string;
@@ -170,6 +172,11 @@ export function ConversationView({
   routine?: { agentId: string; channelId: string };
   /** Which conversation's unsent message the composer keeps. See `Composer`. */
   draftKey?: string;
+  /**
+   * Changed to open the composer again, so it reads its draft once more: it reads it only as it
+   * opens, and a message put back in the draft afterwards would not show otherwise.
+   */
+  composerOpening?: number;
 }) {
   /*
    * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
@@ -571,24 +578,8 @@ export function ConversationView({
           working={working}
         />
       </div>
-      {/*
-       * THE TRANSCRIPT'S SIDE INSET IN A NARROW PANE, AND THE SAME 768px COMPOSER IN A WIDE ONE.
-       *
-       * The composer had no inset of its own, so in a pane narrower than its 768px column it ran to
-       * the pane's border, and the starter tasks above it with it, while the transcript kept 16px a
-       * side. Now the column always pads `px-4`, as the transcript's does, and is allowed 2rem more
-       * than `max-w-3xl` to pay for it: from an 800px pane up the composer is 768px wide exactly as
-       * before, and below that it stands 16px off each edge.
-       *
-       * A width, not a breakpoint, on purpose. A viewport breakpoint does not know how much of the
-       * window the sidebar takes, and a container query would need `@container` on an ancestor of
-       * the composer, which is layout containment: it would become the containing block for the @
-       * menu, which is `position: fixed` at the caret (see `DictationSurface`).
-       */}
-      <div
-        className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
-        data-slot="composer-column"
-      >
+      {/* The composer's column, shared with a group conversation; see `ComposerColumn`. */}
+      <ComposerColumn>
         {notice}
         {/*
          * Notifications are offered once this person has started a task: a Bot is working for them,
@@ -642,6 +633,7 @@ export function ConversationView({
           starterSuggestions
         )}
         <Composer
+          key={composerOpening}
           modelPicker={modelPicker}
           {...(routine ? { routine } : {})}
           {...(draftKey ? { draftKey } : {})}
@@ -706,7 +698,7 @@ export function ConversationView({
            */
           stoppable={stoppable ?? pending}
         />
-      </div>
+      </ComposerColumn>
     </div>
   );
 }

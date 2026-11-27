@@ -93,6 +93,13 @@ function runLangGraphAguiModelProbe(
         "tools.current_tools = lambda: SimpleNamespace(model='', effort='')",
         "tools.model_messages = lambda messages: messages",
         "sys.modules['src.tool_runtime'] = tools",
+        // An OpenAI-compatible model is built as `SignedChatOpenAI(model=..., **kwargs)`, which is
+        // `init_chat_model`'s own construction for `openai`: stood in for the same way.
+        "signatures = ModuleType('src.thought_signatures')",
+        "signatures.SignedChatOpenAI = lambda model, **kwargs: {'model': model, 'model_provider': 'openai'}",
+        "signatures.is_gemini = lambda model: False",
+        "signatures.signed = lambda messages, found: messages",
+        "sys.modules['src.thought_signatures'] = signatures",
         "from src import main",
         "chosen = main._model()",
         "print(json.dumps({'base_url': os.environ.get('OPENAI_BASE_URL'), **chosen}))",
@@ -526,6 +533,42 @@ test("runs the TypeScript LangGraph engine beside the others", () => {
   expect(untold.services.server.environment.LANGGRAPH_TS_AG_UI_URL ?? "").toBe(
     "",
   );
+});
+
+/**
+ * Every Bot runs on that engine, and the server refuses a Bot it cannot reach the engine for rather
+ * than run it on its built-in agent. So the server is always told the engine's name on this network,
+ * whatever the deployment sets, as LANGGRAPH_TS_COMPOSE_AG_UI_URL: the address the server tries
+ * last, after one an operator names in LANGGRAPH_TS_AG_UI_URL and after a picked harness that is
+ * the engine (OpenBot Desktop's, which it starts as `agent-harness`).
+ *
+ * The engine is under no profile, so a plain `docker compose up` starts it, and the server does not
+ * wait on it: OpenBot Desktop starts its services by name from images it pulled, and a dependency
+ * would make it start one it never pulled.
+ */
+test("always names the TypeScript engine to the server, and does not make the server wait for it", () => {
+  const services = composeServices();
+  expect(services["agent-langgraph-ts"]?.profiles).toBeUndefined();
+  expect(services.server?.environment?.LANGGRAPH_TS_COMPOSE_AG_UI_URL).toBe(
+    "http://agent-langgraph-ts:4215/",
+  );
+  const dependsOn: unknown = services.server?.depends_on ?? {};
+  const waitsFor = Array.isArray(dependsOn)
+    ? dependsOn
+    : Object.keys(dependsOn as Record<string, unknown>);
+  expect(waitsFor).not.toContain("agent-langgraph-ts");
+
+  for (const env of [
+    {},
+    { LANGGRAPH_TS_AG_UI_URL: "" },
+    { LANGGRAPH_TS_AG_UI_URL: "http://127.0.0.1:4215/" },
+    { PICKED_HARNESS_URL: "http://agent-harness:4215/" },
+  ]) {
+    expect(
+      runComposeConfig(env).services.server.environment
+        .LANGGRAPH_TS_COMPOSE_AG_UI_URL,
+    ).toBe("http://agent-langgraph-ts:4215/");
+  }
 });
 
 test("tags the TypeScript engine's built image by the stack's project, unless LANGGRAPH_TS_IMAGE names one", () => {
@@ -1206,11 +1249,7 @@ test("gives the selected harness the same governed callback as the managed Bot",
     OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
     AGENT_TOOL_TOKEN: "synthetic-callback-token",
   });
-  for (const service of [
-    "agent-harness",
-    "agent-langgraph-agui",
-    "agent-langgraph-ts",
-  ] as const) {
+  for (const service of ["agent-harness", "agent-langgraph-agui"] as const) {
     expect(config.services[service].environment).toMatchObject({
       OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
       AGENT_TOOL_TOKEN: "synthetic-callback-token",
@@ -1219,6 +1258,21 @@ test("gives the selected harness the same governed callback as the managed Bot",
       "host.docker.internal=host-gateway",
     );
   }
+});
+
+/**
+ * The TypeScript engine calls nothing back: every OpenBot tool it calls is handed back over AG-UI,
+ * as a Bot somebody connects hands it back, so it holds neither the callback's address nor its
+ * secret.
+ */
+test("gives the TypeScript engine no tool callback", () => {
+  const config = runComposeConfig({
+    OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
+    AGENT_TOOL_TOKEN: "synthetic-callback-token",
+  });
+  const environment = config.services["agent-langgraph-ts"].environment;
+  expect(environment.OPENBOT_TOOL_URL).toBeUndefined();
+  expect(environment.AGENT_TOOL_TOKEN).toBeUndefined();
 });
 
 /**
@@ -1426,7 +1480,7 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
 });
 
 /**
- * A Google or xAI sign-in is a file the server renews itself, so it reaches the container as the
+ * An xAI sign-in is a file the server renews itself, so it reaches the container as the
  * folder it sits in: the renewal writes a sibling and renames it over the original.
  */
 test("mounts the model sign-in folder into the server, and only there", () => {

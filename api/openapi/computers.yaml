@@ -560,12 +560,16 @@ paths:
       summary: Read the page a Bot's browser is on
       description: >-
         Return the text of the page the Bot's browser is showing, with its
-        address and title.
+        address and title. Asked with the Bot's threadId and toolCallId, the
+        step runs once, however many times it is asked.
       x-openbot-singleton: true
       security:
         - webSession: []
         - appOAuth: [computers:read]
         - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/ComputerStepThreadIdQuery'
+        - $ref: '#/components/parameters/ComputerStepToolCallIdQuery'
       responses:
         '200':
           description: The page's address, title and text.
@@ -1084,12 +1088,25 @@ paths:
         Idempotency-Key, and sending the same key again answers 409
         ANSWER_NOT_KEPT, not the answer a second time. It was done; send a
         new key to do it again.
+        The body is optional: sent with the Bot's threadId and toolCallId, the
+        step runs once, however many times it is asked.
       security:
         - webSession: []
         - appOAuth: [computers:write]
         - apiKey: []
       parameters:
         - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComputerSnapshotAsk'
+            examples:
+              request:
+                value:
+                  threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+                  toolCallId: call_8c1f
       responses:
         '200':
           description: The elements, and the snapshot they belong to.
@@ -1688,6 +1705,20 @@ paths:
           $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
+    ComputerStepThreadIdQuery:
+      name: threadId
+      in: query
+      required: false
+      description: The conversation's thread the Bot's tool call is in. Sent with toolCallId.
+      schema:
+        $ref: '#/components/schemas/ComputerStepThreadId'
+    ComputerStepToolCallIdQuery:
+      name: toolCallId
+      in: query
+      required: false
+      description: The Bot's tool call this step answers. Sent with threadId.
+      schema:
+        $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerToolCallId:
       name: toolCallId
       in: path
@@ -1939,6 +1970,14 @@ components:
         truncated:
           type: boolean
           description: True when the page had more elements than are returned.
+    ComputerSnapshotAsk:
+      type: object
+      additionalProperties: false
+      properties:
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerNavigate:
       type: object
       additionalProperties: false
@@ -1953,7 +1992,40 @@ components:
           type: string
           description: >-
             The tool call that asked, so a picture of the page is kept under
-            it.
+            it. Sent with threadId, the step also runs once, however many
+            times it is asked (ComputerStepToolCallId says how).
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+    ComputerStepThreadId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: \S
+      description: >-
+        The conversation's thread the Bot's tool call is in. Sent with
+        toolCallId, so the server runs the step once, however many times it is
+        asked.
+    ComputerStepToolCallId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: \S
+      description: >-
+        The Bot's tool call this step answers. Sent with threadId, the server
+        runs the step once, however many times and from wherever it is asked.
+        The first ask runs it. When the server already ran this step, it
+        answers as it answered the first run, with the same result or the same
+        problem, and does nothing a second time; what the first run answered is
+        kept for this only until the conversation's turn is over, and after
+        that the answer is ANSWER_NOT_KEPT. While the first run is still going,
+        the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId
+        and toolCallId for its result. When the first run was cut off before it
+        answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it
+        was done before doing it again. COMPUTER_STEP_RUNNING and
+        COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose
+        OpenBot-Capabilities header names computer-step-taken; any other
+        request is answered as before they existed. Without both ids a call
+        runs once per Idempotency-Key, as it always has.
     ComputerClick:
       type: object
       additionalProperties: false
@@ -1966,6 +2038,10 @@ components:
         snapshotId:
           type: integer
           description: The snapshot the ref came from.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerType:
       type: object
       additionalProperties: false
@@ -1984,6 +2060,10 @@ components:
         submit:
           type: boolean
           description: Send the field's form afterwards.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerKey:
       type: object
       additionalProperties: false
@@ -1999,6 +2079,10 @@ components:
           description: The element to press it on. With it, snapshotId.
         snapshotId:
           type: integer
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerScroll:
       type: object
       additionalProperties: false
@@ -2008,6 +2092,10 @@ components:
           description: >-
             Pixels to scroll down, or up when negative. Without it the
             computer scrolls its own default distance.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerActionResult:
       type: object
       required: [action, url, elapsedMs]
@@ -2057,6 +2145,10 @@ components:
           type: integer
           minimum: 1000
           maximum: 600000
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerCommandResult:
       type: object
       required: [command, exitCode, stdout, stderr, truncated, timedOut, elapsedMs]
@@ -2087,6 +2179,10 @@ components:
         path:
           type: string
           description: A folder of the workspace. Without it, the workspace itself.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerFileEntry:
       type: object
       required: [path, kind]
@@ -2119,6 +2215,10 @@ components:
           type: string
           minLength: 1
           pattern: \S
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerFileText:
       type: object
       required: [path, text, truncated, bytes]
@@ -2150,6 +2250,10 @@ components:
         append:
           type: boolean
           description: Add to the end of the file instead of replacing it.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerFileWritten:
       type: object
       required: [path, bytes, appended]
@@ -2272,6 +2376,12 @@ components:
           description: What the person is needed for.
         toolCallId:
           type: string
+          description: >-
+            The Bot's tool call that asked. Sent with threadId, the step also
+            runs once, however many times it is asked (ComputerStepToolCallId
+            says how).
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
         source:
           type: string
           enum: [model, manual]
@@ -2301,6 +2411,10 @@ components:
         label:
           type: string
           description: What to ask the person for, such as your bank password.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerSecretValue:
       type: object
       additionalProperties: false
@@ -2750,7 +2864,11 @@ components:
         once; send a new key to run it again). Or the caller has something else
         to do first: take a new snapshot, wait for the person driving, clear
         what is in the way, or send the call through its conversation. Or the
-        Idempotency-Key was already used for a different request.
+        Idempotency-Key was already used for a different request. Or the call
+        named a step, by threadId and toolCallId, that the server is running
+        now (COMPUTER_STEP_RUNNING: ask again with the same ids for its
+        result) or that was cut off before it answered
+        (COMPUTER_STEP_OUTCOME_UNKNOWN: check before doing it again).
       headers:
         X-Request-Id:
           $ref: './common.yaml#/components/headers/RequestId'
@@ -2759,6 +2877,10 @@ components:
           schema:
             $ref: '#/components/schemas/ComputerProblem'
           examples:
+            stepRunning:
+              $ref: '#/components/examples/ComputerStepRunningProblemExample'
+            stepOutcomeUnknown:
+              $ref: '#/components/examples/ComputerStepOutcomeUnknownProblemExample'
             answerNotKept:
               value:
                 type: https://open.bot/errors/answer-not-kept
@@ -2787,7 +2909,11 @@ components:
         Nothing is broken, and the caller has something else to do first: take
         a new snapshot, wait for the person driving, clear what is in the way,
         or send the call through its conversation. Or the Idempotency-Key was
-        already used for a different request.
+        already used for a different request. Or the call named a step, by
+        threadId and toolCallId, that the server is running now
+        (COMPUTER_STEP_RUNNING: ask again with the same ids for its result) or
+        that was cut off before it answered (COMPUTER_STEP_OUTCOME_UNKNOWN:
+        check before doing it again).
       headers:
         X-Request-Id:
           $ref: './common.yaml#/components/headers/RequestId'
@@ -2796,6 +2922,10 @@ components:
           schema:
             $ref: '#/components/schemas/ComputerProblem'
           examples:
+            stepRunning:
+              $ref: '#/components/examples/ComputerStepRunningProblemExample'
+            stepOutcomeUnknown:
+              $ref: '#/components/examples/ComputerStepOutcomeUnknownProblemExample'
             stale:
               value:
                 type: https://open.bot/errors/computer-snapshot-stale
@@ -3187,3 +3317,27 @@ components:
       value:
         action: human_click
         url: https://example.com/sign-in
+    ComputerStepRunningProblemExample:
+      summary: The server is running this step now.
+      value:
+        type: https://open.bot/errors/computer-step-running
+        title: This step is already being run.
+        status: 409
+        detail: This step is already being run, and has not finished yet. Ask again in a moment for its result.
+        code: COMPUTER_STEP_RUNNING
+        category: conflict
+        retryable: true
+        requestId: req_example
+        traceId: trace_example
+    ComputerStepOutcomeUnknownProblemExample:
+      summary: The step was cut off before it answered.
+      value:
+        type: https://open.bot/errors/computer-step-outcome-unknown
+        title: This step's outcome is unknown.
+        status: 409
+        detail: This step was started once and stopped before it finished, so it may or may not have been done. Check before doing it again.
+        code: COMPUTER_STEP_OUTCOME_UNKNOWN
+        category: conflict
+        retryable: false
+        requestId: req_example
+        traceId: trace_example

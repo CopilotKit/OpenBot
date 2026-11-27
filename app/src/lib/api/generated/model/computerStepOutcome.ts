@@ -3,6 +3,7 @@
  */
 import type { ComputerStepDone } from "./computerStepDone";
 import type { ComputerStepHeld } from "./computerStepHeld";
+import type { ComputerStepTaken } from "./computerStepTaken";
 import type { ComputerStepWaiting } from "./computerStepWaiting";
 
 /**
@@ -11,4 +12,5 @@ import type { ComputerStepWaiting } from "./computerStepWaiting";
 export type ComputerStepOutcome =
   | ComputerStepDone
   | ComputerStepWaiting
-  | ComputerStepHeld;
+  | ComputerStepHeld
+  | ComputerStepTaken;

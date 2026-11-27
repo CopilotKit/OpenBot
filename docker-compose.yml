@@ -122,11 +122,17 @@ services:
       # The managed Bot by name, when the deployment has one. `:+` keeps an empty setting empty, which
       # is how a deployment without that Bot says so: the package drops its row while this is blank.
       MANAGED_AGENT_AG_UI_URL: ${MANAGED_AGENT_AG_UI_URL:+http://agent-langgraph-agui:4206/}
-      # The TypeScript LangGraph engine by name, which new Bots run on, when the deployment runs it.
-      # `:+` for the same reason as the managed Bot's: empty says it does not. A deployment whose
-      # picked harness is that engine (OpenBot Desktop's) needs neither: the server finds it at
-      # PICKED_HARNESS_URL.
+      # The TypeScript LangGraph engine by name, which new Bots run on, when the deployment names it.
+      # `:+` as for the managed Bot. Unset does not put new Bots on the built-in agent: the server
+      # refuses a Bot made for the engine when it cannot find one, and looks in this order. This
+      # address first; then a picked harness that is the engine (OpenBot Desktop's), at
+      # PICKED_HARNESS_URL; then the line below.
       LANGGRAPH_TS_AG_UI_URL: ${LANGGRAPH_TS_AG_UI_URL:+http://agent-langgraph-ts:4215/}
+      # The engine's service in this file, always named, because this file always defines it. Last
+      # in that order, so OpenBot Desktop, which runs the engine as `agent-harness` and never starts
+      # this service, keeps dialling the one it started. No `depends_on` for the same reason: Desktop
+      # starts its services by name from images it pulled, and one would start an image it never did.
+      LANGGRAPH_TS_COMPOSE_AG_UI_URL: http://agent-langgraph-ts:4215/
       # Where a ChatGPT plan's model calls go: the LangGraph harness that holds the plan's token
       # store, by name. Empty on every other sign-in. The token falls back to MANAGED_AGENT_TOKEN.
       CHATGPT_PLAN_HARNESS_URL: ${CHATGPT_PLAN_HARNESS_URL:-}
@@ -192,7 +198,7 @@ services:
       COMPOSIO_API_KEY: ${COMPOSIO_API_KEY:-}
       ARCADE_API_KEY: ${ARCADE_API_KEY:-}
       OPENBOT_BROKER_PROVIDER: ${OPENBOT_BROKER_PROVIDER:-}
-      # A Google or xAI sign-in, which the server reads and renews itself. The file is on the host,
+      # An xAI sign-in, which the server reads and renews itself. The file is on the host,
       # at `.openbot/model-oauth.json` beside this one, and reaches the container through the mount
       # below, so a host path here becomes the mount's. Empty stays empty: no sign-in, no file.
       OPENBOT_MODEL_OAUTH_FILE: ${OPENBOT_MODEL_OAUTH_FILE:+/openbot/model-oauth.json}
@@ -712,9 +718,10 @@ services:
       timeout: 5s
       retries: 5
 
-  # The TypeScript LangGraph engine: the default engine for new Bots. LangGraph.js behind AG-UI, with
-  # the same harness contract as the Python one above (the model per run, deployment and browser
-  # tools, a provider's refusal in its own words).
+  # The TypeScript LangGraph engine, which new Bots run on. LangGraph.js behind plain AG-UI: its
+  # instructions are the run's system messages, every tool call is handed back to the server, and
+  # the model per run is the one OpenBot extension it reads. Under no profile, so every edition's
+  # `up` starts it.
   agent-langgraph-ts:
     build:
       context: .
@@ -748,9 +755,8 @@ services:
       CLAUDE_PLAN_HARNESS_URL: ${CLAUDE_PLAN_HARNESS_URL:-}
       CHATGPT_PLAN_HARNESS_URL: ${CHATGPT_PLAN_HARNESS_URL:-}
       CHATGPT_PLAN_HARNESS_TOKEN: ${CHATGPT_PLAN_HARNESS_TOKEN:-}
-      # Where this Bot runs a tool: back through the deployment that granted it. See the managed Bot.
-      OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
-      AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
+      # No tool callback: this engine calls nothing back. Every OpenBot tool it calls ends its run
+      # for the server to answer, over plain AG-UI, as a Bot somebody connects does.
     extra_hosts:
       - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
     healthcheck:

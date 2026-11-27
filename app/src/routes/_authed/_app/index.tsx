@@ -24,16 +24,9 @@ import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
-import { toast } from "@/components/ui/toast";
-import {
-  type AgentProfile,
-  agentListQueryOptions,
-  agentQueryOptions,
-  isSharedWithYou,
-} from "@/lib/agents/queries";
+import { agentListQueryOptions, isSharedWithYou } from "@/lib/agents/queries";
 import { firstConversationGreeting } from "@/lib/auth/greeting";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { takesNoModelChoice } from "@/lib/bot-agents/queries";
 import {
   beginPendingStart,
   endPendingStart,
@@ -58,17 +51,13 @@ import {
   loadFailure,
   unavailableSaid,
 } from "@/lib/load-failure";
-import {
-  type ConversationModelInput,
-  modelCatalogueQueryOptions,
-} from "@/lib/models/queries";
-import { useDraftModel } from "@/lib/models/run-model";
+import { modelCatalogueQueryOptions } from "@/lib/models/queries";
+import { usePickedBotModel } from "@/lib/models/run-model";
 import { newId } from "@/lib/new-id";
 import { takeInvitationLink } from "@/lib/organizations/invitation-link";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 import { loadFirstScreen } from "@/lib/route-data";
 import { cn } from "@/lib/utils";
-import { queryClient } from "@/query-client";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
 const EXPLORE_SHOWN = 4;
@@ -138,20 +127,6 @@ function Greeting() {
   );
 }
 
-/**
- * Said when the Bot a message went to takes no model pick, so the pick was not saved. The person
- * picked before OpenBot picked the Bot, and a pick that silently does nothing is a surprise. Whatever
- * the reason (a Bot connected from outside OpenBot, or one set to hand work out), the person reads
- * the same thing: the Bot picks its own model.
- */
-function sayModelNotUsed(bot: AgentProfile) {
-  toast.add({
-    id: "home-model-not-used",
-    type: "info",
-    title: `${bot.name} picks its own model, so it doesn't use the one you picked.`,
-  });
-}
-
 export const Route = createFileRoute("/_authed/_app/")({
   /*
    * `ask`: words to start the box with, as Teach a Bot's Try it hands over a task a Bot just learned. Only put in the
@@ -201,7 +176,10 @@ function RouteComponent() {
    * not true of it. A Bots list that fails to load is said under the composer already.
    */
   const personal = capabilities.data?.edition === "personal";
-  const { startChosen, startPicked, pending } = useStartChannel();
+  // The box's message is kept in its draft until its conversation has it; a suggestion has no draft.
+  const typedStart = useStartChannel("home");
+  const { pending } = typedStart;
+  const suggested = useStartChannel();
   const router = useRouter();
   const navigate = useNavigate();
   // A start that failed behind its placeholder comes back here: its words in the box, its reason
@@ -226,6 +204,17 @@ function RouteComponent() {
   /* The message box's area, which the orb's field behind the page follows. */
   const area = useRef<HTMLDivElement>(null);
   const intro = useHomeIntro();
+  /*
+   * The placeholder's code, fetched while home is open, so Send draws it at once. It is split into
+   * its own file, and fetched only on the first Send it was: until it arrived, home stood there with
+   * its box emptied and nothing to say the message went, as long as a second on a slow connection.
+   * A fetch that fails is tried again by the Send itself.
+   */
+  useEffect(() => {
+    const placeholder = router.routesByPath["/start/$startId"];
+    if (placeholder)
+      void router.loadRouteChunk(placeholder)?.catch(() => undefined);
+  }, [router]);
   useEffect(
     () =>
       onFailedStart(() => {
@@ -255,29 +244,8 @@ function RouteComponent() {
    * message runs, as `/channel/new` saves it.
    */
   const models = useQuery(modelCatalogueQueryOptions());
-  const draftModel = useDraftModel(models.data);
-
-  /**
-   * The pick to save with a new conversation with `agentId`, and the line to say once it has started
-   * when that Bot takes no pick (`takesNoModelChoice`). Nothing to save, and nothing to say, while the
-   * pick is the default. A Bot that could not be read takes the pick, as the hook reads it.
-   */
-  const pickFor = async (
-    agentId: string,
-  ): Promise<{ pick: ConversationModelInput | null; notUsed?: () => void }> => {
-    const pick = draftModel.requested;
-    if (!pick) return { pick: null };
-    const bot =
-      agents?.find((agent) => agent.id === agentId) ??
-      (await queryClient
-        .fetchQuery(agentQueryOptions(agentId))
-        .catch(() => undefined));
-    if (!bot || !(await takesNoModelChoice(queryClient, bot))) return { pick };
-    return {
-      pick: null,
-      notUsed: () => sayModelNotUsed(bot),
-    };
-  };
+  const draftModel = usePickedBotModel(models.data, agents);
+  const { pickFor } = draftModel;
 
   /**
    * Pick the Bot and make the channel behind the placeholder `pendingId`.
@@ -290,8 +258,16 @@ function RouteComponent() {
    * Runs on after this page has unmounted, which is the point. A failure goes back to the home
    * composer with the words and the reason, and the person is taken there only if they are still
    * looking at the placeholder; otherwise the next home page they open shows it.
+   *
+   * A starter task starts the same way, from its own click. It was never typed in the box, so the
+   * box keeps whatever the person had written there, and a failure puts back only its reason.
    */
-  const startBehind = async (pendingId: string, draft: ComposerDraft) => {
+  const startBehind = async (
+    pendingId: string,
+    draft: ComposerDraft,
+    starter = false,
+  ) => {
+    const { startChosen, startPicked } = starter ? suggested : typedStart;
     // A `/` skill stays at the start of the words, where the server finds it and gives the Bot its
     // instructions, only if the Bot holds it (server/src/plugins/picked-skill.ts).
     try {
@@ -319,18 +295,47 @@ function RouteComponent() {
         pickFor,
       });
     } catch (caught) {
-      stashFailedStart({
-        text: draft.text,
-        error: failureOf(caught, "Couldn't start the conversation. Try again."),
-        files: draft.attachments
-          .map(heldFileOf)
-          .filter((file) => file !== undefined),
-      });
+      stashFailedStart(
+        starter
+          ? {
+              text: "",
+              error: failureOf(caught, "Couldn't start that task. Try again."),
+            }
+          : {
+              text: draft.text,
+              error: failureOf(
+                caught,
+                "Couldn't start the conversation. Try again.",
+              ),
+              files: draft.attachments
+                .map(heldFileOf)
+                .filter((file) => file !== undefined),
+            },
+      );
       if (router.state.location.pathname === pendingStartPath(pendingId))
         await navigate({ replace: true, to: "/" });
     } finally {
       endPendingStart(pendingId);
     }
+  };
+
+  /**
+   * The conversation opens NOW, as a placeholder showing the message under the "Thinking" line, and
+   * the Bot is picked and the channel made behind it; see `pending-start.ts`. Waiting here for both
+   * is what kept send looking dead for seconds.
+   */
+  const send = async (draft: ComposerDraft, starter = false) => {
+    setError(null);
+    const pendingId = newId();
+    beginPendingStart(pendingId, {
+      text: draft.text,
+      agentId: draft.agentId,
+    });
+    await navigate({
+      params: { startId: pendingId },
+      to: "/start/$startId",
+    });
+    void startBehind(pendingId, draft, starter);
   };
 
   return (
@@ -377,12 +382,20 @@ function RouteComponent() {
           >
             <StarterSuggestions
               bot={fallback}
-              disabled={pending}
+              disabled={pending || suggested.pending}
               onSelect={async (message) => {
                 if (!fallback) return;
-                const { pick, notUsed } = await pickFor(fallback.id);
-                await startChosen(fallback.id, message, pick);
-                notUsed?.();
+                // Sent as a message written in the box is, to the Bot the tasks are offered for.
+                await send(
+                  {
+                    text: message,
+                    commandIds: [],
+                    attachments: [],
+                    agentId: fallback.id,
+                    isEmpty: false,
+                  },
+                  true,
+                );
               }}
             />
             <Composer
@@ -414,22 +427,7 @@ function RouteComponent() {
                 : asked
                   ? { initialValue: asked, autoFocus: true }
                   : {})}
-              onSubmit={async (draft) => {
-                // The conversation opens NOW, as a placeholder showing the message, and the Bot is
-                // picked and the channel made behind it; see `pending-start.ts`. Waiting here for
-                // both is what kept send looking dead for seconds.
-                setError(null);
-                const pendingId = newId();
-                beginPendingStart(pendingId, {
-                  text: draft.text,
-                  agentId: draft.agentId,
-                });
-                await navigate({
-                  params: { startId: pendingId },
-                  to: "/start/$startId",
-                });
-                void startBehind(pendingId, draft);
-              }}
+              onSubmit={(draft) => send(draft)}
             />
           </div>
           <div className="absolute inset-x-0 top-full flex flex-col items-center pb-8">

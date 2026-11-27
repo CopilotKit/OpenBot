@@ -18,6 +18,9 @@ import {
   type ChannelPage,
   channelKeys,
 } from "@/lib/channels/queries";
+import { ActiveBotProvider } from "@/lib/copilot/active-bot";
+import { BotOffers } from "@/lib/copilot/bot-offer";
+import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { quietRunPeriod } from "@/lib/copilot/quiet-run";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
@@ -71,10 +74,15 @@ const rootRoute = createRootRoute({
     <SidebarShell className="h-svh overflow-hidden">
       <AppSidebar />
       <SidebarInset className="min-h-0 overflow-hidden">
-        <ChannelChat
-          channel={CONVERSATION}
-          runtimeAgentId="general-assistant"
-        />
+        {/* The computer's tools, as the app's provider registers them: a Bot's command runs here. */}
+        <ActiveBotProvider>
+          <BotOffers />
+          <ComputerTools />
+          <ChannelChat
+            channel={CONVERSATION}
+            runtimeAgentId="general-assistant"
+          />
+        </ActiveBotProvider>
       </SidebarInset>
     </SidebarShell>
   ),

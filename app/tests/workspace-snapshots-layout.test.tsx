@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 
 /**
  * A Bot's saved copies hold their layout, drawn by a real Chromium with the app's stylesheet: the
@@ -100,12 +101,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet(classes) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(400);
-  await page.waitForFunction(() =>
-    document
-      .getAnimations()
-      .every((running) => !(running instanceof CSSTransition)),
-  );
+  await still(page);
 }
 
 async function open(

@@ -20,6 +20,7 @@ import {
   type ChangeEvent,
   type DragEvent,
   type FormEvent,
+  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -30,6 +31,7 @@ import {
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { IconWaveform } from "@/components/icons/waveform";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
+import { useTouchTyping } from "@/hooks/use-touch-typing";
 import {
   attachmentAddress,
   classifyAttachment,
@@ -1047,6 +1049,15 @@ export function Composer({
     if (!savedKey) {
       return;
     }
+    /*
+     * ON A SCREEN WHOSE SEND STARTS A CONVERSATION, THE MESSAGE IS KEPT UNTIL THE CONVERSATION HAS
+     * IT. Cleared at Send, a page closed while the conversation was still being made lost the words.
+     * So the draft stays as it was sent until the start keeps the message with its conversation and
+     * forgets this one (`useStartChannel`), or a failed send puts the words back.
+     */
+    if (holdsFilesUntilSent && !channelId && isSubmitting) {
+      return;
+    }
     const current = staged.flatMap((attachment) => {
       const rowId = stagedRowId(attachment);
       if (rowId === undefined) return [];
@@ -1095,6 +1106,7 @@ export function Composer({
     draftRestored,
     holdsFilesUntilSent,
     channelId,
+    isSubmitting,
   ]);
 
   /**
@@ -1720,6 +1732,38 @@ export function Composer({
   };
 
   /**
+   * RETURN ON A TOUCH KEYBOARD STARTS A NEW LINE, AND ONLY THE SEND BUTTON SENDS.
+   *
+   * On a phone, Return sits under Backspace and is pressed for a new line as often as for anything
+   * else, so a message went half-written. On a touch keyboard `submitOnEnter` is off, so Return
+   * types a line break and Send is the one way to send. A computer keeps Enter to send and
+   * Shift+Enter for a new line.
+   */
+  const touchTyping = useTouchTyping();
+
+  /**
+   * Runs before prompt-area's own keys, which skip any key this prevents.
+   *
+   * On a touch keyboard: Cmd or Ctrl+Enter still sends, for an iPad with a keyboard attached, and
+   * Return while live dictation listens still stops it, as Enter does on a computer.
+   *
+   * On a computer: the Enter that confirms a character an input method is composing never sends.
+   * prompt-area skips an Enter marked `isComposing`, which is how Chromium sends it. WebKit sends
+   * it after `compositionend`, unmarked and with the key code 229, and that one sent the message.
+   */
+  const handleEditorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    if (touchTyping) {
+      if (event.metaKey || event.ctrlKey || dictation.live.session.active) {
+        event.preventDefault();
+        void submitDraft(value);
+      }
+      return;
+    }
+    if (event.keyCode === 229) event.preventDefault();
+  };
+
+  /**
    * There is a turn in flight and somewhere to park what is being typed.
    *
    * Not the same question as "is anything typed" — an empty composer mid-turn can queue nothing,
@@ -1979,9 +2023,11 @@ export function Composer({
                 minHeight={COMPACT_MIN_HEIGHT_PX}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
+                onKeyDown={handleEditorKeyDown}
                 onSubmit={submitDraft}
                 placeholder={placeholder}
                 ref={promptAreaRef}
+                submitOnEnter={!touchTyping}
                 triggers={triggers}
                 value={value}
               />
@@ -2077,9 +2123,11 @@ export function Composer({
                   minHeight={oneLine ? ONE_LINE_HEIGHT_PX : undefined}
                   onChange={handleChange}
                   onImagePaste={canAttach ? stagePastedImage : undefined}
+                  onKeyDown={handleEditorKeyDown}
                   onSubmit={submitDraft}
                   placeholder={placeholder}
                   ref={promptAreaRef}
+                  submitOnEnter={!touchTyping}
                   triggers={triggers}
                   value={value}
                 />

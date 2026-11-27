@@ -116,6 +116,88 @@ function coldComputer(clock: StartClock & { at: number }, readyAt: number) {
   return seen;
 }
 
+/*
+ * A STEP THE SERVER RUNS ONCE, WHOEVER ASKS. The server runs a Bot's computer steps itself, and a
+ * page that asks for the same step (an older page, a second tab, a reload part way through) names it
+ * by its thread and tool call. One the server is still running is asked about again and never run
+ * here; one cut off before it answered is not run again, and reads as not run.
+ */
+describe("a step the server is running already", () => {
+  test("is asked about again with the same step, never run here, and its answer is the call's", async () => {
+    const clock = fakeClock();
+    const bodies: unknown[] = [];
+    const understood: (string | null)[] = [];
+    globalThis.fetch = (async (
+      url: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      if (String(url) !== CLICK || init?.method !== "POST")
+        return Response.json({ error: "Not found." }, { status: 404 });
+      bodies.push(JSON.parse(String(init.body)));
+      understood.push(new Headers(init.headers).get("OpenBot-Capabilities"));
+      if (bodies.length < 3)
+        return new Response(
+          JSON.stringify({
+            type: "https://open.bot/errors/computer-step-running",
+            title: "This step is already being run.",
+            status: 409,
+            code: "COMPUTER_STEP_RUNNING",
+            detail:
+              "This step is already being run, and has not finished yet. Ask again in a moment for its result.",
+          }),
+          {
+            status: 409,
+            headers: { "content-type": "application/problem+json" },
+          },
+        );
+      return Response.json({ ok: true, clicked: "e1" });
+    }) as unknown as typeof fetch;
+
+    const outcome = await callComputer(
+      "bot-1",
+      "/click",
+      {
+        method: "POST",
+        body: { ref: "e1", snapshotId: 1 },
+        step: { threadId: "thread-1", toolCallId: "call-1" },
+      },
+      undefined,
+      clock,
+    );
+
+    expect(outcome).toEqual({ ok: true, clicked: "e1" });
+    // Every ask said this page understands a step the server has taken, which is what lets the
+    // server answer that way at all (OpenBot-Capabilities).
+    for (const value of understood)
+      expect(value?.split(" ")).toContain("computer-step-taken");
+    // Every ask named the same step, so the server answered it from its own run of it.
+    expect(bodies).toHaveLength(3);
+    for (const body of bodies)
+      expect(body).toEqual({
+        ref: "e1",
+        snapshotId: 1,
+        threadId: "thread-1",
+        toolCallId: "call-1",
+      });
+  });
+
+  test("one cut off before it answered is not run again, and reads as not run", async () => {
+    serverAnswering(409, {
+      code: "COMPUTER_STEP_OUTCOME_UNKNOWN",
+      detail:
+        "This step was started once and stopped before it finished, so it may or may not have been done. Check before doing it again.",
+    });
+
+    const outcome = await click();
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.outcomeUnknown).toBe(true);
+    // Not a refusal: nothing turned it away, so its step reads "Didn't run", never "Blocked".
+    expect(outcome.refused).toBeUndefined();
+    expect(outcome.staleRefs).toBeUndefined();
+  });
+});
+
 describe("a computer still starting", () => {
   /*
    * A cold start that outlasted the server's wait for one request. The call asks again while the

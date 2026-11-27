@@ -1,22 +1,59 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
+import type { GoAhead } from "./SetupProgress";
+
+/** The heading over the explanation before macOS asks for the person's password. */
+export const PASSWORD_NEXT = "Your Mac will ask for your password";
 
 /** The heading over a password prompt the person closed. */
 export const PASSWORD_AGAIN = "Your password is needed";
 
 /**
- * After the person closed the system's password prompt without a password: what that means, and
- * Try again, which asks at once. Install also asks again by itself after a short wait
- * (`install::ASK_AGAIN_AFTER`), so nobody has to find the button.
- *
- * Never a gate before the prompt. #1385 put Continue there, and the product's call for 1.0.1 was
- * that an install step informs the person and moves forward: the step says "Your Mac will ask for
- * your password so OpenBot can install what it needs to run.", leaves it a moment to be read, and
- * the prompt comes up by itself. This card is only for a prompt that was closed.
- *
- * Give it `key={asking}`: asked again after the prompt was closed again, Try again works again.
+ * Keep a card that waits on the person in view in a step that scrolls. Nothing goes on until they
+ * answer it. At the window's smallest size the button sat under the step's pinned foot
+ * (`StepFooter`). Only the step's own card scrolls: `scrollIntoView` also moved the window's page,
+ * which does not scroll, and cut off the card's top.
  */
-export function TryPasswordAgain() {
+function useKeptInView(offered: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const card = offered.current;
+    const sheet = card?.closest(".sheet");
+    if (!card || !sheet) return;
+    const bring = () => {
+      const foot = sheet.querySelector(".step-footer");
+      const limit = foot
+        ? foot.getBoundingClientRect().top
+        : sheet.getBoundingClientRect().bottom;
+      const over = card.getBoundingClientRect().bottom - limit;
+      if (over > 0) sheet.scrollTop += over;
+    };
+    bring();
+    // Brought into view again when what is above it grows, as the step's lede does once the
+    // account check answers: offered while the check ran, the button went back under the foot.
+    // Not when the person scrolls, nor as the row under it ticks: only when the card itself moves.
+    let top = card.offsetTop;
+    const moved =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => {
+            if (card.offsetTop === top) return;
+            top = card.offsetTop;
+            bring();
+          });
+    moved?.observe(sheet, { childList: true, subtree: true });
+    return () => moved?.disconnect();
+  }, [offered]);
+}
+
+/**
+ * The button that lets Install go on (`allow_podman_install`): Continue before macOS's password
+ * prompt, Try again after the person closed it. Install also asks again by itself a short while
+ * after a closed prompt (`install::ASK_AGAIN_AFTER`), so nobody has to find Try again. Before the
+ * first prompt nothing goes on until Continue.
+ *
+ * Give it `key={line}`: asked again after the prompt was closed again, the button works again.
+ */
+export function GoAheadButton({ label }: { label: "Continue" | "Try again" }) {
   const [sent, setSent] = useState(false);
   return (
     <div className="row">
@@ -34,27 +71,37 @@ export function TryPasswordAgain() {
           );
         }}
       >
-        Try again
+        {label}
       </button>
     </div>
   );
 }
 
 /**
- * The closed prompt's card, on whichever screen the person is on: Install's own line about it
- * (`install::podman_declined`), and Try again.
+ * macOS's password prompt, on whichever screen the person is on: Install's own line about it, and
+ * its one button.
+ *
+ * Before the prompt: what comes next and why, and Continue. The prompt comes up only on Continue.
+ * It comes from the system and comes up over every window, so a line on OpenBot's window with a
+ * pause after it was no guarantee anybody read it. On the 1.2.0 Mac run the prompt covered the
+ * browser's sign-in page while OpenBot's window, and its line, sat behind the browser. A screen
+ * before a system prompt explains it, with one button that goes on to the prompt ("Continue").
+ *
+ * After a prompt closed without a password (`install::podman_declined`): what that means, and Try
+ * again.
  */
-export function PodmanGoAhead({
-  asking,
-}: {
-  /** Install's line while it waits to ask again (`goAheadNow`). */
-  asking: string;
-}) {
+export function PodmanGoAhead({ goAhead }: { goAhead: GoAhead }) {
+  const offered = useRef<HTMLElement>(null);
+  useKeptInView(offered);
+  const heading = goAhead.beforePrompt ? PASSWORD_NEXT : PASSWORD_AGAIN;
   return (
-    <section className="local-alert needs" aria-label={PASSWORD_AGAIN}>
-      <h2>{PASSWORD_AGAIN}</h2>
-      <p>{asking}</p>
-      <TryPasswordAgain key={asking} />
+    <section ref={offered} className="local-alert needs" aria-label={heading}>
+      <h2>{heading}</h2>
+      <p>{goAhead.line}</p>
+      <GoAheadButton
+        key={goAhead.line}
+        label={goAhead.beforePrompt ? "Continue" : "Try again"}
+      />
     </section>
   );
 }
@@ -68,7 +115,7 @@ export const OWN_PODMAN = "OpenBot needs its own Podman";
  * person's is paused, and pausing it is their choice. Nothing is paused until they choose it, and
  * Quit starts theirs again (`own_machine`).
  *
- * Give it `key={offer}`, as `TryPasswordAgain`: offered again later, the button works again.
+ * Give it `key={offer}`, as `GoAheadButton`: offered again later, the button works again.
  */
 export function PausePodman({
   offer,
@@ -77,39 +124,8 @@ export function PausePodman({
   offer: string;
 }) {
   const [sent, setSent] = useState(false);
-  // Nothing goes on until the person answers, so the offer and its button are brought into view
-  // in a step that scrolls. At the window's smallest size the button sat under the step's pinned
-  // foot (`StepFooter`). Only the step's own card scrolls: `scrollIntoView` also moved the window's
-  // page, which does not scroll, and cut off the card's top.
   const offered = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const card = offered.current;
-    const sheet = card?.closest(".sheet");
-    if (!card || !sheet) return;
-    const bring = () => {
-      const foot = sheet.querySelector(".step-footer");
-      const limit = foot
-        ? foot.getBoundingClientRect().top
-        : sheet.getBoundingClientRect().bottom;
-      const over = card.getBoundingClientRect().bottom - limit;
-      if (over > 0) sheet.scrollTop += over;
-    };
-    bring();
-    // Brought into view again when what is above it grows, as the step's lede does once the
-    // account check answers: offered while the check ran, the button went back under the foot.
-    // Not when the person scrolls, nor as the row under it ticks: only when the offer itself moves.
-    let top = card.offsetTop;
-    const moved =
-      typeof MutationObserver === "undefined"
-        ? null
-        : new MutationObserver(() => {
-            if (card.offsetTop === top) return;
-            top = card.offsetTop;
-            bring();
-          });
-    moved?.observe(sheet, { childList: true, subtree: true });
-    return () => moved?.disconnect();
-  }, []);
+  useKeptInView(offered);
   return (
     <section
       ref={offered}

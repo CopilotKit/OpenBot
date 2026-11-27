@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import type { Page } from "playwright-core";
 import {
   alerts,
@@ -15,6 +15,7 @@ import {
   stop,
   UNAVAILABLE,
 } from "./organization-notices-browser";
+import { test } from "./renderer-crash";
 
 /**
  * A hold that lasts longer than one Retry-After: the page that was open fills in by itself once

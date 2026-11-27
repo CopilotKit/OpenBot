@@ -51,10 +51,13 @@ export type Progress = {
    */
   elsewhere?: boolean;
   /**
-   * The step waits on the person in this window: they closed the system's password prompt, and
-   * Install asks again by itself or on Try again (`install::GoAhead`). See `goAheadNow`.
+   * The step waits on the person in this window (`install::GoAhead`): for Continue before the
+   * system's password prompt comes up (`beforePrompt`), or after they closed that prompt, when
+   * Install asks again by itself or on Try again. See `goAheadNow`.
    */
   asks?: boolean;
+  /** With `asks`: the wait is for Continue, before the password prompt. See `goAheadNow`. */
+  beforePrompt?: boolean;
   /**
    * The engine itself is being updated (`engine::StepLine::updating`). Nothing is asked of it
    * until the update is done: an engine being updated refuses what is asked.
@@ -133,12 +136,27 @@ export function engineNow(steps: Progress[]): string | null {
  */
 export const PAUSE_PODMAN_STEP = "pause-podman";
 
+/** What Install waits on the person for before or after macOS's password prompt. */
+export type GoAhead = {
+  /** Install's line ("OpenBot needs to install the software it runs on. Choose Continue…"). */
+  line: string;
+  /**
+   * The password prompt has not come up yet: it comes only on Continue. Otherwise the person
+   * closed it, and Install asks again by itself or on Try again.
+   */
+  beforePrompt: boolean;
+};
+
 /**
- * The line of a step that waits on the person after they closed macOS's password prompt ("OpenBot
- * needs your password to install what it needs to run…"), or null. The screens say it in a card
- * with Try again (`PodmanGoAhead`). Nothing waits on the person before a prompt.
+ * A step that waits on the person in this window around macOS's password prompt, or null: for
+ * Continue before the prompt comes up, or after they closed it. The screens say it in a card with
+ * its one button (`PodmanGoAhead`).
+ *
+ * The prompt comes from the system and comes up over every window. On the 1.2.0 Mac run it covered
+ * the browser's sign-in page a moment after OpenBot's line about it went on a window behind the
+ * browser. So the first prompt waits for Continue here.
  */
-export function goAheadNow(steps: Progress[]): string | null {
+export function goAheadNow(steps: Progress[]): GoAhead | null {
   const asking = [...steps]
     .reverse()
     .find(
@@ -148,7 +166,9 @@ export function goAheadNow(steps: Progress[]): string | null {
         step.detail &&
         step.step !== PAUSE_PODMAN_STEP,
     );
-  return asking?.detail ?? null;
+  return asking
+    ? { line: asking.detail, beforePrompt: asking.beforePrompt === true }
+    : null;
 }
 
 /**
@@ -729,15 +749,17 @@ export function installingBehind({
       now?.downloads && showsDownload(now.downloads) ? now.downloads : null;
     const meanwhile = early && showsDownload(early) ? early : null;
     if (preparing) {
-      // A closed password prompt has its own card, with Try again, and so does the offer to
-      // pause the person's Podman: the row says only what it waits for.
+      // The password prompt's Continue and a closed prompt's Try again have their own card, and so
+      // does the offer to pause the person's Podman: the row says only what it waits for.
       const waiting = now?.asks === true;
       if (waiting)
         return row(
           1,
           now?.step === PAUSE_PODMAN_STEP
             ? "Waiting for you to pause your Podman."
-            : "Waiting for your password.",
+            : now?.beforePrompt
+              ? "Waiting for you to choose Continue."
+              : "Waiting for your password.",
           {
             waiting,
             startedAt: since ?? undefined,

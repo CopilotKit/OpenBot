@@ -203,8 +203,11 @@ Start from a clean machine, or the result proves nothing about a first install.
    - Install downloads the images and shows each one with its speed. On Windows, the app may set up
      WSL and ask for one restart; open OpenBot again after the restart.
    - Choose the AI provider and enter the key.
+   - Finishing setup says OpenBot is ready and waits. Check the usage-data choice, then select
+     **Open OpenBot**.
 
-   **Expected:** the window becomes OpenBot.
+   **Expected:** Finishing setup stays until you select Open OpenBot, then the window becomes
+   OpenBot.
 4. Ask a Bot a question. **Expected:** an answer.
 5. Record the time from the first click to the open OpenBot, and anything that went wrong.
 

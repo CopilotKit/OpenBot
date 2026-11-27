@@ -8,7 +8,7 @@ WORKDIR /app
 COPY agent-langgraph-ts/package.json agent-langgraph-ts/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
-COPY shared/listen-port.ts shared/run-notices.ts shared/model-providers.ts shared/model-providers.json shared/recall-earlier-results.ts shared/tool-search.ts /shared/
+COPY shared/listen-port.ts shared/model-providers.ts shared/model-providers.json shared/recall-earlier-results.ts shared/tool-search.ts /shared/
 COPY agent-langgraph-ts/src ./src
 
 ENV NODE_ENV=production PORT=4215

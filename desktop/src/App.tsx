@@ -14,6 +14,7 @@ import { handover, leaveFor } from "./handover";
 import { currentChoice, DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
+  firstRunRows,
   LocalIntelligence,
   type LocalStartable,
   LocalStatus,
@@ -421,6 +422,12 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   const [handingOver, setHandingOver] = useState<{ returning: boolean } | null>(
     null,
   );
+  // A first run's Start is done: Finishing setup says OpenBot is ready, and waits for Open OpenBot.
+  const [readyToOpen, setReadyToOpen] = useState(false);
+  // Only while OpenBot is up: once it stops, there is nothing ready to open.
+  useEffect(() => {
+    if (!running) setReadyToOpen(false);
+  }, [running]);
   const handoverHeld = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -1048,11 +1055,22 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       const noticed = Boolean(outcome?.notice || intelligence.notice);
       // Not settled when it hands over: Starting stays on screen as it was, its last row running.
       if (noticed) setSteps((current) => settleProgress(current));
+      /*
+       * A first run's Finishing setup stays until the person presses Open OpenBot: it holds the
+       * usage-data choice, and on a Mac the stack came up about 10 seconds after the screen did,
+       * too soon to read the choice or change it. A return (an update over an installation
+       * included) still opens OpenBot by itself.
+       */
+      const waitForOpen = !returnedTo && !noticed && !startingForMove.current;
+      if (waitForOpen) {
+        setSteps((current) => settleProgress(current));
+        setReadyToOpen(true);
+      }
       setRunning(true);
       setRecoveryFailure(null);
       startedAfterReinstall.current = false;
-      // The handover, on a first run as on a return: the window becomes OpenBot the moment the
-      // stack is up. Recorded first, so a later Start of this installation reads as a return.
+      // Recorded first, so a later Start of this installation reads as a return, which opens
+      // OpenBot the moment the stack is up.
       savedLaunch.current = installationKey;
       setStep("connect");
       setRefreshIntelligence(false);
@@ -1072,22 +1090,10 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         setMoveHere({ at: "up" });
         return "started";
       }
-      // Straight from Starting to OpenBot, after an update as after any Start: the running screen
-      // only if this page is still here once OpenBot's page had time to replace it (`handover.ts`).
-      setHandingOver({ returning: returnedTo });
-      if (!(await handOver())) {
-        // The move to OpenBot Cloud is offered first, over the running OpenBot.
-        setHandingOver(null);
-        setSteps((current) => settleProgress(current));
-        return "started";
-      }
-      if (handoverHeld.current !== null) clearTimeout(handoverHeld.current);
-      handoverHeld.current = setTimeout(() => {
-        handoverHeld.current = null;
-        setSteps((current) => settleProgress(current));
-        setHandingOver(null);
-      }, handover.holdMs);
-      return "opening";
+      // Finishing setup shows OpenBot is ready, with Open OpenBot (`openWhenReady`).
+      if (waitForOpen) return "started";
+      // Straight from Starting to OpenBot, after an update as after any Start.
+      return (await handOverStarted(returnedTo)) ? "opening" : "started";
     } catch (error) {
       setHandingOver(null);
       recoverFromStart(error);
@@ -1166,7 +1172,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   function modelCanStart(choice = model) {
     if (!choice) return false;
     if (!choice.saved) return true;
-    if (choice.provider === "google" || choice.provider === "xai") {
+    // A saved Google sign-in can't start: Gemini takes an API key only.
+    if (choice.provider === "google") return false;
+    if (choice.provider === "xai") {
       return choice.login === "oauth" && Boolean(choice.model?.trim());
     }
     if (choice.provider === "openai-compatible") {
@@ -1216,6 +1224,47 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     } finally {
       setBusy(false);
       setStopping(false);
+    }
+  }
+
+  /**
+   * From the screen a Start was on to OpenBot: that screen stays, as it was, in place of the
+   * running screen, which shows only if this page is still here once OpenBot's page had time to
+   * replace it (`handover.ts`). False when the move to OpenBot Cloud is offered first, over the
+   * running OpenBot.
+   */
+  async function handOverStarted(returnedTo: boolean): Promise<boolean> {
+    setHandingOver({ returning: returnedTo });
+    if (!(await handOver())) {
+      setHandingOver(null);
+      setSteps((current) => settleProgress(current));
+      return false;
+    }
+    if (handoverHeld.current !== null) clearTimeout(handoverHeld.current);
+    handoverHeld.current = setTimeout(() => {
+      handoverHeld.current = null;
+      setSteps((current) => settleProgress(current));
+      setHandingOver(null);
+    }, handover.holdMs);
+    return true;
+  }
+
+  /**
+   * Open OpenBot on a first run's Finishing setup, once OpenBot is up. Usage data is whatever the
+   * checkbox above it says by then: the box saves each change as it is made. A handover that fails
+   * stays on this screen, with the failure and the button to try again.
+   */
+  async function openWhenReady() {
+    setReadyToOpen(false);
+    setShowing(true);
+    try {
+      await handOverStarted(false);
+    } catch (error) {
+      setHandingOver(null);
+      setReadyToOpen(true);
+      setRecoveryFailure(asProblem(error));
+    } finally {
+      setShowing(false);
     }
   }
 
@@ -1559,8 +1608,8 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
               {/* Intelligence sets itself up alongside, once the install has Docker answering. Its
               download is the list's third step, once the second is done. */}
               <SetupProgress steps={installRows} presentation="focus" />
-              {/* The person closed macOS's password prompt: said, with Try again. */}
-              {goAhead && <PodmanGoAhead asking={goAhead} />}
+              {/* macOS's password prompt: Continue before it comes up, Try again once closed. */}
+              {goAhead && <PodmanGoAhead goAhead={goAhead} />}
               {pauseCard}
               <LocalStatus sequence={local} download={false} />
               {/* The first screen's downloads, until a row of Install's own shows the one it waits on. */}
@@ -1782,9 +1831,12 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   // restart: said under the rows.
   const handOff = engineNow(steps);
 
-  // Handing over to OpenBot: Starting, as it was, in place of the running screen.
-  const starting = !running || handingOver !== null;
-  const returning = handingOver?.returning ?? returningToInstallation;
+  // Handing over to OpenBot, or a first run's Finishing setup waiting for Open OpenBot: the screen
+  // Start was on, as it was, in place of the running screen.
+  const starting = !running || handingOver !== null || readyToOpen;
+  const returning = readyToOpen
+    ? false
+    : (handingOver?.returning ?? returningToInstallation);
 
   if (starting && returning && !refreshIntelligence) {
     // A Start that moves the installation to this app's release is an update, and says so:
@@ -1885,7 +1937,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
             }
           />
         )}
-        {goAhead && <PodmanGoAhead asking={goAhead} />}
+        {goAhead && <PodmanGoAhead goAhead={goAhead} />}
         {pauseCard}
         {updatingLine}
         {displayedFailure &&
@@ -1946,7 +1998,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   /*
    * The Start step: Intelligence's rows, and OpenBot starts by itself once the CLI reports it ready
    * and valid. While a CLI call runs, Cancel is the only control; leaving is offered only once
-   * nothing runs.
+   * nothing runs. Once OpenBot is up, it says so and offers Open OpenBot (`readyToOpen`).
    */
   if (starting) {
     // Start keeps the native problem here; the sequence otherwise only knows that Start failed.
@@ -1969,18 +2021,20 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
             {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
             <h1>Finishing setup</h1>
             <p className="lede">
-              {leftoverVolumes.length > 0
-                ? "OpenBot starts once you choose what happens to the data a previous installation left."
-                : "OpenBot is setting up on this computer and starts by itself when it’s ready. This can take a few minutes."}
+              {readyToOpen
+                ? "OpenBot is ready on this computer."
+                : leftoverVolumes.length > 0
+                  ? "OpenBot starts once you choose what happens to the data a previous installation left."
+                  : "OpenBot is setting up on this computer. This can take a few minutes."}
             </p>
           </header>
           <div className="setup-body">
             <div className="setup-content">
               {freshInstall || (
                 <LocalIntelligence
-                  sequence={
-                    startFailure ? { ...local, problem: startFailure } : local
-                  }
+                  sequence={firstRunRows(
+                    startFailure ? { ...local, problem: startFailure } : local,
+                  )}
                   offerStart
                   handOff={handOff}
                   open={steps}
@@ -2005,7 +2059,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
                   onStartFresh={startFresh}
                 />
               )}
-              {goAhead && <PodmanGoAhead asking={goAhead} />}
+              {goAhead && <PodmanGoAhead goAhead={goAhead} />}
               {pauseCard}
               {updatingLine}
               {/* Leftover data is a choice, offered above, not a failure to report here. */}
@@ -2014,26 +2068,52 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
                 leftoverVolumes.length === 0 && (
                   <Failure problem={displayedFailure} />
                 )}
-              {!local.running && !busy && (
-                <div className="row">
-                  <button
-                    type="button"
-                    className="quiet"
-                    onClick={() =>
-                      returningToInstallation
-                        ? setRefreshIntelligence(false)
-                        : setStep("model")
-                    }
-                  >
-                    Back
-                  </button>
-                </div>
-              )}
+              {!local.running &&
+                !busy &&
+                !readyToOpen &&
+                handingOver === null && (
+                  <div className="row">
+                    <button
+                      type="button"
+                      className="quiet"
+                      onClick={() =>
+                        returningToInstallation
+                          ? setRefreshIntelligence(false)
+                          : setStep("model")
+                      }
+                    >
+                      Back
+                    </button>
+                  </div>
+                )}
             </div>
           </div>
           {/* The last setup choice stays separate while progress and recovery details change. */}
           <footer className="setup-footer">
             {!returning && <UsageDataChoice />}
+            {/* Under the usage-data choice, so it is read before OpenBot opens. Its room is kept
+                while the steps run: the choice never moves when the button arrives, as it did on
+                Windows K when rows arrived above it. */}
+            {!returning && (
+              <div
+                className="row"
+                style={
+                  readyToOpen || handingOver !== null
+                    ? undefined
+                    : { visibility: "hidden" }
+                }
+              >
+                <button
+                  type="button"
+                  onClick={openWhenReady}
+                  disabled={
+                    !readyToOpen || busy || showing || handingOver !== null
+                  }
+                >
+                  Open OpenBot
+                </button>
+              </div>
+            )}
           </footer>
         </div>
       </main>

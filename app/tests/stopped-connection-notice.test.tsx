@@ -203,6 +203,60 @@ test("an admin on the organization's connection gets Reconnect to its page in Se
   expect(reconnect.getAttribute("href")).toBe("/settings/providers/anthropic");
 });
 
+const GOOGLE_RETIRED =
+  "Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.";
+
+/*
+ * A run refused on a Google sign-in OpenBot no longer offers: the server's words, and one press to
+ * Google Gemini's API key on the same connection, never Reconnect to a sign-in that can't be made.
+ */
+test("a run on a retired Google sign-in says so, with Add a Gemini API key straight to its key", async () => {
+  const person = getGetPersonResponseMock();
+  server.use(
+    getGetPersonMockHandler({
+      ...person,
+      person: { ...person.person, role: "member" },
+    }),
+    http.get(`*${ORG}/model-catalogue`, () =>
+      HttpResponse.json({
+        ...catalogueWith("personal"),
+        connections: [
+          connection({
+            id: "google",
+            provider: "google",
+            login: "oauth",
+            source: "google",
+            isDefault: true,
+            ready: false,
+            problem: { code: "sign-in-retired", detail: GOOGLE_RETIRED },
+          }),
+        ],
+      }),
+    ),
+    http.get(`*${ORG}/people/me/model-choices/${CHANNEL}`, () =>
+      HttpResponse.json({
+        model: null,
+        effort: null,
+        connection: null,
+        stopped: {
+          connection: "google",
+          problem: { code: "sign-in-retired", detail: GOOGLE_RETIRED },
+        },
+      }),
+    ),
+  );
+  const view = render(
+    <StoppedConnectionNotice channelId={CHANNEL} onChooseModel={() => {}} />,
+    { wrapper },
+  );
+  await view.findByText(GOOGLE_RETIRED);
+  expect(view.queryByRole("link", { name: "Reconnect" })).toBeNull();
+  const add = view.getByRole("link", { name: "Add a Gemini API key" });
+  expect(add.getAttribute("href")).toBe(
+    "/settings/providers/google/change?owner=personal",
+  );
+});
+
 test("a refused run with stopped null draws nothing here", async () => {
   serve({ owner: "personal", role: "member", stopped: false });
   const view = render(
