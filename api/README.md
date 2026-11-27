@@ -22,6 +22,7 @@ not touch the same lines:
 | `conversations.yaml` | Conversations and their members, messages and attachments, tasks, reactions, dictation, voice calls, conversation join tokens and product events |
 | `model-connections.yaml` | The vault, the model key, the model catalogue and model choices |
 | `notifications.yaml` | Devices, destinations, deliveries and notification settings |
+| `web-push.yaml` | Web push: the key a browser subscribes with, and each browser's push subscription |
 | `components.yaml` | The components a Bot draws, their drafts and publishing, their data functions, and which a Bot may use |
 | `skills.yaml` | Skills |
 | `apps.yaml` | The apps added to OpenBot, the app directory, app setup and each app's account mode and OAuth client |

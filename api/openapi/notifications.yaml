@@ -76,7 +76,7 @@ paths:
         A token another account holds moves only once that
         account signed out on the phone. Only the person themselves may
         register their devices, and only where this deployment sends push
-        notifications (listNotificationTransports).
+        notifications to phones (its OpenBot phone app's project is set up).
       security:
         - webSession: []
         - appOAuth: [devices:write]
@@ -702,8 +702,10 @@ paths:
       summary: List the ways OpenBot can reach people here
       description: >-
         Return the ways this deployment can reach a person outside OpenBot.
-        One appears only once it is set up where OpenBot runs: push needs the
-        OpenBot phone app's project, Slack and Microsoft Teams need the
+        One appears only once it is set up where OpenBot runs: push is always
+        there for browsers (web push, saveWebPushSubscription) and reaches
+        phones once the OpenBot phone app's project is set up, Slack and
+        Microsoft Teams need the
         OpenTag pairing, and text messages need Twilio. A person's settings
         keep their choice for one that is not, for when it is. A missing
         cursor starts at the first page and nextCursor null ends the list.
@@ -975,7 +977,7 @@ components:
       enum: [push, slack, teams, sms]
       description: >-
         A way OpenBot reaches a person outside it: push notifications to their
-        phones, Slack, Microsoft Teams, or text messages.
+        phones and browsers, Slack, Microsoft Teams, or text messages.
     DeliveryKind:
       type: string
       enum: [reply, question, approval, attention]
