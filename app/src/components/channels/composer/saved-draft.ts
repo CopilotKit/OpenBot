@@ -92,6 +92,14 @@ export function writeSavedDraft(key: string, draft: SavedDraft | undefined) {
   }
 }
 
+/** Forget the draft a box keeps under `draftKey` (the composer's own name for it). */
+export function forgetSavedDraft(draftKey: string) {
+  const key = savedDraftKey(draftKey);
+  if (!key) return;
+  writeSavedDraft(key, undefined);
+  saveHeldFiles(key, []);
+}
+
 function isEmptyDraft(draft: SavedDraft): boolean {
   const words = draft.segments.some((segment) =>
     segment.type === "chip" ? true : segment.text.trim().length > 0,

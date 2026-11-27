@@ -134,7 +134,10 @@ function NewConversation({ composition }: { composition: string }) {
   const [creatingBot, setCreatingBot] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const navigate = Route.useNavigate();
-  const { startChosen, startGroup, startPicked, pending } = useStartChannel();
+  // The box's message is kept in its draft until its conversation has it.
+  const { startChosen, startGroup, startPicked, pending } = useStartChannel(
+    `new:${composition}`,
+  );
   const {
     data: profiles,
     isError: rosterError,
