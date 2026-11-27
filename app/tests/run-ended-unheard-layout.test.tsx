@@ -61,13 +61,130 @@ const BOT = {
   visibility: "private" as const,
 };
 
-/** How the run goes on the server, and what the server keeps. */
+/**
+ * How the run goes on the server, and what the server keeps. `onStep` is a run that finishes by
+ * handing this browser a command for the Bot's computer, as a run that needs the computer does.
+ */
 type Scene = {
-  ends: "finished" | "fails";
+  ends: "finished" | "fails" | "onStep";
   stored: unknown[];
   endings: Map<string, { outcome: string; endedAt: string }>;
+  /** The runs asked for so far, and the commands the browser took through the gate. */
+  runs?: number;
+  steps?: number;
 };
 let scene: Scene = { ends: "finished", stored: [], endings: new Map() };
+
+/** What the Bot says before its command, and once the command has run. */
+const ABOUT_TO =
+  "I'll finish the report and put the derivations and numerical checks in the attached PDF.";
+const FINISHED_REPORT =
+  "The report is finished: the derivations and the numerical checks are in report.pdf.";
+const COMMAND = "pdflatex -interaction=nonstopmode report.tex";
+const PRINTED = "Output written on report.pdf (12 pages).";
+
+/**
+ * The runs of a turn that ends on a command this browser never heard: the first finishes on the
+ * server with the command, and this browser hears only its start; the next asks for the command
+ * again, and the one after answers.
+ */
+function stepRun(input: {
+  threadId: string;
+  runId: string;
+  messages: unknown[];
+}): Response {
+  scene.runs = (scene.runs ?? 0) + 1;
+  const started = {
+    type: "RUN_STARTED",
+    threadId: input.threadId,
+    runId: input.runId,
+  };
+  const finished = {
+    type: "RUN_FINISHED",
+    threadId: input.threadId,
+    runId: input.runId,
+  };
+  const messageId = `reply-${input.runId}`;
+  const toolCallId = `command-${input.runId}`;
+  const call = {
+    id: toolCallId,
+    type: "function",
+    function: {
+      name: "computer_run_command",
+      arguments: JSON.stringify({ command: COMMAND }),
+    },
+  };
+  const callEvents = [
+    {
+      type: "TOOL_CALL_START",
+      toolCallId,
+      toolCallName: "computer_run_command",
+      parentMessageId: messageId,
+    },
+    {
+      type: "TOOL_CALL_ARGS",
+      toolCallId,
+      delta: JSON.stringify({ command: COMMAND }),
+    },
+    { type: "TOOL_CALL_END", toolCallId },
+  ];
+  scene.stored = input.messages;
+  if (scene.runs === 1) {
+    scene.stored = [
+      ...input.messages,
+      {
+        id: messageId,
+        role: "assistant",
+        content: ABOUT_TO,
+        toolCalls: [call],
+      },
+    ];
+    scene.endings.set(input.runId, {
+      outcome: "succeeded",
+      endedAt: new Date().toISOString(),
+    });
+    const heard = [
+      started,
+      { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
+      {
+        type: "TEXT_MESSAGE_CONTENT",
+        messageId,
+        delta: ABOUT_TO.slice(0, Math.floor(ABOUT_TO.length / 2)),
+      },
+    ];
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(frames(heard)));
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  }
+  if (scene.runs === 2) {
+    scene.stored = [
+      ...input.messages,
+      { id: messageId, role: "assistant", content: "", toolCalls: [call] },
+    ];
+    return new Response(frames([started, ...callEvents, finished]), {
+      headers: { "content-type": "text/event-stream" },
+    });
+  }
+  scene.stored = [
+    ...input.messages,
+    { id: messageId, role: "assistant", content: FINISHED_REPORT },
+  ];
+  return new Response(
+    frames([
+      started,
+      { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
+      { type: "TEXT_MESSAGE_CONTENT", messageId, delta: FINISHED_REPORT },
+      { type: "TEXT_MESSAGE_END", messageId },
+      finished,
+    ]),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
 
 const json = (body: unknown, status = 200) =>
   Response.json(body, {
@@ -125,7 +242,20 @@ async function answer(request: Request): Promise<Response | undefined> {
     return new Response("", {
       headers: { "content-type": "text/event-stream" },
     });
-  if (path.endsWith("/run")) return run(await request.json());
+  if (path.endsWith("/run"))
+    return scene.ends === "onStep"
+      ? stepRun(await request.json())
+      : run(await request.json());
+  // A command a Bot asked for, taken through the server's gate, which runs it and answers.
+  if (path === `${ORGANIZATION}/people/me/computer-steps`) {
+    scene.steps = (scene.steps ?? 0) + 1;
+    return json({
+      outcome: "done",
+      result: { ok: true, exitCode: 0, stdout: PRINTED, stderr: "" },
+    });
+  }
+  if (path.startsWith(`${ORGANIZATION}/people/me/approval-modes/`))
+    return json({ asksEveryStep: false });
   if (/\/agent\/[^/]+\/stop\//.test(path)) return json({ stopped: true });
   if (path === BOT_PATH) return json({ bot: BOT });
   if (path === `${ORGANIZATION}/bots`)
@@ -402,6 +532,53 @@ describe.skipIf(!asked)("a run whose end never reached this browser", () => {
             await page.close();
           }
         }, 90_000);
+
+        test(`that finished on a command it never heard carries on and runs it, in ${engine}, ${theme}, ${window.width}px`, async () => {
+          scene = { ends: "onStep", stored: [], endings: new Map() };
+          const page = await sent(engine, theme, window);
+          try {
+            await page.getByText(FINISHED_REPORT).waitFor({ timeout: 30_000 });
+            await page
+              .getByRole("button", { name: "Stop the Bot" })
+              .waitFor({ state: "detached", timeout: 15_000 });
+            // The command ran here once, and its step says what ran and what it printed.
+            expect(scene.steps).toBe(1);
+            expect(scene.runs).toBe(3);
+            const step = page
+              .locator("details")
+              .filter({
+                has: page.locator(":scope > summary", {
+                  hasText: "Ran a command",
+                }),
+              })
+              .last();
+            await step.locator(":scope > summary").click();
+            await page.getByText(PRINTED).first().waitFor({ timeout: 10_000 });
+            await shoot(
+              page,
+              `run-ended-unheard-on-step-${engine}-${theme}-${window.width}`,
+            );
+            expect(await page.getByTestId("transcript-stopped").count()).toBe(
+              0,
+            );
+            expect(await page.getByText(RUN_ENDED_UNHEARD).count()).toBe(0);
+            expect(
+              await page.getByRole("button", { name: "Carry on" }).count(),
+            ).toBe(0);
+            // The command the phone never ran reads as not run, never as blocked.
+            expect(await page.getByText("Didn't run a command").count()).toBe(
+              1,
+            );
+            expect(await page.getByText(/Blocked/).count()).toBe(0);
+            expect(
+              await page.evaluate(
+                () => document.documentElement.scrollWidth > innerWidth,
+              ),
+            ).toBe(false);
+          } finally {
+            await page.close();
+          }
+        }, 120_000);
 
         test(`that failed still says it stopped, with Carry on, in ${engine}, ${theme}, ${window.width}px`, async () => {
           scene = { ends: "fails", stored: [], endings: new Map() };
