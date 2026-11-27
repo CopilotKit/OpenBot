@@ -334,6 +334,7 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/bot-notification-settings/{botId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1bot-notification-settings~1{botId}' }
   /api/v2/organizations/{organizationId}/notification-transports: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1notification-transports' }
   /api/v2/organizations/{organizationId}/routines: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines' }
+  /api/v2/organizations/{organizationId}/routines/read: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1read' }
   /api/v2/organizations/{organizationId}/routines/{routineId}: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}' }
   /api/v2/organizations/{organizationId}/routines/{routineId}/pause: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}~1pause' }
   /api/v2/organizations/{organizationId}/routines/{routineId}/resume: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}~1resume' }
