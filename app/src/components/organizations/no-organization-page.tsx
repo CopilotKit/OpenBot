@@ -7,7 +7,8 @@ import { CopilotKitMark } from "@/components/auth/provider-logo";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { hostedSignInAddress } from "@/lib/auth/hosted";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { loadAgainWhenAnswered } from "@/lib/load-again";
+import { loadAgainWhenAnswered, useLoadingAgain } from "@/lib/load-again";
+import { failureOf } from "@/lib/load-failure";
 import {
   IN_NONE,
   inNoOrganization,
@@ -16,14 +17,21 @@ import { organizationKeys } from "@/lib/organizations/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
+/** What the page says when Try again found them still in no organization. */
+const STILL_IN_NONE =
+  "You're still not in an organization here. Ask an admin to add you, then try again.";
+/** What the page says when Try again couldn't find out, and what failed had no words of its own. */
+const COULD_NOT_CHECK =
+  "Couldn't check your organizations. Try again in a moment.";
+
 /**
  * The page for somebody signed in who is in no organization here: never added, or removed from the last one. Every
  * screen of the app works in an organization, so this stands in for whichever one they opened, in the sign-in screen's
  * own layout, and offers only what acts on no organization.
  *
- * Try again reads their organizations afresh, for somebody added again meanwhile. On a hosted OpenBot, signing in again
- * through OpenBot by CopilotKit is how a membership added there reaches this OpenBot, so that is offered first. Sign out
- * is always there.
+ * Try again reads their organizations afresh, for somebody added again meanwhile, and says so when they are still in
+ * none, or when it couldn't find out. On a hosted OpenBot, signing in again through OpenBot by CopilotKit is how a
+ * membership added there reaches this OpenBot, so that is offered first. Sign out is always there.
  */
 export function NoOrganizationPage({
   tryingAgain = false,
@@ -34,7 +42,11 @@ export function NoOrganizationPage({
   const router = useRouter();
   const signOut = useSignOut();
   const [pressed, setPressed] = useState(false);
-  const retrying = tryingAgain || pressed;
+  // Drawn afresh by a boundary inside the app while Try again loads it again, the page says so.
+  const loading = useLoadingAgain();
+  const retrying = tryingAgain || pressed || loading;
+  /** What the last Try again found, when the page stayed: still in none, or why it couldn't tell. */
+  const [found, setFound] = useState<string>();
   const hosted =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
 
@@ -42,12 +54,15 @@ export function NoOrganizationPage({
     setPressed(true);
     try {
       await queryClient.invalidateQueries({ queryKey: organizationKeys.all });
-      // This page stays up saying "Trying again…" until the app is ready, or stays as it is when they're still in none.
-      await loadAgainWhenAnswered({
+      // This page stays up saying "Trying again…" until the app is ready, or stays, saying so, when they're still in none.
+      const again = await loadAgainWhenAnswered({
         router,
         stays: inNoOrganization,
         meanwhile: <NoOrganizationPage tryingAgain />,
       });
+      if (again) setFound(STILL_IN_NONE);
+    } catch (error) {
+      setFound(failureOf(error, COULD_NOT_CHECK).message);
     } finally {
       setPressed(false);
     }
@@ -64,7 +79,7 @@ export function NoOrganizationPage({
           className="mt-3 text-pretty text-center text-muted-foreground text-sm"
           role="status"
         >
-          {IN_NONE}
+          {found ?? IN_NONE}
         </p>
         <div className="mt-8 flex w-full flex-col gap-2">
           {hosted ? (

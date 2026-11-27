@@ -22,6 +22,7 @@ import userEvent from "@testing-library/user-event";
 import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
 import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
+import { client } from "@/lib/client";
 import { forgetSignedIn, rememberSignedIn } from "@/lib/auth/was-signed-in";
 import { ReportedErrorComponent } from "@/lib/error-reporting";
 import { setCurrentOrganization } from "@/lib/organizations/current";
@@ -45,6 +46,9 @@ import { settleReactWork } from "./settle-react-work";
 
 const NativeResponse = globalThis.Response;
 const HELD = "OpenBot is moving this organization. Try again in a moment.";
+/** What the page for somebody in no organization says when Try again found them still in none. */
+const STILL_IN_NONE =
+  "You're still not in an organization here. Ask an admin to add you, then try again.";
 let openbot: ReturnType<typeof Bun.serve>;
 /** How many more times the gate's question about the terms is refused with a hold. */
 let holdsLeft: number;
@@ -52,6 +56,12 @@ let holdsLeft: number;
 let retryAfterSeconds: number;
 /** Whether the person is in no organization here, until they are added again. */
 let inNone: boolean;
+/** How many more times the read of a page inside the app is refused with a hold. */
+let pageHoldsLeft: number;
+/** How long the terms are answered after, once they are no longer held, in milliseconds. */
+let termsAfterMs: number;
+/** When each question about the terms reached OpenBot, in milliseconds since the epoch. */
+let termsAsked: number[];
 
 async function answer(request: Request): Promise<Response> {
   const path = new URL(request.url).pathname;
@@ -99,8 +109,27 @@ async function answer(request: Request): Promise<Response> {
       openbotVersion: null,
     });
   if (path === "/api/v2/organizations/org_acme/shortened-tool-names")
-    return NativeResponse.json({ tools: [] });
+    return NativeResponse.json({ names: {} });
+  if (path === "/api/v2/organizations/org_acme/held-page") {
+    if (pageHoldsLeft > 0) {
+      pageHoldsLeft--;
+      return NativeResponse.json(
+        { status: 503, code: "ORGANIZATION_UNAVAILABLE", detail: HELD },
+        {
+          status: 503,
+          headers: {
+            "content-type": "application/problem+json",
+            "retry-after": String(retryAfterSeconds),
+          },
+        },
+      );
+    }
+    // Slow enough that the page is loaded again while the answer is still on its way.
+    await Bun.sleep(150);
+    return NativeResponse.json({ ok: true });
+  }
   if (path === "/api/v2/organizations/org_acme/people/me/terms") {
+    termsAsked.push(Date.now());
     if (holdsLeft > 0) {
       holdsLeft--;
       return NativeResponse.json(
@@ -114,6 +143,7 @@ async function answer(request: Request): Promise<Response> {
         },
       );
     }
+    await Bun.sleep(termsAfterMs);
     return NativeResponse.json({
       current: null,
       accepted: null,
@@ -134,6 +164,9 @@ beforeEach(() => {
   holdsLeft = 1;
   retryAfterSeconds = 60;
   inNone = false;
+  pageHoldsLeft = 0;
+  termsAfterMs = 0;
+  termsAsked = [];
   setCurrentOrganization(undefined);
   queryClient.clear();
   localStorage.clear();
@@ -158,7 +191,7 @@ afterAll(async () => {
 });
 
 /** The real sign-in gate, with its pending options and error screen, in front of a stub home. */
-function openApp() {
+function openApp(at = "/") {
   const root = createRootRouteWithContext<RouterContext>()({
     component: Outlet,
   });
@@ -180,6 +213,17 @@ function openApp() {
     path: "/",
     component: () => <p>The app</p>,
   } as never) as unknown as AnyRoute;
+  // A page inside the app whose own read can be held: the hold is caught by its boundary, below the gate's.
+  const page = createRoute({
+    getParentRoute: () => authed,
+    path: "/held",
+    beforeLoad: () =>
+      queryClient.ensureQueryData({
+        queryKey: ["held-page"],
+        queryFn: () => client("/api/v2/organizations/org_acme/held-page"),
+      }),
+    component: () => <p>The app</p>,
+  } as never) as unknown as AnyRoute;
   const sign = SignRoute.options as unknown as Record<string, unknown>;
   const signIn = createRoute({
     getParentRoute: () => root,
@@ -191,8 +235,8 @@ function openApp() {
     },
   } as never) as unknown as AnyRoute;
   const router = createRouter({
-    routeTree: root.addChildren([authed.addChildren([home]), signIn]),
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: root.addChildren([authed.addChildren([home, page]), signIn]),
+    history: createMemoryHistory({ initialEntries: [at] }),
     context: { queryClient },
     defaultErrorComponent: ReportedErrorComponent,
   });
@@ -201,7 +245,7 @@ function openApp() {
       <RouterProvider router={router as never} />
     </QueryClientProvider>,
   );
-  return { view, person: userEvent.setup({ document }) };
+  return { view, router, person: userEvent.setup({ document }) };
 }
 
 /** Whether `element` is in the document and not hidden by an ancestor (React hides a suspended tree with display: none). */
@@ -340,4 +384,147 @@ test("added to an organization again, Try again keeps the page up until the app 
   await settleReactWork();
   watching.stop();
   expect(watching.seen).toEqual({ skeletons: 0, gaps: 0 });
+});
+
+test("a hold caught by a page inside the app stays up saying Trying again… until the page shows", async () => {
+  holdsLeft = 0;
+  pageHoldsLeft = 1;
+  const { view, person } = openApp("/held");
+  await view.findByRole(
+    "heading",
+    { name: "Back in a moment" },
+    { timeout: 5000 },
+  );
+  await settleReactWork();
+
+  const watching = watch();
+  // Once pressed, the page says "Trying again…" until the page it stands in for is there, never "Try again".
+  let offeredAgain = 0;
+  let pressed = false;
+  const offers = new MutationObserver(() => {
+    const buttons = [...document.querySelectorAll("button")].filter(shown);
+    if (buttons.some((button) => button.textContent === "Trying again…"))
+      pressed = true;
+    if (pressed && buttons.some((button) => button.textContent === "Try again"))
+      offeredAgain++;
+  });
+  offers.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+  });
+  await person.click(view.getByRole("button", { name: "Try again" }));
+  await view.findByText("The app", {}, { timeout: 5000 });
+  await settleReactWork();
+  offers.disconnect();
+  watching.stop();
+  expect({ ...watching.seen, offeredAgain }).toEqual({
+    skeletons: 0,
+    gaps: 0,
+    offeredAgain: 0,
+  });
+});
+
+test("a Retry-After of 0 is waited out for a second, never asked back to back", async () => {
+  retryAfterSeconds = 0;
+  holdsLeft = 3;
+  const { view } = openApp();
+  await view.findByText("The app", {}, { timeout: 8000 });
+  // The first question is the load's own; each one after it is a try the page made by itself.
+  const waits = termsAsked.slice(1).map((at, i) => at - termsAsked[i]);
+  expect(waits.length).toBeGreaterThanOrEqual(3);
+  for (const wait of waits) expect(wait).toBeGreaterThanOrEqual(950);
+}, 10_000);
+
+test("Try again pressed shortly before the page would try by itself makes one try, not two", async () => {
+  retryAfterSeconds = 1;
+  // The press's questions are still on their way when the page's own wait runs out.
+  termsAfterMs = 1_500;
+  const { view, router, person } = openApp();
+  await view.findByRole(
+    "heading",
+    { name: "Back in a moment" },
+    { timeout: 5000 },
+  );
+  const preloads: unknown[] = [];
+  const preload = router.preloadRoute.bind(router);
+  router.preloadRoute = ((options: never) => {
+    preloads.push(options);
+    return preload(options);
+  }) as typeof router.preloadRoute;
+  const asked = termsAsked.length;
+
+  await person.click(view.getByRole("button", { name: "Try again" }));
+  await view.findByText("The app", {}, { timeout: 5000 });
+  await settleReactWork();
+  expect(preloads.length).toBe(1);
+  expect(termsAsked.length - asked).toBe(1);
+});
+
+test("still in no organization, Try again says it checked, and the button works again", async () => {
+  holdsLeft = 0;
+  inNone = true;
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const { view, person } = openApp();
+    await view.findByRole(
+      "heading",
+      { name: "You're not in an organization" },
+      { timeout: 5000 },
+    );
+    await settleReactWork();
+
+    const watching = watch(noneShown);
+    await person.click(view.getByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(view.getByRole("status").textContent).toBe(STILL_IN_NONE),
+    );
+    expect(
+      view.getByRole("button", { name: "Try again" }).hasAttribute("disabled"),
+    ).toBe(false);
+    await settleReactWork();
+    watching.stop();
+    expect(watching.seen).toEqual({ skeletons: 0, gaps: 0 });
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  expect(unhandled).toEqual([]);
+});
+
+test("in no organization, a Try again that fails says so and leaves no unhandled rejection", async () => {
+  holdsLeft = 0;
+  inNone = true;
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const { view, router, person } = openApp();
+    await view.findByRole(
+      "heading",
+      { name: "You're not in an organization" },
+      { timeout: 5000 },
+    );
+    await settleReactWork();
+    router.preloadRoute = (() =>
+      Promise.reject(
+        new Error("Couldn't reach OpenBot."),
+      )) as unknown as typeof router.preloadRoute;
+
+    await person.click(view.getByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(view.getByRole("status").textContent).toBe(
+        "Couldn't reach OpenBot.",
+      ),
+    );
+    expect(
+      view.getByRole("button", { name: "Try again" }).hasAttribute("disabled"),
+    ).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  expect(unhandled).toEqual([]);
 });
