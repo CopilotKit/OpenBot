@@ -58,6 +58,7 @@ jobs:
   components:
     name: components
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # a list, in seconds
     outputs:
       components: ${{ steps.components.outputs.components }}
       tags: ${{ steps.tags.outputs.tags }}
@@ -161,6 +162,7 @@ jobs:
     name: OpenBot images
     needs: components
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # reads digests, in about a minute
     permissions:
       contents: read
       packages: read
@@ -215,6 +217,7 @@ jobs:
     name: ${{ matrix.image }} ${{ matrix.platform.arch }}
     needs: components
     runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 60 # one image on one architecture
     permissions:
       contents: read
       packages: write
@@ -298,6 +301,7 @@ jobs:
     name: ${{ matrix.image }} manifest
     needs: [components, component-images]
     runs-on: ubuntu-latest
+    timeout-minutes: 20 # joins the architectures, in minutes
     permissions:
       contents: read
       packages: write
@@ -408,6 +412,7 @@ jobs:
     name: manifest
     needs: [components, backend-images, component-manifests]
     runs-on: ubuntu-latest
+    timeout-minutes: 20 # writes the release manifest, in minutes
     outputs:
       artifact: container-images
     steps:
