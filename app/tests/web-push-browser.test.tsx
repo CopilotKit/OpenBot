@@ -676,9 +676,11 @@ describe.skipIf(!asked || !engines.includes("chromium"))(
         keys: held?.keys,
       });
       // Settings says it is on: one state, whichever place it was turned on from.
+      // Read off the switch's state, drawn or not: styled before the row arrives, it has no size.
       await page.goto(`${origin}/settings/notifications`);
-      await style(page);
-      await page.getByRole("switch", { name: TITLE, checked: true }).waitFor();
+      await page
+        .getByRole("switch", { name: TITLE, checked: true })
+        .waitFor({ state: "attached" });
       await context.close();
     }, 60_000);
 
