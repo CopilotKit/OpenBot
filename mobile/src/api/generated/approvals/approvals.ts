@@ -594,7 +594,7 @@ export const getRunComputerStepUrl = (
 };
 
 /**
- * Run one computer action a Bot called from the person's open conversation, through the same approval rules every other action goes through. The body names the Bot and carries the conversation with the unanswered call in it. The answer says what came of it: done, with what the computer answered; waiting, when the person must approve it first, and then the decision runs it once and carries the conversation on; or held, when the computer is held for a person, with what to tell them. Only computer tools may be called this way, and the call must match an unanswered one in the conversation. Only the person themselves may take a step.
+ * Run one computer action a Bot called from the person's open conversation, through the same approval rules every other action goes through. The body names the Bot and carries the conversation with the unanswered call in it. The answer says what came of it: done, with what the computer answered; waiting, when the person must approve it first, and then the decision runs it once and carries the conversation on; held, when the computer is held for a person, with what to tell them; or taken, when the server already ran, or is running, this step (the same tool call in the same conversation), so it is not run a second time, with the first run's result once it has one. Only computer tools may be called this way, and the call must match an unanswered one in the conversation. Only the person themselves may take a step.
  * @summary Take a step on a Bot's computer, asking first when it must
  */
 export const runComputerStep = async (
