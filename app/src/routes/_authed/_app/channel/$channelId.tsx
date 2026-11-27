@@ -2,7 +2,7 @@ import { IconListDetails, IconSettings } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
 import { ConversationApprovals } from "@/components/approvals/inline-approval";
@@ -13,7 +13,11 @@ import { ConversationActions } from "@/components/channels/conversation-actions"
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
-import { DetailPanel } from "@/components/layout/detail-panel";
+import { useCardsFirst } from "@/components/computer/use-cards-first";
+import {
+  DetailPanel,
+  detailFitsBeside,
+} from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { TaskDetails } from "@/components/tasks/task-details";
 import { Button } from "@/components/ui/button";
@@ -91,11 +95,24 @@ function RouteComponent() {
 
   useMarkOpenChannelRead(channelId);
 
+  // Whether the Computer has room beside the conversation, or would be a sheet over it.
+  const [computerFits, setComputerFits] = useState(false);
+  // Over the conversation, a card waiting on the person closes the Computer and keeps it shut.
+  const { cardWaiting } = useCardsFirst({
+    botId: agentId,
+    threadId: channel.data?.threadId,
+    covers: !computerFits,
+    watching: isWatching,
+    close: () => show(null),
+    computers: !noComputers,
+  });
+
   // Browser activity may auto-open the screen once per run unless this run was dismissed.
   const autoWatch = useAutoWatchScreen({
     botId: agentId,
     watching: isWatching,
     busy: isSettingsOpen,
+    covers: !computerFits && cardWaiting,
     open: () =>
       navigate({
         search: (previous) => ({
@@ -133,6 +150,9 @@ function RouteComponent() {
         agentId !== undefined
       }
       detailWidth={isWatching ? SCREEN_PANEL_WIDTH : undefined}
+      onRoomChange={(room) =>
+        setComputerFits(detailFitsBeside(room, SCREEN_PANEL_WIDTH))
+      }
       title={
         isWatching ? "Computer" : isShowingDetails ? "Task details" : undefined
       }
@@ -220,6 +240,7 @@ function RouteComponent() {
             <ComputerChatControls
               computerId={agentId}
               noComputers={noComputers}
+              fitsBeside={computerFits}
               open={isWatching}
               onOpenChange={(open) => show(open ? "watch" : null)}
             />
