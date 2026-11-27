@@ -1191,12 +1191,27 @@ export function ChannelChat({
       pull();
     });
     pullHistoryRef.current = pull;
+    /*
+     * THE BOT'S LINE THE ROSTER HAD ON OPENING IS READ FOR ONLY WHEN OPENING DIDN'T BRING IT. Opening
+     * reads the store with the join, so reading it again for that line read the same history three
+     * more times over the retries, which go on while a read brings nothing new, as it nearly never
+     * does. A transcript whose newest Bot line is the roster's already holds that turn. One that
+     * isn't is a turn that ended just before opening, which the store can be a beat behind on, or a
+     * line this check can't match (a turn that only drew): read for as before.
+     */
+    const openedWith = (activity: ChannelActivitySignature) =>
+      runReply(
+        agentRef.current.messages,
+        new Set(),
+        authoredComponents(),
+      )?.text.trim() === activity.text.trim();
     void (async () => {
       await joinGatePromise;
       if (
         !cancelled &&
         initialActivity &&
-        !sameActivity(selfReportedBotActivity.current, initialActivity)
+        !sameActivity(selfReportedBotActivity.current, initialActivity) &&
+        !openedWith(initialActivity)
       ) {
         pull();
       }

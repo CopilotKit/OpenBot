@@ -255,12 +255,15 @@ afterAll(() => {
   gateway.stop(true);
 });
 
-/** The roster, holding this conversation, busy when the Bot is working in it. */
-function roster(busy = false) {
+/**
+ * The roster, holding this conversation, busy when the Bot is working in it, with `lastMessage` as
+ * the Bot's last line in it.
+ */
+function roster(busy = false, lastMessage = "Planning the cycle") {
   const summary: ChannelSummary = {
     ...channel,
     summary: null,
-    lastMessage: "Planning the cycle",
+    lastMessage,
     lastMessageAgentId: "join-bot",
     lastMessageAt: "2026-11-08T00:00:01.000Z",
     createdAt: "2026-11-08T00:00:00.000Z",
@@ -413,6 +416,24 @@ for (const turn of turns) {
     expect(historyReads).toBeGreaterThan(0);
   }, 10_000);
 }
+
+/*
+ * The roster's last line is the Bot's reply that opening brings, so nothing is left to read for it.
+ * Looked at once the retries a read for that line takes (0, 750 and 1500 ms) would all be over.
+ */
+test("opening reads the history once", async () => {
+  script = replaying(plainReplay());
+  storing(plainStored);
+  roster(false, PLAIN_REPLY);
+
+  const view = opened();
+  await waitFor(() => expect(replayEnded).toBe(true), { timeout: 4000 });
+  await sleep(3000);
+
+  expect(shown(view.container, PLAIN_USER)).toBe(1);
+  expect(shown(view.container, PLAIN_REPLY)).toBe(1);
+  expect(historyReads).toBe(1);
+}, 10_000);
 
 test("a turn still running streams in live", async () => {
   const LIVE_TEXT = "Matching the lookups against the cycle now";
