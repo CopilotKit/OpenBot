@@ -228,9 +228,13 @@ describe("the built page's icons", () => {
     expect(file.type).toBe("application/manifest+json");
     const manifest = JSON.parse(file.body.toString("utf8"));
     expect(manifest).toMatchObject({
+      id: "/",
       name: "OpenBot",
       short_name: "OpenBot",
       start_url: "/",
+      scope: "/",
+      // An app of its own on a phone's Home Screen, which an iPhone needs before it allows push.
+      display: "standalone",
       background_color: BACKGROUND,
       theme_color: BACKGROUND,
     });

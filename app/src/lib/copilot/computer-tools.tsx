@@ -17,7 +17,7 @@ import {
 import { reportBotDecline } from "@/lib/api/generated/bots/bots";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { noteBrowsed, outputOf, readOutcome } from "@/lib/computers/activity";
-import { callComputer, type ToolOutcome } from "@/lib/computers/call";
+import { callComputer, stepOf, type ToolOutcome } from "@/lib/computers/call";
 import { type ControlState, readControl } from "@/lib/computers/control";
 import {
   runBrowserRead,
@@ -374,7 +374,13 @@ export function ComputerTools() {
       { signal, toolCall, agent }: ToolCallContext = {},
     ) => {
       const computerId = botOf(agent);
-      const result = await runNavigation(computerId, url, toolCall?.id, signal);
+      const result = await runNavigation(
+        computerId,
+        url,
+        toolCall?.id,
+        signal,
+        agent?.threadId,
+      );
       if (result.ok) noteBrowsed(computerId);
       return result;
     },
@@ -398,7 +404,14 @@ export function ComputerTools() {
     handler: async (
       _input: Record<string, never>,
       { signal, toolCall, agent }: ToolCallContext = {},
-    ) => runBrowserRead(botOf(agent), "/read", toolCall?.id, signal),
+    ) =>
+      runBrowserRead(
+        botOf(agent),
+        "/read",
+        toolCall?.id,
+        signal,
+        agent?.threadId,
+      ),
     render: () => null,
   });
 
@@ -413,7 +426,14 @@ export function ComputerTools() {
     handler: async (
       _input: Record<string, never>,
       { signal, toolCall, agent }: ToolCallContext = {},
-    ) => runBrowserRead(botOf(agent), "/snapshot", toolCall?.id, signal),
+    ) =>
+      runBrowserRead(
+        botOf(agent),
+        "/snapshot",
+        toolCall?.id,
+        signal,
+        agent?.threadId,
+      ),
     // Snapshot renders a count only; navigate owns the screen view.
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
@@ -456,7 +476,7 @@ export function ComputerTools() {
         text: string;
         submit?: boolean;
       },
-      { signal, agent }: ToolCallContext = {},
+      { signal, agent, toolCall }: ToolCallContext = {},
     ) =>
       callComputer(
         botOf(agent),
@@ -464,6 +484,7 @@ export function ComputerTools() {
         {
           method: "POST",
           body: input,
+          step: stepOf({ agent, toolCall }),
         },
         signal,
       ),
@@ -504,7 +525,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { ref: string; snapshotId: number },
-      { signal, agent }: ToolCallContext = {},
+      { signal, agent, toolCall }: ToolCallContext = {},
     ) =>
       callComputer(
         botOf(agent),
@@ -512,6 +533,7 @@ export function ComputerTools() {
         {
           method: "POST",
           body: input,
+          step: stepOf({ agent, toolCall }),
         },
         signal,
       ),
@@ -557,7 +579,7 @@ export function ComputerTools() {
         ref?: string;
         snapshotId?: number;
       },
-      { signal, agent }: ToolCallContext = {},
+      { signal, agent, toolCall }: ToolCallContext = {},
     ) =>
       callComputer(
         botOf(agent),
@@ -565,6 +587,7 @@ export function ComputerTools() {
         {
           method: "POST",
           body: input,
+          step: stepOf({ agent, toolCall }),
         },
         signal,
       ),
@@ -617,7 +640,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { label: string; ref: string; snapshotId: number },
-      { signal, agent }: ToolCallContext = {},
+      { signal, agent, toolCall }: ToolCallContext = {},
     ) => {
       const botId = botOf(agent);
       const asked = await callComputer(
@@ -626,6 +649,7 @@ export function ComputerTools() {
         {
           method: "POST",
           body: input,
+          step: stepOf({ agent, toolCall }),
         },
         signal,
       );
@@ -714,7 +738,14 @@ export function ComputerTools() {
     handler: async (
       input: { reason: string },
       { signal, toolCall, agent }: ToolCallContext = {},
-    ) => runHelpRequest(botOf(agent), input.reason, toolCall?.id, signal),
+    ) =>
+      runHelpRequest(
+        botOf(agent),
+        input.reason,
+        toolCall?.id,
+        signal,
+        agent?.threadId,
+      ),
     // The Bot's screen with the wheel while the request is open, then a line saying what was asked and what came of it.
     render: ({ args, result, toolCallId }) => (
       <HelpRequestCard
@@ -741,11 +772,12 @@ export function ComputerTools() {
     // Activity is read from the conversation this answer lands in: see `useConversationActivity`.
     handler: async (
       input: { path?: string },
-      { agent }: ToolCallContext = {},
+      { agent, toolCall }: ToolCallContext = {},
     ) =>
       callComputer(botOf(agent), "/files/list", {
         method: "POST",
         body: input ?? {},
+        step: stepOf({ agent, toolCall }),
       }),
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
@@ -784,10 +816,14 @@ export function ComputerTools() {
         .string()
         .describe("Path relative to your workspace, such as notes.md"),
     }),
-    handler: async (input: { path: string }, { agent }: ToolCallContext = {}) =>
+    handler: async (
+      input: { path: string },
+      { agent, toolCall }: ToolCallContext = {},
+    ) =>
       callComputer(botOf(agent), "/files/read", {
         method: "POST",
         body: input,
+        step: stepOf({ agent, toolCall }),
       }),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
@@ -850,12 +886,12 @@ export function ComputerTools() {
      */
     handler: async (
       input: { command: string },
-      { signal, agent }: ToolCallContext = {},
+      { signal, agent, toolCall }: ToolCallContext = {},
     ) =>
       callComputer(
         botOf(agent),
         "/exec",
-        { method: "POST", body: input },
+        { method: "POST", body: input, step: stepOf({ agent, toolCall }) },
         signal,
       ),
     render: ({ args, result, status }) => {
@@ -922,11 +958,12 @@ export function ComputerTools() {
         contents: string;
         append?: boolean;
       },
-      { agent }: ToolCallContext = {},
+      { agent, toolCall }: ToolCallContext = {},
     ) =>
       callComputer(botOf(agent), "/files/write", {
         method: "POST",
         body: input,
+        step: stepOf({ agent, toolCall }),
       }),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
@@ -1018,7 +1055,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { deltaY?: number },
-      { signal, agent }: ToolCallContext = {},
+      { signal, agent, toolCall }: ToolCallContext = {},
     ) =>
       callComputer(
         botOf(agent),
@@ -1026,6 +1063,7 @@ export function ComputerTools() {
         {
           method: "POST",
           body: input,
+          step: stepOf({ agent, toolCall }),
         },
         signal,
       ),

@@ -450,9 +450,10 @@ test("A smaller window: the refused call is retried cleared harder, and the run 
     const input = longThread();
     input.forwardedProps = { openbotModel: OPENAI_MODEL };
     const { second } = await stepAndContinue(env, input, resultBody(61));
-    // Each run: refused once, then the stage that fits. Nothing is remembered between runs, so the
-    // run after the hand-back starts at the first stage again.
-    assert.equal(provider.requests.length, 4);
+    // The first run: refused once, then the stage that fits. The thread keeps that stage, so the
+    // run after the hand-back starts there and is not refused first: a long task carried on step
+    // after step is refused once, not once a step.
+    assert.equal(provider.requests.length, 3);
     assert.equal(shape(provider.requests[0]!.body).whole.length, 12);
     const retried = shape(provider.requests[1]!.body);
     assert.deepEqual(retried.whole, [
@@ -462,8 +463,7 @@ test("A smaller window: the refused call is retried cleared harder, and the run 
       "call_58",
       "call_59",
     ]);
-    assert.equal(shape(provider.requests[2]!.body).whole.length, 12);
-    const next = shape(provider.requests[3]!.body);
+    const next = shape(provider.requests[2]!.body);
     assert.deepEqual(next.whole, [
       "call_0",
       "call_1",

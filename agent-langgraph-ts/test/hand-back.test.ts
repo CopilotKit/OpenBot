@@ -12,7 +12,6 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_STEPS } from "../src/run.ts";
 import { always, fakeProvider, type Recorded } from "./fake-provider.ts";
 import {
   conversation,
@@ -412,52 +411,62 @@ test("recall_earlier_results is answered here; in a mixed step the recall is ans
   }
 });
 
-test(`A turn takes at most ${MAX_STEPS} steps across its hand-backs, and the last answers in words`, async () => {
-  const provider = await fakeProvider((request, index) =>
-    request.body.tool_choice === "none"
-      ? { text: "Here is what I found so far." }
-      : {
-          calls: [
-            { id: `call_${index}`, name: "lookup", args: { q: `p${index}` } },
-          ],
-        },
-  );
+// No budget counts steps across a turn: the server answers every hand-back and calls again, and a
+// long task takes hundreds of steps. Under the old 40-step budget the forty-first step was sent
+// with its tools off and told it was on its last step, so a long task stopped half done.
+const LONG_TURN = 45;
+
+test(`A turn ${LONG_TURN} hand-backs deep is still sent its tools, and never told it is on its last step`, async () => {
+  const provider = await fakeProvider((_request, index) => ({
+    calls: [{ id: `call_next_${index}`, name: "lookup", args: { q: "more" } }],
+  }));
   const wire = await tripwire();
   try {
     const env = { ...openAI(provider.base), ...oldCallbackEnv(wire) };
     let thread = conversation().messages as unknown[];
-    let runs = 0;
+    for (let i = 0; i < LONG_TURN; i += 1)
+      thread = answered(
+        thread,
+        [{ id: `call_${i}`, name: "lookup", args: { q: `p${i}` } }],
+        { [`call_${i}`]: `result ${i}` },
+        `a-${i}`,
+      );
     await withEngine({ env }, async (base) => {
-      for (;;) {
-        runs += 1;
-        assert.ok(runs <= MAX_STEPS + 1, "the turn ends");
+      for (let step = 0; step < 2; step += 1) {
         const result = await run(
           base,
           conversation({
-            runId: `run-${runs}`,
+            runId: `run-${step}`,
             messages: thread,
             tools: [LOOKUP],
           }),
         );
         assert.equal(result.events.at(-1)!.type, "RUN_FINISHED");
         const pending = pendingOf(result.events);
-        if (!pending?.length) {
-          assert.equal(words(result.events), "Here is what I found so far.");
-          break;
-        }
+        assert.deepEqual(pending, [`call_next_${step}`], "the step hands back");
         thread = answered(
           thread,
-          pending.map((id) => ({ id, name: "lookup", args: {} })),
-          Object.fromEntries(pending.map((id) => [id, `result ${id}`])),
-          `a-${runs}`,
+          [{ id: `call_next_${step}`, name: "lookup", args: { q: "more" } }],
+          { [`call_next_${step}`]: "more" },
+          `a-next-${step}`,
         );
       }
     });
-    assert.equal(runs, MAX_STEPS, "one run per step");
-    assert.equal(provider.requests.length, MAX_STEPS);
-    for (const request of provider.requests.slice(0, -1))
+    assert.equal(provider.requests.length, 2);
+    for (const request of provider.requests) {
       assert.notEqual(request.body.tool_choice, "none");
-    assert.equal(provider.requests.at(-1)!.body.tool_choice, "none");
+      const tools = (request.body.tools ?? []) as {
+        function: { name: string };
+      }[];
+      assert.ok(
+        tools.some((tool) => tool.function.name === "lookup"),
+        "the step is sent its tools",
+      );
+      assert.ok(
+        !JSON.stringify(request.body.messages).includes("last step"),
+        "and is not told to stop",
+      );
+    }
     assert.deepEqual(wire.hits, []);
   } finally {
     await provider.close();
@@ -465,27 +474,63 @@ test(`A turn takes at most ${MAX_STEPS} steps across its hand-backs, and the las
   }
 });
 
-test("Steps before the person's latest message do not count against this turn", async () => {
-  const provider = await fakeProvider(() => ({
-    calls: [{ id: "call_new", name: "lookup", args: {} }],
-  }));
+// The server clears old tool results from the thread it sends, and offers recall_earlier_results as
+// a tool of its own, answered from the whole conversation it stores. A recall answered here would
+// read the server's placeholder back instead of the result.
+test("A recall_earlier_results the caller offers is handed back like any other call, not answered here", async () => {
+  const offeredRecall = {
+    name: "recall_earlier_results",
+    description: "Read a cleared result again.",
+    parameters: {
+      type: "object",
+      properties: { call_id: { type: "string" } },
+    },
+  };
+  const provider = await fakeProvider((_request, index) =>
+    index === 0
+      ? {
+          calls: [
+            {
+              id: "recall_1",
+              name: "recall_earlier_results",
+              args: { call_id: "call_old" },
+            },
+          ],
+        }
+      : { text: "answered from the engine's own thread" },
+  );
+  const wire = await tripwire();
   try {
-    let thread = (conversation().messages as unknown[]).slice(0, 4);
-    for (let i = 0; i < MAX_STEPS; i += 1)
-      thread = answered(
-        thread,
-        [{ id: `old_${i}`, name: "lookup", args: {} }],
-        { [`old_${i}`]: "r" },
-        `old-a-${i}`,
-      );
-    thread.push({ id: "u-next", role: "user", content: "next task" });
-    const result = await withEngine({ env: openAI(provider.base) }, (base) =>
-      run(base, conversation({ messages: thread, tools: [LOOKUP] })),
+    const env = { ...openAI(provider.base), ...oldCallbackEnv(wire) };
+    const messages = answered(
+      conversation().messages as unknown[],
+      [{ id: "call_old", name: "lookup", args: { q: "old" } }],
+      {
+        call_old:
+          '[This result was cleared to make room in the conversation. Call recall_earlier_results with call_id "call_old" to read it again.]',
+      },
     );
-    assert.notEqual(provider.requests[0]!.body.tool_choice, "none");
-    assert.deepEqual(pendingOf(result.events), ["call_new"]);
+    const result = await withEngine({ env }, (base) =>
+      run(base, conversation({ messages, tools: [LOOKUP, offeredRecall] })),
+    );
+    assert.equal(provider.requests.length, 1, "one model call, then back");
+    assert.equal(result.events.at(-1)!.type, "RUN_FINISHED");
+    assert.deepEqual(pendingOf(result.events), ["recall_1"]);
+    assert.ok(
+      !types(result.events).includes("TOOL_CALL_RESULT"),
+      "the engine does not answer it",
+    );
+    const names = (
+      (provider.requests[0]!.body.tools ?? []) as {
+        function: { name: string; description: string };
+      }[]
+    ).filter((tool) => tool.function.name === "recall_earlier_results");
+    assert.equal(names.length, 1, "the caller's recall, offered once");
+    assert.equal(names[0]!.function.description, offeredRecall.description);
+    assert.deepEqual(wire.hits, []);
   } finally {
     await provider.close();
+    await wire.close();
   }
 });
 

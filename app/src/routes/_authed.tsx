@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { BotLookProvider } from "../components/agents/bot-look";
 import { HeldOutGate } from "../components/auth/company-sign-in-page";
 import { PendingDeletionGate } from "../components/auth/pending-deletion-page";
+import { WebPushKeeper } from "../components/delivery/web-push-keeper";
 import { OpenFromApp } from "../components/desktop/open-from-app";
 import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
 import { CommandMenu } from "../components/navigation/command-menu";
@@ -136,6 +137,8 @@ function AuthedApp() {
          */}
         <SkinBotLook>
           <AppHotkeys />
+          {/* This browser's push subscription, saved again in each organization OpenBot starts in. */}
+          <WebPushKeeper />
           {/* The skin saved on the account, drawn over the browser's cached one once it loads. */}
           <SkinAccountSync />
           {/* Opened by the "OpenBot for Business" entry (personal edition and OpenBot Cloud), from whichever skin draws it. */}

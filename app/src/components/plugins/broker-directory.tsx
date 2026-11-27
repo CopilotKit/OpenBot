@@ -1,5 +1,9 @@
 import { IconKey, IconPlug, IconSearch } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import {
+  type UseInfiniteQueryResult,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import * as React from "react";
 import {
@@ -31,7 +35,8 @@ import { myAppRequestsQueryOptions } from "@/lib/app-access/queries";
 import {
   appsQueryOptions,
   type DirectoryApp,
-  directoryAppsQueryOptions,
+  type DirectoryAppPage,
+  directoryAppPagesQueryOptions,
   directorySlug,
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
@@ -48,7 +53,6 @@ import {
   consentBreadth,
   coverageWarning,
   keyNeededLine,
-  matchingApps,
 } from "@/lib/plugins/enablement-notes";
 import {
   directoryDescriptions,
@@ -127,7 +131,12 @@ export function BrokerDirectory({
     return () => clearTimeout(timer);
   }, [search]);
 
-  const apps = useQuery(directoryAppsQueryOptions(query));
+  /*
+   * A page at a time: the first as soon as it comes, the next as the person scrolls toward the end
+   * (`MoreWhenSeen`). Reading every page before drawing any kept this screen on its placeholders
+   * for a quarter of a minute.
+   */
+  const apps = useInfiniteQuery(directoryAppPagesQueryOptions(query));
   const personal = paths.edition === "personal";
   const role = useQuery(currentUserQueryOptions()).data?.role;
   const open = useAppsOpen();
@@ -152,7 +161,15 @@ export function BrokerDirectory({
   const press = useDirectoryPress(mode);
   const { tab, signingIn } = press;
   const { waiting } = tab;
-  const listed = matchingApps(apps.data ?? []);
+  /*
+   * In the order the server answers, which is the order this screen draws (apps you sign in to
+   * first, then apps that take a key, each by title). Sorting here instead would move rows already
+   * on screen each time a page arrived.
+   */
+  const listed = apps.data?.pages.flatMap((page) => page.apps) ?? [];
+  /** How many the whole list holds; counted from the rows only once they are all here. */
+  const total =
+    apps.data?.pages[0]?.total ?? (apps.hasNextPage ? null : listed.length);
   const stateOf = (entry: DirectoryApp) =>
     directoryAppState(entry, {
       servers: plugins.data,
@@ -224,9 +241,10 @@ export function BrokerDirectory({
         />
 
         {/*
-         * Pending, error, empty, rows. Pending draws placeholder rows: the full directory takes a
-         * couple of seconds to arrive, and a bare search box over blank space read as a page with
-         * nothing on it. They assert nothing, so no sentence claims anything mid-fetch.
+         * Pending, error, empty, rows. Pending draws placeholder rows until the first page comes,
+         * since a bare search box over blank space read as a page with nothing on it. They assert
+         * nothing, so no sentence claims anything mid-fetch. The error is the first page's: a later
+         * page that fails keeps the rows already here and says so under them (`MoreWhenSeen`).
          */}
         {apps.isPending ? (
           <div aria-busy="true" aria-label="Loading apps" role="status">
@@ -247,7 +265,7 @@ export function BrokerDirectory({
               ))}
             </PageRows>
           </div>
-        ) : apps.error ? (
+        ) : apps.data === undefined ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             {/*
              * The server's own sentence, as the enable failure above already does. A keyless
@@ -271,11 +289,18 @@ export function BrokerDirectory({
           </PageEmpty>
         ) : (
           <>
-            {/* How many there are, before the list: with no search, this is the whole directory. */}
+            {/*
+             * How many there are, before the list: with no search, this is the whole directory,
+             * counted by the server across every page rather than by the rows read so far.
+             */}
             <p className="mt-4 text-muted-foreground text-xs">
               {query
-                ? `${listed.length.toLocaleString()} ${listed.length === 1 ? "match" : "matches"}`
-                : `${listed.length.toLocaleString()} apps. Search by name to narrow them.`}
+                ? total === null
+                  ? null
+                  : `${total.toLocaleString()} ${total === 1 ? "match" : "matches"}`
+                : total === null
+                  ? "Search by name to narrow them."
+                  : `${total.toLocaleString()} apps. Search by name to narrow them.`}
             </p>
             <PageRows className="mt-2">
               {listed.map((entry, index) => {
@@ -408,6 +433,10 @@ export function BrokerDirectory({
                 );
               })}
             </PageRows>
+            <MoreWhenSeen
+              failure={directoryReadFailure(provider)}
+              pages={apps}
+            />
           </>
         )}
       </PageSection>
@@ -415,6 +444,92 @@ export function BrokerDirectory({
       {tab.consentStep}
     </PageShell>
   );
+}
+
+/**
+ * The next page of the directory, asked for as the end of the list comes into view.
+ *
+ * Nothing to see while it works: the rows simply continue. A margin below the view asks a little
+ * before the person reaches the end, so the rows are usually there when they do, and a screen
+ * taller than one page fills itself, since the end is in view as soon as a page lands. A page that
+ * fails keeps every row already here, says so beneath them, and offers to try again.
+ */
+function MoreWhenSeen({
+  pages,
+  failure,
+}: {
+  pages: Pick<
+    UseInfiniteQueryResult<{ pages: DirectoryAppPage[] }>,
+    | "data"
+    | "hasNextPage"
+    | "isFetchingNextPage"
+    | "isFetchNextPageError"
+    | "fetchNextPage"
+    | "error"
+  >;
+  /** What to say when a page fails and the server said nothing of its own. */
+  failure: string;
+}) {
+  const end = React.useRef<HTMLDivElement>(null);
+  const {
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    fetchNextPage,
+    error,
+  } = pages;
+  /*
+   * Watched afresh each time a page lands. An observer reports only a change, so one left in place
+   * says nothing when the end is still in view after the rows grew, and the list would stop short
+   * on a tall screen.
+   */
+  const landed = pages.data?.pages.length ?? 0;
+
+  React.useEffect(() => {
+    const element = end.current;
+    if (
+      !element ||
+      landed === 0 ||
+      !hasNextPage ||
+      isFetchingNextPage ||
+      isFetchNextPageError ||
+      typeof IntersectionObserver === "undefined"
+    )
+      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting))
+          void fetchNextPage({ cancelRefetch: false });
+      },
+      { rootMargin: "0px 0px 600px 0px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    landed,
+  ]);
+
+  if (!hasNextPage) return null;
+  if (isFetchNextPageError)
+    return (
+      <div className="mt-4 flex flex-col items-start gap-3">
+        <p className="text-destructive text-sm" role="alert">
+          {loadFailure(error, error?.message || failure)}
+        </p>
+        <Button
+          onClick={() => void fetchNextPage()}
+          size="sm"
+          variant="outline"
+        >
+          Try again
+        </Button>
+      </div>
+    );
+  return <div aria-hidden="true" data-testid="directory-more" ref={end} />;
 }
 
 /**

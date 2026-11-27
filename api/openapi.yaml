@@ -18,6 +18,8 @@ info:
 
     OpenBot's own apps name themselves on every request in the header `OpenBot-Client`: `<kind>/<version>`, where kind is web, desktop, mobile or recorder, such as `OpenBot-Client: desktop/1.1.0`. A header may name more than one, separated by spaces: OpenBot Desktop adds its own to the one its window's page sent. getDeployment says which API versions this OpenBot serves and the oldest release of each app it serves (minimumClients). Every other operation under /api/v2 refuses an app older than that with 400 and the code CLIENT_UPDATE_REQUIRED, whose problem names the app (client) and its minimum (minimumVersion) and whose detail tells the person to update OpenBot. When that minimum was raised because of a security problem in older releases, the problem also says security: true, and getDeployment lists it under securityMinimumClients. A program of your own need not send the header; without it nothing is refused for a version.
 
+    An app says which newer answers it understands in the header `OpenBot-Capabilities`: lowercase tokens separated by spaces, such as `OpenBot-Capabilities: computer-step-taken`. The server sends a newer shape of an answer only to a request naming its token, and the shape before it to every other request, so an app never gets an answer it can't read, whatever its version. A token the server doesn't know is ignored. The conversation events socket takes the same list in its `capabilities` query parameter, since a browser can't set a header on a WebSocket. The tokens: `computer-step-taken`, a computer step the server already ran or is running is answered as such, `taken` from runComputerStep and the problems COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN from a direct computer call that names its step by threadId and toolCallId; and `conversation-work-turn`, a conversation's work can name the person's own turn that the server is carrying on (kind turn). A request without a token is answered as before its shape existed. A program of your own need not send the header.
+
     Every answer carries `X-Request-Id`, the id OpenBot's server logs the request under, and a problem's requestId is the same id. So does every other answer under /api, the four addresses outside /api/v2 included. Quote it when reporting a failure, so the request can be found in the server's logs.
 
     This file is the single source of truth: the clients, the server's types, the docs and the contract tests are all generated from it or checked against it. A change that breaks an existing client fails the pull request.
@@ -125,6 +127,8 @@ tags:
     description: 'The agents an organization''s Bots hand work to: OpenBot''s own, a framework OpenBot runs, or an agent somebody runs at its own address. An administrator adds the organization''s, and anybody may add a private one for their own Bots. A Bot''s delegation says whether it works on one agent or hands work to several, and which.'
   - name: CopilotKit management
     description: Connecting a self-hosted OpenBot to CopilotKit's management service, which keeps it up to date in the company's own cluster through an agent installed there. Only the administrators of the organization `default` manage it, and only on the team edition a company runs itself.
+  - name: Web push
+    description: The browsers a person turned notifications on in, which their Bots send push notifications to through each browser's own push service, and the key a browser subscribes with.
   - name: Moving to OpenBot Cloud
     description: 'Moving what a person has in an OpenBot on their own computer to an organization on OpenBot Cloud: exporting it there as a bundle, importing the bundle on Cloud, and checking that everything arrived before anything is removed. Connections to apps never carry their sign-in, and a model key moves only when the person chooses, sealed to the import.'
 paths:
@@ -6567,7 +6571,7 @@ paths:
         - Apps
       operationId: listAppDirectory
       summary: List the apps that can be added
-      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue) in the catalogue''s own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. An app that connects with a key but signs in through its vendor is listed once, as the sign-in, with keyVersion naming the same app connected with its key. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included. While the organization''s apps are open (getAppsSetting), anybody may add what they find (createApp); where they''re locked down an administrator adds it, and anybody else asks for it (createAppAccessRequest). Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
+      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue) in the catalogue''s own order, then apps from the wider directory (source directory), the ones a person signs in to before the ones that take a key, each by title, ignoring case, and then by id. So a screen can show the pages as they arrive, in the order it shows them. appId names the app an entry was added as, or is null. An app that connects with a key but signs in through its vendor is listed once, as the sign-in, with keyVersion naming the same app connected with its key. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included. While the organization''s apps are open (getAppsSetting), anybody may add what they find (createApp); where they''re locked down an administrator adds it, and anybody else asks for it (createAppAccessRequest). Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
       security:
         - webSession: []
         - appOAuth:
@@ -9751,7 +9755,7 @@ paths:
         - Devices
       operationId: registerDevice
       summary: Register a device for push notifications
-      description: Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. A device is registered in one organization, the one the address names, and gets push notifications only from the person's Bots there. A person in several organizations registers the phone in each one they want notifications from, under the same id. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications (listNotificationTransports).
+      description: Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. A device is registered in one organization, the one the address names, and gets push notifications only from the person's Bots there. A person in several organizations registers the phone in each one they want notifications from, under the same id. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications to phones (its OpenBot phone app's project is set up).
       security:
         - webSession: []
         - appOAuth:
@@ -10340,7 +10344,7 @@ paths:
         - Notification settings
       operationId: listNotificationTransports
       summary: List the ways OpenBot can reach people here
-      description: 'Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push needs the OpenBot phone app''s project, Slack and Microsoft Teams need the OpenTag pairing, and text messages need Twilio. A person''s settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push is always there for browsers (web push, saveWebPushSubscription) and reaches phones once the OpenBot phone app''s project is set up, Slack and Microsoft Teams need the OpenTag pairing, and text messages need Twilio. A person''s settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -23935,6 +23939,137 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/web-push-key:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Web push
+      operationId: getWebPushKey
+      summary: Read the key a browser subscribes to push notifications with
+      description: 'Return this OpenBot''s public application server key (VAPID, RFC 8292), the key a browser passes as applicationServerKey when it subscribes to push notifications, so that only this OpenBot can send to the subscription. It is the same in every organization here and stays the same across restarts and upgrades. A browser holding a subscription made with a different key unsubscribes and subscribes again with this one. Anybody signed in to the organization may read it: it is public by design.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - devices:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The key.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushKey'
+              examples:
+                key:
+                  $ref: '#/components/examples/WebPushKeyExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/web-push-subscriptions/{subscriptionId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/WebPushSubscriptionId'
+    put:
+      tags:
+        - Web push
+      operationId: saveWebPushSubscription
+      summary: Save this browser's push subscription
+      description: 'Save the push subscription a browser made, under the id the app made for that browser, so the person''s Bots send push notifications to it from this organization: replies, questions, approvals and sign-in requests, as the person''s notification settings route push. Saving again replaces what the id holds; the app saves on every start, so a subscription the browser renewed replaces the old one. A subscription is saved once in each organization: saving its address under another id, or as another person, moves it there, so a browser that changes hands notifies only whoever saved it last. The address must be a browser push service''s (Apple''s, Google''s, Mozilla''s or Microsoft''s). A subscription the push service says has ended is removed when the next notification to it is refused. Only the person themselves may save their subscriptions.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - devices:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveWebPushSubscriptionRequest'
+            examples:
+              chrome:
+                value:
+                  endpoint: https://fcm.googleapis.com/fcm/send/dQw4w9WgXcQ:APA91bHPRgkF3JUikC4ENAHEeMrd41Zxv3hVZjC9KtT8OvPVGJ-hQMRKRrZuJAEcl7B338qju59zJMjw2DELjzEvxwYv7hH5Ynpc1ODQ0aT4U4OFEeBkpI1ffakVCgWq4CwOI5tHxN3n
+                  keys:
+                    p256dh: BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM
+                    auth: tBHItJI5svbpez7KI4CCXg
+      responses:
+        '200':
+          description: The subscription, saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushSubscriptionResponse'
+              examples:
+                saved:
+                  $ref: '#/components/examples/WebPushSubscriptionResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidWebPushSubscription'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Web push
+      operationId: deleteWebPushSubscription
+      summary: Stop push notifications to this browser
+      description: Stop sending push notifications to a browser from this organization. Its subscriptions in the person's other organizations stay. The app does this when the person turns notifications off in that browser and when they sign out of it. Only the person themselves may remove their subscriptions. One already removed is not found, which a client can read as done.
+      security:
+        - webSession: []
+        - appOAuth:
+            - devices:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The browser gets no more push notifications from this organization.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/WebPushSubscriptionNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -24014,8 +24149,8 @@ components:
             components:write: Tell OpenBot which components the app can draw, and, when the signed-in person is an admin, write, publish and delete components and choose which Bots and data each may use.
             skills:read: Read the skills the signed-in person can use, and for an admin everybody's.
             skills:write: Write and delete the signed-in person's skills, and for an admin the organization's and anybody's.
-            devices:read: Read the phones the signed-in person registered for push notifications.
-            devices:write: Register the signed-in person's phones for push notifications, and remove them.
+            devices:read: Read the phones the signed-in person registered for push notifications, and the key a browser subscribes to push notifications with.
+            devices:write: Register the signed-in person's phones and browsers for push notifications, and remove them.
             destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
             destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams and text message destinations.
             deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
@@ -24866,6 +25001,15 @@ components:
         maxLength: 256
         pattern: \S
       example: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+    WebPushSubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      description: 'The browser''s id: a UUID the app makes once in that browser and keeps, so saving again replaces rather than adds.'
+      schema:
+        type: string
+        format: uuid
+      example: 6d0f2a4b-8c1e-4f3a-9b5d-7e2c4a6f8b10
   headers:
     PrivateNoStore:
       description: A Bot is private to the caller.
@@ -30373,7 +30517,7 @@ components:
       properties:
         entries:
           type: array
-          description: The catalogue in its own order, then the wider directory by title, ignoring case, and then by id.
+          description: 'The catalogue in its own order, then the wider directory: apps a person signs in to before apps that take a key (connectsWith key), each by title, ignoring case, and then by id.'
           items:
             $ref: '#/components/schemas/AppDirectoryEntry'
         nextCursor:
@@ -30383,6 +30527,10 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+        total:
+          type: integer
+          minimum: 0
+          description: How many entries the whole list holds for this search and source, across every page, so a screen can say how many there are while it reads only the first page.
     AppSetup:
       type: object
       description: How apps are set up on this OpenBot. Never a key.
@@ -32507,7 +32655,7 @@ components:
         - slack
         - teams
         - sms
-      description: 'A way OpenBot reaches a person outside it: push notifications to their phones, Slack, Microsoft Teams, or text messages.'
+      description: 'A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.'
     DeliveryKind:
       type: string
       enum:
@@ -35682,7 +35830,7 @@ components:
           $ref: '#/components/schemas/ComputerStepHandoff'
     ComputerStepTaken:
       type: object
-      description: 'The server already ran, or is running, this step: the same tool call in the same conversation. It is not run a second time. While the first run goes on, running is true and there is no result yet; ask again for it. Once the first run has ended, result is what it answered. A first run that was cut off before it answered has, as its result, a note that its outcome is unknown, to check before doing it again.'
+      description: 'The server already ran, or is running, this step: the same tool call in the same conversation. It is not run a second time. While the first run goes on, running is true and there is no result yet; ask again for it. Once the first run has ended, result is what it answered. A first run that was cut off before it answered has, as its result, a note that its outcome is unknown, to check before doing it again. Sent only to a request whose OpenBot-Capabilities header names computer-step-taken.'
       required:
         - outcome
         - threadId
@@ -38420,7 +38568,7 @@ components:
       minLength: 1
       maxLength: 200
       pattern: \S
-      description: 'The Bot''s tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation''s turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. Without both ids a call runs once per Idempotency-Key, as it always has.'
+      description: 'The Bot''s tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation''s turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.'
     ComputerChallenge:
       type: object
       description: A check the page raised that only a person can pass, and the request raised for them to take over.
@@ -42420,6 +42568,72 @@ components:
       properties:
         run:
           $ref: '#/components/schemas/ConversationRun'
+    WebPushKey:
+      type: object
+      required:
+        - publicKey
+      properties:
+        publicKey:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{87}$
+          description: 'The public key: an uncompressed P-256 point (65 bytes), in URL-safe base64 with no padding, as the Push API''s applicationServerKey takes it.'
+    WebPushSubscriptionKeys:
+      type: object
+      additionalProperties: false
+      required:
+        - p256dh
+        - auth
+      description: The keys the browser encrypts with (RFC 8291), as the subscription's getKey() or toJSON() gives them, in URL-safe base64.
+      properties:
+        p256dh:
+          type: string
+          minLength: 87
+          maxLength: 88
+          pattern: ^[A-Za-z0-9_-]+=?$
+          description: The browser's P-256 public key, uncompressed (65 bytes).
+        auth:
+          type: string
+          minLength: 22
+          maxLength: 24
+          pattern: ^[A-Za-z0-9_-]+={0,2}$
+          description: The authentication secret (16 bytes).
+    SaveWebPushSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - endpoint
+        - keys
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: ^https://
+          description: 'The subscription''s endpoint, the address its push service gave it. It is a credential: OpenBot never sends it back.'
+        keys:
+          $ref: '#/components/schemas/WebPushSubscriptionKeys'
+    WebPushSubscription:
+      type: object
+      description: A browser that gets push notifications for the person, from every one of their Bots in this organization. Never its endpoint or keys.
+      required:
+        - id
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The id the app made for the browser.
+        createdAt:
+          type: string
+          format: date-time
+          description: When OpenBot first saved a subscription under this id.
+    WebPushSubscriptionResponse:
+      type: object
+      required:
+        - webPushSubscription
+      properties:
+        webPushSubscription:
+          $ref: '#/components/schemas/WebPushSubscription'
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -49553,6 +49767,48 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    InvalidWebPushSubscription:
+      description: The request doesn't match the API, or the endpoint is not a browser push service's address.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAPushService:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That address isn't a browser push service's, so OpenBot can't send notifications to it.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    WebPushSubscriptionNotFound:
+      description: 'The person has no such subscription in this organization: it was removed already, or never saved. Or the organization does not exist.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/web-push-subscription-not-found
+                title: Subscription not found.
+                status: 404
+                detail: Subscription not found.
+                code: WEB_PUSH_SUBSCRIPTION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
   examples:
     ReactionPageLast:
       summary: Every reaction in a conversation, on one page.
@@ -51214,6 +51470,7 @@ components:
             scopedActionCount: 26
             connectsWith: sign-in
         nextCursor: null
+        total: 2
     AppSetupExample:
       summary: An OpenBot with the app directory set up.
       value:
@@ -54618,3 +54875,13 @@ components:
                 reason: Sending a message asks first.
                 kind: sending
         nextCursor: null
+    WebPushKeyExample:
+      summary: This OpenBot's key.
+      value:
+        publicKey: BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U
+    WebPushSubscriptionResponseExample:
+      summary: A browser, saved.
+      value:
+        webPushSubscription:
+          id: 6d0f2a4b-8c1e-4f3a-9b5d-7e2c4a6f8b10
+          createdAt: '2026-11-26T18:04:12.000Z'

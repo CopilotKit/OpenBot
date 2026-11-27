@@ -125,10 +125,18 @@ function webManifest() {
     type: "image/png",
     ...(maskable ? { purpose: "maskable" } : {}),
   });
+  /*
+   * `display: standalone` makes OpenBot added to a phone's Home Screen an app of its own, which is
+   * also what lets an iPhone or iPad give it push notifications (Settings, Notifications). `id` and
+   * `scope` say it is one app, the whole of this address.
+   */
   const manifest = {
+    id: "/",
     name: "OpenBot",
     short_name: "OpenBot",
     start_url: "/",
+    scope: "/",
+    display: "standalone",
     background_color: background,
     theme_color: background,
     icons: [

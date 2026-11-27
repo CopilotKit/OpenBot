@@ -125,6 +125,9 @@ const FOR_PERSON = new Map<string, string>([
 export function outcomeForPerson(text: string): string {
   const known = FOR_PERSON.get(text.trim());
   if (known) return known;
+  // A step whose run was cut off before it answered, in the words the server tells the Bot that with.
+  if (text.trim().startsWith("Outcome unknown:"))
+    return FOR_PERSON.get(OUTCOME_UNKNOWN) ?? text;
   if (!text.startsWith("Not done:") && !text.startsWith("Not run:"))
     return text;
   const end = firstSentenceEnd(text);
