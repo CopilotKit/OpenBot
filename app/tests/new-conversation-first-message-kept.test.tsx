@@ -90,6 +90,13 @@ const channel: AgentChannel = {
 let serverAnswers = true;
 /** Whether the server makes the conversations it is asked for, or never answers. */
 let makes = true;
+/**
+ * Whether a run the server takes has its start reach the page. False is the server taking the
+ * message and answering it while the page dies before it hears so.
+ */
+let startReaches = true;
+/** What the server holds of the conversation's thread, as its history read answers it. */
+let stored: unknown[] = [];
 /** The run inputs that reached the server, in order. */
 let runs: RunAgentInput[] = [];
 /** Runs the server never answered, which a dying page drops. */
@@ -179,6 +186,16 @@ beforeAll(() => {
             unanswered.push(reject);
           });
         runs.push(body);
+        if (!startReaches) {
+          // Taken and answered on the server; the page never hears the run start.
+          stored = [
+            ...body.messages,
+            { id: "answer-1", role: "assistant", content: "High water is at noon." },
+          ];
+          return new Promise<Response>((_resolve, reject) => {
+            unanswered.push(reject);
+          });
+        }
         return sse([
           { type: "RUN_STARTED", threadId: body.threadId, runId: body.runId },
           { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId },
@@ -193,7 +210,7 @@ beforeAll(() => {
       if (url.pathname === conversationPath(channel.id) && method === "GET")
         return NativeResponse.json({ conversation: conversationOf(channel) });
       if (/\/threads\/[^/]+(\/messages)?$/.test(url.pathname))
-        return NativeResponse.json({ messages: [] });
+        return NativeResponse.json({ messages: stored });
       if (
         /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy|mark-read)$/.test(
           url.pathname,
@@ -217,6 +234,8 @@ afterEach(async () => {
   window.localStorage.clear();
   serverAnswers = true;
   makes = true;
+  startReaches = true;
+  stored = [];
   runs = [];
 });
 
@@ -327,8 +346,9 @@ test("a page that dies before the server has the first message gives the words b
   // Opened again, as a notification or the sidebar opens it.
   serverAnswers = true;
   const { view } = openPage(`/channel/${channel.id}`);
-  const editor = await view.findByRole("textbox", { name: "Message" });
-  await waitFor(() => expect(editor.textContent).toContain(QUESTION), {
+  // The box opens again with them once the thread is read, so it is found afresh.
+  const box = () => view.getByRole("textbox", { name: "Message" });
+  await waitFor(() => expect(box().textContent).toContain(QUESTION), {
     timeout: 5000,
   });
   // Nothing is sent on its own: the person decides.
@@ -337,6 +357,7 @@ test("a page that dies before the server has the first message gives the words b
   expect(runs).toHaveLength(0);
 
   // Sent from the box, it runs once.
+  const editor = box();
   const user = userEvent.setup({ document });
   await waitFor(() =>
     expect(editor.getAttribute("aria-disabled")).not.toBe("true"),
@@ -373,6 +394,22 @@ test("a page that dies while its Send is still making the conversation gives the
     timeout: 5000,
   });
   expect(runs).toHaveLength(0);
+}, 30_000);
+
+test("a first message the server took while its page died, before the page heard so, is not given back", async () => {
+  startReaches = false;
+  await sendFromNewConversation();
+  await waitFor(() => expect(runs).toHaveLength(1), { timeout: 5000 });
+  await diePage();
+
+  // Opened again: the message and its answer, and nothing in the box to send twice.
+  const { view } = openPage(`/channel/${channel.id}`);
+  await view.findByText("High water is at noon.", undefined, { timeout: 5000 });
+  await settleReactWork();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const editor = await view.findByRole("textbox", { name: "Message" });
+  expect(editor.textContent ?? "").not.toContain(QUESTION);
+  expect(runs).toHaveLength(1);
 }, 30_000);
 
 test("a first message the server has is not given back", async () => {

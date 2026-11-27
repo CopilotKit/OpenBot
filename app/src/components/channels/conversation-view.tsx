@@ -69,6 +69,7 @@ export function ConversationView({
   modelPicker,
   routine,
   draftKey,
+  composerOpening,
 }: {
   messages: readonly Message[];
   threadId?: string;
@@ -164,6 +165,11 @@ export function ConversationView({
   routine?: { agentId: string; channelId: string };
   /** Which conversation's unsent message the composer keeps. See `Composer`. */
   draftKey?: string;
+  /**
+   * Changed to open the composer again, so it reads its draft once more: it reads it only as it
+   * opens, and a message put back in the draft afterwards would not show otherwise.
+   */
+  composerOpening?: number;
 }) {
   /*
    * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
@@ -635,6 +641,7 @@ export function ConversationView({
           starterSuggestions
         )}
         <Composer
+          key={composerOpening}
           modelPicker={modelPicker}
           {...(routine ? { routine } : {})}
           {...(draftKey ? { draftKey } : {})}
