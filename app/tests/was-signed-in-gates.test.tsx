@@ -46,6 +46,8 @@ import { settleReactWork } from "./settle-react-work";
 const NativeResponse = globalThis.Response;
 let openbot: ReturnType<typeof Bun.serve>;
 let signedIn: boolean;
+/** Where the person is in onboarding: null for somebody who never had it to do. */
+let onboarding: { step: number; completedAt: string | null } | null;
 
 async function answer(request: Request): Promise<Response> {
   const path = new URL(request.url).pathname;
@@ -92,7 +94,7 @@ async function answer(request: Request): Promise<Response> {
         needsName: false,
         image: null,
         role: "member",
-        onboarding: null,
+        onboarding,
       },
       openbotVersion: null,
     });
@@ -116,6 +118,7 @@ beforeAll(() => {
 });
 beforeEach(() => {
   signedIn = true;
+  onboarding = null;
   setCurrentOrganization(undefined);
   queryClient.clear();
   localStorage.clear();
@@ -136,8 +139,8 @@ afterAll(async () => {
   setCurrentOrganization("default");
 });
 
-/** The real sign-in gate in front of a stub home and a stub sign-in screen. */
-function memoryRouter() {
+/** The real sign-in gate in front of a stub home, stub onboarding and terms screens, and a stub sign-in screen. */
+function memoryRouter(start = "/") {
   const root = createRootRouteWithContext<RouterContext>()({
     component: Outlet,
   });
@@ -153,6 +156,12 @@ function memoryRouter() {
     path: "/",
     component: () => <p>The app</p>,
   } as never) as unknown as AnyRoute;
+  const page = (path: string, name: string) =>
+    createRoute({
+      getParentRoute: () => authed,
+      path,
+      component: () => <p>{name}</p>,
+    } as never) as unknown as AnyRoute;
   const sign = SignRoute.options as unknown as Record<string, unknown>;
   const signIn = createRoute({
     getParentRoute: () => root,
@@ -164,15 +173,22 @@ function memoryRouter() {
     },
   } as never) as unknown as AnyRoute;
   return createRouter({
-    routeTree: root.addChildren([authed.addChildren([home]), signIn]),
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: root.addChildren([
+      authed.addChildren([
+        home,
+        page("/onboarding", "Onboarding"),
+        page("/terms", "The terms"),
+      ]),
+      signIn,
+    ]),
+    history: createMemoryHistory({ initialEntries: [start] }),
     context: { queryClient },
     defaultErrorComponent: ReportedErrorComponent,
   });
 }
 
-function openApp() {
-  const router = memoryRouter();
+function openApp(start = "/") {
+  const router = memoryRouter(start);
   const view = render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router as never} />
@@ -207,4 +223,20 @@ test("a preload neither remembers nor forgets", async () => {
   await router.preloadRoute({ to: "/" } as never);
   expect(wasSignedIn()).toBe(true);
   forgetSignedIn();
+});
+
+test("passing the gates on onboarding doesn't remember", async () => {
+  // Somebody partway through onboarding: the gates admit them to onboarding and nowhere else.
+  onboarding = { step: 1, completedAt: null };
+  const { view } = openApp("/onboarding");
+  await view.findByText("Onboarding", {}, { timeout: 5000 });
+  await settleReactWork();
+  expect(wasSignedIn()).toBe(false);
+});
+
+test("passing the gates on the terms screen doesn't remember", async () => {
+  const { view } = openApp("/terms");
+  await view.findByText("The terms", {}, { timeout: 5000 });
+  await settleReactWork();
+  expect(wasSignedIn()).toBe(false);
 });

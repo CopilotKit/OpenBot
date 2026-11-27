@@ -110,8 +110,17 @@ export const Route = createFileRoute("/_authed")({
     }
     // Before any conversation is drawn, so a long-named action's step never shows its cut name.
     await toolNames;
-    // Only somebody who got past every check is remembered, so the next visit may draw the frame while they run.
-    if (!preload) rememberSignedIn();
+    /*
+     * Only somebody who got past every check into the app is remembered, so the next visit may draw the frame while
+     * they run. Onboarding and the terms are let through while the gates still hold, and are drawn without the
+     * frame: somebody partway through either would see the frame on their next visit, then be sent back there.
+     */
+    if (
+      !preload &&
+      location.pathname !== "/onboarding" &&
+      location.pathname !== "/terms"
+    )
+      rememberSignedIn();
   },
   /*
    * Somebody who was signed in sees the app's frame from the main script's arrival, not a blank page, while the
