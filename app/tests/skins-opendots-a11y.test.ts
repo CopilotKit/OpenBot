@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { oklchToRgb, type Rgb } from "../../tokens/src/color";
+import { scheme, type Token } from "../../tokens/src/scheme";
 
 /**
- * The OpenDots skin's colours and motion, read from its own stylesheet.
+ * The OpenDots skin's colours, as it draws them, and its motion, read from its own stylesheet.
  *
  * Every text colour the skin draws must meet WCAG AA (4.5:1) on the surface it sits on, and every
  * icon 3:1 (WCAG 1.4.11), in light and in dark. OpenDots' own greys did not: its "YOUR WORKSPACE"
- * label measured 2.7:1 and its page description 3.0:1. The pairs below are the ones the frame and
- * its screens actually draw, so a token changed later is measured where it is used.
+ * label measured 2.7:1 and its page description 3.0:1. The skin now wears OpenBot's colours: each of
+ * its roles reads a token of the scheme (`--opendots-label: var(--muted-foreground)`), so the pairs
+ * below, the ones the frame and its screens actually draw, are measured on the scheme's values. A
+ * role pointed at another token later is measured where it is used.
  */
 
 const css = readFileSync(
@@ -15,41 +19,72 @@ const css = readFileSync(
   "utf8",
 ).replace(/\/\*[\s\S]*?\*\//g, "");
 
-function tokens(selector: string): Record<string, string> {
-  const start = css.indexOf(`${selector} {`);
-  if (start < 0) throw new Error(`No ${selector} block`);
-  const body = css.slice(start, css.indexOf("}", start));
+/** Each `--opendots-*` role and the scheme's token it reads, from the block light and dark share. */
+const roles: Record<string, string> = (() => {
+  const head =
+    ':root[data-skin="opendots"],\n:root[data-skin="opendots"].dark {';
+  const start = css.indexOf(head);
+  if (start < 0) throw new Error("No block of OpenDots' roles");
+  const body = css.slice(start + head.length, css.indexOf("}", start));
   const found: Record<string, string> = {};
-  for (const match of body.matchAll(/(--[\w-]+):\s*([^;]+);/g)) {
+  for (const match of body.matchAll(/(--opendots-[\w-]+):\s*([^;]+);/g)) {
     found[match[1]] = match[2].trim();
   }
   return found;
+})();
+
+type Mode = keyof typeof scheme;
+
+/** The scheme's token a name reads: itself, or the one an OpenDots role points at. */
+function token(name: string): Token {
+  if (!name.startsWith("--opendots-")) return name.slice(2) as Token;
+  const read = /^var\(--([\w-]+)\)$/.exec(roles[name] ?? "");
+  if (!read)
+    throw new Error(
+      `${name} reads no single token of the scheme: ${roles[name]}`,
+    );
+  return read[1] as Token;
 }
 
-const themes = {
-  light: tokens(':root[data-skin="opendots"]'),
-  dark: tokens(':root[data-skin="opendots"].dark'),
-};
-
-function channels(hex: string) {
-  const value = hex.slice(1);
-  return [0, 2, 4].map(
-    (at) => Number.parseInt(value.slice(at, at + 2), 16) / 255,
-  );
+/** `top` laid over `under`. */
+function over(top: Rgb, under: Rgb): Rgb {
+  const mix = (a: number, b: number) => a * top.alpha + b * (1 - top.alpha);
+  return {
+    r: mix(top.r, under.r),
+    g: mix(top.g, under.g),
+    b: mix(top.b, under.b),
+    alpha: 1,
+  };
 }
 
-function luminance(hex: string) {
-  const [r, g, b] = channels(hex).map((c) =>
-    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4,
-  );
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+/** A surface as it is drawn: a translucent one (the selected row's tint) over the sidebar. */
+function surface(mode: Mode, name: string): Rgb {
+  const color = oklchToRgb(scheme[mode][token(name)]);
+  return color.alpha === 1
+    ? color
+    : over(color, oklchToRgb(scheme[mode].sidebar));
+}
+
+function luminance({ r, g, b }: Rgb) {
+  const [R, G, B] = [r, g, b].map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * R + 0.7152 * G + 0.0722 * B;
 }
 
 /** The WCAG 2 contrast ratio of two opaque sRGB colours. */
-export function contrast(a: string, b: string) {
+export function contrast(a: Rgb, b: Rgb) {
   const [x, y] = [luminance(a), luminance(b)];
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
+
+const hex = (value: string): Rgb => ({
+  r: Number.parseInt(value.slice(1, 3), 16),
+  g: Number.parseInt(value.slice(3, 5), 16),
+  b: Number.parseInt(value.slice(5, 7), 16),
+  alpha: 1,
+});
 
 const TEXT = 4.5;
 const ICON = 3;
@@ -130,19 +165,17 @@ const PAIRS: Array<[string, string, number, string]> = [
 
 describe("OpenDots colours meet WCAG AA", () => {
   test("the measure agrees with WCAG's own examples", () => {
-    expect(contrast("#000000", "#ffffff")).toBeCloseTo(21, 5);
-    expect(contrast("#767676", "#ffffff")).toBeCloseTo(4.54, 2);
+    expect(contrast(hex("#000000"), hex("#ffffff"))).toBeCloseTo(21, 5);
+    expect(contrast(hex("#767676"), hex("#ffffff"))).toBeCloseTo(4.54, 2);
   });
 
-  for (const [theme, values] of Object.entries(themes)) {
+  for (const mode of ["light", "dark"] as const) {
     test.each(PAIRS)(
-      `${theme}: %s on %s reaches %d:1 (%s)`,
-      (foreground, surface, minimum) => {
-        const color = values[foreground];
-        const ground = values[surface];
-        expect(color).toMatch(/^#[0-9a-f]{6}$/i);
-        expect(ground).toMatch(/^#[0-9a-f]{6}$/i);
-        expect(contrast(color, ground)).toBeGreaterThanOrEqual(minimum);
+      `${mode}: %s on %s reaches %d:1 (%s)`,
+      (foreground, ground, minimum) => {
+        const under = surface(mode, ground);
+        const ink = over(oklchToRgb(scheme[mode][token(foreground)]), under);
+        expect(contrast(ink, under)).toBeGreaterThanOrEqual(minimum);
       },
     );
   }

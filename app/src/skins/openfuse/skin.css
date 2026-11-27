@@ -1,168 +1,83 @@
 /*
- * OpenFuse. Light is OpenFuse's own palette from its `ui.tsx`: a near-white canvas, white cards, a
- * pale sky blue for the primary action and the person's own words, and soft pastel tiles. OpenFuse
- * ships no dark theme, so dark is drawn in its spirit: the same airy shapes at night, a deep slate
- * canvas with a blue cast, cards one step up, and the sky blue deepened into a night blue so the
- * person's bubble and the primary pill still read as the one warm accent.
+ * OpenFuse: its own airy shapes, pills and tiles, in OpenBot's colors. Every role below reads the
+ * scheme's color that means the same (tokens/src/scheme.ts), so it follows light and dark.
  *
- * Every token is set for both. A skin's `:root[data-skin]` outranks OpenBot's `.dark`, so a token set
- * only for light would leak into dark.
+ * What a mode sets is set for both. A skin's `:root[data-skin]` outranks OpenBot's `.dark`, so a
+ * value set only for light would leak into dark.
  */
 
 :root[data-skin="openfuse"] {
   color-scheme: light;
-  --background: #fcfcfc;
-  --foreground: #11191c;
-  --card: #ffffff;
-  --card-foreground: #11191c;
-  --popover: #ffffff;
-  --popover-foreground: #11191c;
-  --primary: #c8e7ff;
-  --primary-foreground: #11191c;
-  --secondary: #f1f2f3;
-  --secondary-foreground: #11191c;
-  --muted: #f0f1f2;
-  --muted-foreground: #697176;
-  --accent: #edf7fd;
-  --accent-foreground: #11191c;
-  --destructive: #aa4a45;
-  --success: #189a58;
-  --border: #eeeef0;
-  --input: #e6e8ea;
-  --ring: #7fbde9;
-  --chart-1: #1473c8;
-  --chart-2: #6aaee0;
-  --chart-3: #24a46b;
-  --chart-4: #6866a6;
-  --chart-5: #e59a2b;
   --radius: 1rem;
-  --sidebar: #f6f7f8;
-  --sidebar-foreground: #11191c;
-  --sidebar-primary: #1473c8;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #edeef0;
-  --sidebar-accent-foreground: #11191c;
-  --sidebar-border: #eeeef0;
-  --sidebar-ring: #7fbde9;
-
   --openfuse-font:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
   --font-sans: var(--openfuse-font);
-  --openfuse-accent: #1473c8;
-  --openfuse-blue: #c8e7ff;
-  --openfuse-sky: #edf7fd;
-  --openfuse-green: #e3f3e8;
-  --openfuse-lavender: #f0eefa;
-  --openfuse-orange: #fdf0df;
-  --openfuse-chip: #f3f4f5;
-  --openfuse-danger-tint: #fbefed;
-  --openfuse-pressed: #e9eaec;
-  --openfuse-primary-hover: #b5ddfb;
-  --openfuse-task: #f0f1f2;
-  --openfuse-tab-active: #f0f1f2;
-  --openfuse-tab-hover: #f7f8f8;
-  --openfuse-pill: #ffffff;
-  --openfuse-pill-border: #f8f8f8;
   --openfuse-pill-shadow: rgba(19, 38, 49, 0.07);
   --openfuse-scrim: rgba(35, 48, 44, 0.25);
-  --openfuse-handle: #d8dbde;
-  --openfuse-group: #f3f4f5;
-  --openfuse-group-line: #e5e7e9;
-  --openfuse-group-soft: #f4f5f6;
-  --openfuse-quiet: #a3a6a8;
-  --openfuse-quiet-text: #666a6d;
-  --openfuse-green-dot: #24a46b;
-  --openfuse-green-ring: #d9f1e2;
-  --openfuse-green-text: #189a58;
-  --openfuse-blue-dot: #3d9bde;
-  --openfuse-blue-ring: #d7e9fa;
-  --openfuse-amber: #e59a2b;
-  --openfuse-focus: #c7e4f9;
-  --openfuse-user-bubble: #c8e7ff;
-  --openfuse-bot-bubble: #eeeef0;
-  --openfuse-composer: #ffffff;
-  --openfuse-composer-border: #eef0f2;
   --openfuse-composer-shadow: rgba(24, 56, 75, 0.06);
-  --openfuse-send-idle: #f3f5f6;
 }
 
 :root[data-skin="openfuse"].dark {
   color-scheme: dark;
-  --background: #0e1316;
-  --foreground: #e8edef;
-  --card: #161c20;
-  --card-foreground: #e8edef;
-  --popover: #161c20;
-  --popover-foreground: #e8edef;
-  --primary: #1f4766;
-  --primary-foreground: #dcefff;
-  --secondary: #1d2428;
-  --secondary-foreground: #e8edef;
-  --muted: #1b2226;
-  --muted-foreground: #8d989e;
-  --accent: #142530;
-  --accent-foreground: #e8edef;
-  --destructive: #e07a73;
-  --success: #4cc38a;
-  --border: #232b30;
-  --input: #2a3338;
-  --ring: #3f7fae;
-  --chart-1: #6fb6f0;
-  --chart-2: #3d9bde;
-  --chart-3: #4cc38a;
-  --chart-4: #a19fe0;
-  --chart-5: #f0b45a;
   --radius: 1rem;
-  --sidebar: #12181b;
-  --sidebar-foreground: #e8edef;
-  --sidebar-primary: #6fb6f0;
-  --sidebar-primary-foreground: #0e1316;
-  --sidebar-accent: #1d2428;
-  --sidebar-accent-foreground: #e8edef;
-  --sidebar-border: #232b30;
-  --sidebar-ring: #3f7fae;
-
   --openfuse-font:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
   --font-sans: var(--openfuse-font);
-  --openfuse-accent: #6fb6f0;
-  --openfuse-blue: #2a5576;
-  --openfuse-sky: #13242e;
-  --openfuse-green: #142a1f;
-  --openfuse-lavender: #1f1d33;
-  --openfuse-orange: #2d2215;
-  --openfuse-chip: #1f272b;
-  --openfuse-danger-tint: #2e1716;
-  --openfuse-pressed: #232b30;
-  --openfuse-primary-hover: #275678;
-  --openfuse-task: #182025;
-  --openfuse-tab-active: #232c31;
-  --openfuse-tab-hover: #1b2226;
-  --openfuse-pill: #161c20;
-  --openfuse-pill-border: #222a2f;
   --openfuse-pill-shadow: rgba(0, 0, 0, 0.45);
   --openfuse-scrim: rgba(4, 8, 10, 0.6);
-  --openfuse-handle: #3a444a;
-  --openfuse-group: #161c20;
-  --openfuse-group-line: #232b30;
-  --openfuse-group-soft: #161c20;
-  --openfuse-quiet: #5f6a70;
-  --openfuse-quiet-text: #a3adb2;
-  --openfuse-green-dot: #4cc38a;
-  --openfuse-green-ring: #173827;
-  --openfuse-green-text: #5fd39b;
-  --openfuse-blue-dot: #5aaee8;
-  --openfuse-blue-ring: #17344a;
-  --openfuse-amber: #f0b45a;
-  --openfuse-focus: #2f6a95;
-  --openfuse-user-bubble: #1f4766;
-  --openfuse-bot-bubble: #1b2226;
-  --openfuse-composer: #161c20;
-  --openfuse-composer-border: #242d32;
   --openfuse-composer-shadow: rgba(0, 0, 0, 0.35);
-  --openfuse-send-idle: #1f272b;
+}
+
+/*
+ * The skin's own roles, read from OpenBot's scheme: a skin keeps its own structure and wears
+ * OpenBot's colors, so each role is the scheme's color that means the same, and follows light,
+ * dark and a customer's theme as OpenBot's own screens do.
+ */
+:root[data-skin="openfuse"],
+:root[data-skin="openfuse"].dark {
+  --openfuse-accent: var(--primary);
+  --openfuse-blue: var(--secondary);
+  --openfuse-sky: var(--muted);
+  --openfuse-green: var(--muted);
+  --openfuse-lavender: var(--muted);
+  --openfuse-orange: var(--muted);
+  --openfuse-chip: var(--secondary);
+  --openfuse-danger-tint: color-mix(
+    in oklab,
+    var(--destructive) 10%,
+    transparent
+  );
+  --openfuse-pressed: var(--accent);
+  --openfuse-primary-hover: color-mix(
+    in oklab,
+    var(--primary) 90%,
+    transparent
+  );
+  --openfuse-task: var(--muted);
+  --openfuse-tab-active: var(--secondary);
+  --openfuse-tab-hover: var(--accent);
+  --openfuse-pill: var(--card);
+  --openfuse-pill-border: var(--border);
+  --openfuse-handle: var(--border);
+  --openfuse-group: var(--muted);
+  --openfuse-group-line: var(--border);
+  --openfuse-group-soft: var(--muted);
+  --openfuse-quiet: var(--muted-foreground);
+  --openfuse-quiet-text: var(--muted-foreground);
+  --openfuse-green-dot: var(--success);
+  --openfuse-green-ring: color-mix(in oklab, var(--success) 25%, transparent);
+  --openfuse-green-text: var(--success);
+  --openfuse-blue-dot: var(--primary);
+  --openfuse-blue-ring: color-mix(in oklab, var(--primary) 15%, transparent);
+  --openfuse-amber: var(--warning);
+  --openfuse-focus: var(--ring);
+  --openfuse-user-bubble: var(--secondary);
+  --openfuse-bot-bubble: var(--muted);
+  --openfuse-composer: var(--card);
+  --openfuse-composer-border: var(--border);
+  --openfuse-send-idle: var(--muted);
 }
 
 /*

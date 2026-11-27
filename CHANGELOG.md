@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **One set of colors, skins included.** OpenDuet, OpenFuse and OpenDots keep their own layout and
+  wear OpenBot's colors, in light and in dark, so a customer's theme now reaches them too. In light,
+  red for errors and amber for warnings are a shade deeper, so both read as text (7.8:1 and 5.8:1 on
+  white), and the focus ring is a touch darker, so it shows on the sidebar (3:1).
+
 - **Notifications in the browser, with OpenBot closed.** Settings, Notifications has a new switch,
   Notifications in this browser. Turned on, a Bot's replies, questions and approvals reach that
   browser as push notifications, as "Where updates go" routes push, and a click opens the

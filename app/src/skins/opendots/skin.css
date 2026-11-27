@@ -1,178 +1,77 @@
 /*
- * OpenDots tokens: `:root[data-skin="opendots"]` for light and `:root[data-skin="opendots"].dark`
- * for dark.
+ * OpenDots: its own compact chrome (a rail, a sidebar, a top bar and a pane), in OpenBot's colors.
+ * Every role below reads the scheme's color that means the same (tokens/src/scheme.ts), so every
+ * text color meets the scheme's contrast in light and in dark (tokens/tests/contrast.test.ts).
  *
- * Light is OpenDots' own compact chrome: white canvas, one ink accent (#242424), a pale grey rail
- * and sidebar, lavender for the row you are on, and teal for unread chats and your own messages.
- * Dark is what OpenDots' build-time theme makes of the same colours (src/build/dark-theme.ts flips
- * OKLab lightness, keeps hue, and lifts text to AA), with two departures where the flip loses
- * hierarchy: cards sit a step above the canvas, and the breadcrumb keeps a dim and a bright half.
- *
- * Every text colour meets WCAG AA (4.5:1) on the surface it sits on, and every icon 3:1, in both
- * themes. Where OpenDots' own grey fell short, it is darkened along its own hue until it passes.
+ * `:root[data-skin="opendots"]` is light and `:root[data-skin="opendots"].dark` is dark, and what
+ * either sets is set in both.
  */
 :root[data-skin="opendots"] {
   color-scheme: light;
-  --background: #ffffff;
-  --foreground: #333641;
-  --card: #ffffff;
-  --card-foreground: #333641;
-  --popover: #ffffff;
-  --popover-foreground: #333641;
-  --primary: #242424;
-  --primary-foreground: #ffffff;
-  --secondary: #f1f1f1;
-  --secondary-foreground: #242424;
-  --muted: #f5f5f5;
-  --muted-foreground: #6b6b6b;
-  --accent: #f1f1f1;
-  --accent-foreground: #242424;
-  --destructive: #a23d35;
-  --success: #3d7e75;
-  --border: #e7e7e7;
-  --input: #dedede;
-  --ring: #242424;
-  --chart-1: #3d7e75;
-  --chart-2: #7285d5;
-  --chart-3: #c98a4b;
-  --chart-4: #9b82c9;
-  --chart-5: #8cac91;
   --radius: 0.5625rem;
-  --sidebar: #f9f9f9;
-  --sidebar-foreground: #242424;
-  --sidebar-primary: #242424;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #eeeff7;
-  --sidebar-accent-foreground: #596aa9;
-  --sidebar-border: #e7e7e7;
-  --sidebar-ring: #242424;
-
   --opendots-font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --opendots-rail: #f5f5f5;
-  --opendots-sidebar: #f9f9f9;
-  --opendots-topbar: #ffffff;
-  --opendots-pane: #fafafa;
-  --opendots-line: #e7e7e7;
-  --opendots-hover: #f4f4f9;
-  --opendots-active: #eeeff7;
-  --opendots-active-ink: #596aa9;
-  --opendots-tag: #edf1e7;
-  --opendots-tag-ink: #526249;
-  --opendots-nav-ink: #6c6d77;
-  --opendots-dot-ink: #58634f;
-  --opendots-new-chat-ink: #53634d;
-  --opendots-label: #646b61;
-  --opendots-muted: #707070;
-  --opendots-faint: #646d5d;
-  --opendots-icon: #878a99;
-  --opendots-rail-icon: #555555;
-  --opendots-teal: #438c81;
-  --opendots-crumb: #636d5b;
-  --opendots-crumb-ink: #686b76;
-  --opendots-toggle-ink: #575e59;
-  --opendots-pause-ink: #53624d;
-  --opendots-menu-ink: #333333;
-  --opendots-tab: #ededed;
-  --opendots-eyebrow: #71747f;
   --opendots-scrim: #2f34464d;
   --opendots-pane-shadow: -8px 0 28px #20263418;
-  --opendots-user-bubble: #3d7e75;
-  --opendots-user-bubble-ink: #ffffff;
-  --opendots-assistant-ink: #373737;
-  --opendots-composer-line: #dedede;
   --opendots-composer-shadow: 0 3px 14px #00000006;
-  --opendots-composer-focus: #c8c8c8;
-  --opendots-send-off: #ececec;
-  --opendots-send-off-ink: #9a9a9a;
-  --opendots-note: #72737d;
-  --opendots-persona-ink: #747474;
-  --opendots-text-button: #707484;
-  --opendots-avatar: #eeeae1;
-  --opendots-avatar-line: #e2dfd8;
-  --opendots-avatar-ink: #6d675d;
-  --opendots-error-ink: #8b6a61;
 }
 
 :root[data-skin="opendots"].dark {
   color-scheme: dark;
-  --background: #1b1b1b;
-  --foreground: #b2b5c1;
-  --card: #222222;
-  --card-foreground: #b2b5c1;
-  --popover: #242424;
-  --popover-foreground: #b2b5c1;
-  --primary: #c5c5c5;
-  --primary-foreground: #1b1b1b;
-  --secondary: #242424;
-  --secondary-foreground: #c5c5c5;
-  --muted: #212121;
-  --muted-foreground: #a4a4a4;
-  --accent: #262626;
-  --accent-foreground: #c5c5c5;
-  --destructive: #e4877d;
-  --success: #7bb1a8;
-  --border: #2b2b2b;
-  --input: #313131;
-  --ring: #c5c5c5;
-  --chart-1: #7bb1a8;
-  --chart-2: #91a2db;
-  --chart-3: #d9a06a;
-  --chart-4: #b39ddb;
-  --chart-5: #92ad96;
   --radius: 0.5625rem;
-  --sidebar: #1e1e1e;
-  --sidebar-foreground: #c5c5c5;
-  --sidebar-primary: #c5c5c5;
-  --sidebar-primary-foreground: #1b1b1b;
-  --sidebar-accent: #242429;
-  --sidebar-accent-foreground: #91a2db;
-  --sidebar-border: #2b2b2b;
-  --sidebar-ring: #c5c5c5;
-
   --opendots-font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --opendots-rail: #212121;
-  --opendots-sidebar: #1e1e1e;
-  --opendots-topbar: #1b1b1b;
-  --opendots-pane: #1e1e1e;
-  --opendots-line: #2b2b2b;
-  --opendots-hover: #212124;
-  --opendots-active: #242429;
-  --opendots-active-ink: #f2f2f2;
-  --opendots-tag: transparent;
-  --opendots-tag-ink: #9caa93;
-  --opendots-nav-ink: #a3a3ad;
-  --opendots-dot-ink: #9ea996;
-  --opendots-new-chat-ink: #9baa96;
-  --opendots-label: #a1a79e;
-  --opendots-muted: #a4a4a4;
-  --opendots-faint: #9fa899;
-  --opendots-icon: #a1a4b1;
-  --opendots-rail-icon: #9c9c9c;
-  --opendots-teal: #76b2a8;
-  --opendots-crumb: #9fa898;
-  --opendots-crumb-ink: #c7c9d1;
-  --opendots-toggle-ink: #a0a6a1;
-  --opendots-pause-ink: #9ca996;
-  --opendots-menu-ink: #b8b8b8;
-  --opendots-tab: #272727;
-  --opendots-eyebrow: #a1a4ae;
   --opendots-scrim: #00000080;
   --opendots-pane-shadow: -8px 0 28px #00000026;
-  --opendots-user-bubble: #5c9189;
-  --opendots-user-bubble-ink: #1b1b1b;
-  --opendots-assistant-ink: #b5b5b5;
-  --opendots-composer-line: #313131;
   --opendots-composer-shadow: 0 3px 14px #0000000a;
-  --opendots-composer-focus: #4a4a4a;
-  --opendots-send-off: #272727;
-  --opendots-send-off-ink: #646464;
-  --opendots-note: #a1a2ab;
-  --opendots-persona-ink: #a4a4a4;
-  --opendots-text-button: #a1a5b4;
-  --opendots-avatar: #2b2823;
-  --opendots-avatar-line: #32302b;
-  --opendots-avatar-ink: #a9a49b;
-  --opendots-error-ink: #bb9d94;
+}
+
+/*
+ * The skin's own roles, read from OpenBot's scheme: a skin keeps its own structure and wears
+ * OpenBot's colors, so each role is the scheme's color that means the same, and follows light,
+ * dark and a customer's theme as OpenBot's own screens do.
+ */
+:root[data-skin="opendots"],
+:root[data-skin="opendots"].dark {
+  --opendots-rail: var(--sidebar);
+  --opendots-sidebar: var(--sidebar);
+  --opendots-topbar: var(--card);
+  --opendots-pane: var(--background);
+  --opendots-line: var(--border);
+  --opendots-hover: var(--accent);
+  --opendots-active: var(--sidebar-accent);
+  --opendots-active-ink: var(--sidebar-accent-foreground);
+  /* The Bot's name under a conversation, and a count: quiet text, no chip of its own. */
+  --opendots-tag: var(--sidebar);
+  --opendots-tag-ink: var(--muted-foreground);
+  --opendots-nav-ink: var(--muted-foreground);
+  --opendots-dot-ink: var(--sidebar-foreground);
+  --opendots-new-chat-ink: var(--sidebar-foreground);
+  --opendots-label: var(--muted-foreground);
+  --opendots-muted: var(--muted-foreground);
+  --opendots-faint: var(--muted-foreground);
+  --opendots-icon: var(--muted-foreground);
+  --opendots-rail-icon: var(--muted-foreground);
+  --opendots-teal: var(--primary);
+  --opendots-crumb: var(--muted-foreground);
+  --opendots-crumb-ink: var(--muted-foreground);
+  --opendots-toggle-ink: var(--muted-foreground);
+  --opendots-pause-ink: var(--muted-foreground);
+  --opendots-menu-ink: var(--foreground);
+  --opendots-tab: var(--muted);
+  --opendots-eyebrow: var(--muted-foreground);
+  --opendots-user-bubble: var(--secondary);
+  --opendots-user-bubble-ink: var(--secondary-foreground);
+  --opendots-assistant-ink: var(--foreground);
+  --opendots-composer-line: var(--border);
+  --opendots-composer-focus: var(--ring);
+  --opendots-send-off: var(--muted);
+  --opendots-send-off-ink: var(--muted-foreground);
+  --opendots-note: var(--muted-foreground);
+  --opendots-persona-ink: var(--muted-foreground);
+  --opendots-text-button: var(--muted-foreground);
+  --opendots-avatar: var(--secondary);
+  --opendots-avatar-line: var(--border);
+  --opendots-avatar-ink: var(--secondary-foreground);
+  --opendots-error-ink: var(--destructive);
 }
 
 /* OpenDots sets its type in the system face, not Inter, at a 14px base. */
