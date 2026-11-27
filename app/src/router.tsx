@@ -1,5 +1,6 @@
 import { createRouter } from "@tanstack/react-router";
 import { ReportedErrorComponent } from "./lib/error-reporting";
+import { loadCodeEarly } from "./lib/route-code";
 import { parseSearchText } from "./lib/search-text";
 import type { RouterContext } from "./router-context";
 import { routeTree } from "./routeTree.gen";
@@ -16,6 +17,13 @@ export const router = createRouter({
   // The router's own error screen, which also tells OpenBot what it caught (lib/error-reporting.tsx).
   defaultErrorComponent: ReportedErrorComponent,
 });
+
+/*
+ * The page's code, and `_authed`'s chunk with the large shared chunk, download while the sign-in
+ * gates are asked instead of after them. router-core 1.171.27 emits `onBeforeLoad` before any
+ * `beforeLoad`.
+ */
+loadCodeEarly(router);
 
 declare module "@tanstack/react-router" {
   interface Register {
