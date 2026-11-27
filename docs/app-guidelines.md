@@ -219,9 +219,10 @@ things are drawn, not how big they are.
 1. **Colors.** Only the scheme's tokens, as above.
 2. **Type.** Inter and the type scale in `theme.css`. Controls, rows and navigation are `text-sm`;
    labels, times and counts are `text-xs`. No text size written by hand (`text-[13px]`).
-3. **Corners.** All from `--radius`. Controls are `rounded-md`, cards and the page's panel
-   `rounded-lg`, menus, dialogs and the message box `rounded-xl`, round things `rounded-full`.
-   `rounded-none` squares a part off. No other step and no corner of its own (`rounded-[20px]`).
+3. **Corners.** All from `--radius`, 10px, the design's radius base. Controls are `rounded-md`
+   (8px), cards and the page's panel `rounded-lg` (10px), menus, dialogs and the message box
+   `rounded-xl` (14px), round things `rounded-full`. `rounded-none` squares a part off. No other
+   step and no corner of its own (`rounded-[20px]`).
 4. **Surfaces.** The frame (`sidebar`), the panel the page sits in (`background`), cards on it
    (`card`). A card has a hairline border in light and in dark. Every line (`border`, a field's
    `input`, the sidebar's `sidebar-border`) is the text color at 20% in light and 16% in dark,

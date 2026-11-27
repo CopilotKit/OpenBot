@@ -42,8 +42,11 @@
   --sidebar-border: oklch(0.108 0.042 264.7 / 20%);
   --sidebar-ring: oklch(0.644 0.167 276.1);
   /* end of tokens/src/scheme.ts */
-  /* Every corner comes from this (docs/app-guidelines.md, "The look"): 8px cards, 6.4px controls. */
-  --radius: 0.5rem;
+  /*
+   * Every corner comes from this (docs/app-guidelines.md, "The look"), the design's radius base:
+   * 10px cards, 8px controls, 14px menus and dialogs.
+   */
+  --radius: 0.625rem;
   /*
    * The pattern behind empty states, in three parts so a customer can change each without touching
    * a component: the tile (an SVG used as a mask, so only its shapes' opacity matters), its colour
