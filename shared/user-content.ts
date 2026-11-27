@@ -33,15 +33,17 @@ export function userContent(content: unknown): string | UserContentPart[] {
       return { type: "text", text: item.text };
     }
     const source = item.source;
-    // The mime type reaches a `data:` URL sent to model providers. Allowlisted to images and
-    // base64-shape-checked, so `text/html` (or whitespace/quotes/CRLF smuggling) and empty values
-    // degrade to a named part instead of a provider payload.
+    // The mime type reaches a `data:` URL sent to model providers. Allowlisted to images, and the
+    // bytes are shape-checked after whitespace is removed, so `text/html`, quotes, an empty value,
+    // and padding with no data (`=` or `==`) degrade to a named part instead of a provider payload.
+    // The URL is built from that stripped value, so a wrapped line cannot ride into what the model
+    // reads.
+    const base64 =
+      typeof source?.value === "string" ? source.value.replace(/\s/g, "") : "";
     if (
       item.type === "image" &&
       source?.type === "data" &&
-      typeof source.value === "string" &&
-      source.value.trim() &&
-      /^[A-Za-z0-9+/]*={0,2}$/.test(source.value.replace(/\s/g, "")) &&
+      /^[A-Za-z0-9+/]+={0,2}$/.test(base64) &&
       typeof source.mimeType === "string" &&
       ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
         source.mimeType.trim().toLowerCase(),
@@ -50,7 +52,7 @@ export function userContent(content: unknown): string | UserContentPart[] {
       return {
         type: "image_url",
         image_url: {
-          url: `data:${source.mimeType.trim().toLowerCase()};base64,${source.value}`,
+          url: `data:${source.mimeType.trim().toLowerCase()};base64,${base64}`,
         },
       };
     }
