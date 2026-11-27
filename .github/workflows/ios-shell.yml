@@ -109,6 +109,9 @@ jobs:
             container="$(xcrun simctl get_app_container "$SIM_UDID" ai.openbot.shell data 2>/dev/null || true)"
             if [ -n "$container" ] && [ -f "$container/Documents/diagnostics.jsonl" ]; then
               cp "$container/Documents/diagnostics.jsonl" artifacts/diagnostics.jsonl
+              echo "::group::diagnostics.jsonl"
+              cat artifacts/diagnostics.jsonl
+              echo "::endgroup::"
             else
               echo "no diagnostics.jsonl in the app container ($container)"
             fi

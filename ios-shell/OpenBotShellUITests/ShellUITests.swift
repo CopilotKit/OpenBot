@@ -113,7 +113,9 @@ final class ShellUITests: XCTestCase {
         // Let redirects, hydration and late requests settle.
         sleep(8)
         screenshot("hosted-light")
-        attachText("hosted-webview-debugDescription-light", web.debugDescription)
+        let lightDump = web.debugDescription
+        attachText("hosted-webview-debugDescription-light", lightDump)
+        print("HOSTED_DEBUG_BEGIN\n\(lightDump)\nHOSTED_DEBUG_END")
         XCUIDevice.shared.appearance = .dark
         sleep(3)
         screenshot("hosted-dark")
@@ -127,7 +129,9 @@ final class ShellUITests: XCTestCase {
     }
 
     func testOfflineShowsRetry() throws {
-        let app = launch(baseURL: "http://127.0.0.1:9/", test: "testOfflineShowsRetry")
+        // Nothing listens on 8799. Port 9 (the first choice) is on WebKit's list of restricted
+        // ports, and WKWebView did not report anything at all for it, so it cannot test the overlay.
+        let app = launch(baseURL: "http://127.0.0.1:8799/", test: "testOfflineShowsRetry")
         let retry = app.buttons["retry-button"]
         let shown = retry.waitForExistence(timeout: 30)
         screenshot("offline-error-overlay")
