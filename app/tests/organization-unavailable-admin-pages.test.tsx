@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import type { Page } from "playwright-core";
 import {
   asked,
@@ -13,6 +13,7 @@ import {
   style,
   UNAVAILABLE,
 } from "./organization-notices-browser";
+import { test } from "./renderer-crash";
 
 /**
  * While an organization's database can't be reached, the pages the end-to-end test of database

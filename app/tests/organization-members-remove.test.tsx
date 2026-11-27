@@ -1,9 +1,10 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * Only an owner removes another owner, as the server holds. Organization settings' Members list, in
