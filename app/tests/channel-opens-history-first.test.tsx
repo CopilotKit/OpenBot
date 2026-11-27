@@ -318,14 +318,14 @@ const PLAIN_USER = "How is the cycle going?";
 const PLAIN_REPLY = "The cycle is on track and nothing is blocked.";
 const PLAIN_MESSAGE = "plain-reply-message";
 
-function plainStored(): unknown[] {
+function plainStored(reply = PLAIN_REPLY): unknown[] {
   return [
     { id: "plain-user", role: "user", content: PLAIN_USER },
-    { id: PLAIN_MESSAGE, role: "assistant", content: PLAIN_REPLY },
+    { id: PLAIN_MESSAGE, role: "assistant", content: reply },
   ];
 }
 
-function plainReplay(): unknown[] {
+function plainReplay(reply = PLAIN_REPLY): unknown[] {
   const event = (fields: Record<string, unknown>) => ({
     ...fields,
     threadId: channel.threadId,
@@ -341,7 +341,7 @@ function plainReplay(): unknown[] {
     event({
       type: "TEXT_MESSAGE_CONTENT",
       messageId: PLAIN_MESSAGE,
-      delta: PLAIN_REPLY,
+      delta: reply,
     }),
     event({ type: "TEXT_MESSAGE_END", messageId: PLAIN_MESSAGE }),
     event({ type: "RUN_FINISHED" }),
@@ -432,6 +432,23 @@ test("opening reads the history once", async () => {
 
   expect(shown(view.container, PLAIN_USER)).toBe(1);
   expect(shown(view.container, PLAIN_REPLY)).toBe(1);
+  expect(historyReads).toBe(1);
+}, 10_000);
+
+/*
+ * The roster keeps a reply as plain text on one line, so a reply with Markdown and paragraphs is
+ * still the line opening brings, and nothing is left to read for it.
+ */
+test("opening reads the history once when the reply has Markdown and paragraphs", async () => {
+  const reply = "Here is **the plan**:\n\n- one\n- two";
+  script = replaying(plainReplay(reply));
+  storing(() => plainStored(reply));
+  roster(false, "Here is the plan: one two");
+
+  opened();
+  await waitFor(() => expect(replayEnded).toBe(true), { timeout: 4000 });
+  await sleep(3000);
+
   expect(historyReads).toBe(1);
 }, 10_000);
 

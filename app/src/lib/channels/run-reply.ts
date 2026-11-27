@@ -198,3 +198,19 @@ function headingOf(html: unknown): string | null {
     oneLine(page.querySelector("title")?.textContent)
   );
 }
+
+/**
+ * Whether the roster's line is this reply. The roster keeps a reply as plain text on one line, with
+ * the Markdown removed, the white space joined and the text cut with a trailing "…", so the two are
+ * compared by their letters and digits only. A cut line matches when the reply begins with it.
+ */
+export function rosterLineMatches(reply: string, line: string): boolean {
+  const bare = (text: string) =>
+    text.normalize("NFC").replace(/[^\p{L}\p{N}]+/gu, "");
+  if (line.endsWith("…")) {
+    const core = bare(line.slice(0, -1));
+    return core.length > 0 && bare(reply).startsWith(core);
+  }
+  const want = bare(line);
+  return want.length > 0 && bare(reply) === want;
+}

@@ -65,7 +65,7 @@ import {
   refusedTurnsQueryOptions,
 } from "@/lib/channels/queries";
 import { withRefusedTurns } from "@/lib/channels/refused-turns";
-import { runReply } from "@/lib/channels/run-reply";
+import { rosterLineMatches, runReply } from "@/lib/channels/run-reply";
 import { onBotSaidOffTheList } from "@/lib/channels/said-off-the-list";
 import { turnDidWork } from "@/lib/channels/turn-did-work";
 import {
@@ -1195,16 +1195,19 @@ export function ChannelChat({
      * THE BOT'S LINE THE ROSTER HAD ON OPENING IS READ FOR ONLY WHEN OPENING DIDN'T BRING IT. Opening
      * reads the store with the join, so reading it again for that line read the same history three
      * more times over the retries, which go on while a read brings nothing new, as it nearly never
-     * does. A transcript whose newest Bot line is the roster's already holds that turn. One that
-     * isn't is a turn that ended just before opening, which the store can be a beat behind on, or a
-     * line this check can't match (a turn that only drew): read for as before.
+     * does. The conversation list keeps the reply as plain text on one line, cut at 200 characters,
+     * so the two are compared by their letters and digits. A transcript whose newest Bot line is the
+     * list's already holds that turn. One that isn't is a turn that ended just before opening, which
+     * the store can be a beat behind on, or a line this check can't match (a turn that only drew, or
+     * a reply whose list line drops other text, such as link addresses and list numbers): read for
+     * as before, which is safe.
      */
     const openedWith = (activity: ChannelActivitySignature) =>
-      runReply(
-        agentRef.current.messages,
-        new Set(),
-        authoredComponents(),
-      )?.text.trim() === activity.text.trim();
+      rosterLineMatches(
+        runReply(agentRef.current.messages, new Set(), authoredComponents())
+          ?.text ?? "",
+        activity.text,
+      );
     void (async () => {
       await joinGatePromise;
       if (
