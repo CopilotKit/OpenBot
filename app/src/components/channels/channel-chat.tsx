@@ -2187,13 +2187,20 @@ export function ChannelChat({
    * in the thread, so without the record a reload lost the message and the notice both.
    */
   const storedRefusals = useQuery(refusedTurnsQueryOptions(channel.id)).data;
+  /*
+   * THE STORED COPY IS FOR READING ONLY. While it is drawn the join is still replaying onto an agent
+   * it emptied, and anything that changed the agent then would be changed again by the replay: a
+   * message set on it has its replayed text appended twice. So until the join is over, or a turn
+   * still going takes the screen (`onAnswering`), what the transcript draws is drawn as it is outside
+   * a conversation, with nothing in it that adds a turn; the question waiting on the person can't be
+   * answered yet; and a hand-back is not checked against a half-replayed thread. The composer waits
+   * on its own: the replay holds the agent running, so what is typed meanwhile is queued.
+   */
+  const earlyShown = earlyHistory !== null && replaying;
   // Every render, as the transcript's messages always were: the agent's list changes in place.
   const refused = withRefusedTurns(
     // The stored history while the join replays it, which empties the agent: see `earlyHistory`.
-    transcriptMessages(
-      earlyHistory !== null && replaying ? earlyHistory : agent.messages,
-      seed,
-    ),
+    transcriptMessages(earlyShown ? earlyHistory : agent.messages, seed),
     storedRefusals ?? [],
   );
   for (const [messageId, sentence] of refusals)
@@ -2206,7 +2213,7 @@ export function ChannelChat({
       agentId={localAgentId}
       threadId={channel.threadId}
     >
-      <ConversationProvider ask={askFromComponent}>
+      <ConversationProvider ask={earlyShown ? null : askFromComponent}>
         <div className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col">
           <VoiceCallWidget
             call={call}
@@ -2306,6 +2313,7 @@ export function ChannelChat({
                 <QuestionNotice
                   avatarSeed={botSeed}
                   botName={botName}
+                  disabled={earlyShown}
                   onAnswered={answerTo}
                   question={question}
                 />
@@ -2324,7 +2332,7 @@ export function ChannelChat({
                 <HandoffResumeNotice
                   botId={runtimeAgentId}
                   agent={agent}
-                  ready={isReady && !restoring && channel.active}
+                  ready={isReady && !restoring && !earlyShown && channel.active}
                   run={async () => {
                     setRunsInFlight((count) => count + 1);
                     try {

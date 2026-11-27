@@ -1,8 +1,14 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { CopilotKitProvider } from "@copilotkit/react-core/v2";
+import { AbstractAgent, CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import {
   type AgentChannel,
@@ -12,7 +18,11 @@ import {
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
-import { approvalInboxResponse } from "./approvals-api";
+import {
+  approvalInboxResponse,
+  approvalWriteResponse,
+  questionResponsePath,
+} from "./approvals-api";
 import {
   ASKED_TEXT,
   ASKING_TEXT,
@@ -75,6 +85,10 @@ let history: () => Response | Promise<Response>;
 let historyReads = 0;
 /** Whether the gateway has sent `replay_complete` in the current test. */
 let replayEnded = false;
+/** The questions waiting on the person, as the inbox answers them in the current test. */
+let inboxQuestions: unknown[] = [];
+/** How many answers to a question were sent in the current test. */
+let answersSent = 0;
 
 /** The gateway's replay of `events`, each with the durable id the gateway stamps on it. */
 function sending(
@@ -151,13 +165,18 @@ beforeAll(() => {
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       {
-        const approvals = approvalInboxResponse(url.pathname, {
+        const inbox = {
           enabled: true,
           requests: [],
           rules: [],
           teamRules: [],
-          questions: [],
-        });
+          questions: inboxQuestions,
+        };
+        if (url.pathname === questionResponsePath("apple-question"))
+          answersSent += 1;
+        const written = approvalWriteResponse(url.pathname, init, inbox);
+        if (written) return written;
+        const approvals = approvalInboxResponse(url.pathname, inbox);
         if (approvals) return approvals;
       }
       if (url.pathname.endsWith("/info"))
@@ -227,6 +246,8 @@ afterEach(() => {
   historyReads = 0;
   replayEnded = false;
   joins = 0;
+  inboxQuestions = [];
+  answersSent = 0;
 });
 afterAll(() => {
   globalThis.fetch = originalFetch;
@@ -477,3 +498,85 @@ test("a stored history that can't be read says so as today", async () => {
   expect(shown(view.container, PLAIN_USER)).toBe(0);
   expect(historyReads).toBeGreaterThan(1);
 }, 30_000);
+
+/*
+ * The stored copy is drawn while the join replays onto an agent it emptied, and the replay appends
+ * its text to anything set on the agent meanwhile. So nothing drawn then may change the agent: the
+ * question the Bot is waiting on can't be answered until the join is over, and then it can.
+ */
+test("nothing in the early history can be pressed while the replay runs", async () => {
+  const turn = turns[1];
+  if (!turn) throw new Error("No turn");
+  inboxQuestions = [
+    {
+      id: "apple-question",
+      botId: "join-bot",
+      threadId: channel.threadId,
+      channelId: channel.id,
+      question: "Which colour of apple do you prefer, red or green?",
+      parts: [
+        {
+          header: "Apple colour",
+          question: "Which colour of apple do you prefer?",
+          options: ["Red", "Green"],
+        },
+      ],
+    },
+  ];
+  script = replaying(turn.replay());
+  storing(turn.stored);
+  roster();
+
+  /*
+   * Every `setMessages` this app makes on an agent, and whether the replay was over when it did:
+   * the SDK's own (emptying the agent as the join starts, copying what the join brings) are left
+   * out, as they are the replay itself. Told apart by the call's immediate caller. Every agent
+   * class the SDK has takes `setMessages` from `AbstractAgent`.
+   */
+  const setByApp: { replayOver: boolean }[] = [];
+  const agents = AbstractAgent.prototype;
+  const original = agents.setMessages;
+  agents.setMessages = function (this: AbstractAgent, messages) {
+    const caller = new Error().stack?.split("\n")[2] ?? "";
+    if (caller.includes("/app/src/"))
+      setByApp.push({ replayOver: replayEnded });
+    return original.call(this, messages);
+  };
+
+  try {
+    const view = opened();
+    await sleep(200);
+
+    // The stored copy is on screen, the replay is not over, and the question can't be answered.
+    expect(replayEnded).toBe(false);
+    expect(shown(view.container, ASKED_TEXT)).toBe(1);
+    const send = await view.findByRole("button", { name: "Send answer" });
+    expect((send as HTMLButtonElement).disabled).toBe(true);
+
+    // Pressed anyway, and sent by its form: neither reaches the server or the agent.
+    fireEvent.click(view.getByRole("radio", { name: /Red/ }));
+    fireEvent.click(send);
+    const form = send.closest("form");
+    if (!form) throw new Error("No form");
+    fireEvent.submit(form);
+    await sleep(100);
+    expect(answersSent).toBe(0);
+
+    await waitFor(() => expect(replayEnded).toBe(true), { timeout: 4000 });
+    await waitFor(
+      () =>
+        expect(
+          (
+            view.getByRole("button", {
+              name: "Send answer",
+            }) as HTMLButtonElement
+          ).disabled,
+        ).toBe(false),
+      { timeout: 4000 },
+    );
+    expect(answersSent).toBe(0);
+    expect(setByApp.filter((call) => !call.replayOver)).toEqual([]);
+  } finally {
+    agents.setMessages = original;
+  }
+}, 10_000);
