@@ -1,0 +1,90 @@
+# XcodeGen spec for the iOS web view shell. Generate the project with `xcodegen` in this folder;
+# the .xcodeproj and OpenBotShell/Info.plist are generated and not committed.
+name: OpenBotShell
+options:
+  bundleIdPrefix: ai.openbot
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+targets:
+  OpenBotShell:
+    type: application
+    platform: iOS
+    sources:
+      - path: OpenBotShell
+        excludes:
+          - Info.plist
+    info:
+      path: OpenBotShell/Info.plist
+      properties:
+        CFBundleDisplayName: OpenBot
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        OpenBotBaseURL: https://my.open.bot
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSMicrophoneUsageDescription: OpenBot uses the microphone when you talk to a Bot.
+        NSCameraUsageDescription: OpenBot uses the camera when you share a photo or video with a Bot.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openbot.shell
+        PRODUCT_NAME: OpenBotShell
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+  OpenBotShellUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: OpenBotShellUITests
+    dependencies:
+      - target: OpenBotShell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openbot.shell.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: OpenBotShell
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+schemes:
+  OpenBotShell:
+    build:
+      targets:
+        OpenBotShell: all
+        OpenBotShellUITests: [test]
+    run:
+      config: Debug
+      # Turn this on in the scheme editor to point the app at another server, such as the probe.
+      environmentVariables:
+        - variable: OPENBOT_BASE_URL
+          value: http://127.0.0.1:8765/
+          isEnabled: false
+        - variable: OPENBOT_SHELL_DIAGNOSTICS
+          value: "1"
+          isEnabled: false
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: OpenBotShellUITests
+          parallelizable: false
