@@ -111,6 +111,15 @@ const endpointPresets: Record<
     keyUrl: "https://trustedrouter.com/console/api-keys",
     keyLink: "Get a TrustedRouter API key",
   },
+  // AtmoRouter's gateway speaks the OpenAI API and lists models from many providers under a route
+  // prefix, so the model is named the way its /models lists it.
+  // https://atmorouter.dev/docs
+  atmorouter: {
+    baseUrl: "https://atmorouter.dev/v1",
+    model: "cc/claude-sonnet-5-5",
+    keyUrl: "https://atmorouter.dev/dashboard",
+    keyLink: "Get an AtmoRouter API key",
+  },
 };
 
 /** What approving in the browser does, for each provider that signs in that way. */

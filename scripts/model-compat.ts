@@ -334,6 +334,10 @@ export const NOT_CHECKED: readonly { baseUrl: string; why: string }[] = [
     baseUrl: "https://api.trustedrouter.com/v1",
     why: "TrustedRouter is a gateway in front of many providers, not a provider's own listing",
   },
+  {
+    baseUrl: "https://atmorouter.dev/v1",
+    why: "AtmoRouter is a gateway in front of many providers, not a provider's own listing",
+  },
 ];
 
 function provider(id: string): Provider {

@@ -20,6 +20,7 @@ const PRESET_HOSTS: Record<string, string> = {
   "api.x.ai": "xAI",
   "api.unbiased.ai": "Unbiased AI",
   "api.trustedrouter.com": "TrustedRouter",
+  "atmorouter.dev": "AtmoRouter",
 };
 
 function signedIn(

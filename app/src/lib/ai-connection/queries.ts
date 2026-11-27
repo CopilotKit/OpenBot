@@ -3,7 +3,7 @@ import type {
   AiConnection,
   AiConnectionEntry,
   AiConnectionPage,
-  AiConnectionProvider,
+  AiConnectionProviderAnswer,
   PersonalAiConnection,
 } from "@/lib/api/generated/model";
 import {
@@ -31,7 +31,7 @@ export type ConnectionScope = "organization" | "personal";
 /** Every AI connection in one scope, and the providers the server signs in to for it itself. */
 export type AiConnections = {
   connections: AiConnectionEntry[];
-  signIns: AiConnectionProvider[];
+  signIns: AiConnectionProviderAnswer[];
 };
 
 export const aiConnectionKeys = {
@@ -73,7 +73,7 @@ async function everyConnection(
 ): Promise<AiConnections> {
   const connections: AiConnectionEntry[] = [];
   const seen = new Set<string>();
-  let signIns: AiConnectionProvider[] = [];
+  let signIns: AiConnectionProviderAnswer[] = [];
   let cursor: string | undefined;
   do {
     const params = { limit: 100, ...(cursor ? { cursor } : {}) };

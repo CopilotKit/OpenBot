@@ -89,9 +89,19 @@ const trustedRouter = {
   keyLink: "Get a TrustedRouter API key",
 };
 
+/** Another gateway in front of many providers, with an API key and no sign-in. */
+const atmoRouter = {
+  id: "atmorouter",
+  name: "AtmoRouter",
+  baseUrl: "https://atmorouter.dev/v1",
+  model: "cc/claude-sonnet-5-5",
+  keyUrl: "https://atmorouter.dev/dashboard",
+  keyLink: "Get an AtmoRouter API key",
+};
+
 const allProviders: Provider[] = [
   ...providers,
-  ...[...cloudProviders, unbiased, trustedRouter].map(
+  ...[...cloudProviders, unbiased, trustedRouter, atmoRouter].map(
     (provider): Provider => ({
       id: provider.id,
       name: provider.name,
@@ -1512,7 +1522,12 @@ test("a saved Google sign-in says it ended and its button opens Gemini's API key
   expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
 });
 
-for (const provider of [...cloudProviders, unbiased, trustedRouter]) {
+for (const provider of [
+  ...cloudProviders,
+  unbiased,
+  trustedRouter,
+  atmoRouter,
+]) {
   test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers") return allProviders;

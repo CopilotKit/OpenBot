@@ -1945,6 +1945,7 @@ const PROVIDERS = [
   "xAI",
   "Unbiased AI",
   "TrustedRouter",
+  "AtmoRouter",
   "Any OpenAI-compatible endpoint",
 ];
 

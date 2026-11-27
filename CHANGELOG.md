@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **AtmoRouter is an AI provider.** It is listed between TrustedRouter and the custom endpoint on
+  OpenBot Desktop's Connect your AI screen, and in Settings where the AI connection is changed.
+  AtmoRouter is an OpenAI-compatible gateway in front of many providers, so its row asks only for an
+  API key: OpenBot fills in `https://atmorouter.dev/v1` and the model `cc/claude-sonnet-5-5`, which
+  can be changed to any name the gateway lists. The model list reads the gateway's `/models`, as it
+  does for any other compatible endpoint. `replaceAiConnection` and `replacePersonalAiConnection`
+  take `provider: atmorouter` with `login: endpoint`, like `trustedrouter`, and answers can name it.
+  `signIns` on `listAiConnections` and `listPersonalAiConnections` is now the open
+  `AiConnectionProviderAnswer`, as it already is on a person's AI connection.
+
 - **Notifications in the browser, with OpenBot closed.** Settings, Notifications has a new switch,
   Notifications in this browser. Turned on, a Bot's replies, questions and approvals reach that
   browser as push notifications, as "Where updates go" routes push, and a click opens the

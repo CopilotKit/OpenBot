@@ -567,6 +567,15 @@ function createStates(where: Where): States {
             caution: null,
           },
           {
+            id: "atmorouter",
+            name: "AtmoRouter",
+            summary:
+              "Use an AtmoRouter API key for models from many providers.",
+            logins: ["endpoint"],
+            mark: "atmorouter",
+            caution: null,
+          },
+          {
             id: "openai-compatible",
             name: "Any OpenAI-compatible endpoint",
             summary:

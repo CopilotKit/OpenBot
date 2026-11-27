@@ -77,6 +77,14 @@ export const AI_PROVIDERS: AiProvider[] = [
     mark: "trustedrouter",
   },
   {
+    id: "atmorouter",
+    name: "AtmoRouter",
+    summary: "Use an AtmoRouter API key for models from many providers.",
+    keySummary: "Use an AtmoRouter API key for models from many providers.",
+    logins: ["endpoint"],
+    mark: "atmorouter",
+  },
+  {
     id: "openai-compatible",
     name: "Any OpenAI-compatible endpoint",
     summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.",
@@ -119,6 +127,12 @@ export const ENDPOINT_PRESETS: Partial<
     model: "anthropic/claude-sonnet-5.5",
     keyUrl: "https://trustedrouter.com/console/api-keys",
     keyLink: "Get a TrustedRouter API key",
+  },
+  atmorouter: {
+    baseUrl: "https://atmorouter.dev/v1",
+    model: "cc/claude-sonnet-5-5",
+    keyUrl: "https://atmorouter.dev/dashboard",
+    keyLink: "Get an AtmoRouter API key",
   },
 };
 
