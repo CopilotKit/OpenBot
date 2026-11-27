@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
@@ -7,6 +7,7 @@ import { getGetBotResponseMock } from "@/lib/api/generated/bots/bots.msw";
 import { personBody } from "./accounts-api";
 import { botGrantsBody } from "./bot-grants-api";
 import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * An unsent reply, and the files attached to it, stay with their conversation, in a real browser.

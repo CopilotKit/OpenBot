@@ -24,16 +24,9 @@ import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
-import { toast } from "@/components/ui/toast";
-import {
-  type AgentProfile,
-  agentListQueryOptions,
-  agentQueryOptions,
-  isSharedWithYou,
-} from "@/lib/agents/queries";
+import { agentListQueryOptions, isSharedWithYou } from "@/lib/agents/queries";
 import { firstConversationGreeting } from "@/lib/auth/greeting";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { takesNoModelChoice } from "@/lib/bot-agents/queries";
 import {
   beginPendingStart,
   endPendingStart,
@@ -58,33 +51,15 @@ import {
   loadFailure,
   unavailableSaid,
 } from "@/lib/load-failure";
-import {
-  type ConversationModelInput,
-  modelCatalogueQueryOptions,
-} from "@/lib/models/queries";
-import { useDraftModel } from "@/lib/models/run-model";
+import { modelCatalogueQueryOptions } from "@/lib/models/queries";
+import { usePickedBotModel } from "@/lib/models/run-model";
 import { newId } from "@/lib/new-id";
 import { takeInvitationLink } from "@/lib/organizations/invitation-link";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 import { cn } from "@/lib/utils";
-import { queryClient } from "@/query-client";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
 const EXPLORE_SHOWN = 4;
-
-/**
- * Said when the Bot a message went to takes no model pick, so the pick was not saved. The person
- * picked before OpenBot picked the Bot, and a pick that silently does nothing is a surprise. Whatever
- * the reason (a Bot connected from outside OpenBot, or one set to hand work out), the person reads
- * the same thing: the Bot picks its own model.
- */
-function sayModelNotUsed(bot: AgentProfile) {
-  toast.add({
-    id: "home-model-not-used",
-    type: "info",
-    title: `${bot.name} picks its own model, so it doesn't use the one you picked.`,
-  });
-}
 
 export const Route = createFileRoute("/_authed/_app/")({
   /*
@@ -196,29 +171,8 @@ function RouteComponent() {
    * message runs, as `/channel/new` saves it.
    */
   const models = useQuery(modelCatalogueQueryOptions());
-  const draftModel = useDraftModel(models.data);
-
-  /**
-   * The pick to save with a new conversation with `agentId`, and the line to say once it has started
-   * when that Bot takes no pick (`takesNoModelChoice`). Nothing to save, and nothing to say, while the
-   * pick is the default. A Bot that could not be read takes the pick, as the hook reads it.
-   */
-  const pickFor = async (
-    agentId: string,
-  ): Promise<{ pick: ConversationModelInput | null; notUsed?: () => void }> => {
-    const pick = draftModel.requested;
-    if (!pick) return { pick: null };
-    const bot =
-      agents?.find((agent) => agent.id === agentId) ??
-      (await queryClient
-        .fetchQuery(agentQueryOptions(agentId))
-        .catch(() => undefined));
-    if (!bot || !(await takesNoModelChoice(queryClient, bot))) return { pick };
-    return {
-      pick: null,
-      notUsed: () => sayModelNotUsed(bot),
-    };
-  };
+  const draftModel = usePickedBotModel(models.data, agents);
+  const { pickFor } = draftModel;
 
   /**
    * Pick the Bot and make the channel behind the placeholder `pendingId`.

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
@@ -6,6 +6,7 @@ import { compile } from "tailwindcss";
 import { personBody } from "./accounts-api";
 import { conversationPage } from "./conversations-api";
 import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * On Routines, a section with no panel, the strip lights Routines, and it can always be chosen

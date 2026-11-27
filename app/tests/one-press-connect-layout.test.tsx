@@ -1,10 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { botAppPath } from "./bot-grants-api";
 import { myConnectionPath } from "./connections-api";
+import { test } from "./renderer-crash";
 
 /**
  * One Connect on the chat card, in a real browser, for an app nobody has turned on.

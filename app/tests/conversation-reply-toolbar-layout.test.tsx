@@ -1,9 +1,10 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { marksPlugin } from "./marks-plugin";
+import { test } from "./renderer-crash";
 
 /**
  * A conversation's finished reply carries the Bot chat page's own toolbar, drawn as it is there.
