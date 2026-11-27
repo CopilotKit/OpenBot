@@ -169,12 +169,21 @@ test("One engine process answers run 1 on the openai route and run 2 on the anth
 });
 
 /*
- * SWITCHING MODELS MID-CONVERSATION. Found in dogfooding: a conversation answered on an OpenAI
- * Responses model, then the person picked Claude Opus 5.5 in the composer, whose effort the picker
- * shows as Extra high, and sent. The run ended in under a second with "The Bot stopped before it
- * finished answering": @langchain/anthropic checks its own default `thinking: disabled` against
- * Opus 5's rule that disabled thinking can't run at `xhigh` or `max`, though it never sends that
- * default, and threw before anything was asked.
+ * SWITCHING MODELS MID-CONVERSATION, BETWEEN PROVIDERS, AND BACK.
+ *
+ * Found in dogfooding: a conversation answered on an OpenAI Responses model (GPT-6.2 Astra), then
+ * the person picked Claude Opus 5.5 in the composer, whose effort the picker shows as Extra high,
+ * and sent. The run ended in under a second with "The Bot stopped before it finished answering":
+ * @langchain/anthropic checks its own default `thinking: disabled` against Opus 5's rule that
+ * disabled thinking can't run at `xhigh` or `max`, though it never sends that default, and threw
+ * before anything was asked.
+ *
+ * AG-UI has no idea of a provider. Each provider's opaque reasoning rides on the thread as an
+ * `encryptedValue` (on a `reasoning` row, and on a call), and nothing says whose it is; OpenAI's
+ * is a reference into OpenAI's own store that no other provider can use. So on every switch the
+ * new provider is sent none of it, every visible turn and every tool result stays, and every
+ * earlier call and its result are sent in the new provider's own shape, whoever made them.
+ * Switching back to the first provider works the same way.
  */
 type Side = {
   via: Provider;
@@ -186,13 +195,14 @@ type Side = {
   sealed: string;
 };
 
-const OPENAI_SIDE: Side = {
+const ASTRA: Side = {
   via: "openai",
-  model: RESPONSES_MODEL,
+  model: live ? RESPONSES_MODEL : "gpt-6.2-astra",
+  effort: "high",
   callId: "call_Wq3nX8pL2vR7",
   sealed: "gAAAAB-openai-encrypted-reasoning",
 };
-const OPUS_SIDE: Side = {
+const OPUS: Side = {
   via: "anthropic",
   model: "claude-opus-5-5",
   effort: "xhigh",
@@ -200,170 +210,226 @@ const OPUS_SIDE: Side = {
   sealed: "EqQBCkYIBxgCKkA-anthropic-signature",
 };
 
+/** A turn of the conversation: the model picked, what the person asks, and whether a tool answers. */
+type Leg = { side: Side; ask: string; city?: string };
+
+/** The blocks of an Anthropic Messages body, or the items of a Responses body, flat. */
+function partsOf(body: Record<string, unknown>): Record<string, unknown>[] {
+  if (Array.isArray(body.input)) return body.input as Record<string, unknown>[];
+  return (body.messages as { content: unknown }[]).flatMap((message) =>
+    Array.isArray(message.content)
+      ? (message.content as Record<string, unknown>[])
+      : [],
+  );
+}
+
+/** Every call id the request carries, as the call and as its result, in its provider's shape. */
+function callsSent(via: Provider, body: Record<string, unknown>) {
+  const parts = partsOf(body);
+  const ids = (type: string, key: string) =>
+    parts.filter((part) => part.type === type).map((part) => String(part[key]));
+  return via === "anthropic"
+    ? {
+        calls: ids("tool_use", "id"),
+        results: ids("tool_result", "tool_use_id"),
+      }
+    : {
+        calls: ids("function_call", "call_id"),
+        results: ids("function_call_output", "call_id"),
+      };
+}
+
 /**
- * One conversation, two providers: the first run on `from` calls a tool, the person's app answers
- * it, a reasoning row with `from`'s sealed reasoning sits on the thread, then the person picks
- * `to`'s model and sends. The second run must answer, sent the call and its result in `to`'s own
- * shape and nothing of `from`'s sealed reasoning.
+ * One conversation across `legs`, each on its own model. Every leg but the last asks for the
+ * weather, the model calls the tool, and the person's app answers it; a reasoning row with that
+ * provider's sealed reasoning goes on the thread, and the call carries it too. The last leg must
+ * answer in words. Each run's request is read at the provider.
  */
-async function switchesMidConversation(from: Side, to: Side) {
+async function conversationAcross(legs: Leg[]) {
   const choice = (side: Side) => ({
     model: side.model,
     ...(side.effort ? { reasoningEffort: side.effort } : {}),
   });
-  // The first request is asked to call the tool; every later one answers.
-  const answer: Responder = (request, index) =>
-    index === 0
+  const calling = legs.slice(0, -1);
+  // Request `i` is leg `i`'s one request: a call, until the last leg, which answers.
+  const answer: Responder = (request, index) => {
+    const leg = calling[index];
+    return leg
       ? {
           calls: [
-            { id: from.callId, name: "get_weather", args: { city: "Paris" } },
+            {
+              id: leg.side.callId,
+              name: "get_weather",
+              args: { city: leg.city },
+            },
           ],
         }
       : pineapple(request, index);
+  };
   await withGateway(
-    from.via,
+    legs[0]!.side.via,
     async (gateway) => {
-      gateway.mint("run-token-switch-1");
-      gateway.mint("run-token-switch-2");
+      for (const index of legs.keys()) gateway.mint(`run-token-leg-${index}`);
+      let thread: Record<string, unknown>[] = [
+        {
+          id: "standing-role:test-bot",
+          role: "system",
+          content: "You are Test Bot. Answer in one short sentence.",
+        },
+      ];
+      const callIds: string[] = [];
       await withEngine({ env: engineEnv(gateway.url) }, async (base) => {
-        const first = await run(
-          base,
-          ask({
-            runId: "run-switch-1",
-            tools: [WEATHER_TOOL],
-            messages: [
-              {
-                id: "standing-role:test-bot",
-                role: "system",
-                content: "You are Test Bot. Answer in one short sentence.",
+        for (const [index, leg] of legs.entries()) {
+          gateway.connect(leg.side.via);
+          const asked = [
+            ...thread,
+            { id: `u${index}`, role: "user", content: leg.ask },
+          ];
+          const result = await run(
+            base,
+            ask({
+              runId: `run-leg-${index}`,
+              tools: [WEATHER_TOOL],
+              messages: asked,
+              forwardedProps: {
+                openbotModel: choice(leg.side),
+                openbotModelRoute: {
+                  via: leg.side.via,
+                  token: `run-token-leg-${index}`,
+                },
               },
-              {
-                id: "u1",
-                role: "user",
-                content: "What is the weather in Paris? Use get_weather.",
-              },
-            ],
-            forwardedProps: {
-              openbotModel: choice(from),
-              openbotModelRoute: { via: from.via, token: "run-token-switch-1" },
+            }),
+          );
+          assert.equal(
+            result.events.at(-1)?.type,
+            "RUN_FINISHED",
+            `leg ${index} on ${leg.side.model}: ${inspect(result.events.at(-1))}`,
+          );
+          const snapshot = result.events.findLast(
+            (event) => event.type === "MESSAGES_SNAPSHOT",
+          )?.messages as Record<string, unknown>[];
+          if (index === legs.length - 1) {
+            assert.match(words(result.events), /pineapple/i);
+            break;
+          }
+          const called = snapshot
+            .slice(asked.length)
+            .find((message) => Array.isArray(message.toolCalls)) as {
+            toolCalls: { id: string; encryptedValue?: string }[];
+          };
+          assert.ok(
+            called,
+            `leg ${index} on ${leg.side.model} called the tool`,
+          );
+          const callId = called.toolCalls[0]!.id;
+          if (!live) assert.equal(callId, leg.side.callId);
+          callIds.push(callId);
+          // What the provider sealed travels on the thread, as AG-UI carries it.
+          called.toolCalls[0]!.encryptedValue = leg.side.sealed;
+          thread = [
+            ...snapshot,
+            {
+              id: `result-${index}`,
+              role: "tool",
+              toolCallId: callId,
+              content: `Sunny, ${20 + index} degrees in ${leg.city}.`,
             },
-          }),
-        );
-        assert.equal(
-          first.events.at(-1)?.type,
-          "RUN_FINISHED",
-          inspect(first.events.at(-1)),
-        );
-        const snapshot = first.events.findLast(
-          (event) => event.type === "MESSAGES_SNAPSHOT",
-        )?.messages as Record<string, unknown>[];
-        const called = snapshot.find((message) =>
-          Array.isArray(message.toolCalls),
-        ) as { toolCalls: { id: string; encryptedValue?: string }[] };
-        const callId = called.toolCalls[0]!.id;
-        if (!live) assert.equal(callId, from.callId);
-        // What the provider sealed travels on the thread, as AG-UI carries it.
-        called.toolCalls[0]!.encryptedValue = from.sealed;
-
-        gateway.connect(to.via);
-
-        const second = await run(
-          base,
-          ask({
-            runId: "run-switch-2",
-            tools: [WEATHER_TOOL],
-            messages: [
-              ...snapshot,
-              {
-                id: "result-1",
-                role: "tool",
-                toolCallId: callId,
-                content: "Sunny, 21 degrees.",
-              },
-              {
-                id: "reasoning-1",
-                role: "reasoning",
-                content: "The weather tool answered; summarise it.",
-                encryptedValue: from.sealed,
-              },
-              {
-                id: "u2",
-                role: "user",
-                content:
-                  "Thanks. Now reply with the word pineapple and nothing else.",
-              },
-            ],
-            forwardedProps: {
-              openbotModel: choice(to),
-              openbotModelRoute: { via: to.via, token: "run-token-switch-2" },
+            {
+              id: `reasoning-${index}`,
+              role: "reasoning",
+              content: "The weather tool answered; summarise it.",
+              encryptedValue: leg.side.sealed,
             },
-          }),
-        );
-        assert.equal(
-          second.events.at(-1)?.type,
-          "RUN_FINISHED",
-          inspect(second.events.at(-1)),
-        );
-        assert.match(words(second.events), /pineapple/i);
+          ];
+        }
       });
 
-      const asked = gateway.requests.at(-1)!;
-      assert.equal(asked.served, to.via);
-      assert.equal(asked.status, 200);
-      assert.equal(asked.body.model, to.model);
-      const sent = JSON.stringify(asked.body);
-      assert.ok(
-        !sent.includes(from.sealed),
-        "the other provider's sealed reasoning is never sent",
-      );
-      if (live) return;
-      if (to.via === "anthropic") {
-        assert.equal(asked.path, "/api/model-provider/anthropic/v1/messages");
-        if (to.effort)
-          assert.deepEqual(asked.body.output_config, { effort: to.effort });
-        assert.notEqual(
-          (asked.body.thinking as { type?: string } | undefined)?.type,
-          "disabled",
-        );
-        const blocks = (asked.body.messages as { content: unknown }[]).flatMap(
-          (message) =>
-            Array.isArray(message.content)
-              ? (message.content as Record<string, unknown>[])
-              : [],
-        );
+      assert.equal(gateway.requests.length, legs.length);
+      for (const [index, leg] of legs.entries()) {
+        if (index === 0) continue;
+        const sent = gateway.requests[index]!;
+        const label = `leg ${index} on ${leg.side.model}`;
+        assert.equal(sent.served, leg.side.via, label);
+        assert.equal(sent.status, 200, label);
+        assert.equal(sent.body.model, leg.side.model, label);
+        const text = JSON.stringify(sent.body);
+        // No provider's opaque reasoning, not even this provider's own from an earlier turn.
+        for (const earlier of legs.slice(0, index))
+          assert.ok(
+            !text.includes(earlier.side.sealed),
+            `${label}: sealed reasoning sent`,
+          );
+        // Every visible turn stays.
+        for (const earlier of legs.slice(0, index + 1))
+          assert.ok(
+            text.includes(earlier.ask),
+            `${label}: "${earlier.ask}" missing`,
+          );
+        if (live) continue;
+        if (leg.side.via === "anthropic") {
+          if (leg.side.effort)
+            assert.deepEqual(sent.body.output_config, {
+              effort: leg.side.effort,
+            });
+          assert.notEqual(
+            (sent.body.thinking as { type?: string } | undefined)?.type,
+            "disabled",
+          );
+        }
         assert.ok(
-          blocks.every(
-            (block) =>
-              block.type !== "thinking" && block.type !== "redacted_thinking",
+          partsOf(sent.body).every(
+            (part) =>
+              part.type !== "thinking" &&
+              part.type !== "redacted_thinking" &&
+              part.type !== "reasoning",
           ),
+          `${label}: reasoning sent`,
         );
-        const use = blocks.find((block) => block.type === "tool_use");
-        const result = blocks.find((block) => block.type === "tool_result");
-        assert.equal(use?.id, from.callId);
-        assert.match(String(use?.id), /^[a-zA-Z0-9_-]+$/);
-        assert.equal(result?.tool_use_id, from.callId);
-      } else {
-        assert.equal(asked.path, "/api/model-provider/v1/responses");
-        const items = asked.body.input as Record<string, unknown>[];
-        assert.ok(items.every((item) => item.type !== "reasoning"));
-        const call = items.find((item) => item.type === "function_call");
-        const output = items.find(
-          (item) => item.type === "function_call_output",
-        );
-        assert.equal(call?.call_id, from.callId);
-        assert.equal(output?.call_id, from.callId);
+        // Every earlier call and its result, whoever made it, in this provider's own shape.
+        const { calls, results } = callsSent(leg.side.via, sent.body);
+        const earlierCalls = callIds.slice(0, index);
+        assert.deepEqual(calls, earlierCalls, `${label}: calls`);
+        assert.deepEqual(results, earlierCalls, `${label}: results`);
+        for (const id of calls) assert.match(id, /^[a-zA-Z0-9_-]+$/);
+        for (const index_ of earlierCalls.keys())
+          assert.ok(
+            text.includes(`degrees in ${legs[index_]!.city}`),
+            `${label}: a tool result is missing`,
+          );
       }
     },
     answer,
   );
 }
 
-test("Switching from an OpenAI model to Claude Opus 5.5 at Extra high mid-conversation, with a tool call and reasoning on the thread, the next run answers", async () => {
-  await switchesMidConversation(OPENAI_SIDE, OPUS_SIDE);
+test("GPT-6.2 Astra to Claude Opus 5.5 at Extra high and back, mid-conversation, with tool calls and reasoning on the thread: every run answers", async () => {
+  await conversationAcross([
+    {
+      side: ASTRA,
+      ask: "What is the weather in Paris? Use get_weather.",
+      city: "Paris",
+    },
+    { side: OPUS, ask: "And in London? Use get_weather.", city: "London" },
+    {
+      side: ASTRA,
+      ask: "Thanks. Now reply with the word pineapple and nothing else.",
+    },
+  ]);
 });
 
-test("Switching from Claude Opus 5.5 at Extra high to an OpenAI model mid-conversation, with a tool call and reasoning on the thread, the next run answers", async () => {
-  await switchesMidConversation(OPUS_SIDE, { ...OPENAI_SIDE, effort: "high" });
+test("Claude Opus 5.5 at Extra high to GPT-6.2 Astra and back, mid-conversation, with tool calls and reasoning on the thread: every run answers", async () => {
+  await conversationAcross([
+    {
+      side: OPUS,
+      ask: "What is the weather in Paris? Use get_weather.",
+      city: "Paris",
+    },
+    { side: ASTRA, ask: "And in London? Use get_weather.", city: "London" },
+    {
+      side: OPUS,
+      ask: "Thanks. Now reply with the word pineapple and nothing else.",
+    },
+  ]);
 });
 
 test("On the openai route a model that takes tools only on the Responses API goes to the gateway's /v1/responses", async () => {
