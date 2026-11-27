@@ -84,6 +84,25 @@ info:
     refused for a version.
 
 
+    An app says which newer answers it understands in the header
+    `OpenBot-Capabilities`: lowercase tokens separated by spaces, such as
+    `OpenBot-Capabilities: computer-step-taken`. The server sends a newer
+    shape of an answer only to a request naming its token, and the shape
+    before it to every other request, so an app never gets an answer it
+    can't read, whatever its version. A token the server doesn't know is
+    ignored. The conversation events socket takes the same list in its
+    `capabilities` query parameter, since a browser can't set a header on
+    a WebSocket. The tokens: `computer-step-taken`, a computer step the
+    server already ran or is running is answered as such, `taken` from
+    runComputerStep and the problems COMPUTER_STEP_RUNNING and
+    COMPUTER_STEP_OUTCOME_UNKNOWN from a direct computer call that names
+    its step by threadId and toolCallId; and `conversation-work-turn`, a
+    conversation's work can name the person's own turn that the server is
+    carrying on (kind turn). A request without a token is answered as
+    before its shape existed. A program of your own need not send the
+    header.
+
+
     Every answer carries `X-Request-Id`, the id OpenBot's server logs the
     request under, and a problem's requestId is the same id. So does every
     other answer under /api, the four addresses outside /api/v2 included.
