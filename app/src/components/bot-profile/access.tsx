@@ -18,6 +18,7 @@ import {
   appAccessSentence,
   namesAnAdmin,
   useOpenApps,
+  useOwnerless,
 } from "@/components/plugins/app-access-action";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
+import { withAdmins } from "@/lib/organizations/admin-names";
 import { useOrganizationAdmins } from "@/lib/organizations/queries";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
@@ -394,26 +396,39 @@ function Granted({
   // Apps open: the Bot's owner gives it apps, and nobody is told to ask an admin for that.
   const knownOpen = useOpenApps(agentId);
   const open = knownOpen ?? null;
+  // A Bot nobody owns: only an admin gives it apps and skills, and no sentence names its owner.
+  const knownOwnerless = useOwnerless(agentId);
+  const ownerless = knownOwnerless === true && edition === "team";
   /*
    * Who a member is told to go to, read only once one of the rows says only an admin can take the
    * step, and only once it is known the person is not an admin themselves, and whether apps are open.
+   * On a Bot nobody owns, the empty page says only an admin can give it some, and names them too.
    */
   const admins = useOrganizationAdmins(
     me !== undefined &&
       knownOpen !== undefined &&
-      kind === "apps" &&
-      (apps.data ?? []).some((app) =>
-        namesAnAdmin(app, edition, isOrganizationAdmin(me?.role), open),
-      ),
+      ((ownerless && !isOrganizationAdmin(me?.role)) ||
+        (kind === "apps" &&
+          (apps.data ?? []).some((app) =>
+            namesAnAdmin(
+              app,
+              edition,
+              isOrganizationAdmin(me?.role),
+              open,
+              ownerless,
+            ),
+          ))),
   );
   /*
    * Both on the Apps page, so no row is drawn without its state and then redrawn with one a moment
-   * later; and the edition, so the personal edition never shows the team edition's empty state first.
+   * later; and the edition, so the personal edition never shows the team edition's empty state first;
+   * and whether anybody owns the Bot, so its owner is never named for a moment.
    */
   if (
     plugins.isPending ||
     (kind === "apps" && apps.isPending) ||
-    capabilities.isPending
+    capabilities.isPending ||
+    knownOwnerless === undefined
   )
     return null;
   if (!plugins.data) {
@@ -461,9 +476,13 @@ function Granted({
       ) : null}
       {count === 0 && kind === "skills" ? (
         <PageEmpty icon={IconBox} title="No skills yet">
-          {mine
-            ? "Turn one on under Your skills, or write one on the Skills page."
-            : "The Bot's owner or an admin gives it skills."}
+          {ownerless
+            ? admin
+              ? "An admin gives it skills."
+              : withAdmins("Only an admin can give it skills.", admins)
+            : mine
+              ? "Turn one on under Your skills, or write one on the Skills page."
+              : "The Bot's owner or an admin gives it skills."}
         </PageEmpty>
       ) : count === 0 ? (
         <PageEmpty icon={IconApps} title="No apps yet">
@@ -475,6 +494,11 @@ function Granted({
             <>
               Connect one on <Link to="/connections">Connections</Link>.
             </>
+          ) : ownerless && admin ? (
+            "An admin has to give it some. Until then this Bot can only talk with you."
+          ) : ownerless ? (
+            // Nobody owns it, so nobody but an admin can give it one, apps open or not.
+            `${withAdmins("Only an admin can give it apps.", admins)} Until then this Bot can only talk with you.`
           ) : open && mine ? (
             "Give it one under Your apps. Until then this Bot can only talk with you."
           ) : open ? (
@@ -514,6 +538,7 @@ function Granted({
                             admin,
                             admins,
                             open,
+                            ownerless,
                           )}
                     </ItemDescription>
                   </ItemContent>
