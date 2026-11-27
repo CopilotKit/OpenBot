@@ -140,17 +140,14 @@ export function appAccessSentence(
   }
   /*
    * Apps open: the Bot's owner has the admin's button beside this (`AdminAction`), so is told what
-   * is missing, as an admin is. Anybody else connects it themselves, and the owner gives it.
+   * is missing, as an admin is. Anybody else can't give it, and is told so first (`notYoursToGive`).
    */
   if (open && edition === "team" && !admin && openToMember(access)) {
     const name = access.displayName;
-    if (access.state === "not_granted")
-      return open.owner
-        ? `This Bot hasn't been given ${name} yet.`
-        : `This Bot hasn't been given ${name}. Its owner can give it.`;
-    return open.owner
-      ? `${name} isn't connected yet.`
-      : `${name} isn't connected yet. Connect it, and this Bot's owner can give it to the Bot.`;
+    if (!open.owner) return notYoursToGive(access, bot);
+    return access.state === "not_granted"
+      ? `This Bot hasn't been given ${name} yet.`
+      : `${name} isn't connected yet.`;
   }
   switch (access.state) {
     case "ready":
@@ -194,6 +191,42 @@ export function appAccessSentence(
       return access.needsConnect ? `${ask} Connect it first.` : ask;
     }
   }
+}
+
+/**
+ * Somebody else's Bot, apps open, an app it wasn't given: who can give it, and that Request access
+ * beside this asks for it.
+ *
+ * FOUND IN DOGFOODING. A member asked his organization's General Assistant, a shared Bot he could
+ * only view, to hook up his Google Calendar. The card said "Connect it, and this Bot's owner can
+ * give it to the Bot", so he connected it, which gave the Bot nothing; then it said "Its owner can
+ * give it" with nothing to press. Now the first thing it says is who can give it, and the button
+ * asks them. Connecting his own account, where it isn't, is offered beside it, and said to be his.
+ */
+export function notYoursToGive(access: AppAccess, bot?: string): string {
+  const owner = bot ? `${bot}'s` : "this Bot's";
+  const who = `Only ${owner} owner or an admin can give it ${access.displayName}.`;
+  const ask = access.request ? "" : " Request access to ask for it.";
+  return `${who}${ask}${connectsOwnToo(access) ? " You can connect your own account now too." : ""}`;
+}
+
+/**
+ * Whether, on somebody else's Bot that wasn't given an app, the person can connect their own
+ * account to it now: it runs on each person's own account and theirs isn't connected. An app
+ * nobody has added is added for everybody on the same press (`AddAndConnectAction`), unless they
+ * already asked for it: approving that request adds it, and adding it first would leave the card
+ * asking for it again.
+ */
+function connectsOwnToo(access: AppAccess): boolean {
+  if (access.account !== "personal" || access.accountHolder === "owner")
+    return false;
+  if (access.state === "disabled")
+    return (
+      access.request === null &&
+      access.source !== "address" &&
+      (access.unavailable === null || access.unavailable === "absent")
+    );
+  return access.state === "not_granted" && access.connectedAt === null;
 }
 
 /**
@@ -542,7 +575,8 @@ function appAccessButton({
     );
   /*
    * APPS OPEN: what an admin's press did is the Bot's owner's press too, Connect and give it in one
-   * go. Anybody else adds and connects it for themselves, and the owner gives it. Nobody asks.
+   * go. Anybody else can't give it, so they ask for it (`notYoursToGive`), and connect their own
+   * account beside that where it isn't connected yet.
    */
   if (open && openToMember(access)) {
     if (open.owner)
@@ -554,7 +588,16 @@ function appAccessButton({
           tab={tab}
         />
       );
-    return <AddAndConnectAction access={access} agentId={agentId} tab={tab} />;
+    const ask = (
+      <RequestAction access={access} actions={actions} agentId={agentId} />
+    );
+    if (!connectsOwnToo(access)) return ask;
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <AddAndConnectAction access={access} agentId={agentId} tab={tab} />
+        {ask}
+      </div>
+    );
   }
   return <RequestAction access={access} actions={actions} agentId={agentId} />;
 }
