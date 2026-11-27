@@ -282,9 +282,15 @@ function RouteComponent() {
       <SidebarToggleBar>
         <BusinessLink />
       </SidebarToggleBar>
+      {/*
+       * Home scrolls inside the pane, so a long Explore list can be reached. The gutter is kept on
+       * both sides from the first paint: where a scrollbar takes width (Windows, OpenBot Desktop's
+       * WebView2), one that appears once a list arrives would otherwise nudge the centred heading
+       * and box sideways.
+       */}
       <div
         className={cn(
-          "relative isolate flex-1 min-h-0 overflow-y-auto flex flex-col items-center justify-center-safe w-full p-4 mt-8",
+          "relative isolate flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable_both-edges] flex flex-col items-center justify-center-safe w-full p-4 mt-8",
           intro && "home-intro",
         )}
       >
