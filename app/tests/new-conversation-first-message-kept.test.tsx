@@ -93,7 +93,7 @@ let makes = true;
 /** The run inputs that reached the server, in order. */
 let runs: RunAgentInput[] = [];
 /** Runs the server never answered, which a dying page drops. */
-let unanswered: ((error: Error) => void)[] = [];
+const unanswered: ((error: Error) => void)[] = [];
 let originalFetch: typeof fetch;
 
 function sse(events: unknown[]) {
