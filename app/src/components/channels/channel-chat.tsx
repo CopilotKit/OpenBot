@@ -753,6 +753,16 @@ export function ChannelChat({
    */
   const [replaying, setReplaying] = useState(false);
   /**
+   * The stored history, read alongside the join and drawn while the join replays the thread.
+   *
+   * A slow replay used to leave a conversation that already had something to show blank until the
+   * replay was over. It is kept here rather than on the agent because the join empties the agent
+   * when it starts, and anything put on the agent before the replay ends has its replayed text
+   * appended to it a second time. The transcript draws it only while `replaying`, and it is let go
+   * when the join turns out to carry the Bot's answer and when the join ends.
+   */
+  const [earlyHistory, setEarlyHistory] = useState<Message[] | null>(null);
+  /**
    * How many stored turns this app could not read.
    *
    * Held rather than derived, because the transcript is the running agent's once history is handed
@@ -823,6 +833,27 @@ export function ChannelChat({
     // Before the connect: it is handed the subscribers the agent has when it starts.
     const lastRun = followLastRun(agent);
     setReplaying(true);
+    /*
+     * THE STORED HISTORY IS ASKED FOR WITH THE JOIN, NOT AFTER IT, so a conversation shows what it
+     * holds while a slow replay is still on its way. Only drawn from `earlyHistory`, never set on the
+     * agent: see there. Not drawn once the join has found the Bot answering, whose replay is then the
+     * screen's, nor once the join is over, nor when a later read has taken over the notice.
+     */
+    let joinOver = false;
+    let answering = false;
+    const early = readThreadMessages(channel.threadId, runtimeAgentId);
+    void early.then((stored) => {
+      if (
+        current &&
+        !joinOver &&
+        !answering &&
+        version === historyReadVersion.current &&
+        stored.availability === "ready"
+      ) {
+        setEarlyHistory(withCurrentA2uiVersions(stored.messages));
+        setRestoring(false);
+      }
+    });
 
     void (async () => {
       let joined: "connected" | "deadline" | "gave up" = "deadline";
@@ -860,9 +891,11 @@ export function ChannelChat({
               answerMs: JOIN_LIVENESS_MS,
             })) !== "unreachable",
           onAnswering: () => {
+            answering = true;
             if (current) {
               setRestoring(false);
               setReplaying(false);
+              setEarlyHistory(null);
             }
           },
           /*
@@ -906,7 +939,11 @@ export function ChannelChat({
         stopKept();
         keptRunId = lastRun.runId();
         lastRun.stop();
-        if (current) setReplaying(false);
+        joinOver = true;
+        if (current) {
+          setReplaying(false);
+          setEarlyHistory(null);
+        }
         openJoined.current();
       }
       /*
@@ -944,10 +981,17 @@ export function ChannelChat({
        */
       let askAgain = false;
       try {
-        const stored = await readThreadMessages(
-          channel.threadId,
-          runtimeAgentId,
-        );
+        /*
+         * The read taken with the join holds the thread as the replay found it only when the replay
+         * finished on its own and was not kept for a turn still going: that turn has added to the
+         * store since. Nor after a replay cut short at the deadline. Otherwise the store is read
+         * again, as it was before there was an early read. Not `keptRunId`, which names the last run
+         * the replay heard start, finished or not, and so is set for nearly every thread.
+         */
+        const stored =
+          joined === "connected" && !answering
+            ? await early
+            : await readThreadMessages(channel.threadId, runtimeAgentId);
         const isCurrent = current && version === historyReadVersion.current;
         if (isCurrent) {
           // The gateway snapshot can lag the store. Keep its valid local rows even when the
@@ -2145,7 +2189,11 @@ export function ChannelChat({
   const storedRefusals = useQuery(refusedTurnsQueryOptions(channel.id)).data;
   // Every render, as the transcript's messages always were: the agent's list changes in place.
   const refused = withRefusedTurns(
-    transcriptMessages(agent.messages, seed),
+    // The stored history while the join replays it, which empties the agent: see `earlyHistory`.
+    transcriptMessages(
+      earlyHistory !== null && replaying ? earlyHistory : agent.messages,
+      seed,
+    ),
     storedRefusals ?? [],
   );
   for (const [messageId, sentence] of refusals)
