@@ -1,5 +1,10 @@
 import { EventType, type Message } from "@ag-ui/core";
 import type { AbstractAgent } from "@copilotkit/react-core/v2";
+import { client } from "@/lib/client";
+import {
+  currentOrganizationId,
+  organizationHeaders,
+} from "@/lib/organizations/current";
 import { withoutWaitingPlaceholders } from "./approval-context";
 import { joinWithin } from "./join-thread";
 import {
@@ -39,6 +44,28 @@ export function turnAnswered(messages: readonly Message[]): boolean {
     return typeof content === "string" ? content.trim().length > 0 : !!content;
   }
   return false;
+}
+
+/**
+ * Stop the person's turn in a thread wherever it is: in a run, or carried on by the server between
+ * one run and the next, where no run is going for a Stop to reach. The runtime's own stop route,
+ * which the server answers before the runtime does by taking the person's carried turn off its
+ * queue, and which reaches a run going too. Only the person's own turn is stopped. A Stop the server
+ * did not take is said as a failure (`ClientError`), never taken as done.
+ */
+export async function stopCarriedTurn(
+  agentId: string,
+  threadId: string,
+): Promise<void> {
+  await client(
+    `/api/copilotkit/agent/${encodeURIComponent(agentId)}/stop/${encodeURIComponent(threadId)}`,
+    {
+      method: "POST",
+      // Stopped in the organization this tab works in, as its runs are (copilot/provider.tsx).
+      headers: organizationHeaders(currentOrganizationId()),
+      fallback: "Couldn't stop the Bot. Try again.",
+    },
+  );
 }
 
 /**

@@ -84,6 +84,8 @@ let onRun: (input: RunAgentInput) => Response = () => {
 };
 /** Each time this page ran a computer step itself. Never, when the server runs them. */
 let stepsRunHere = 0;
+/** The stops the runtime was asked for, by address. */
+let stops: string[] = [];
 let originalFetch: typeof fetch;
 
 const frame = (event: unknown) =>
@@ -250,8 +252,10 @@ beforeAll(() => {
         runs.push(body);
         return onRun(body);
       }
-      if (/\/agent\/[^/]+\/stop\//.test(url.pathname))
+      if (/\/agent\/[^/]+\/stop\//.test(url.pathname)) {
+        stops.push(url.pathname);
         return NativeResponse.json({ stopped: true });
+      }
       if (url.pathname.match(/\/threads\/[^/]+\/messages$/))
         return NativeResponse.json({ messages: stored });
       // Which run is going in the conversation, as a join token names it.
@@ -346,6 +350,7 @@ beforeEach(() => {
   lastRun = null;
   live = null;
   stepsRunHere = 0;
+  stops = [];
   sessionStorage.clear();
   queryClient.clear();
   queryClient.setQueryData<InfiniteData<ChannelPage>>(channelKeys.list(), {
@@ -698,5 +703,62 @@ test("between two runs of a turn the server carries, the conversation stays work
   );
   expect(view.queryByTestId("transcript-stopped")).toBeNull();
   expect(stepsRunHere).toBe(0);
+  expect(runs).toHaveLength(1);
+}, 30_000);
+
+/*
+ * Stop works at every moment of a turn the server carries, the gap between two runs included, where
+ * no run is going for a Stop to reach. It asks the server to stop the turn in the thread, and the
+ * conversation stops reading as working at once, with nothing saying the Bot stopped on its own.
+ */
+test("Stop between two runs of a turn the server carries stops the turn, and the conversation is free at once", async () => {
+  onRun = (input) => {
+    const person = input.messages.filter((message) => message.role === "user");
+    stored = wholeTurn(person).slice(0, person.length + 2);
+    endings.set(input.runId, "succeeded");
+    return sse([
+      { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+      ...said("about", ABOUT_TO),
+      ...serverStep(
+        "save",
+        "computer_write_file",
+        { path: SAVED, contents: "1000\n234" },
+        "about",
+        { ok: true, path: SAVED, bytes: 8 },
+      ),
+      { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+    ]);
+  };
+  const view = render(app());
+  await send(view, ASKED);
+  await view.findByText(
+    /computer_write_file answered .*numbers\.txt/,
+    {},
+    { timeout: 15_000 },
+  );
+  view.rerender(app(CARRYING));
+  // No run is going, and the person can still stop the turn.
+  const stop = await view.findByRole(
+    "button",
+    { name: "Stop the Bot" },
+    { timeout: 15_000 },
+  );
+  stops = [];
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(stop);
+
+  // The server is asked to stop the turn in this thread, and the conversation is free at once.
+  await waitFor(() => expect(stops.length).toBeGreaterThan(0), {
+    timeout: 5_000,
+  });
+  expect(
+    stops.every((path) => path.endsWith(`/stop/${channel.threadId}`)),
+  ).toBe(true);
+  await waitFor(
+    () => expect(view.getByRole("log").getAttribute("aria-busy")).toBe("false"),
+    { timeout: 5_000 },
+  );
+  expect(view.queryByRole("button", { name: "Stop the Bot" })).toBeNull();
+  expect(view.queryByTestId("transcript-stopped")).toBeNull();
   expect(runs).toHaveLength(1);
 }, 30_000);

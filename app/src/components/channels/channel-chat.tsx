@@ -91,7 +91,9 @@ import {
   endsOnStep,
   followCarriedRun,
   followServerTurn,
+  isTurnWork,
   serverCarriesTurn,
+  stopCarriedTurn,
   turnAnswered,
   waitsOnPerson,
 } from "@/lib/copilot/carried-turn";
@@ -1482,7 +1484,14 @@ export function ChannelChat({
    * conversation's work says so the whole time (`turn`, `carried-turn.ts`), so while it does the
    * conversation reads as working, Stop is up, and the next run is joined as it appears.
    */
-  const carriedByServer = serverCarriesTurn(channel.work);
+  /*
+   * The carried turn the person stopped from here, by its work's key: over at once on this screen,
+   * though the conversation's work still lists it until the server's word that it is gone arrives.
+   */
+  const [stoppedCarried, setStoppedCarried] = useState<string | null>(null);
+  const carriedByServer = serverCarriesTurn(
+    channel.work?.filter((entry) => entry.key !== stoppedCarried),
+  );
   const carriedByServerRef = useRef(carriedByServer);
   carriedByServerRef.current = carriedByServer;
   useEffect(() => {
@@ -2407,6 +2416,31 @@ export function ChannelChat({
     stoppedHere.current = true;
     stopEpoch.current++;
     copilotkit.stopAgent({ agent });
+    /*
+     * A TURN THE SERVER IS CARRYING ON IS STOPPED WHEREVER IT IS. Between one run and the next no run
+     * is going, so the Stop above reaches nothing, and the turn would go on with the person having
+     * pressed Stop. The server's stop for the thread takes it off its queue, and reaches a run going
+     * too. The conversation stops reading as working at once; a Stop the server refused says so.
+     */
+    const carried = channel.work?.find(
+      (entry) => isTurnWork(entry) && entry.key !== stoppedCarried,
+    );
+    if (!carried || !agent.threadId) return;
+    setStoppedCarried(carried.key);
+    const routed =
+      (agent as { runtimeAgentId?: string }).runtimeAgentId ?? agent.agentId;
+    if (!routed) return;
+    stopCarriedTurn(routed, agent.threadId).catch((error: unknown) => {
+      setStoppedCarried((stopped) =>
+        stopped === carried.key ? null : stopped,
+      );
+      setRunError({
+        message:
+          error instanceof Error
+            ? error.message
+            : "Couldn't stop the Bot. Try again.",
+      });
+    });
   };
 
   /**
@@ -2704,7 +2738,12 @@ export function ChannelChat({
              * Nor while the join replays history (`replaying`): the agent reports itself running then
              * with nothing running.
              */
-            stoppable={(agent.isRunning && !replaying) || runsInFlight > 0}
+            stoppable={
+              (agent.isRunning && !replaying) ||
+              runsInFlight > 0 ||
+              // A turn the server carries on, between its runs too: see `stopTask`.
+              carriedByServer
+            }
             /*
              * At the END OF THE TRANSCRIPT rather than above the composer, which is where this used to
              * be. A turn that ends without an answer leaves a gap exactly where the reply was going to
