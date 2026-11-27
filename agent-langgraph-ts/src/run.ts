@@ -14,7 +14,9 @@
  *    approvals and the audit trail, and runs computer calls in the order the model made them.
  *  - The one tool answered here is the engine's own `recall_earlier_results` (`context-room.ts`),
  *    which reads back a result this engine cleared for room. A step mixing it with other calls
- *    answers the recall and hands back the rest; nothing else is ever run here.
+ *    answers the recall and hands back the rest; nothing else is ever run here. A caller that
+ *    offers its own `recall_earlier_results` in `input.tools` answers it, like any of its tools:
+ *    the thread it sent may hold results it cleared itself, which only it can read back.
  *  - Gemini's thought signature on a handed-back call travels the AG-UI way: a
  *    REASONING_ENCRYPTED_VALUE on the call, and `encryptedValue` on it in the snapshot, which the
  *    caller returns unchanged with the call (https://docs.ag-ui.com/spec/draft/events/reasoning).
@@ -26,10 +28,10 @@
  * optional, and a stock agent ignores them; a connected Bot brings its own model.
  *
  * HOW THIS AGENT WORKS INSIDE, which no caller needs to know:
- *  - A 40-step budget per turn. The last step is sent with tools off (`tool_choice: "none"`) and the
- *    last-step notice (shared/run-notices.ts), so a turn always ends by saying something rather than
- *    on its fortieth search. A turn spans its hand-backs, so the steps it has already taken are the
- *    assistant tool-call messages since the person's latest message (`stepsTaken`).
+ *  - No step budget. A turn runs as long as the task needs: every step is sent its tools, and a
+ *    turn ends when the model answers in words or the caller stops the run. A long task takes
+ *    hundreds of steps, each its own run, and nothing here counts them. One step's own size is
+ *    still bounded by the model's own limits.
  *  - History sanitising, so no dangling tool call reaches the model.
  *  - Room in the conversation (`context-room.ts`): old tool results cleared from what each step
  *    sends, harder retries when a provider still says too long, and `recall_earlier_results` to read
@@ -42,7 +44,6 @@ import {
   AIMessage,
   type AIMessageChunk,
   type BaseMessage,
-  HumanMessage,
   ToolMessage,
 } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
@@ -54,7 +55,6 @@ import {
   START,
   StateGraph,
 } from "@langchain/langgraph";
-import { LAST_STEP_NOTICE } from "../../shared/run-notices.ts";
 import {
   clearsOnServer,
   LAST_STAGE,
@@ -83,9 +83,6 @@ import {
   runRoute,
 } from "./models.ts";
 
-/** Model steps a turn may take: the built-in Bot's `TOOL_STEPS`. The last one answers in words. */
-export const MAX_STEPS = 40;
-
 export type Emit = (event: BaseEvent) => void;
 
 export type RunContext = {
@@ -93,7 +90,11 @@ export type RunContext = {
   model: BaseChatModel;
   emit: Emit;
   signal?: AbortSignal;
-  maxSteps: number;
+  /**
+   * Whether this engine answers `recall_earlier_results` itself: it does when it added the tool,
+   * and hands the call back when the caller offered its own.
+   */
+  answersRecall: boolean;
   /**
    * How hard this run clears what it sends (`STAGES` in context-room.ts). A stage that got a
    * too-long request through is where every later step starts, so it is not refused again first.
@@ -101,13 +102,38 @@ export type RunContext = {
   room: { stage: number };
 };
 
+/**
+ * The stage each thread's turn last had to be cleared to, so a turn carried on in run after run
+ * (each step of a long task is a run of its own) starts there instead of being refused as too long
+ * first, every step. FOUND ON A 300-STEP TURN: every run began at stage 0, and the provider refused
+ * the first request of 293 of them. A new message from the person starts the thread at 0 again.
+ * Held for the most recent threads only; a thread forgotten starts at 0, as every run once did.
+ */
+const stages = new Map<string, number>();
+const MOST_THREADS = 1_000;
+
+function startingStage(input: RunAgentInput): number {
+  const latest = input.messages?.at(-1);
+  if (!input.threadId || !latest || latest.role === "user") return 0;
+  return stages.get(input.threadId) ?? 0;
+}
+
+function keepStage(threadId: string, stage: number): void {
+  if (!threadId) return;
+  stages.delete(threadId);
+  if (stage > 0) stages.set(threadId, stage);
+  if (stages.size > MOST_THREADS) {
+    const oldest = stages.keys().next().value;
+    if (oldest !== undefined) stages.delete(oldest);
+  }
+}
+
 export type RunOptions = {
   emit: Emit;
   signal?: AbortSignal;
   env?: Env;
   /** For tests: the model a run would otherwise build from the environment. */
   makeModel?: (run: RunModel, env: Env) => BaseChatModel;
-  maxSteps?: number;
   log?: Pick<Console, "warn" | "error">;
 };
 
@@ -116,7 +142,6 @@ const State = Annotation.Root({
     reducer: messagesStateReducer,
     default: () => [],
   }),
-  steps: Annotation<number>({ reducer: (_, next) => next, default: () => 0 }),
 });
 type StateType = typeof State.State;
 
@@ -179,13 +204,12 @@ function signatureOf(call: unknown): string | undefined {
 /**
  * One model call, streamed as it arrives: its words as one text message, and each tool call under
  * its own id as soon as the provider names it (parallel calls interleave safely: each is keyed by
- * its index in the response). On the last step no tool event is sent and any call is dropped.
+ * its index in the response).
  */
 async function streamStep(
   model: BaseChatModel | ReturnType<NonNullable<BaseChatModel["bindTools"]>>,
   messages: BaseMessage[],
   run: RunContext,
-  last: boolean,
 ): Promise<AIMessage> {
   const messageId = randomUUID();
   const slots = new Map<string, Slot>();
@@ -239,7 +263,6 @@ async function streamStep(
       }
       run.emit({ type: "TEXT_MESSAGE_CONTENT", messageId, delta } as BaseEvent);
     }
-    if (last) continue;
     for (const piece of callPieces(chunk)) {
       const key =
         piece.index !== undefined && piece.index !== null
@@ -308,16 +331,9 @@ async function streamStep(
 
   // The provider's own content is kept for the rest of this run (Anthropic's thinking and tool_use
   // blocks, the Responses API's reasoning items), so a tool step continues the way it began.
-  const content =
-    last && Array.isArray(whole.content)
-      ? (whole.content as Record<string, unknown>[]).filter(
-          (block) =>
-            block?.type !== "tool_use" && block?.type !== "function_call",
-        )
-      : whole.content;
   return new AIMessage({
     id: messageId,
-    content: content as never,
+    content: whole.content as never,
     tool_calls: calls,
     additional_kwargs: whole.additional_kwargs,
     response_metadata: whole.response_metadata,
@@ -327,9 +343,7 @@ async function streamStep(
 
 async function answer(state: StateType, config: RunnableConfig) {
   const run = runOf(config);
-  const step = state.steps + 1;
   const offered = boundTools(run.tools);
-  const last = offered.length > 0 && step >= run.maxSteps;
   const toolChars = JSON.stringify(offered).length;
   for (;;) {
     // Only what this call sends is cleared: the run's own thread stays whole, for recall and for
@@ -339,18 +353,14 @@ async function answer(state: StateType, config: RunnableConfig) {
       clearsOnServer: clearsOnServer(run.model),
       extraChars: toolChars,
     });
-    const sent = run.model instanceof ChatGoogle ? forGemini(room) : room;
-    // The notice is this call's only: the conversation keeps what the model said and did.
-    const messages = last
-      ? [...sent, new HumanMessage(LAST_STEP_NOTICE)]
-      : sent;
+    const messages = run.model instanceof ChatGoogle ? forGemini(room) : room;
     const model =
       offered.length && run.model.bindTools
-        ? run.model.bindTools(offered, last ? { tool_choice: "none" } : {})
+        ? run.model.bindTools(offered)
         : run.model;
     try {
-      const message = await streamStep(model, messages, run, last);
-      return { messages: [message], steps: step };
+      const message = await streamStep(model, messages, run);
+      return { messages: [message] };
     } catch (error) {
       if (run.signal?.aborted) throw error;
       // A proxy in front of Claude that does not take context editing: clear here instead.
@@ -380,15 +390,20 @@ function lastCalls(state: StateType) {
  *
  * Every other call, whatever its name, is the caller's: a tool OpenBot runs, a component the
  * browser draws, the computer, or a name nobody holds, which OpenBot refuses in words. The run ends
- * with those calls unanswered, and the next run brings their results.
+ * with those calls unanswered, and the next run brings their results. A recall is the caller's too
+ * when the caller offered the tool itself.
  */
-export function nextStep(state: StateType): "tools" | typeof END {
+function nextStep(
+  state: StateType,
+  config: RunnableConfig,
+): "tools" | typeof END {
+  if (!runOf(config).answersRecall) return END;
   const calls = lastCalls(state);
   return calls.some((call) => call.name === RECALL) ? "tools" : END;
 }
 
 /** After the recalls: the next step, or the end of the run if the caller still owns a call. */
-export function afterRecall(state: StateType): "answer" | typeof END {
+function afterRecall(state: StateType): "answer" | typeof END {
   return lastCalls(state).some((call) => call.name !== RECALL) ? END : "answer";
 }
 
@@ -502,25 +517,6 @@ function pendingCalls(added: readonly BaseMessage[]): string[] {
 }
 
 /**
- * The model steps this turn has already taken, in the runs before this one: the assistant messages
- * that called a tool since the person's latest message. Each was one step that ended its run on a
- * hand-back (or answered a recall), so a turn's budget runs across its hand-backs rather than
- * starting again on each.
- */
-export function stepsTaken(thread: readonly BaseMessage[]): number {
-  let taken = 0;
-  for (const message of [...thread].reverse()) {
-    if (message.getType() === "human") break;
-    if (
-      message.getType() === "ai" &&
-      ((message as AIMessage).tool_calls?.length ?? 0) > 0
-    )
-      taken += 1;
-  }
-  return taken;
-}
-
-/**
  * The Bot a run is for, from its standing role's id, for model routing only: a Claude plan's query
  * is named by it (`claudeThreadId`). Absent, every run of the thread still shares one name.
  */
@@ -599,25 +595,29 @@ export async function runAgent(
 
   try {
     const model = (options.makeModel ?? chatModel)(choice, env);
+    const offered = input.tools ?? [];
     const run: RunContext = {
       // A Bot with tools can read back a result cleared to make room (context-room.ts).
-      tools: withRecall(input.tools ?? []),
+      tools: withRecall(offered),
       model,
       emit,
       signal: options.signal,
-      maxSteps: options.maxSteps ?? MAX_STEPS,
-      room: { stage: 0 },
+      answersRecall: !offered.some((tool) => tool.name === RECALL),
+      room: { stage: startingStage(input) },
     };
     const thread = modelMessages(input.messages ?? [], input.context ?? []);
     const final = await graph.invoke(
-      { messages: thread, steps: stepsTaken(thread) },
+      { messages: thread },
       {
         configurable: { openbot: run },
-        // Each step is an answer and, at most, a recall: room for every step and the last.
-        recursionLimit: run.maxSteps * 2 + 2,
+        // A run is one step and any recalls answered here, however many the task needs: no count
+        // ends it. LangGraph's default of 25 graph steps would end a run that recalls a dozen
+        // times as a failure, so the bound is lifted and the caller's stop ends a run instead.
+        recursionLimit: Number.POSITIVE_INFINITY,
         signal: options.signal,
       },
     );
+    keepStage(input.threadId, run.room.stage);
     const all = final.messages as BaseMessage[];
     const added = all
       .slice(thread.length)
