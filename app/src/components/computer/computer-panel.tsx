@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import {
   IconDeviceDesktop,
   IconDeviceDesktopOff,
@@ -56,8 +57,7 @@ export function ComputerViewPanel({
   const bot = useQuery(agentQueryOptions(agentId));
   const noComputers = useNoBotComputers();
   // A Bot set to work on a Windows computer (Bot.computer) shows that one: one computer at a time.
-  if (bot.data?.computer === "windows")
-    return <WindowsComputerPanel botId={agentId} />;
+  if (bot.data?.computer === "windows") return <WindowsComputerPanel />;
   if (bot.isPending) return null;
   if (noComputers === undefined) return null;
   if (noComputers)
@@ -74,10 +74,11 @@ export function ComputerViewPanel({
 }
 
 /**
- * The panel for a Bot that works on the person's Windows computer: its live screen, who is using it, and
- * its recording. Nothing of the browser computer is drawn: that Bot has none.
+ * The panel for a Bot that works on a Windows computer: the person's own, whichever of their Bots it is (a person
+ * has one in each organization). Its live screen, who is using it, and its recording; nothing of the browser computer
+ * is drawn: that Bot has none.
  */
-function WindowsComputerPanel({ botId }: { botId: string }) {
+function WindowsComputerPanel() {
   const computer = useQuery(windowsComputerQueryOptions());
   if (computer.isPending) return null;
   return (
@@ -86,9 +87,17 @@ function WindowsComputerPanel({ botId }: { botId: string }) {
         <p className="pt-4 text-destructive text-sm" role="alert">
           Couldn't load your Windows computer. Try again in a moment.
         </p>
-      ) : !computer.data || computer.data.botId !== botId ? (
-        <PageEmpty icon={IconDeviceDesktopOff} title="No Windows computer">
-          There's no Windows computer set up for this Bot.
+      ) : !computer.data ? (
+        <PageEmpty icon={IconDeviceDesktopOff} title="No Windows computers">
+          Windows computers aren't on for this OpenBot.
+        </PageEmpty>
+      ) : !computer.data.enrolled ? (
+        <PageEmpty icon={IconDeviceDesktopOff} title="No Windows computer yet">
+          This Bot works on your Windows computer, and you haven't connected
+          one.{" "}
+          <Link className="underline underline-offset-4" to="/windows-computer">
+            Connect your Windows computer
+          </Link>
         </PageEmpty>
       ) : (
         <WindowsComputerView compact computer={computer.data} />

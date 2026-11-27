@@ -5,12 +5,10 @@ import type { WindowsComputerControl } from "./windowsComputerControl";
 import type { WindowsComputerRecording } from "./windowsComputerRecording";
 
 /**
- * The caller's Windows computer, who is using it, and what is being recorded on it.
+ * The caller's Windows computer in this organization, who is using it, and what is being recorded on it. Every Bot of theirs set to work on a Windows computer (computer: windows) works on this one.
  */
 export interface WindowsComputer {
-  /** The Bot it is set up for: the one Bot that can be told to work on it (computer: windows). */
-  botId?: string;
-  /** True when the Windows computer answers, its session is unlocked and the Bot can use it. */
+  /** True when the Windows computer answers, its session is unlocked and a Bot can use it. */
   available: boolean;
   /** True when the Windows computer has connected with an enrollment code and its link to OpenBot is open now. False when none is connected yet (make an enrollment code) or it is off, asleep or offline. */
   connected?: boolean;
