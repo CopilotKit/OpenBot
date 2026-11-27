@@ -31,6 +31,15 @@ well. The interrupt it answers was OpenBot's, never this graph's, but the integr
 `resume` to LangGraph as `Command(resume=...)` and never reads the request's messages. A warm process
 finished without asking the model, and a fresh one, which every run now is, asked it with no
 conversation at all. So `resume` is dropped and the run starts from the thread, like any other.
+
+REASONING ROWS ARE THE SURFACE'S, NOT THE MODEL'S, as in agent-langgraph-ts (`history.ts`). A
+`reasoning` row carries the sealed reasoning of whichever provider answered that turn
+(`encryptedValue`: OpenAI's encrypted reasoning, Anthropic's thinking signature), and nothing in
+AG-UI says which provider that was. ag-ui-langgraph folds each one back onto the next assistant
+message as an OpenAI reasoning item, so after the person switched from Claude to an OpenAI model
+the next run sent Anthropic's signature to OpenAI, which refused the whole request
+(`invalid_encrypted_content`). The rows are left out of what the model is sent; the turns, the
+calls and their results stay, in the new provider's own shape.
 """
 
 from contextlib import aclosing
@@ -68,8 +77,9 @@ class WholeThreadAgent(ParallelToolAgent):
         shared = self.graph
         self.graph = shared.copy(update={"checkpointer": MemorySaver()})
         try:
+            thread = [message for message in input.messages if message.role != "reasoning"]
             async with aclosing(
-                super().run(input.model_copy(update={"resume": None}))
+                super().run(input.model_copy(update={"resume": None, "messages": thread}))
             ) as stream:
                 async for event in stream:
                     yield event
