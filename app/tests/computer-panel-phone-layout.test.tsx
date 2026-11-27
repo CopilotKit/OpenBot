@@ -479,7 +479,9 @@ describe.skipIf(!asked)("a Bot asking something of the person", () => {
           // Opened by the person, the Computer takes the screen, and closing it is the way back.
           await page.getByRole("button", { name: "Open Computer" }).click();
           const sheet = page.getByRole("dialog", { name: "Computer" });
-          await sheet.getByRole("region", { name: "Computer sidebar" }).waitFor();
+          await sheet
+            .getByRole("region", { name: "Computer sidebar" })
+            .waitFor();
           await shoot(
             page,
             `computer-panel-take-over-opened-${engine}-${theme}-390`,
@@ -515,7 +517,10 @@ describe.skipIf(!asked)("a Bot asking something of the person", () => {
           await page
             .locator('[data-slot="sheet-content"]')
             .waitFor({ state: "detached" });
-          await shoot(page, `computer-panel-secret-closed-${engine}-${theme}-390`);
+          await shoot(
+            page,
+            `computer-panel-secret-closed-${engine}-${theme}-390`,
+          );
           expect(
             await reachable(page.getByRole("textbox", { name: "Message" })),
           ).toBe(true);
