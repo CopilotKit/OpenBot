@@ -39,6 +39,8 @@ export const Route = createFileRoute("/_authed")({
     if (!user) {
       // A hover on a link must not leave the invitation behind or sign Desktop out; only the visit does.
       if (!preload) {
+        // Nobody is signed in any more, so the next visit must not draw the app's frame before the sign-in screen.
+        forgetSignedIn();
         // An invitation's link is kept while they sign in, and home hands them on to it.
         rememberInvitationLink(location.pathname);
         /*
@@ -50,10 +52,6 @@ export const Route = createFileRoute("/_authed")({
         if (await connectedThroughDesktop(context.queryClient)) {
           await signOutThroughDesktop().catch(() => undefined);
         }
-      }
-      if (!preload) {
-        // Nobody is signed in any more, so the next visit must not draw the app's frame before the sign-in screen.
-        forgetSignedIn();
       }
       throw redirect({ to: "/sign" });
     }
