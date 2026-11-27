@@ -74,6 +74,22 @@ export function isClientRoute(pathname: string): boolean {
   return !pathname.startsWith("/assets/") && !pathname.includes(".");
 }
 
+/** The service worker's script (public/sw.js), at the root so its scope is the whole app. */
+export const SERVICE_WORKER_PATH = "/sw.js";
+
+/**
+ * The headers a file is served with beyond the type its extension names: the service worker's
+ * script as JavaScript and never answered from a cache without asking, so a new release's worker
+ * replaces the old one at once. Every other file, none.
+ */
+export function servedHeaders(pathname: string): HeadersInit | undefined {
+  if (pathname !== SERVICE_WORKER_PATH) return undefined;
+  return {
+    "content-type": "text/javascript; charset=utf-8",
+    "cache-control": "no-cache",
+  };
+}
+
 /** Whether this is a call for the server rather than the app. */
 export function isApiCall(pathname: string): boolean {
   return pathname === "/api" || pathname.startsWith("/api/");
@@ -288,7 +304,12 @@ if (import.meta.main) {
         if (!wanted) return new Response("not found", { status: 404 });
 
         const found = file(wanted);
-        if (await found.exists()) return new Response(found);
+        if (await found.exists()) {
+          const headers = servedHeaders(url.pathname);
+          return headers
+            ? new Response(found, { headers })
+            : new Response(found);
+        }
         if (isClientRoute(url.pathname)) {
           return new Response(file(join(DIST, "index.html")));
         }
