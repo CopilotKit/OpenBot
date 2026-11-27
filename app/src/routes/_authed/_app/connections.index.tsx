@@ -97,6 +97,7 @@ import {
   personalConnections,
 } from "@/lib/plugins/queries";
 import { searchTextEntry } from "@/lib/search-text";
+import { loadFirstScreen } from "@/lib/route-data";
 
 /**
  * The services a Bot reads as you.
@@ -107,6 +108,14 @@ import { searchTextEntry } from "@/lib/search-text";
  * these runs on your own grant, so it sees exactly what you can see and nothing else.
  */
 export const Route = createFileRoute("/_authed/_app/connections/")({
+  loader: ({ context }) =>
+    loadFirstScreen(context.queryClient, [
+      appsQueryOptions(),
+      catalogueQueryOptions(),
+      appSetupQueryOptions(),
+      connectionsQueryOptions(),
+      deploymentCapabilitiesQueryOptions(),
+    ]),
   component: RouteComponent,
   /*
    * `?connected=` is how the OAuth callback reports back, carrying a server key on success and

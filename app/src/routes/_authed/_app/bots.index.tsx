@@ -29,6 +29,9 @@ import {
   useOffersMemory,
 } from "@/lib/deployment/queries";
 import { useOrganizationAudience } from "@/lib/organizations/queries";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
+import { loadFirstScreen } from "@/lib/route-data";
 
 /** Just longer than the sheet's 200ms exit, so it has finished sliding away before the page changes. */
 const SHEET_CLOSE_MS = 240;
@@ -36,6 +39,13 @@ const SHEET_CLOSE_MS = 240;
 /** Creating a Bot is a search-parameter state, so the roster stays mounted and Back closes it. */
 export const Route = createFileRoute("/_authed/_app/bots/")({
   validateSearch: z.object({ new: z.boolean().optional() }),
+  loader: ({ context }) =>
+    loadFirstScreen(context.queryClient, [
+      deploymentCapabilitiesQueryOptions(),
+      agentListQueryOptions(),
+      agentListQueryOptions(true),
+      botAttentionQueryOptions(),
+    ]),
   component: BotsPage,
 });
 

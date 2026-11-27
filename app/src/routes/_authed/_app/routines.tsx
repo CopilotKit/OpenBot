@@ -1,5 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { RoutinesHome } from "@/components/routines/routines-home";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import { proactiveSettingsQueryOptions } from "@/lib/proactive";
+import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
+import { loadFirstScreen } from "@/lib/route-data";
+import { routinesQueryOptions } from "@/lib/routines/queries";
 
 /**
  * Every Bot's routines on one page: one box that makes a routine from a sentence, then the routines,
@@ -12,5 +17,13 @@ import { RoutinesHome } from "@/components/routines/routines-home";
  * write.
  */
 export const Route = createFileRoute("/_authed/_app/routines")({
+  loader: ({ context }) =>
+    loadFirstScreen(context.queryClient, [
+      routinesQueryOptions(),
+      responsibilitiesQueryOptions(),
+      proactiveSettingsQueryOptions(),
+      agentListQueryOptions(),
+      agentListQueryOptions(true),
+    ]),
   component: RoutinesHome,
 });
