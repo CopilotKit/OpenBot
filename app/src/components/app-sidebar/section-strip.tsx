@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { useSidebar } from "@/components/ui/sidebar";
+import { useOptionalSidebar, useSidebar } from "@/components/ui/sidebar";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { appConfig } from "@/lib/generated/application-config";
 import {
@@ -140,8 +140,19 @@ function PageItem({ item }: { item: NavigationLink }) {
 /**
  * The account at the strip's foot, and the menu it opens: organizations, the account's pages, Get
  * the desktop app on OpenBot Cloud, Get troubleshooting logs, Sign out.
+ *
+ * Also at the top right of the phone app's tab pages, where there is no sidebar
+ * (`layout/native-shell-account.tsx`): opening below the avatar there, and named "Account".
  */
-function StripAccount() {
+export function StripAccount({
+  label,
+  side = "right",
+}: {
+  /** The button's name, in place of the person's (see `AccountMenu`). */
+  label?: string;
+  /** Beside the strip, or below a page's header. */
+  side?: "right" | "bottom";
+} = {}) {
   const navigation = useNavigationItems();
   const signOut = useSignOut();
   const signOutOffered = useSignOutOffered();
@@ -149,13 +160,14 @@ function StripAccount() {
   const organizationChoices = useOrganizationChoices();
   const invitationsWaiting = useWaitingInvitationCount();
   const switchOrganization = useSwitchOrganization();
-  const { setOpenMobile } = useSidebar();
+  // No sidebar in the native shell, so no sheet to close.
+  const setOpenMobile = useOptionalSidebar()?.setOpenMobile ?? (() => {});
   return (
-    <AccountMenu>
+    <AccountMenu label={label} side={side}>
       <DropdownMenuContent
         align="end"
         className={accountMenuClassName}
-        side="right"
+        side={side}
         sideOffset={8}
       >
         <AccountRow />

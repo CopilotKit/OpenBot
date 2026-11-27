@@ -183,7 +183,7 @@ describe("which shell the page is in", () => {
     test(`${name}: ${platform ?? "none"}, the same before the first paint`, () => {
       expect(detectNativeShell(environment())?.platform ?? null).toBe(platform);
       const painted = beforeFirstPaint(environment());
-      expect(painted.platform).toBe(platform);
+      expect(painted.platform as string | null).toBe(platform);
       // The viewport takes the whole web view in the shell, and is left alone in a browser.
       expect(painted.viewport.includes("viewport-fit=cover")).toBe(
         platform !== null,
