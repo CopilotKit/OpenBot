@@ -35,9 +35,11 @@ import {
 } from "@/lib/markdown";
 import { newId } from "@/lib/new-id";
 import { DELETED_USER, isDeletedUser } from "@/lib/people/deleted-user";
+import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
 import { Composer, toAgentOptions } from "./composer";
+import { ComposerColumn, transcriptColumn } from "./conversation-columns";
 import { SentFileCard } from "./sent-file-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
 
@@ -136,7 +138,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
 
   if (group.isPending)
     return (
-      <div className="mx-auto w-full max-w-3xl px-4 py-6">
+      <div className={cn("py-6", transcriptColumn)}>
         <RestoringTranscript />
       </div>
     );
@@ -144,7 +146,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
   if (group.data === undefined)
     return (
       <div
-        className="mx-auto flex w-full max-w-3xl flex-col items-start gap-3 px-4 py-8"
+        className={cn("flex flex-col items-start gap-3 py-8", transcriptColumn)}
         role="alert"
       >
         <p className="text-sm text-destructive">
@@ -173,8 +175,12 @@ export function GroupChat({ channelId }: { channelId: string }) {
         }}
         ref={viewportRef}
       >
+        {/*
+         * The transcript's column and the composer's below are a conversation with one Bot's
+         * (`conversation-columns.tsx`), so a group keeps its side margin on a phone too.
+         */}
         <div
-          className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-6"
+          className={cn("flex flex-col gap-5 py-6", transcriptColumn)}
           data-transcript-column
         >
           {messages.length === 0 ? (
@@ -223,7 +229,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
         </div>
       </div>
       {/* The same column and the same compact composer as a conversation with one Bot. */}
-      <div className="mx-auto w-full max-w-2xl shrink-0 pb-4">
+      <ComposerColumn>
         {send.error ? (
           <p className="pb-2 text-sm text-destructive" role="alert">
             {failureSaid(send.error)}
@@ -272,7 +278,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
             });
           }}
         />
-      </div>
+      </ComposerColumn>
     </div>
   );
 }
