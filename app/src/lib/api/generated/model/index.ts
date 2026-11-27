@@ -636,7 +636,6 @@ export * from "./conversationSummary";
 export * from "./conversationThread";
 export * from "./conversationThreadStatus";
 export * from "./conversationWork";
-export * from "./conversationWorkKind";
 export * from "./createApiKeyHeaders";
 export * from "./createApiKeyRequest";
 export * from "./createAppAccessRequestHeaders";

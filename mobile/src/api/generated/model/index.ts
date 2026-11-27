@@ -304,7 +304,6 @@ export * from "./conversationSummary";
 export * from "./conversationThread";
 export * from "./conversationThreadStatus";
 export * from "./conversationWork";
-export * from "./conversationWorkKind";
 export * from "./createBotRequest";
 export * from "./createBotRequestHarness";
 export * from "./createCheckInParams";

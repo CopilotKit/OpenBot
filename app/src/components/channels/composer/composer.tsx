@@ -1025,6 +1025,15 @@ export function Composer({
     if (!savedKey) {
       return;
     }
+    /*
+     * ON A SCREEN WHOSE SEND STARTS A CONVERSATION, THE MESSAGE IS KEPT UNTIL THE CONVERSATION HAS
+     * IT. Cleared at Send, a page closed while the conversation was still being made lost the words.
+     * So the draft stays as it was sent until the start keeps the message with its conversation and
+     * forgets this one (`useStartChannel`), or a failed send puts the words back.
+     */
+    if (holdsFilesUntilSent && !channelId && isSubmitting) {
+      return;
+    }
     const current = staged.flatMap((attachment) => {
       const rowId = stagedRowId(attachment);
       if (rowId === undefined) return [];
@@ -1073,6 +1082,7 @@ export function Composer({
     draftRestored,
     holdsFilesUntilSent,
     channelId,
+    isSubmitting,
   ]);
 
   /**
