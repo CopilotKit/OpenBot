@@ -88,6 +88,8 @@ const channel: AgentChannel = {
 
 /** Whether the server starts the runs it is sent, or never answers them. */
 let serverAnswers = true;
+/** Whether the server makes the conversations it is asked for, or never answers. */
+let makes = true;
 /** The run inputs that reached the server, in order. */
 let runs: RunAgentInput[] = [];
 /** Runs the server never answered, which a dying page drops. */
@@ -129,6 +131,9 @@ beforeAll(() => {
       );
       const method =
         init?.method ?? (input instanceof Request ? input.method : "GET");
+      // Never answered: a page that dies waiting on it runs nothing after, as a closed tab doesn't.
+      if (url.pathname === CONVERSATIONS_PATH && method === "POST" && !makes)
+        return new Promise<Response>(() => {});
       if (url.pathname === CONVERSATIONS_PATH && method === "POST")
         return NativeResponse.json(
           { conversation: conversationOf(channel) },
@@ -211,6 +216,7 @@ afterEach(async () => {
   await diePage();
   window.localStorage.clear();
   serverAnswers = true;
+  makes = true;
   runs = [];
 });
 
@@ -342,6 +348,31 @@ test("a page that dies before the server has the first message gives the words b
     (message) => message.role === "user" && textOf(message) === QUESTION,
   );
   expect(asked).toHaveLength(1);
+}, 30_000);
+
+test("a page that dies while its Send is still making the conversation gives the words to the next new conversation", async () => {
+  makes = false;
+  const { view } = openPage(`/channel/new?agent=${BOT}`);
+  const user = userEvent.setup({ document });
+  const editor = await view.findByRole("textbox", { name: "Message" });
+  await waitFor(() =>
+    expect(editor.getAttribute("aria-disabled")).not.toBe("true"),
+  );
+  await user.click(editor);
+  await user.keyboard(QUESTION);
+  await user.keyboard("{Enter}");
+  // The page dies before the conversation is made.
+  await settleReactWork();
+  await diePage();
+
+  // The next new conversation, a visit of its own.
+  makes = true;
+  const next = openPage(`/channel/new?agent=${BOT}`);
+  const box = await next.view.findByRole("textbox", { name: "Message" });
+  await waitFor(() => expect(box.textContent).toContain(QUESTION), {
+    timeout: 5000,
+  });
+  expect(runs).toHaveLength(0);
 }, 30_000);
 
 test("a first message the server has is not given back", async () => {
