@@ -267,10 +267,10 @@ class ShellActivity : AppCompatActivity() {
         webSignInBar.setBackgroundColor(color)
         bottomNav.setBackgroundColor(color)
         bottomBar.setBackgroundColor(color)
-        moreButton.imageTintList = ColorStateList.valueOf(muted)
-        skeleton.setColors(isDark, background)
         val foreground = if (isDark) 0xFFFAFAFA.toInt() else 0xFF0A0A0A.toInt()
         val muted = if (isDark) 0xFFA1A1AA.toInt() else 0xFF6B6B70.toInt()
+        moreButton.imageTintList = ColorStateList.valueOf(muted)
+        skeleton.setColors(isDark, background)
         val tint = ColorStateList(
             arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
             intArrayOf(foreground, muted),
