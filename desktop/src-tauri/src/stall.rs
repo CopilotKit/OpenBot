@@ -24,7 +24,15 @@ not taken for over 30 seconds, while the window is on screen (shown, not minimis
 not covered), is a stall. It is said once, with its length, when the page catches up, the window
 leaves the screen, the page is replaced, or OpenBot quits.
 
-Neither watch reads a clock: every call is given the time, so the rules are tested second by second.
+THE SETUP PAGE ITSELF (`PageWatch`). On a Mac after an update the setup window stayed a plain
+ground with nothing on it, across two launches, and nothing noticed: no log line, no reload, no way
+out. A setup page that has loaded must send its first heartbeat within `FIRST_BEAT` of loading, and
+one at least every `SILENT` after, each saying it has drawn something. One that doesn't, while the
+window is on screen, is reloaded once. Still silent after that, the person is told, natively, with
+Restart and Get logs. A heartbeat that says something is drawn ends it all.
+
+None of the watches reads a clock: every call is given the time, so the rules are tested second by
+second.
 */
 
 use std::collections::VecDeque;
@@ -443,6 +451,183 @@ impl UiWatch {
     }
 }
 
+/// How long a setup page that has finished loading has to send its first heartbeat.
+pub const FIRST_BEAT: Duration = Duration::from_secs(10);
+
+/// How long a setup page that started loading has to finish, or to send a heartbeat anyway.
+pub const LOADING: Duration = Duration::from_secs(30);
+
+/// How long the setup page may go without a heartbeat once it has sent one (it sends one every 5s).
+pub const SILENT: Duration = Duration::from_secs(20);
+
+/// Why the setup page is taken to be stuck.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Quiet {
+    /// It loaded and never answered.
+    NeverAnswered,
+    /// It answered, then stopped.
+    Stopped,
+    /// It answers, with nothing drawn.
+    Blank,
+}
+
+impl Quiet {
+    pub fn said(self) -> &'static str {
+        match self {
+            Quiet::NeverAnswered => "has not answered since it loaded",
+            Quiet::Stopped => "stopped answering",
+            Quiet::Blank => "answers but has drawn nothing",
+        }
+    }
+}
+
+/// What to do about a setup page that is stuck. See the module.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageAct {
+    /// Reload it, the one time.
+    Reload { quiet: Quiet, waited: Duration },
+    /// It was reloaded and is still stuck: tell the person, with Restart and Get logs.
+    GiveUp { quiet: Quiet, waited: Duration },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PageState {
+    /// Not on the setup page, or OpenBot is quitting: nothing is expected.
+    #[default]
+    Away,
+    /// The setup page started loading.
+    Loading,
+    /// It finished loading; its first heartbeat is due.
+    Loaded,
+    /// It has sent a heartbeat with something drawn.
+    Answering,
+    /// It was reloaded, stayed stuck, and the person has been told.
+    GaveUp,
+}
+
+/// Whether the setup page in the main window is alive and drawing. See the module.
+#[derive(Default)]
+pub struct PageWatch {
+    state: PageState,
+    /// The last thing heard that counts: the load starting or finishing, a reload asked for, or a
+    /// heartbeat with something drawn.
+    since: Option<Instant>,
+    /// A heartbeat came since `since`, with nothing drawn.
+    blank: bool,
+    /// Since when the window has been on screen without a break.
+    on_screen_since: Option<Instant>,
+    /// It has been reloaded since it last drew something.
+    reloaded: bool,
+    /// OpenBot is quitting: its Shutting down page is left alone to the end.
+    quitting: bool,
+}
+
+impl PageWatch {
+    /// The main window started loading the setup page.
+    pub fn setup_started(&mut self, now: Instant) {
+        if self.quitting {
+            return;
+        }
+        self.state = PageState::Loading;
+        self.since = Some(now);
+        self.blank = false;
+    }
+
+    /// The setup page finished loading.
+    pub fn setup_finished(&mut self, now: Instant) {
+        if self.state == PageState::Loading {
+            self.state = PageState::Loaded;
+            self.since = Some(now);
+        }
+    }
+
+    /// The main window went to another page, OpenBot itself, which sends no heartbeat.
+    pub fn elsewhere(&mut self) {
+        self.state = PageState::Away;
+        self.since = None;
+        self.blank = false;
+        self.reloaded = false;
+    }
+
+    /// A heartbeat from the setup page, and whether it has drawn anything. True when it came after
+    /// the person was told the window was stuck: it has come back by itself.
+    pub fn heartbeat(&mut self, drawn: bool, now: Instant) -> bool {
+        if self.quitting {
+            return false;
+        }
+        if self.state == PageState::Away {
+            // A heartbeat before the load was seen (the watch began after the page loaded).
+            self.state = PageState::Loaded;
+            self.since = Some(now);
+        }
+        if !drawn {
+            self.blank = true;
+            return false;
+        }
+        let back = self.state == PageState::GaveUp;
+        self.state = PageState::Answering;
+        self.since = Some(now);
+        self.blank = false;
+        self.reloaded = false;
+        back
+    }
+
+    /// Whether the window is on screen now: shown, not minimised, and on macOS not covered.
+    pub fn window(&mut self, on_screen: bool, now: Instant) {
+        if on_screen {
+            self.on_screen_since.get_or_insert(now);
+        } else {
+            self.on_screen_since = None;
+        }
+    }
+
+    /// OpenBot is quitting: nothing more is expected of the window, whatever it loads.
+    pub fn quit(&mut self) {
+        self.elsewhere();
+        self.quitting = true;
+    }
+
+    /**
+    One look. `on_screen` is what this look read of the window: only a window read as on screen
+    now, and on screen for the whole wait, is acted on. A look that couldn't read it (on a Mac, the
+    main thread busy for two seconds) acts on nothing, since the page's answers go through that
+    same thread.
+    */
+    pub fn tick(&mut self, now: Instant, on_screen: Option<bool>) -> Option<PageAct> {
+        if on_screen != Some(true) {
+            return None;
+        }
+        let limit = match self.state {
+            PageState::Away | PageState::GaveUp => return None,
+            PageState::Loading => LOADING,
+            PageState::Loaded => FIRST_BEAT,
+            PageState::Answering => SILENT,
+        };
+        let since = self.since?;
+        let from = since.max(self.on_screen_since?);
+        if now.saturating_duration_since(from) <= limit {
+            return None;
+        }
+        let quiet = if self.blank {
+            Quiet::Blank
+        } else if self.state == PageState::Answering {
+            Quiet::Stopped
+        } else {
+            Quiet::NeverAnswered
+        };
+        let waited = now.saturating_duration_since(since);
+        if self.reloaded {
+            self.state = PageState::GaveUp;
+            return Some(PageAct::GiveUp { quiet, waited });
+        }
+        self.reloaded = true;
+        self.state = PageState::Loading;
+        self.since = Some(now);
+        self.blank = false;
+        Some(PageAct::Reload { quiet, waited })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -707,5 +892,178 @@ mod tests {
             watch.sent(FailingStep::Answering, at(start, second));
         }
         assert_eq!(watch.tick(at(start, 300)), None);
+    }
+
+    /// Every second from `from` to `to`, looked at with the window on screen: the first act.
+    fn looks(watch: &mut PageWatch, start: Instant, from: u64, to: u64) -> Option<(u64, PageAct)> {
+        (from..=to).find_map(|second| {
+            watch
+                .tick(at(start, second), Some(true))
+                .map(|act| (second, act))
+        })
+    }
+
+    /**
+    FOUND ON 1.2.0-rc.3, a Mac, after an update: the setup window stayed a plain ground with
+    nothing on it, across two launches, and nothing noticed. A setup page that loads and never
+    answers is reloaded once, ten seconds after it loaded; still silent, the person is told.
+    */
+    #[test]
+    fn a_setup_page_that_never_answers_is_reloaded_once_then_the_person_is_told() {
+        let start = Instant::now();
+        let mut watch = PageWatch::default();
+        watch.window(true, start);
+        watch.setup_started(start);
+        watch.setup_finished(at(start, 1));
+        assert_eq!(
+            looks(&mut watch, start, 1, 60),
+            Some((
+                12,
+                PageAct::Reload {
+                    quiet: Quiet::NeverAnswered,
+                    waited: Duration::from_secs(11)
+                }
+            ))
+        );
+        // The reload: the page loads again, and is as silent.
+        watch.setup_started(at(start, 12));
+        watch.setup_finished(at(start, 13));
+        assert_eq!(
+            looks(&mut watch, start, 13, 60),
+            Some((
+                24,
+                PageAct::GiveUp {
+                    quiet: Quiet::NeverAnswered,
+                    waited: Duration::from_secs(11)
+                }
+            ))
+        );
+        // Told once, not every look after.
+        assert_eq!(looks(&mut watch, start, 25, 600), None);
+        // It comes back by itself: that is news, and the watch starts over.
+        assert!(watch.heartbeat(true, at(start, 601)));
+        assert_eq!(looks(&mut watch, start, 601, 621), None);
+        assert_eq!(
+            looks(&mut watch, start, 622, 622),
+            Some((
+                622,
+                PageAct::Reload {
+                    quiet: Quiet::Stopped,
+                    waited: Duration::from_secs(21)
+                }
+            ))
+        );
+    }
+
+    /// A page that answers is left alone however long it runs, and each heartbeat restarts the
+    /// clock. One that stops is reloaded after twenty seconds; a page that never finishes loading,
+    /// after thirty.
+    #[test]
+    fn a_heartbeat_resets_the_watch_and_one_that_stops_is_reloaded() {
+        let start = Instant::now();
+        let mut watch = PageWatch::default();
+        watch.window(true, start);
+        watch.setup_started(start);
+        watch.setup_finished(at(start, 1));
+        for second in (2..=600).step_by(5) {
+            assert!(!watch.heartbeat(true, at(start, second)));
+            assert_eq!(watch.tick(at(start, second + 4), Some(true)), None);
+        }
+        // The last at 597: twenty seconds of nothing is fine, twenty-one is not.
+        assert_eq!(looks(&mut watch, start, 598, 617), None);
+        assert_eq!(
+            looks(&mut watch, start, 618, 618),
+            Some((
+                618,
+                PageAct::Reload {
+                    quiet: Quiet::Stopped,
+                    waited: Duration::from_secs(21)
+                }
+            ))
+        );
+        // The reloaded page answers: the one reload is given back.
+        watch.setup_started(at(start, 619));
+        watch.setup_finished(at(start, 620));
+        assert!(!watch.heartbeat(true, at(start, 621)));
+        assert_eq!(
+            looks(&mut watch, start, 622, 700),
+            Some((
+                642,
+                PageAct::Reload {
+                    quiet: Quiet::Stopped,
+                    waited: Duration::from_secs(21)
+                }
+            ))
+        );
+        // A load that never finishes: thirty seconds.
+        let mut loading = PageWatch::default();
+        loading.window(true, start);
+        loading.setup_started(start);
+        assert_eq!(
+            looks(&mut loading, start, 0, 60).map(|(second, _)| second),
+            Some(31)
+        );
+    }
+
+    /// The same blank window the person saw, with the page's code running: it answers, but has
+    /// drawn nothing. That is stuck too.
+    #[test]
+    fn a_page_that_answers_with_nothing_drawn_is_stuck_too() {
+        let start = Instant::now();
+        let mut watch = PageWatch::default();
+        watch.window(true, start);
+        watch.setup_started(start);
+        watch.setup_finished(at(start, 1));
+        for second in (2..=11).step_by(5) {
+            assert!(!watch.heartbeat(false, at(start, second)));
+        }
+        assert_eq!(
+            looks(&mut watch, start, 2, 60),
+            Some((
+                12,
+                PageAct::Reload {
+                    quiet: Quiet::Blank,
+                    waited: Duration::from_secs(11)
+                }
+            ))
+        );
+    }
+
+    /// Hidden, minimised, covered, or not read at all: a page held back by the system, or whose
+    /// answers wait on a busy main thread, is not stuck. Back on screen, it has its time again.
+    /// Another page in the window (OpenBot), or a quit, is never waited on.
+    #[test]
+    fn off_screen_unread_elsewhere_or_quitting_is_never_acted_on() {
+        let start = Instant::now();
+        let mut watch = PageWatch::default();
+        watch.setup_started(start);
+        watch.setup_finished(at(start, 1));
+        watch.window(false, start);
+        for second in 1..=300 {
+            assert_eq!(watch.tick(at(start, second), Some(false)), None);
+            assert_eq!(watch.tick(at(start, second), None), None);
+        }
+        watch.window(true, at(start, 300));
+        assert_eq!(looks(&mut watch, start, 300, 310), None);
+        assert_eq!(
+            looks(&mut watch, start, 311, 311).map(|(second, _)| second),
+            Some(311)
+        );
+        // OpenBot opened in the window: nothing is expected of it.
+        let mut away = PageWatch::default();
+        away.window(true, start);
+        away.setup_started(start);
+        away.elsewhere();
+        assert_eq!(looks(&mut away, start, 0, 600), None);
+        // Quitting.
+        let mut quitting = PageWatch::default();
+        quitting.window(true, start);
+        quitting.setup_started(start);
+        quitting.heartbeat(true, at(start, 1));
+        quitting.quit();
+        // Quit sends the window to its Shutting down page, which loads and beats as any does.
+        quitting.setup_started(at(start, 2));
+        quitting.heartbeat(true, at(start, 3));
+        assert_eq!(looks(&mut quitting, start, 1, 600), None);
     }
 }

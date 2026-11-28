@@ -71,15 +71,21 @@ export const GetDeploymentResponse = zod
     authProviders: zod
       .array(zod.enum(["google", "microsoft", "okta"]))
       .describe("The social sign-ins offered, by id."),
+    hostedSignIn: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether people sign in through OpenBot by CopilotKit's own sign-in, with their account there. The sign-in starts at /api/auth/hosted/sign-in. Absent or false, people sign in only the ways authProviders and ssoConfigured say.",
+      ),
     ssoConfigured: zod
       .boolean()
       .describe(
-        "Whether a company's own identity provider is registered, so an email address can be sent to it. Never which.",
+        "Whether a company's own identity provider is registered, so an email address can be sent to it. Never which. Always false where hostedSignIn is true.",
       ),
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether an administrator requires single sign-on; social sign-in then stays only as the configured administrators' way in.",
+        "Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false. Always false where hostedSignIn is true.",
       ),
     builtInBots: zod
       .boolean()
@@ -277,7 +283,7 @@ export const GetOrganizationSettingsResponse = zod
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -351,7 +357,7 @@ export const GetOrganizationSettingsResponse = zod
   .and(zod.unknown());
 
 /**
- * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Requiring single sign-on applies to signing in to the whole OpenBot, so it is set only in the organization `default`: sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.
+ * Change the settings sent and keep the rest. The settings sent are saved all or none: if any one is refused, none is saved. context is read-only, and sending it answers 400 with nothing saved. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization's own rule: its members sign in through an identity provider, and saving it signs out only this organization's members who signed in another way. Where it keeps only one organization, that organization's rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), single sign-on can't be required: sending ssoRequired true answers 409 with the code HOSTED_SIGN_IN_ONLY.
  * @summary Change the organization's settings
  */
 
@@ -449,7 +455,7 @@ export const UpdateOrganizationSettingsBody = zod
       .boolean()
       .optional()
       .describe(
-        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -602,7 +608,7 @@ export const UpdateOrganizationSettingsResponse = zod
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -714,6 +720,84 @@ export const StopInactiveComputersResponse = zod.object({
     .nullable()
     .describe("Why nothing was stopped, when nothing was looked at."),
 });
+
+/**
+ * Return whether the organization's apps are open, the default, or locked down (AppsSetting). Every member may read it, so the app can say what giving an app to a Bot will do. In the personal edition apps are always open, and it can't be changed.
+ * @summary Read whether the organization's apps are open
+ */
+
+export const GetAppsSettingParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const GetAppsSettingResponse = zod
+  .object({
+    lockedDown: zod
+      .boolean()
+      .describe(
+        "Whether the organization's apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, the apps that need no sign-in are on for every Bot, any member adds an app the organization hasn't added in the press that connects it, and a connected shared account is on for every Bot for anybody who can use that Bot. True is locked down: an administrator adds apps and approves access requests and who may use a shared account through a Bot, one press gives an app's read-only actions, and an app is open to Bot owners only once an administrator opens it. Either way each person's own account stays theirs, and an administrator connects a shared account. Switching changes what giving does from then on. It doesn't take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.",
+      ),
+  })
+  .describe(
+    "Whether the organization's apps are open or locked down. It is kept apart from the organization's other settings so every member can read it.",
+  );
+
+/**
+ * Open the organization's apps or lock them down (AppsSetting). Locking down takes nothing back unless takeBackWhatOpenGave is sent too. The change, and anything taken back, is recorded on the audit trail. Only an administrator of the organization may change it.
+ * @summary Open the organization's apps, or lock them down
+ */
+
+export const UpdateAppsSettingParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const updateAppsSettingHeaderIdempotencyKeyMax = 128;
+
+export const UpdateAppsSettingHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(updateAppsSettingHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const UpdateAppsSettingBody = zod.object({
+  lockedDown: zod
+    .boolean()
+    .describe(
+      "True locks the organization's apps down, false opens them (AppsSetting).",
+    ),
+  takeBackWhatOpenGave: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Sent with lockedDown true: also take back what OpenBot gave Bots by itself while the organization was open, which is a person's connected apps on their own Bots and the apps that need no sign-in on every Bot. What an administrator or a Bot's owner gave by hand stays. Recorded on the audit trail. Ignored with lockedDown false: open apps would give it all again.",
+    ),
+});
+
+export const UpdateAppsSettingResponse = zod
+  .object({
+    lockedDown: zod
+      .boolean()
+      .describe(
+        "Whether the organization's apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, the apps that need no sign-in are on for every Bot, any member adds an app the organization hasn't added in the press that connects it, and a connected shared account is on for every Bot for anybody who can use that Bot. True is locked down: an administrator adds apps and approves access requests and who may use a shared account through a Bot, one press gives an app's read-only actions, and an app is open to Bot owners only once an administrator opens it. Either way each person's own account stays theirs, and an administrator connects a shared account. Switching changes what giving does from then on. It doesn't take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.",
+      ),
+  })
+  .describe(
+    "Whether the organization's apps are open or locked down. It is kept apart from the organization's other settings so every member can read it.",
+  );
 
 /**
  * Return which models the organization's Bots ran on over the last days, with how many runs, refusals and people each had, and the newest 50 runs. Only an administrator of the organization may read it.
@@ -840,7 +924,7 @@ export const ListComputerActionsResponse = zod.object({
 });
 
 /**
- * Return what this OpenBot has set up and what it still needs, each row with its fix. An administrator, or somebody running OpenBot on their own, reads it as the one who sets it up; anybody else reads which parts work, and that an administrator sets the rest up.
+ * Return what this OpenBot has set up and what it still needs, each row with its fix. An administrator, or somebody running OpenBot on their own, reads it as the one who sets it up; anybody else reads which parts work, and that an administrator sets the rest up. On OpenBot Cloud, where each person can connect their own AI, the model row is the reader's: ready when the AI their runs use, their own or else the organization's, can answer, and needing setup only when neither can. No model key in this OpenBot's configuration is needed there.
  * @summary Read the setup checklist
  */
 

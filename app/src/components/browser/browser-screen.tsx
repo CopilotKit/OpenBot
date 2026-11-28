@@ -2,6 +2,7 @@ import type { BrowserApiState } from "@openbot/shared/openbot-browser";
 import { IconSearch } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
+import { ComputerBlocked } from "@/components/computer/computer-blocked";
 import {
   LiveScreen,
   type LiveScreenHandle,
@@ -20,6 +21,9 @@ import {
   clearBrowserMutationOptions,
   navigateBrowserMutationOptions,
 } from "@/lib/browser/mutations";
+import type { ClientError } from "@/lib/client";
+import { settledRefusal } from "@/lib/computers/refusal";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 import {
   AddressBar,
@@ -42,6 +46,9 @@ import {
   useRecording,
 } from "./recording";
 import { useNarration } from "./use-narration";
+
+/** What the page says when the person's browser can't be opened and asking again won't change that. */
+export const CANT_OPEN_BROWSER = "Can't open your browser";
 
 /** The shape of the computer's browser viewport, kept for the screen before its first frame says otherwise. */
 const SCREEN_ASPECT_RATIO = 1280 / 800;
@@ -67,6 +74,7 @@ export function ScreenBrowser({
   state,
   reopen,
   reopening,
+  reopenError,
   heading,
   children,
 }: {
@@ -74,6 +82,8 @@ export function ScreenBrowser({
   state: BrowserApiState;
   reopen: () => void;
   reopening: boolean;
+  /** Why Open it again failed, when it did. One asking again can't change is said in place of the button. */
+  reopenError?: unknown;
   /** Above the window, as wide as it. Without one the page's name is said to screen readers only. */
   heading?: ReactNode;
   /** Under the window, as wide as it. Kept short by its own cap, since its height is taken from the page's. */
@@ -198,11 +208,12 @@ export function ScreenBrowser({
                   className="border-b border-border bg-background px-3 py-2 text-destructive text-sm"
                   role="alert"
                 >
-                  {failure.message}
+                  {failureSaid(failure)}
                 </p>
               ) : null}
               <Screen
                 blank={!shownAddress(active)}
+                blocked={reopening ? null : settledRefusal(reopenError)}
                 computerId={computerId}
                 notAnswering={state.problem}
                 onGo={go}
@@ -295,16 +306,20 @@ export function BrowserDesk({
  * it is opening, so the page never sits blank or half drawn. A deliberate exception to the data-access rule (no loading
  * placeholder): what arrives here is a whole browser, slow to start, and the empty pane read as broken. Nothing in the
  * frame can be pressed, so it is never mistaken for the browser itself. `problem` says why it has not opened instead,
- * with Try again where asking again can help (`onRetry`).
+ * with Try again where asking again can help (`onRetry`). `blocked` is a refusal asking again can't change (at the
+ * organization's computer limit, say): the window says so calmly, in the server's sentence, with no Try again.
  */
 export function OpeningBrowser({
   heading,
   problem,
+  blocked,
   onRetry,
   children,
 }: {
   heading?: ReactNode;
-  problem?: string;
+  /** Why it hasn't opened, kept whole so a hold is drawn calmly (`failureSaid`). */
+  problem?: Failure | null;
+  blocked?: ClientError | null;
   onRetry?: () => void;
   children?: ReactNode;
 }) {
@@ -333,10 +348,16 @@ export function OpeningBrowser({
             className="relative w-full bg-background"
             style={{ aspectRatio: SCREEN_ASPECT_RATIO }}
           >
-            {problem ? (
+            {blocked ? (
+              <ComputerBlocked
+                className="absolute inset-0"
+                refusal={blocked}
+                title={CANT_OPEN_BROWSER}
+              />
+            ) : problem ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-sm">
                 <p className="text-destructive" role="alert">
-                  {problem}
+                  {failureSaid(problem)}
                 </p>
                 {onRetry ? (
                   <Button onClick={onRetry} size="sm" variant="outline">
@@ -372,6 +393,7 @@ export function OpeningBrowser({
  */
 function Screen({
   blank,
+  blocked,
   computerId,
   notAnswering,
   onGo,
@@ -382,6 +404,8 @@ function Screen({
 }: {
   /** The tab that shows is empty: the page offers somewhere to go rather than a white rectangle. */
   blank: boolean;
+  /** Opening it again was refused for good: said in place of Open it again. */
+  blocked: ClientError | null;
   computerId: string;
   /** Why there is nothing to show: the browser is there and not answering (`BrowserApiState.problem`). */
   notAnswering?: string;
@@ -418,6 +442,12 @@ function Screen({
             {notAnswering}
           </span>
         </div>
+      ) : !open && blocked ? (
+        <ComputerBlocked
+          className="absolute inset-0"
+          refusal={blocked}
+          title={CANT_OPEN_BROWSER}
+        />
       ) : !open ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-muted-foreground text-sm">
           <span>Your browser is closed.</span>

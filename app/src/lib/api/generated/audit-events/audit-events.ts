@@ -30,6 +30,7 @@ import type {
   InvalidAuditQuestionResponse,
   InvalidRequestResponse,
   ListAuditEventsParams,
+  ListDeploymentAuditEventsParams,
   ModelFailedResponse,
   ModelNotConfiguredResponse,
   OrganizationNotFoundResponse,
@@ -84,7 +85,7 @@ export const getListAuditEventsUrl = (
 };
 
 /**
- * Return one page of the organization's audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.invitation_canceled, organization.member_joined, organization.member_removed and organization.member_role_changed. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.
+ * Return one page of the organization's audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.invitation_canceled, organization.member_joined, organization.member_removed, organization.member_role_changed and organization.deleted, and its teams: team.created, team.updated, team.deleted, team.member_added, team.member_role_changed, team.member_removed and team.models_changed (the models before and after, each null when the team set none). A run refused on its model is model.refused: its payload names the model (provider/model), its source, and the rule that refused it (organization or team); when the rule is team, teams lists the teams whose lists applied to the person then, each with its id and its name as it was then ({ id, name }). An event written before this has no teams. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.
  * @summary List audit events
  */
 export const listAuditEvents = async (
@@ -907,3 +908,247 @@ export const useAskAuditEvents = <
 > => {
   return useMutation(getAskAuditEventsMutationOptions(options), queryClient);
 };
+export const getListDeploymentAuditEventsUrl = (
+  organizationId: string,
+  params?: ListDeploymentAuditEventsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/deployment/audit-events?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/deployment/audit-events`;
+};
+
+/**
+ * Return one page of this OpenBot's own trail, newest first: what happened to the installation and to no organization. That includes what the server found when it started, a Recorder connect code nobody knows, identity providers registered or removed, and the configuration making somebody the admin who runs this OpenBot. Where this OpenBot keeps one organization, those events are on that organization's trail, and this list is empty. Only the admin who runs this OpenBot may read it. Where it keeps one organization, that is the organization's admins. Where it may hold several, it is the people its configuration names (INITIAL_ADMIN_EMAILS), asking in an organization they administer, and any other admin is refused. eventType, from and to narrow the events as they do on an organization's trail. A missing cursor starts at the newest event, and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Events older than the audit retention window are removed, as they are from every organization's trail.
+ * @summary List this OpenBot's own audit events
+ */
+export const listDeploymentAuditEvents = async (
+  organizationId: string,
+  params?: ListDeploymentAuditEventsParams,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AuditEventPage> => {
+  return apiRequest<AuditEventPage>(
+    getListDeploymentAuditEventsUrl(organizationId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListDeploymentAuditEventsQueryKey = (
+  organizationId: string,
+  params?: ListDeploymentAuditEventsParams,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/deployment/audit-events`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListDeploymentAuditEventsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListDeploymentAuditEventsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListDeploymentAuditEventsQueryKey(organizationId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listDeploymentAuditEvents>>
+  > = ({ signal }) =>
+    listDeploymentAuditEvents(organizationId, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: organizationId !== null && organizationId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListDeploymentAuditEventsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDeploymentAuditEvents>>
+>;
+export type ListDeploymentAuditEventsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useListDeploymentAuditEvents<
+  TData = Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params: undefined | ListDeploymentAuditEventsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+          TError,
+          Awaited<ReturnType<typeof listDeploymentAuditEvents>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListDeploymentAuditEvents<
+  TData = Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListDeploymentAuditEventsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+          TError,
+          Awaited<ReturnType<typeof listDeploymentAuditEvents>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListDeploymentAuditEvents<
+  TData = Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListDeploymentAuditEventsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List this OpenBot's own audit events
+ */
+
+export function useListDeploymentAuditEvents<
+  TData = Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListDeploymentAuditEventsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDeploymentAuditEvents>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListDeploymentAuditEventsQueryOptions(
+    organizationId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}

@@ -346,7 +346,7 @@ test("a done primary reads green with a check", () => {
   expect(footerButtons(view)).toHaveLength(1);
   expect(done?.textContent).toBe("Notifications on");
   expect(done?.hasAttribute("data-done")).toBe(true);
-  expect(done?.className).toContain("bg-emerald-500/10");
+  expect(done?.className).toContain("bg-success/10");
 });
 
 test("an optional step keeps Not now's place when it goes, so the primary doesn't move", () => {

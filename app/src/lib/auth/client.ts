@@ -63,6 +63,35 @@ export async function signInWith(
 }
 
 /**
+ * Link the signed-in person's company account: sign in, while signed in, through one of their organization's identity
+ * providers, by its id. The server links what the provider vouches for to the account they already have (as a GitHub
+ * member authenticates their SAML identity to an organization) rather than opening another, and the browser comes back
+ * to `callbackURL` with both.
+ *
+ * By the provider's id, not by address: somebody who joined with a personal address has none at the company's domain.
+ * Injectable for the same reason as `signInWith`: the Better Auth client is a proxy.
+ */
+export async function linkCompanyAccount(
+  providerId: string,
+  start: (input: {
+    providerId: string;
+    callbackURL: string;
+  }) => Promise<SocialResult> = (input) =>
+    (
+      authClient as unknown as {
+        signIn: { sso: (i: unknown) => Promise<SocialResult> };
+      }
+    ).signIn.sso(input),
+  callbackURL: string = window.location.href,
+) {
+  const result = await start({ providerId, callbackURL });
+  if (result.error)
+    throw new Error(
+      result.error.message || "Couldn't start signing in with your company.",
+    );
+}
+
+/**
  * Start sign-in through whichever identity provider covers this address.
  *
  * The email is not a credential here and no password is asked for: only the part after the @ is

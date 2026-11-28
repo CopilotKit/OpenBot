@@ -4,6 +4,7 @@ import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { cn } from "@/lib/utils";
 import { PageHeader, TabHeader } from "./header";
@@ -69,6 +70,7 @@ export function OpenDuetFrame({ children }: { children: ReactNode }) {
         <BotsNavBadge />
       </div>
       <ConnectionBanner />
+      <MovedAppsBanner />
       <UpdateBanner />
       <SelfHostBanner />
       <div

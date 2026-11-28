@@ -505,6 +505,7 @@ test("a reply is shown once and whole after leaving its conversation and coming 
   queryClient.setQueryData(channelKeys.detail(channel.id), channel);
 
   const router = createRouter({
+    context: { queryClient },
     routeTree: rootRoute.addChildren([
       authedRoute.addChildren([
         appRoute.addChildren([homeRoute, conversationRoute]),

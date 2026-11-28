@@ -37,9 +37,12 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # The window of releases, for the nightly and on-demand runs. A pull request has a single leg, the
+  # previous release, and its upgrade job finds that itself: one runner to wait for, not two in a row.
   legs:
     name: releases to upgrade from
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    runs-on: openbot-ubuntu-16core
     timeout-minutes: 5
     outputs:
       releases: ${{ steps.legs.outputs.releases }}
@@ -53,24 +56,24 @@ jobs:
       - id: legs
         env:
           GH_TOKEN: ${{ github.token }}
-          MODE: ${{ github.event_name == 'pull_request' && 'previous' || 'window' }}
         run: |
           set -euo pipefail
           gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --json tagName,publishedAt,isPrerelease > "$RUNNER_TEMP/releases.json"
-          releases="$(bun desktop/scripts/upgrade-legs.ts "$MODE" --releases "$RUNNER_TEMP/releases.json")"
-          echo "Upgrading from ($MODE): $releases"
+          releases="$(bun desktop/scripts/upgrade-legs.ts window --releases "$RUNNER_TEMP/releases.json")"
+          echo "Upgrading from (window): $releases"
           echo "releases=$releases" >> "$GITHUB_OUTPUT"
 
   upgrade:
     name: upgrade from ${{ matrix.release }}
     needs: legs
-    if: needs.legs.outputs.releases != '[]'
+    # `legs` is skipped on a pull request, so this runs unless the run was cancelled.
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || (needs.legs.result == 'success' && needs.legs.outputs.releases != '[]')) }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        release: ${{ fromJSON(needs.legs.outputs.releases) }}
+        release: ${{ fromJSON(github.event_name == 'pull_request' && '["previous"]' || needs.legs.outputs.releases) }}
     env:
       # The commit GitHub serves this tree's source archive for: the pull request's head, or main's.
       COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -79,19 +82,42 @@ jobs:
         with:
           ref: ${{ env.COMMIT }}
           persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: matrix.release == 'previous'
+        with:
+          bun-version: 1.4.3
+      # On a pull request, the newest published release at or below this tree's version; none when
+      # nothing has been published below it, and then there is nothing to upgrade from.
+      - id: from
+        name: The release to upgrade from
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ matrix.release }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE" = previous ]; then
+            gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --json tagName,publishedAt,isPrerelease > "$RUNNER_TEMP/releases.json"
+            RELEASE="$(bun desktop/scripts/upgrade-legs.ts previous --releases "$RUNNER_TEMP/releases.json" | jq -r '.[0] // empty')"
+          fi
+          echo "Upgrading from: ${RELEASE:-no earlier release, nothing to upgrade}"
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        if: steps.from.outputs.release != ''
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.from.outputs.release != ''
         with:
           workspaces: desktop/src-tauri
           key: upgrade
-      - run: |
+      - if: steps.from.outputs.release != ''
+        run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       # This tree's release as an internal build pins it: the server, computer and supervisor images
       # at the tag backend-images.env names, each by its digest, under the commit's own version.
       - name: This tree's image list
+        if: steps.from.outputs.release != ''
         run: |
           set -euo pipefail
           tag="$(sed -n 's/^OPENBOT_BACKEND_TAG=//p' backend-images.env | tail -1)"
@@ -103,10 +129,11 @@ jobs:
             '{version: $version, images: {openbot: {reference: $openbot}, server: {reference: $openbot}, "agent-computer": {reference: $openbot}, supervisor: {reference: $supervisor}}}' \
             > "$RUNNER_TEMP/container-images.json"
           cat "$RUNNER_TEMP/container-images.json"
-      - name: The upgrade from ${{ matrix.release }} to this tree
+      - name: The upgrade from ${{ steps.from.outputs.release }} to this tree
+        if: steps.from.outputs.release != ''
         working-directory: desktop/src-tauri
         env:
-          OPENBOT_UPGRADE_FROM: ${{ matrix.release }}
+          OPENBOT_UPGRADE_FROM: ${{ steps.from.outputs.release }}
           OPENBOT_UPGRADE_TO_COMMIT: ${{ env.COMMIT }}
         run: |
           set -euo pipefail

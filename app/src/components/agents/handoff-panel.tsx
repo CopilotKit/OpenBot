@@ -23,6 +23,7 @@ import {
   agentHandoffQueryOptions,
   agentListQueryOptions,
 } from "@/lib/agents/queries";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /**
@@ -97,11 +98,20 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
 
       {setGrant.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {setGrant.error.message}
+          {failureSaid(setGrant.error)}
         </p>
       ) : null}
 
-      {grantable && total === 0 ? (
+      {/* The roster unread is not a roster of none: say it couldn't be read instead. */}
+      {agents.data === undefined && agents.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {loadFailure(
+            agents.error,
+            "Couldn't load your Bots. Try again in a moment.",
+          )}
+        </p>
+      ) : null}
+      {grantable && total === 0 && agents.data !== undefined ? (
         <PageEmpty icon={IconBolt} title="No other Bots yet">
           When there are more, you can let this Bot ask them here.
         </PageEmpty>

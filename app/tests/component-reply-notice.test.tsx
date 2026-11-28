@@ -44,7 +44,6 @@ import {
   lifecycleOf,
   lifecycleResponse,
 } from "./bots-api";
-import { settleReactWork } from "./settle-react-work";
 import {
   ANNOUNCE_COMPONENTS_PATH,
   announcedResponse,
@@ -53,6 +52,7 @@ import {
   checkComponentPath,
   checkResponse,
 } from "./components-api";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * A Bot whose whole answer is something it drew raises the same "replied" notice a Bot that answers
@@ -191,7 +191,8 @@ class ServerSocket {
 function announce(event: Record<string, unknown>) {
   for (const socket of ServerSocket.opened)
     if (
-      socket.url.endsWith("/api/v2/organizations/default/conversation-events")
+      new URL(socket.url).pathname ===
+      "/api/v2/organizations/default/conversation-events"
     )
       socket.onmessage?.({ data: JSON.stringify(event) });
 }

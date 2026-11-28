@@ -2,9 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { leftSaid } from "./journey";
+import { asProblem, InlineFailure, type Problem } from "./Problem";
 import {
-  type Downloads,
   DownloadProgress,
+  type Downloads,
   StatusLine,
   useDownloadWhere,
 } from "./SetupProgress";
@@ -31,6 +32,11 @@ export type EarlyDownloads = {
   download?: number;
   /** Downloading, and paused until there is enough free space (`wait_for_room`). */
   paused?: boolean;
+  /**
+   * When the disk is short and moving the engine to the install folder's drive would help: that
+   * drive, as "F:". The space message then offers the move (`move_engine_here`).
+   */
+  moveTo?: string;
 };
 
 /** Where the early downloads are, as the native side last said. */
@@ -143,7 +149,13 @@ export function earlyDownloadsSaid(
  */
 export function EarlyDownloadsLine({
   firstScreen = false,
+  quiet = false,
 }: {
+  /**
+   * A row beside the line spins already (Install's own): the line keeps its words and its bar, with
+   * no spinner of its own. Two spinners read as two waits.
+   */
+  quiet?: boolean;
   /**
    * The Welcome screen, whose Install starts the downloads. There the line keeps the height of its tallest
    * state (a line, a bar and the bytes) whatever it says, and when it says nothing: on Windows F
@@ -164,10 +176,62 @@ export function EarlyDownloadsLine({
         firstScreen ? "early-downloads first-screen" : "early-downloads"
       }
     >
-      {said && <StatusLine working={download != null}>{said}</StatusLine>}
+      {said && (
+        <StatusLine working={download != null && !quiet}>{said}</StatusLine>
+      )}
       {said && download && where && (
         <DownloadProgress downloads={download} where={where} />
       )}
+      {said && downloads?.moveTo && (
+        <MoveEngine key={downloads.moveTo} to={downloads.moveTo} />
+      )}
     </div>
+  );
+}
+
+/**
+ * Under the space message, the offer to move the engine to the install folder's drive, and the
+ * button that says yes. Only the click moves it. Once it has moved, the old summary still offers it
+ * until the native side measures the disk again (about 10 seconds): the button stays gone until a
+ * summary offers another drive (`key={moveTo}`) or none. A failed move says why and offers it again.
+ */
+function MoveEngine({ to }: { to: string }) {
+  const [move, setMove] = useState<"offered" | "moving" | "moved">("offered");
+  const [problem, setProblem] = useState<Problem | null>(null);
+  if (move === "moving") {
+    return <StatusLine>Moving OpenBot's storage to {to}…</StatusLine>;
+  }
+  if (move === "moved") {
+    return (
+      <p className="caution">
+        OpenBot's storage is on {to} now. OpenBot checks the free space again.
+      </p>
+    );
+  }
+  return (
+    <>
+      {problem && <InlineFailure problem={problem} />}
+      <div className="row">
+        <button
+          type="button"
+          onClick={() => {
+            setProblem(null);
+            setMove("moving");
+            invoke("move_engine_here").then(
+              () => setMove("moved"),
+              (thrown: unknown) => {
+                setProblem(asProblem(thrown));
+                setMove("offered");
+              },
+            );
+          }}
+        >
+          Move OpenBot's storage to {to}
+        </button>
+      </div>
+      <p className="caution">
+        Docker Desktop and other Linux apps on this computer stop for a moment.
+      </p>
+    </>
   );
 }

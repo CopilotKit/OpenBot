@@ -10,6 +10,7 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NewRoutinePage } from "@/components/routines/new-routine-page";
+import type { RoutineDraft } from "@/lib/api/generated/model";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { proactiveKeys } from "@/lib/proactive";
 import { queryClient } from "@/query-client";
@@ -152,12 +153,20 @@ function serving({
 /** The router of the last `draw()`, to read where a save went. */
 let router: { state: { location: { pathname: string } } };
 
-function draw({ preset = true } = {}) {
+function draw({
+  preset = true,
+  draft,
+}: {
+  preset?: boolean;
+  draft?: RoutineDraft;
+} = {}) {
   router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({
       component: () =>
-        preset ? (
+        draft ? (
+          <NewRoutinePage agentId="bot-1" draft={draft} />
+        ) : preset ? (
           <NewRoutinePage agentId="bot-1" channelId="c1" />
         ) : (
           <NewRoutinePage />
@@ -170,6 +179,33 @@ function draw({ preset = true } = {}) {
     </QueryClientProvider>,
   );
 }
+
+test("a draft the Routines box read fills in the form", async () => {
+  serving();
+  const view = draw({
+    draft: {
+      instruction: "Send me yesterday's leads",
+      title: "",
+      does: "act",
+      starts: "unsaid",
+      cron: null,
+      timezone: "UTC",
+      doneWhen: "",
+      conversationId: null,
+      intervalMinutes: null,
+    },
+  });
+  const instruction = await view.findByLabelText("What to do");
+  expect((instruction as HTMLTextAreaElement).value).toBe(
+    "Send me yesterday's leads",
+  );
+  expect((await view.findByLabelText("It should")).textContent).toContain(
+    "Act for you",
+  );
+  expect((await view.findByLabelText("Starts")).textContent).toContain(
+    "On a schedule",
+  );
+});
 
 test("the default answers make a routine", async () => {
   serving();

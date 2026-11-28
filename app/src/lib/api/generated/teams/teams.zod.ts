@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the organization's teams, in the order they were created. Any member of the organization can read it. Each team says the caller's own role in it and whether the caller may manage it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's teams, in the order they were created. Any member of the organization can read it. Each team says the caller's own role in it and whether the caller may manage it. search narrows the list to the teams whose name holds it, ignoring case; it finds only this organization's teams. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List an organization's teams
  */
 
@@ -17,6 +17,9 @@ export const ListTeamsParams = zod.object({
     ),
 });
 
+export const listTeamsQuerySearchMax = 200;
+
+export const listTeamsQuerySearchRegExp = new RegExp("^[^\\x00]*$");
 export const listTeamsQueryLimitDefault = 50;
 export const listTeamsQueryLimitMax = 100;
 
@@ -25,6 +28,14 @@ export const listTeamsQueryCursorMax = 4096;
 export const listTeamsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
 export const ListTeamsQueryParams = zod.object({
+  search: zod
+    .string()
+    .max(listTeamsQuerySearchMax)
+    .regex(listTeamsQuerySearchRegExp)
+    .optional()
+    .describe(
+      "Part of a team's name, matched without regard to case. Leading and trailing spaces are ignored; empty lists every team.",
+    ),
   limit: zod
     .int()
     .min(1)
@@ -75,7 +86,9 @@ export const ListTeamsResponse = zod.object({
           memberCount: zod
             .int()
             .min(listTeamsResponseTeamsItemMemberCountMin)
-            .describe("How many people are in the team itself."),
+            .describe(
+              "How many people are in the team itself: the people its members list shows.",
+            ),
           role: zod
             .union([
               zod
@@ -214,7 +227,9 @@ export const CreateTeamResponse = zod.object({
       memberCount: zod
         .int()
         .min(createTeamResponseTeamMemberCountMin)
-        .describe("How many people are in the team itself."),
+        .describe(
+          "How many people are in the team itself: the people its members list shows.",
+        ),
       role: zod
         .union([
           zod
@@ -302,7 +317,9 @@ export const GetTeamResponse = zod.object({
       memberCount: zod
         .int()
         .min(getTeamResponseTeamMemberCountMin)
-        .describe("How many people are in the team itself."),
+        .describe(
+          "How many people are in the team itself: the people its members list shows.",
+        ),
       role: zod
         .union([
           zod
@@ -439,7 +456,9 @@ export const UpdateTeamResponse = zod.object({
       memberCount: zod
         .int()
         .min(updateTeamResponseTeamMemberCountMin)
-        .describe("How many people are in the team itself."),
+        .describe(
+          "How many people are in the team itself: the people its members list shows.",
+        ),
       role: zod
         .union([
           zod
@@ -515,7 +534,7 @@ export const DeleteTeamHeader = zod.object({
 export const DeleteTeamResponse = zod.void();
 
 /**
- * Return one page of the people in a team, in the order they joined it. Any member of the organization can read it. People who are only in a team beneath this one are not listed. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the people in a team, in the order they joined it. Any member of the organization can read it. People who are only in a team beneath this one are not listed, and nor is anybody who is not a member of the organization now: somebody removed from it is listed again once they are restored. search narrows the list to the people whose address or name holds it, ignoring case. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List a team's members
  */
 
@@ -538,6 +557,9 @@ export const ListTeamMembersParams = zod.object({
     .describe("The team's id. Opaque."),
 });
 
+export const listTeamMembersQuerySearchMax = 200;
+
+export const listTeamMembersQuerySearchRegExp = new RegExp("^[^\\x00]*$");
 export const listTeamMembersQueryLimitDefault = 50;
 export const listTeamMembersQueryLimitMax = 100;
 
@@ -546,6 +568,14 @@ export const listTeamMembersQueryCursorMax = 4096;
 export const listTeamMembersQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
 export const ListTeamMembersQueryParams = zod.object({
+  search: zod
+    .string()
+    .max(listTeamMembersQuerySearchMax)
+    .regex(listTeamMembersQuerySearchRegExp)
+    .optional()
+    .describe(
+      "Part of an address or a name, matched without regard to case. Leading and trailing spaces are ignored; empty lists everybody.",
+    ),
   limit: zod
     .int()
     .min(1)
@@ -736,3 +766,203 @@ export const RemoveTeamMemberHeader = zod.object({
 });
 
 export const RemoveTeamMemberResponse = zod.void();
+
+/**
+ * Return the models a team allows its people to run, or null when the team sets none. A person in teams with lists may run any model one of those lists names (their teams' parents' lists included), within what the organization allows: its model allowlist when that narrows anything, otherwise every model. A team with no list sets nothing, and a person in no team with a list runs what the organization allows. Admins and owners are held to it like anyone else. Any member of the organization can read it. A team of another organization is not found.
+ * @summary Read which models a team's people may run
+ */
+
+export const getTeamModelsPathTeamIdMax = 200;
+
+export const getTeamModelsPathTeamIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const GetTeamModelsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  teamId: zod
+    .string()
+    .min(1)
+    .max(getTeamModelsPathTeamIdMax)
+    .regex(getTeamModelsPathTeamIdRegExp)
+    .describe("The team's id. Opaque."),
+});
+
+export const getTeamModelsResponseModelsItemMax = 200;
+
+export const getTeamModelsResponseModelsItemRegExp = new RegExp(
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
+);
+
+export const GetTeamModelsResponse = zod
+  .object({
+    models: zod
+      .array(
+        zod
+          .string()
+          .min(1)
+          .max(getTeamModelsResponseModelsItemMax)
+          .regex(getTeamModelsResponseModelsItemRegExp)
+          .describe(
+            "A model, as provider/model: the organization's model allowlist names models this way, from the catalogue's provider and a model's id (getModelCatalogue).",
+          ),
+      )
+      .nullable()
+      .describe(
+        "The models, as provider/model, in the order they were saved. Null when the team sets none.",
+      ),
+    updatedBy: zod
+      .string()
+      .nullable()
+      .describe(
+        "The id of the person who last set them. Null when the team sets none, or that person's account is gone.",
+      ),
+    updatedAt: zod.iso
+      .datetime({ offset: true })
+      .nullable()
+      .describe("When they were last set. Null when the team sets none."),
+  })
+  .describe(
+    "The models a team allows its people to run. models null: the team sets none, and its people run what their other teams and the organization allow.",
+  );
+
+/**
+ * Replace the models a team allows its people to run. At least one, each one the organization's model catalogue offers (getModelCatalogue with view=all), named as the organization's model allowlist names models: provider/model. A model the organization's allowlist leaves out may be listed, and runs only once the organization allows it too. From the next request, the team's people (and the people of the teams beneath it) run only models one of their teams allows. Only an owner or an admin of the organization can, for a team made here or one from the company's directory alike. A repeated request with the same Idempotency-Key and body returns the first result.
+ * @summary Set which models a team's people may run
+ */
+
+export const replaceTeamModelsPathTeamIdMax = 200;
+
+export const replaceTeamModelsPathTeamIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const ReplaceTeamModelsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  teamId: zod
+    .string()
+    .min(1)
+    .max(replaceTeamModelsPathTeamIdMax)
+    .regex(replaceTeamModelsPathTeamIdRegExp)
+    .describe("The team's id. Opaque."),
+});
+
+export const replaceTeamModelsHeaderIdempotencyKeyMax = 128;
+
+export const ReplaceTeamModelsHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(replaceTeamModelsHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const replaceTeamModelsBodyModelsItemMax = 200;
+
+export const replaceTeamModelsBodyModelsItemRegExp = new RegExp(
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
+);
+export const replaceTeamModelsBodyModelsMax = 200;
+
+export const ReplaceTeamModelsBody = zod.object({
+  models: zod
+    .array(
+      zod
+        .string()
+        .min(1)
+        .max(replaceTeamModelsBodyModelsItemMax)
+        .regex(replaceTeamModelsBodyModelsItemRegExp)
+        .describe(
+          "A model, as provider/model: the organization's model allowlist names models this way, from the catalogue's provider and a model's id (getModelCatalogue).",
+        ),
+    )
+    .min(1)
+    .max(replaceTeamModelsBodyModelsMax)
+    .describe(
+      "The models the team's people may run, as provider/model. Each one the organization's model catalogue offers.",
+    ),
+});
+
+export const replaceTeamModelsResponseModelsItemMax = 200;
+
+export const replaceTeamModelsResponseModelsItemRegExp = new RegExp(
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
+);
+
+export const ReplaceTeamModelsResponse = zod
+  .object({
+    models: zod
+      .array(
+        zod
+          .string()
+          .min(1)
+          .max(replaceTeamModelsResponseModelsItemMax)
+          .regex(replaceTeamModelsResponseModelsItemRegExp)
+          .describe(
+            "A model, as provider/model: the organization's model allowlist names models this way, from the catalogue's provider and a model's id (getModelCatalogue).",
+          ),
+      )
+      .nullable()
+      .describe(
+        "The models, as provider/model, in the order they were saved. Null when the team sets none.",
+      ),
+    updatedBy: zod
+      .string()
+      .nullable()
+      .describe(
+        "The id of the person who last set them. Null when the team sets none, or that person's account is gone.",
+      ),
+    updatedAt: zod.iso
+      .datetime({ offset: true })
+      .nullable()
+      .describe("When they were last set. Null when the team sets none."),
+  })
+  .describe(
+    "The models a team allows its people to run. models null: the team sets none, and its people run what their other teams and the organization allow.",
+  );
+
+/**
+ * Clear a team's models, so the team sets none again and its people run what their other teams and the organization allow. Only an owner or an admin of the organization can. Clearing a team that sets none changes nothing.
+ * @summary Stop limiting a team's models
+ */
+
+export const deleteTeamModelsPathTeamIdMax = 200;
+
+export const deleteTeamModelsPathTeamIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const DeleteTeamModelsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  teamId: zod
+    .string()
+    .min(1)
+    .max(deleteTeamModelsPathTeamIdMax)
+    .regex(deleteTeamModelsPathTeamIdRegExp)
+    .describe("The team's id. Opaque."),
+});
+
+export const deleteTeamModelsHeaderIdempotencyKeyMax = 128;
+
+export const DeleteTeamModelsHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(deleteTeamModelsHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const DeleteTeamModelsResponse = zod.void();

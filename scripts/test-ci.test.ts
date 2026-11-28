@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -37,9 +37,13 @@ process.exitCode = 7;
   return directory;
 }
 
-async function runBun(directory: string, script: string) {
-  const proc = Bun.spawn(["bun", script], {
+async function runBun(directory: string, script: string, args: string[] = []) {
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env.TEST_SHARD;
+  delete env.TEST_COUNT_DIR;
+  const proc = Bun.spawn(["bun", script, ...args], {
     cwd: directory,
+    env,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -103,4 +107,53 @@ test("preserves the child stderr tail before returning the child status", async 
   expect(fixedWrapper.stdout).toContain(
     'error: script "test" exited with code 7',
   );
+});
+
+test("CI discovery runs production tests without importing Workbench or fake-native tests", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "openbot-test-ci-discovery-"));
+  createdDirectories.push(directory);
+  await writeFile(
+    join(directory, "package.json"),
+    JSON.stringify({
+      scripts: {
+        pretest:
+          'bun -e \'require("node:fs").writeFileSync("pretest-ran", "yes")\'',
+        test: "bun test",
+      },
+    }),
+  );
+  await writeFile(
+    join(directory, "bunfig.toml"),
+    '[test]\npathIgnorePatterns = ["agent-langgraph-ts/**"]\n',
+  );
+  await mkdir(join(directory, "src"));
+  await writeFile(
+    join(directory, "src/production.test.ts"),
+    `import {expect,test} from "bun:test";
+import {readFileSync,writeFileSync} from "node:fs";
+test("production test really executes",()=>{expect(readFileSync("pretest-ran","utf8")).toBe("yes");writeFileSync("production-ran","yes")});`,
+  );
+  const forbidden = [
+    "workbench",
+    "app/workbench/nested",
+    "fakeNative",
+    "desktop/src/fakeNative",
+    "agent-langgraph-ts",
+  ];
+  for (const path of forbidden) {
+    await mkdir(join(directory, path), { recursive: true });
+    await writeFile(
+      join(directory, path, "must-not-import.test.ts"),
+      `throw new Error("CI imported ${path}");`,
+    );
+  }
+  // One shard bypasses only the aggregate floor, so this small project exercises real discovery
+  // and the pretest hook without changing the production suite's minimum count.
+  const result = await runBun(directory, join(import.meta.dir, "test-ci.ts"), [
+    "--shard=1/1",
+  ]);
+  expect(result.stderr).not.toContain("CI imported");
+  expect(result.exitCode).toBe(0);
+  expect(result.stderr).toContain("1 tests ran in shard 1/1");
+  expect(await readFile(join(directory, "production-ran"), "utf8")).toBe("yes");
 });

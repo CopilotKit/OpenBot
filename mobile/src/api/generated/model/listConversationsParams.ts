@@ -12,6 +12,12 @@ export type ListConversationsParams = {
    */
   q?: string;
   /**
+   * Only the conversations this Bot takes part in, one-Bot and group alike. A Bot the caller has no conversations with answers an empty page. Cannot be combined with q.
+   * @minLength 1
+   * @maxLength 200
+   */
+  botId?: string;
+  /**
    * Most items in one page.
    * @minimum 1
    * @maximum 200

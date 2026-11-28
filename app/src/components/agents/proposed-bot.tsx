@@ -10,6 +10,7 @@ import {
   type ProposedBot,
   wasCreated,
 } from "@/lib/agents/proposal";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 
 /**
  * The coworker a Bot has written, put in front of the person before it exists.
@@ -71,7 +72,7 @@ export function ProposedBotCard({
    * after whatever the refusal named has been dealt with, or declining. Answering the tool with the
    * error would end the turn and leave the person retyping their request.
    */
-  const [refusal, setRefusal] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<Failure | null>(null);
 
   if (result !== undefined) {
     /*
@@ -115,9 +116,8 @@ export function ProposedBotCard({
     } catch (cause) {
       // Left on the card with the buttons still live. See `refusal` above.
       setSending(null);
-      setRefusal(
-        cause instanceof Error ? cause.message : "The Bot wasn't created.",
-      );
+      // The refusal itself, not its words: a hold is drawn calmly (lib/load-failure.tsx).
+      setRefusal(failureOf(cause, "The Bot wasn't created."));
       return;
     }
     /*
@@ -177,7 +177,7 @@ export function ProposedBotCard({
 
       {refusal ? (
         <p className="mt-3 text-destructive text-sm" role="alert">
-          {refusal}
+          {failureSaid(refusal)}
         </p>
       ) : null}
 

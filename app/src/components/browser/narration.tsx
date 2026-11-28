@@ -123,7 +123,7 @@ export function NativeNarrationRow({
               {/* Decorative: the word beside it says it is live. */}
               <span
                 aria-hidden="true"
-                className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+                className="size-1.5 shrink-0 rounded-full bg-success motion-safe:animate-pulse"
               />
               {nativeNarrationSentence(voice)}
             </span>
@@ -170,13 +170,13 @@ export function NarrationSwitch({
     >
       {listening ? (
         <span
-          className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400"
+          className="inline-flex items-center gap-1.5 text-success"
           role="status"
         >
           {/* Decorative: the word beside it says it is live. */}
           <span
             aria-hidden="true"
-            className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+            className="size-1.5 shrink-0 rounded-full bg-success motion-safe:animate-pulse"
           />
           Listening
         </span>
@@ -320,7 +320,7 @@ export function NarrationRow({
               {/* Decorative: the word beside it says it is live. */}
               <span
                 aria-hidden="true"
-                className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+                className="size-1.5 shrink-0 rounded-full bg-success motion-safe:animate-pulse"
               />
               {sentence}
             </span>

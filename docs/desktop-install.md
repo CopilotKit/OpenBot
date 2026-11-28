@@ -43,7 +43,8 @@ What is about OpenBot on this computer is not there while the app is connected:
 
 | On this computer | Connected to an OpenBot |
 |---|---|
-| Start, Stop and Restart, the Status window, and their tray and menu items | Not shown. The tray and menu have Show Window, Open Log Folder, Sign Out and Quit. |
+| Start, Stop and Restart, the Status window, and their tray and menu items | Not shown. The tray and menu have Show Window, Open Log Folder, Get Troubleshooting Logs…, Sign Out and Quit. |
+| Get Troubleshooting Logs…: the engine, the containers and the server's log on this computer | What the app saw of the OpenBot it is connected to: its address, whether it answers, its release and the account and organization ids; the app's own recent problems (requests that failed or got no answer, each with the request id the server's logs file it under, page errors and failed runs); the relay's recent lines and the end of the app's log. Keys, tokens, passwords, cookies and email addresses are taken out. |
 | Installing and updating OpenBot's services (downloads, the engine, the upgrade at Start) | Never run. The app still updates itself. |
 | The local Intelligence, the account sign-in and the 30-day license | Not asked for. The OpenBot it connects to has its own. |
 | Model keys and model sign-ins kept on this computer | Not shown. That OpenBot's admin sets its models. |
@@ -72,7 +73,7 @@ sequenceDiagram
   N->>N: engine, deployment download, image pulls
   W->>N: sign_in_to_copilotkit (Account opens)
   N->>C: login (no engine needed; opens the browser)
-  Note over W,N: macOS only, when Podman needs installing: the window says the password prompt<br/>is coming and why, and it comes up by itself a moment later
+  Note over W,N: macOS only, when Podman needs installing: the window says the password prompt<br/>comes next and why, and it comes up only on Continue
   W->>N: local_eval_terms, once an engine answers
   N->>C: onboard local-terms
   P->>W: Accept the evaluation agreement
@@ -84,6 +85,8 @@ sequenceDiagram
   W->>N: connect_local_eval, run_local_eval
   N->>C: local connect, local start / status
   W->>N: start_stack
+  Note over W: Finishing setup says OpenBot is ready
+  P->>W: Open OpenBot
   W->>N: show_openbot
   Note over W: The window becomes OpenBot
 ```
@@ -106,16 +109,20 @@ sequenceDiagram
 4. **AI.** The person chooses a provider and gives a key or signs in with that provider. If Start
    is later refused because of the model, the person comes back here and changes it.
 5. **Start.** Continue starts everything in order: connect OpenBot to the local Intelligence, start
-   Intelligence, start OpenBot, then open it. The window becomes OpenBot as soon as the stack
-   answers. There is no question step before the handover.
+   Intelligence, then start OpenBot. This screen, Finishing setup, holds the usage-data choice.
+   Once the stack answers, it says OpenBot is ready and stays until the person selects **Open
+   OpenBot**, so there is time to read the choice and change it. The window then becomes OpenBot.
 
-A return visit with a recorded local stack goes straight to Start. Any other saved state,
+A return visit with a recorded local stack goes straight to Start, and the window becomes OpenBot
+as soon as the stack answers. So does a Start that updates an existing installation. Only a first
+run waits for Open OpenBot. Any other saved state,
 including an installation that an earlier app connected to a hosted Intelligence, starts at the
 first screen and keeps its finished install.
 
 ## Usage data and account attribution
 
-The last setup screen, Finishing setup, ends with a usage-data checkbox, checked by default. It
+The last setup screen, Finishing setup, ends with a usage-data checkbox, checked by default, above
+**Open OpenBot**. Whatever the box says when the person selects Open OpenBot is the setting. It
 says OpenBot shares diagnostics like errors, hangs, updates and available memory, never any
 content, and links [Desktop telemetry](../desktop/TELEMETRY.md). Once the person signs in, the
 data is linked to their OpenBot account (their CopilotKit sign-in), as that document says. The
@@ -185,18 +192,49 @@ fill a gap. Three rules hold that boundary:
 - **Install before sign-in, sign-in before the engine.** Downloading software needs no account, and
   it is the slow part. Starting it on the first click means the person signs in while it runs. The
   sign-in waits for nothing: someone who leaves while Podman installs has still signed in.
-- **No password prompt without an explanation first, and no click before one.** On macOS, Podman's
+- **No password prompt until the person has read why and chosen Continue.** On macOS, Podman's
   package needs an administrator, so macOS asks for the person's password. Install downloads the
-  package, says "Your Mac will ask for your password so OpenBot can install what it needs to run.",
-  leaves it a moment to be read (`install::BEFORE_PROMPT`), and raises the prompt by itself. An
-  install step informs the person and moves forward. The prompt says why in OpenBot's words
-  (`do shell script ... with prompt`). Closing it without a password is said plainly, with Try
-  again, and Install asks again by itself after a short wait (`install::GoAhead`,
-  `ASK_AGAIN_AFTER`). Windows installs Podman for the person's own account with no prompt. When
+  package while the person signs in, then waits: a card on whichever step the person is on says
+  "Your Mac will ask for your password" and why, with Continue, and the prompt comes up only on
+  Continue (`install::install_with_password`, `install::GoAhead`). The prompt comes from the system
+  and comes up over every window. Raised on a timer after a line on OpenBot's window, it came up over
+  the browser's sign-in page on the 1.2.0 Mac run while that line sat behind the browser. The
+  prompt says why in OpenBot's words (`do shell script ... with prompt`). Closing it without a
+  password is said plainly, with Try again, and Install asks again by itself after a short wait
+  (`ASK_AGAIN_AFTER`). Windows installs Podman for the person's own account with no prompt. When
   WSL is missing, the Windows blocker says what Windows will ask and starts the change by itself;
   a declined administrator prompt is asked again the same way. The restart after it is the one
   step that waits for the person's click: OpenBot never restarts the computer on its own, because
   the person may have unsaved work open.
+- **On Windows, the engine's disk follows the install folder.** OpenBot's Podman machine is a WSL
+  disk of about 40 GB. By default, Podman puts that disk in the user profile, usually on C:, for
+  every install folder.
+  - **`XDG_DATA_HOME`, on `podman machine init` only:** on Windows, Podman reads it for its data
+    folder, and init puts a new machine's disk there. No flag or `containers.conf` key sets this
+    location. OpenBot sets it to `<install>\engine` (the machine home) for init alone
+    (`engine::podman_command`, `use_machine_home` in `main.rs`). Every later command finds the disk
+    through WSL and the absolute paths in the machine's config, which stays in
+    `%USERPROFILE%\.config`.
+  - **Every other Podman command keeps Podman's default data folder.** Podman keeps state there
+    that the person's own Podman and the uninstaller share: the API proxy's record
+    (`win-sshproxy.tid`, which stop reads to end the proxy on `\\.\pipe\podman-openbot`), and the
+    user-mode networking distribution `podman-net-usermode` with its count of machines and its lock.
+    For the same reason, init runs without `--user-mode-networking`, and `podman machine set
+    --user-mode-networking` turns it on right after, so `podman-net-usermode` is made in the default
+    folder, not in the install folder.
+  - **A drive that cannot hold a WSL disk** (a network share, a removable drive, exFAT, FAT32)
+    keeps the disk in the user profile (`windows::holds_wsl_disk`). Install does not stop, and the
+    `create-machine` row says where the disk is. An installation saved on Docker Desktop has no
+    machine home.
+  - **The space check measures the machine's drive:** the WSL `BasePath` of an existing machine,
+    else the machine home, else the user profile (`early_downloads::disk_place`).
+  - **An existing machine moves only on a click.** The move runs `wsl --shutdown`, which stops
+    every WSL distro on the computer, Docker Desktop included. If the install folder's drive has
+    room and this WSL supports `wsl --manage --move`, the space message offers **Move OpenBot's
+    storage to F:** (`move_engine_here`, `[engine move]` in the log).
+  - **The download cache stays in `~/OpenBot/openbot-engine`.** It holds Compose, which
+    `podman compose` runs. If the cache moves, every existing install loses `podman compose` until
+    Install runs again.
 - **License work after acceptance.** Intelligence setup waits for the evaluation agreement, and
   uses the version of the terms the person accepted.
 - **One engine for both.** OpenBot and Intelligence share one container engine. The app uses, in
@@ -311,6 +349,10 @@ fill a gap. Three rules hold that boundary:
 | `~/OpenBot/.env` | Settings only. A person's own `COMPOSIO_API_KEY` goes here and always wins |
 | Protected store (see `vault.rs`) | Model keys, service tokens and a provisioned Composio key |
 | `%LOCALAPPDATA%\OpenBot` (Windows) | Recorder host files, and the browser profile earlier versions kept in `local-computer` |
+| `<install>\engine` (Windows) | The disk of the Podman machine `openbot`: `containers\podman\machine\wsl\wsldist\openbot\ext4.vhdx`. It holds the images, containers and data, about 40 GB (`engine::machine_home`) |
+| `%USERPROFILE%\.local\share\containers\...` (Windows) | The same disk, when the install folder's drive cannot hold a WSL disk: a network share, a removable drive, exFAT or FAT32 |
+| `%USERPROFILE%\.config` (Windows) | Podman's config for the machine, with absolute paths to its disk |
+| `~/OpenBot/openbot-engine` | The engine download cache: the Podman installer and Compose. It stays here for every install folder (`early_downloads::cache`) |
 
 ## Apps through Composio
 

@@ -22,17 +22,17 @@ export function peopleCount(count: number): string {
 
 /**
  * The second line of a team's row: how many people are in it, where it comes from, the team it is
- * under, and the reader's own role in it. Joined with a middle dot, as the People page's rows are.
+ * under (by `parentName`, once known), and the reader's own role in it. Joined with a middle dot,
+ * as the People page's rows are.
  */
 export function teamFacts(
   team: TeamSummary,
-  teams: readonly TeamSummary[],
+  parentName: string | undefined,
 ): string {
-  const parent = teams.find((other) => other.id === team.parentTeamId);
   return [
     peopleCount(team.memberCount),
     team.source === "directory" ? FROM_DIRECTORY : null,
-    parent ? `Under ${parent.name}` : null,
+    team.parentTeamId !== null && parentName ? `Under ${parentName}` : null,
     team.role === "maintainer"
       ? "You're a maintainer"
       : team.role === "member"

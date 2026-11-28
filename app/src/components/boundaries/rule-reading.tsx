@@ -45,7 +45,7 @@ export function ReadingStatus({
       <div className={cn("flex flex-col gap-2", edited && "opacity-60")}>
         {check.ok ? (
           <p className="flex items-center gap-1.5">
-            <IconCircleCheck className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <IconCircleCheck className="size-4 shrink-0 text-success" />
             {passed}
           </p>
         ) : (
@@ -67,13 +67,9 @@ export function ReadingStatus({
             <p className="mt-0.5 text-muted-foreground">{explanation}</p>
           </div>
         ) : null}
-        {warning ? (
-          <p className="text-amber-600 dark:text-amber-500">{warning}</p>
-        ) : null}
+        {warning ? <p className="text-warning">{warning}</p> : null}
       </div>
-      {edited ? (
-        <p className="text-amber-600 dark:text-amber-500">{edited}</p>
-      ) : null}
+      {edited ? <p className="text-warning">{edited}</p> : null}
     </div>
   );
 }

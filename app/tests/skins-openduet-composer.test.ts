@@ -12,10 +12,15 @@ const read = (path: string) =>
   readFileSync(new URL(path, import.meta.url), "utf8");
 
 test("OpenBot marks a conversation's composer column with its hook", () => {
-  const view = read("../src/components/channels/conversation-view.tsx");
-  expect(view).toMatch(
-    /<div\s+className="[^"]*"\s+data-slot="composer-column"\s*>\s*\{notice\}[\s\S]*?<Composer/,
+  // The column is drawn once, for a conversation with one Bot and for a group.
+  const columns = read("../src/components/channels/conversation-columns.tsx");
+  expect(columns).toMatch(
+    /export function ComposerColumn[\s\S]*?<div\s+className="[^"]*"\s+data-slot="composer-column"\s*>\s*\{children\}/,
   );
+  for (const file of ["conversation-view.tsx", "group-chat.tsx"])
+    expect(read(`../src/components/channels/${file}`)).toMatch(
+      /<ComposerColumn>[\s\S]*?<Composer\b[\s\S]*?<\/ComposerColumn>/,
+    );
 });
 
 test("the OpenDuet skin insets that column, by the hook and only inside its frame", () => {

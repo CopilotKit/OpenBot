@@ -31,8 +31,13 @@ afterAll(() => {
   GlobalRegistrator.unregister();
 });
 
-/** What happened, in order: each request to the server and each command asked of the desktop app. */
+/**
+ * What happened, in order: each request to the server and each command asked of the desktop app.
+ * The problems the page hands the desktop app's log are left out: `desktop-problems.test.ts` is
+ * about those.
+ */
 let happened: string[] = [];
+const RECORD_PROBLEM = "plugin:openbot-desktop|record_problem";
 let serverAgrees = true;
 const originalFetch = globalThis.fetch;
 
@@ -40,6 +45,7 @@ function installShell(answer: "accepts" | "refuses") {
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
     transformCallback: () => 0,
     invoke: async (command: string, args?: Record<string, unknown>) => {
+      if (command === RECORD_PROBLEM) return null;
       happened.push(`shell ${command} ${JSON.stringify(args ?? {})}`);
       if (answer === "refuses") throw "command set_organization not found";
       return null;
@@ -127,9 +133,13 @@ describe("an organization the person has left, named by the desktop app", () => 
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
       transformCallback: () => 0,
       invoke: async (command: string, args?: Record<string, unknown>) => {
+        if (command === RECORD_PROBLEM) return null;
         happened.push(`shell ${command} ${JSON.stringify(args ?? {})}`);
         if (command === "plugin:openbot-desktop|set_organization")
           named = (args?.organizationId as string | null) ?? null;
+        // As the desktop app answers it: this window shows an OpenBot it is connected to.
+        if (command === "plugin:openbot-desktop|connection")
+          return { mode: "connected", address: "https://openbot.example" };
         return null;
       },
     };
@@ -194,6 +204,7 @@ describe("an organization the person has left, named by the desktop app", () => 
     expect(currentOrganizationId()).toBe(OWN.id);
     expect(named).toBeNull();
     expect(happened).toEqual([
+      "shell plugin:openbot-desktop|connection {}",
       "server /api/v2/organizations/default/deployment as org_kai",
       "server /api/v2/people/me/organizations as org_kai",
       'shell plugin:openbot-desktop|set_organization {"organizationId":null}',

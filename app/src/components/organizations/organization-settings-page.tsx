@@ -2,16 +2,19 @@ import {
   IconBuilding,
   IconChevronDown,
   IconChevronRight,
+  IconCreditCard,
+  IconSearch,
 } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, useEffect, useId, useState } from "react";
 import {
+  PageEmpty,
   PageRows,
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogBody,
@@ -37,11 +40,18 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  Progress,
+  ProgressLabel,
+  ProgressValue,
+} from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin, type KnownRole } from "@/lib/auth/roles";
+import { failureSaid } from "@/lib/load-failure";
 import {
   changeMemberRoleMutationOptions,
+  deleteOrganizationMutationOptions,
   leaveOrganizationMutationOptions,
   removeOrganizationMemberMutationOptions,
   renameOrganizationMutationOptions,
@@ -49,19 +59,37 @@ import {
 import {
   type OrganizationMemberSummary,
   type OrganizationSummary,
-  organizationMembersQueryOptions,
+  organizationMemberPagesQueryOptions,
   useOrganizationChoices,
 } from "@/lib/organizations/queries";
 import {
+  DEACTIVATED,
   givableRoles,
-  initialsOf,
   memberControl,
+  memberLine,
   personName,
+  removeMemberWords,
   roleChangeQuestion,
   roleInSentence,
   roleName,
 } from "@/lib/organizations/words";
+import { SEARCH_MAX } from "@/lib/people/queries";
+import {
+  employeePaysForOthers,
+  employeeTrialUsedUp,
+  organizationNeedsCard,
+  usePlan,
+} from "@/lib/plan/queries";
+import {
+  COPILOTKIT_EMPLOYEE_LINE,
+  cardAction,
+  OTHERS_NEED_A_CARD,
+  planSummary,
+  trialUsed,
+} from "@/lib/plan/words";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { PersonAvatar } from "./person-avatar";
 import { SentInvitationsSection } from "./sent-invitations-section";
 
 /** The API's cap on an organization's name, so the field stops where the server does. */
@@ -96,11 +124,15 @@ export function OrganizationSettingsPage() {
       <PageSection title="Profile">
         <PageRows>
           <NameRow canManage={canManage} organization={organization} />
+          <PlanRow />
         </PageRows>
       </PageSection>
       <MembersSection organization={organization} />
       {canManage ? (
         <SentInvitationsSection organization={organization} />
+      ) : null}
+      {organization.role === "owner" ? (
+        <DeleteOrganizationSection organization={organization} />
       ) : null}
     </PageShell>
   );
@@ -158,6 +190,100 @@ function NameRow({
         open={open}
         organization={organization}
       />
+    </>
+  );
+}
+
+/**
+ * Where the organization stands on its plan, where this OpenBot needs one: on its free trial, on the
+ * plan, a failed payment, or none yet. Read-only, with the way to add or update the card for an
+ * owner or an admin while Bots can't run (`addCardUrl`, the server's verdict). Nothing, and no
+ * divider, where no plan is needed or while it is read.
+ *
+ * On the free trial it shows how much of it is used, as a bar and a percentage
+ * (`freeRunsUsedPercent`, the person's own share). Never a count or a limit: the server sends
+ * neither while runs are left. A CopilotKit employee who has used it all keeps the full bar, with
+ * the line that says their runs are free.
+ */
+function PlanRow() {
+  const plan = usePlan();
+  if (!plan?.required) return null;
+  const used =
+    plan.status === "free" && typeof plan.freeRunsUsedPercent === "number"
+      ? plan.freeRunsUsedPercent
+      : null;
+  if (used !== null)
+    return (
+      <>
+        <Separator />
+        <Item size="sm">
+          {/* Level with the title, as beside a row's description. */}
+          <ItemMedia className="translate-y-0.5 self-start" variant="icon">
+            <IconCreditCard />
+          </ItemMedia>
+          <ItemContent className="min-w-0">
+            <ItemTitle>Plan</ItemTitle>
+            <Progress className="mt-0.5 gap-x-3 gap-y-2" value={used}>
+              <ProgressLabel className="font-normal text-muted-foreground text-xs">
+                Free trial
+              </ProgressLabel>
+              <ProgressValue className="text-xs">
+                {() => trialUsed(used)}
+              </ProgressValue>
+            </Progress>
+            {employeeTrialUsedUp(plan) ? (
+              <ItemDescription className="mt-1.5 line-clamp-none">
+                {COPILOTKIT_EMPLOYEE_LINE}
+              </ItemDescription>
+            ) : null}
+            {/*
+             * An employee admin can pay for the members who aren't employees. Under the bar, not
+             * beside it, so the bar keeps its width in a narrow window.
+             */}
+            {employeePaysForOthers(plan) && plan.addCardUrl ? (
+              <>
+                {/* Whole on a phone too: a row's description stops at two lines. */}
+                <ItemDescription className="mt-1.5 line-clamp-none">
+                  {OTHERS_NEED_A_CARD}
+                </ItemDescription>
+                <a
+                  className={cn(
+                    buttonVariants({ size: "sm", variant: "outline" }),
+                    "mt-2 self-start",
+                  )}
+                  href={plan.addCardUrl}
+                >
+                  {cardAction(plan)}
+                </a>
+              </>
+            ) : null}
+          </ItemContent>
+        </Item>
+      </>
+    );
+  return (
+    <>
+      <Separator />
+      <Item size="sm">
+        <ItemMedia variant="icon">
+          <IconCreditCard />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>Plan</ItemTitle>
+          <ItemDescription>{planSummary(plan)}</ItemDescription>
+        </ItemContent>
+        {/* The organization's bill: shown to a CopilotKit employee too, whose own runs go on. */}
+        {organizationNeedsCard(plan) && plan.addCardUrl ? (
+          <ItemActions>
+            <a
+              className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
+              href={plan.addCardUrl}
+            >
+              {cardAction(plan)}
+            </a>
+          </ItemActions>
+        ) : null}
+      </Item>
     </>
   );
 }
@@ -232,7 +358,7 @@ function RenameOrganizationDialog({
           </form>
           {rename.error ? (
             <p className="mt-3 text-destructive text-sm" role="alert">
-              {rename.error.message}
+              {failureSaid(rename.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -254,19 +380,6 @@ function RenameOrganizationDialog({
   );
 }
 
-/** A person's picture, or their initials on the tint the account row uses. */
-function PersonAvatar({ person }: { person: OrganizationMemberSummary }) {
-  return (
-    <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted-foreground/10 text-foreground/70 text-xs">
-      {person.image ? (
-        <img alt="" className="size-full object-cover" src={person.image} />
-      ) : (
-        initialsOf(person)
-      )}
-    </div>
-  );
-}
-
 /** A member and the role they are about to be given. */
 type RoleChange = {
   member: OrganizationMemberSummary;
@@ -276,14 +389,25 @@ type RoleChange = {
 /**
  * Who is in the organization, with each person's role, and what their row offers: a Role menu
  * listing the roles the server says the person looking may give them (`assignableRoles`), and
- * Remove or Leave where the membership can end (`removable`).
+ * Remove or Leave where the membership can end (`removable`). A page at a time, with a search above
+ * them that asks the server, as Admin's People does: an organization can have any number of people.
  */
 function MembersSection({
   organization,
 }: {
   organization: OrganizationSummary;
 }) {
-  const members = useQuery(organizationMembersQueryOptions(organization.id));
+  const [search, setSearch] = useState("");
+  // Debounced, so typing a name is one request rather than one per keystroke.
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const members = useInfiniteQuery(
+    organizationMemberPagesQueryOptions(organization.id, query),
+  );
+  const rows = members.data?.pages.flatMap((page) => page.members) ?? [];
   const me = useQuery(currentUserQueryOptions()).data;
   const changeRole = useMutation(changeMemberRoleMutationOptions(queryClient));
   // Kept while its dialog closes, so the question does not lose its name on the way out.
@@ -313,13 +437,30 @@ function MembersSection({
 
   return (
     <PageSection title="Members">
+      {/*
+        Server-side search, as on Admin's People: filtering what already arrived would only search
+        the first page, which is the opposite of what somebody looking for a colleague needs.
+      */}
+      <Input
+        aria-label="Search members"
+        className="mt-4"
+        maxLength={SEARCH_MAX}
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder="Search by name or address"
+        value={search}
+      />
       {members.isPending ? null : members.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {members.error.message}
+          {failureSaid(members.error)}
         </p>
+      ) : rows.length === 0 ? (
+        // A list with nobody in it at all can't be read by anybody, so this is a search's answer.
+        <PageEmpty icon={IconSearch} title="No matches">
+          {`Nobody matches "${query}".`}
+        </PageEmpty>
       ) : (
         <PageRows>
-          {members.data.map((member, index) => {
+          {rows.map((member, index) => {
             const control = memberControl(member, viewer);
             const name = personName(member);
             const roles = givableRoles(member);
@@ -337,15 +478,30 @@ function MembersSection({
                           You
                         </span>
                       ) : null}
+                      {/* Their account is to be deleted: still listed, using nothing, until it goes. */}
+                      {member.deactivated ? (
+                        <span className="shrink-0 font-normal text-muted-foreground">
+                          {DEACTIVATED}
+                        </span>
+                      ) : null}
                     </ItemTitle>
-                    <ItemDescription className="line-clamp-1 break-all">
-                      {member.name?.trim()
-                        ? `${member.email} · ${roleName(member.role)}`
-                        : roleName(member.role)}
+                    {/* Not opened yet wraps whole words onto a second line, never cut off. */}
+                    <ItemDescription
+                      className={
+                        member.notOpenedYet
+                          ? "line-clamp-2 break-words"
+                          : "line-clamp-1 break-all"
+                      }
+                    >
+                      {memberLine(member)}
                     </ItemDescription>
                   </ItemContent>
+                  {/*
+                   * A Role menu and a button are too much beside a name on a phone, so there they
+                   * take a line of their own under it, as on a team's people and Admin's People.
+                   */}
                   {control || roles.length > 0 ? (
-                    <ItemActions>
+                    <ItemActions className="max-sm:basis-full">
                       {roles.length > 0 ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger
@@ -400,15 +556,27 @@ function MembersSection({
                     </ItemActions>
                   ) : null}
                 </Item>
-                {index !== members.data.length - 1 && <Separator />}
+                {index !== rows.length - 1 && <Separator />}
               </Fragment>
             );
           })}
         </PageRows>
       )}
+      {/* Only when the server says there is another page, as on Admin's People. */}
+      {members.hasNextPage ? (
+        <Button
+          className="mt-4"
+          disabled={members.isFetchingNextPage}
+          onClick={() => members.fetchNextPage()}
+          size="sm"
+          variant="outline"
+        >
+          {members.isFetchingNextPage ? "Loading…" : "Show more"}
+        </Button>
+      ) : null}
       {changeRole.error ? (
         <p className="mt-3 text-destructive text-sm" role="alert">
-          {changeRole.error.message}
+          {failureSaid(changeRole.error)}
         </p>
       ) : null}
       {changing ? (
@@ -494,7 +662,7 @@ function ChangeRoleDialog({
         </DialogHeader>
         {changeRole.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {changeRole.error.message}
+            {failureSaid(changeRole.error)}
           </p>
         ) : null}
         <DialogFooter>
@@ -563,13 +731,12 @@ function RemoveMemberDialog({
             Remove {personName(member)} from {organization.name}?
           </DialogTitle>
           <DialogDescription>
-            They keep their account and their other organizations. What they
-            made here stays here.
+            {removeMemberWords(member, organization.name)}
           </DialogDescription>
         </DialogHeader>
         {remove.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {remove.error.message}
+            {failureSaid(remove.error)}
           </p>
         ) : null}
         <DialogFooter>
@@ -593,22 +760,27 @@ function RemoveMemberDialog({
 }
 
 /**
- * Asks before the person leaves, and leaves. They are then working in another of their
- * organizations, from home, as after a switch.
+ * Asks before the person leaves, and leaves. Leaving the one they work in, they are then working in
+ * another of their organizations, at `returnTo` (home unless said), as after a switch. `onLeft`
+ * hears it done, for a screen that lists what leaving changes (deleting an account).
  */
-function LeaveOrganizationDialog({
+export function LeaveOrganizationDialog({
+  onLeft,
   onOpenChange,
   open,
   organization,
+  returnTo = "/",
 }: {
+  onLeft?: () => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
-  organization: OrganizationSummary;
+  organization: Pick<OrganizationSummary, "id" | "name">;
+  returnTo?: string;
 }) {
   const navigate = useNavigate();
   const leave = useMutation(
     leaveOrganizationMutationOptions(queryClient, async () => {
-      await navigate({ to: "/" });
+      await navigate({ to: returnTo });
     }),
   );
   const { reset } = leave;
@@ -629,7 +801,7 @@ function LeaveOrganizationDialog({
         </DialogHeader>
         {leave.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {leave.error.message}
+            {failureSaid(leave.error)}
           </p>
         ) : null}
         <DialogFooter>
@@ -640,13 +812,142 @@ function LeaveOrganizationDialog({
             disabled={leave.isPending}
             onClick={() =>
               leave.mutate(organization.id, {
-                onSuccess: () => onOpenChange(false),
+                onSuccess: () => {
+                  onOpenChange(false);
+                  onLeft?.();
+                },
               })
             }
             size="sm"
             variant="destructive"
           >
             {leave.isPending ? "Leaving…" : "Leave"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Delete the organization, for its owner. Asked in a dialog that wants the organization's name typed,
+ * because everything in it goes for everybody and can't come back. The server decides whether it can
+ * go: a person's own organization and the one that comes with OpenBot stay, and its refusal is said
+ * in its own words in the dialog.
+ */
+function DeleteOrganizationSection({
+  organization,
+}: {
+  organization: OrganizationSummary;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <PageSection
+      description="Its Bots, conversations and computers are deleted for everyone. Members keep their accounts and their other organizations."
+      title="Delete"
+    >
+      <Button
+        className="mt-4"
+        onClick={() => setOpen(true)}
+        variant="destructive"
+      >
+        Delete organization
+      </Button>
+      <DeleteOrganizationDialog
+        onOpenChange={setOpen}
+        open={open}
+        organization={organization}
+      />
+    </PageSection>
+  );
+}
+
+function DeleteOrganizationDialog({
+  onOpenChange,
+  open,
+  organization,
+}: {
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  organization: OrganizationSummary;
+}) {
+  const formId = useId();
+  const navigate = useNavigate();
+  const remove = useMutation(
+    deleteOrganizationMutationOptions(queryClient, async () => {
+      await navigate({ to: "/" });
+    }),
+  );
+  const { reset } = remove;
+  const [typed, setTyped] = useState("");
+  const confirmed = typed.trim() === organization.name.trim();
+
+  // Each opening starts empty, and a refusal from the last one is not news about this one.
+  useEffect(() => {
+    if (open) {
+      setTyped("");
+      reset();
+    }
+  }, [open, reset]);
+
+  const confirm = () => {
+    if (!confirmed || remove.isPending) return;
+    remove.mutate(organization.id, { onSuccess: () => onOpenChange(false) });
+  };
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete {organization.name}?</DialogTitle>
+          <DialogDescription>
+            Its Bots stop, and its conversations and computers are deleted for
+            everyone in it. You can't undo this.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="mt-4">
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              confirm();
+            }}
+          >
+            <Field>
+              <FieldLabel htmlFor={`${formId}-name`}>
+                Type {organization.name} to confirm
+              </FieldLabel>
+              <Input
+                autoComplete="off"
+                autoFocus
+                disabled={remove.isPending}
+                id={`${formId}-name`}
+                onChange={(event) => {
+                  setTyped(event.target.value);
+                  reset();
+                }}
+                value={typed}
+              />
+            </Field>
+          </form>
+          {remove.error ? (
+            <p className="mt-3 text-destructive text-sm" role="alert">
+              {failureSaid(remove.error)}
+            </p>
+          ) : null}
+        </DialogBody>
+        <DialogFooter className="mt-4">
+          <Button onClick={() => onOpenChange(false)} size="sm" variant="ghost">
+            Cancel
+          </Button>
+          <Button
+            disabled={!confirmed || remove.isPending}
+            form={formId}
+            size="sm"
+            type="submit"
+            variant="destructive"
+          >
+            {remove.isPending ? "Deleting…" : "Delete organization"}
           </Button>
         </DialogFooter>
       </DialogContent>

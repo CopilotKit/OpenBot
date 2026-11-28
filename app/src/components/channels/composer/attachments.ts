@@ -231,6 +231,17 @@ export function attachmentsConfigFor(
     accept: "*/*",
     maxSize: largestAttachmentBytes(limits),
     onUpload: async (file) => {
+      /*
+       * A file a saved draft is putting back was uploaded before, so it is not uploaded again: the
+       * answer it got then is the answer now. Still reported through `onUploaded`, so a chip put back
+       * and then removed gives its row back like any other.
+       */
+      const restored = restoredUploadOf(file);
+      if (restored) {
+        const rowId = stagedRowId(restored);
+        if (rowId !== undefined) onUploaded(rowId);
+        return restored;
+      }
       const answer = await upload(file);
       /*
        * A PICTURE'S CHIP IS DRAWN FROM THE FILE ON THIS DEVICE. Drawn from the server's address, the
@@ -304,6 +315,44 @@ export function heldAttachmentsConfig(
     },
     onUploadFailed,
   };
+}
+
+/**
+ * A STAGED FILE A SAVED DRAFT IS PUTTING BACK ON THE STRIP.
+ *
+ * The SDK's hook has no way to add an attachment that is already uploaded: its only door is
+ * `processFiles`, which makes a placeholder per `File` and asks `onUpload` for the answer. So a
+ * file put back goes through that same door as an empty stand-in named and typed like the original,
+ * and `onUpload` recognises the stand-in and answers with what the upload said the first time. The
+ * chip it makes is the one the original upload made: the same stored row, name, type and size.
+ */
+const restoredUploads = new WeakMap<File, AttachmentUploadResult>();
+
+export function restoringFile(saved: {
+  attachmentId: string;
+  url: string;
+  mimeType?: string;
+  filename?: string;
+  size?: number;
+}): File {
+  const name = saved.filename ?? "Attachment";
+  const stand = new File([], name, { type: saved.mimeType ?? "" });
+  // The strip shows the size the placeholder was made with; the stand-in has no bytes of its own.
+  if (saved.size !== undefined) {
+    Object.defineProperty(stand, "size", { value: saved.size });
+  }
+  restoredUploads.set(stand, {
+    type: "url",
+    value: saved.url,
+    ...(saved.mimeType ? { mimeType: saved.mimeType } : {}),
+    metadata: { attachmentId: saved.attachmentId, filename: name },
+  });
+  return stand;
+}
+
+/** What the first upload answered for a stand-in made by `restoringFile`, if `file` is one. */
+function restoredUploadOf(file: File): AttachmentUploadResult | undefined {
+  return restoredUploads.get(file);
 }
 
 /** The object URL a picture's chip is drawn from, when this tab has the file. */

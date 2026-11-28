@@ -15,6 +15,7 @@ installation is started, read or written while the app is connected.
 - `relay`: the loopback HTTP server the window loads.
 */
 
+pub mod about;
 pub mod address;
 pub mod choice;
 pub mod credentials;

@@ -20,6 +20,7 @@ import {
   pendingSignInRequestsQueryOptions,
 } from "@/lib/passwords/queries";
 import { type ToolCallContext, useBotOfCall } from "./active-bot";
+import { isWaitingForPerson } from "./approval-context";
 import { useFrontendTool } from "./approval-tools";
 import { type OfferRule, useOfferedTo } from "./bot-offer";
 import { offeredBrowser } from "./computer-available";
@@ -135,14 +136,18 @@ export function SignInTool() {
         result: "Nobody signed in. Do not ask for the login another way.",
       };
     },
-    render: ({ args, result, status, toolCallId }) => (
-      <SignInCard
-        site={typeof args?.site === "string" ? args.site : ""}
-        toolCallId={toolCallId}
-        running={status !== "complete"}
-        outcome={parse(result)}
-      />
-    ),
+    render: ({ args, result, status, toolCallId }) => {
+      const outcome = parse(result);
+      return (
+        <SignInCard
+          site={typeof args?.site === "string" ? args.site : ""}
+          toolCallId={toolCallId}
+          // A sign-in the server holds is waiting until its answer comes (`heldByServer`).
+          running={status !== "complete" || isWaitingForPerson(outcome)}
+          outcome={isWaitingForPerson(outcome) ? {} : outcome}
+        />
+      );
+    },
   });
   return null;
 }

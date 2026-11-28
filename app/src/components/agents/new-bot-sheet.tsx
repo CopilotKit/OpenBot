@@ -17,7 +17,7 @@ import {
   useQuery,
 } from "@tanstack/react-query";
 import { MotionConfig, motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { CustomAgentCta } from "@/components/agents/custom-agent-cta";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
@@ -56,10 +56,11 @@ import {
 } from "@/lib/agents/form";
 import {
   ISOLATION_NOT_ALLOWED,
-  ISOLATION_UNAVAILABLE,
   isolatedExplained,
+  isolationUnavailable,
 } from "@/lib/agents/isolation";
 import { createAgentMutationOptions } from "@/lib/agents/mutations";
+import { publicVisibilityWords } from "@/lib/agents/public-words";
 import { testAgentConnection } from "@/lib/agents/queries";
 import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
@@ -72,6 +73,13 @@ import { isComposing } from "@/lib/composing";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
 import { type PluginServer, pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -231,8 +239,11 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const [tried, setTried] = useState(false);
   /** Continue on the address is dialling it, before anything is created. */
   const [checking, setChecking] = useState(false);
-  /** Why the server could not reach the address on the last Continue, in its own words. */
-  const [unreachable, setUnreachable] = useState<string>();
+  /**
+   * Why the server could not reach the address on the last Continue, in its own words. The refusal
+   * itself, not its words: a hold is drawn calmly (lib/load-failure.tsx).
+   */
+  const [unreachable, setUnreachable] = useState<Failure>();
   /** The Bot just made, held for the moment the sheet spends saying so before it hands over. */
   const [createdId, setCreatedId] = useState<string>();
   /**
@@ -388,11 +399,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         await create(runtime);
       } catch (error) {
         createAgent.reset();
-        setUnreachable(
-          error instanceof Error && error.message
-            ? error.message
-            : MASTRA_UNREACHABLE,
-        );
+        setUnreachable(failureOf(error, MASTRA_UNREACHABLE));
         focusAddress();
       }
       return;
@@ -495,6 +502,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                     checked: isolated,
                     available: isolationAvailable,
                     allowed: isolationAllowed,
+                    cloud: capabilities?.hostedSignIn === true,
                     onChange: setIsolated,
                   }}
                   onInstructions={setInstructions}
@@ -522,7 +530,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             ) : (
               <EndpointStep
                 endpoint={endpoint}
-                endpointError={tried ? endpointIssue : unreachable}
+                endpointError={
+                  tried
+                    ? endpointIssue === undefined
+                      ? undefined
+                      : { message: endpointIssue }
+                    : unreachable
+                }
                 harness={runtime?.kind === "managed" ? runtime.harness : null}
                 onEndpoint={(value) => {
                   setEndpoint(value);
@@ -547,7 +561,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
         {createAgent.error ? (
           <p className="mt-6 text-destructive text-sm" role="alert">
-            {createAgent.error.message}
+            {failureSaid(createAgent.error)}
           </p>
         ) : null}
       </div>
@@ -631,7 +645,7 @@ function CreatedView({ name }: { name: string }) {
         </motion.div>
         <motion.span
           animate={{ opacity: 1, scale: 1 }}
-          className="absolute -right-0.5 -bottom-0.5 flex size-7 items-center justify-center rounded-full bg-emerald-500 text-white ring-3 ring-popover"
+          className="absolute -right-0.5 -bottom-0.5 flex size-7 items-center justify-center rounded-full bg-success text-white ring-3 ring-popover"
           initial={{ opacity: 0, scale: 0 }}
           transition={{
             delay: 0.45,
@@ -663,7 +677,7 @@ type Visibility = AgentFormValues["visibility"];
 const VISIBILITY_OPTIONS: Array<{
   value: Visibility;
   title: string;
-  description: string;
+  description?: string;
   icon: typeof IconLock;
 }> = [
   {
@@ -675,7 +689,7 @@ const VISIBILITY_OPTIONS: Array<{
   {
     value: "public",
     title: "Public",
-    description: "Everyone in your company can find and use it.",
+    // No sentence of its own: said for the organization the person is in (`publicVisibilityWords`).
     icon: IconUsers,
   },
 ];
@@ -716,6 +730,8 @@ function AboutStep({
   isolation: IsolationChoice;
   personal: boolean;
 }) {
+  // Public is everyone in this organization, by name where the app knows it.
+  const everyone = publicVisibilityWords(useOrganizationAudience());
   return (
     <FieldGroup>
       <Field>
@@ -749,7 +765,7 @@ function AboutStep({
         <Textarea
           autoComplete="off"
           id="new-bot-instructions"
-          maxLength={1000}
+          maxLength={5000}
           onChange={(event) => onInstructions(event.target.value)}
           placeholder="Review receipts, categorize expenses, and prepare reimbursement reports."
           rows={5}
@@ -779,7 +795,7 @@ function AboutStep({
                         {option.title}
                       </span>
                       <span className="block text-pretty text-muted-foreground text-xs">
-                        {option.description}
+                        {option.description ?? everyone}
                       </span>
                     </span>
                   </button>
@@ -852,11 +868,11 @@ function EveryAppList({
     <FieldSet>
       <FieldLegend variant="label">Apps it can use</FieldLegend>
       <FieldDescription>
-        Every Bot can use every app you turn on in Connections.
+        Every Bot can use every app you connect in Connections.
       </FieldDescription>
       {turnedOn.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your apps.
+          {loadFailure(turnedOn.error, "Couldn't load your apps.")}
         </p>
       ) : servers.length > 0 ? (
         <ul aria-label="Apps it can use" className="grid gap-2 sm:grid-cols-2">
@@ -888,6 +904,8 @@ type IsolationChoice = {
   available: boolean;
   /** Whether an administrator lets this person ask for one ("Isolated Bots"). */
   allowed: boolean;
+  /** Whether this is OpenBot Cloud (`hostedSignIn`), which gives each person one computer. */
+  cloud: boolean;
   onChange: (checked: boolean) => void;
 };
 
@@ -909,11 +927,12 @@ function IsolatedOption({
   checked,
   available,
   allowed,
+  cloud,
   isPublic,
   onChange,
 }: IsolationChoice & { isPublic: boolean }) {
   const reason = !available
-    ? ISOLATION_UNAVAILABLE
+    ? isolationUnavailable(cloud)
     : !allowed
       ? ISOLATION_NOT_ALLOWED
       : null;
@@ -965,6 +984,9 @@ function IsolatedOption({
           >
             {reason ?? "A computer of its own, instead of sharing yours."}
           </p>
+          {cloud && !available ? (
+            <BusinessComputerLink className="text-xs" />
+          ) : null}
         </div>
       </div>
     </FieldSet>
@@ -1022,6 +1044,64 @@ export function RuntimeStep({
   );
 }
 
+/** Where docs/agent-frameworks.md is read, each framework's setup a section of it. */
+export const AGENT_FRAMEWORKS_DOCS =
+  "https://github.com/CopilotKit/OpenBot/blob/main/docs/agent-frameworks.md";
+
+/**
+ * The frameworks whose AG-UI receivers take the Bot's role and tool guidance at full strength only
+ * from a caller they trust, by harness id, with the docs section that sets each one up. LangChain is
+ * the Python LangGraph receiver, Mastra the Mastra one. "An agent you already run" may be either, so
+ * it links both. Every other framework passes the role through as it ships, and gets no hint.
+ *
+ * Nothing here says what an endpoint declared: the address step can't know that. It says what such a
+ * receiver needs, and where to read how to give it.
+ */
+const TRUSTED_GUIDANCE_SETUP: Record<
+  string,
+  readonly { name: string; href: string }[]
+> = {
+  langgraph: [
+    { name: "LangGraph", href: `${AGENT_FRAMEWORKS_DOCS}#langgraph` },
+  ],
+  mastra: [{ name: "Mastra", href: `${AGENT_FRAMEWORKS_DOCS}#mastra` }],
+  "byo-url": [
+    { name: "LangGraph", href: `${AGENT_FRAMEWORKS_DOCS}#langgraph` },
+    { name: "Mastra", href: `${AGENT_FRAMEWORKS_DOCS}#mastra` },
+  ],
+};
+
+/**
+ * What a framework's receiver needs to give the Bot its full role and tool guidance, under the
+ * address. Nothing for a framework that needs nothing.
+ *
+ * Kept below the address's own description and below a failed test, since it is about how the agent
+ * is set up and not about this address. The description above it is no longer the field's
+ * second-to-last line, so it keeps its own spacing instead of tucking up under the input.
+ */
+function TrustedGuidanceHint({ harness }: { harness: string | null }) {
+  const setup = TRUSTED_GUIDANCE_SETUP[harness ?? "byo-url"];
+  if (!setup) return null;
+  return (
+    <FieldDescription className="text-pretty">
+      For the Bot to get its full role and tool guidance, your agent has to
+      trust OpenBot. Add your agent's key below, or give the address of a
+      listener only OpenBot can reach, with trusted ingress turned on. Set it up
+      for{" "}
+      {setup.map((entry, index) => (
+        // A fragment, not a span: the description underlines only the links that are its children.
+        <Fragment key={entry.name}>
+          {index > 0 ? " or " : null}
+          <a href={entry.href} rel="noopener noreferrer" target="_blank">
+            {entry.name}
+          </a>
+        </Fragment>
+      ))}
+      .
+    </FieldDescription>
+  );
+}
+
 /**
  * The address of an agent somebody else runs, and the key it sits behind if it has one.
  *
@@ -1048,7 +1128,7 @@ export function EndpointStep({
   harness: string | null;
   endpoint: string;
   secret: string;
-  endpointError?: string;
+  endpointError?: Failure;
   onEndpoint: (value: string) => void;
   onKey: (value: string) => void;
 }) {
@@ -1087,21 +1167,21 @@ export function EndpointStep({
             value={endpoint}
           />
           {endpointError ? (
-            <FieldError
-              className="text-pretty"
-              errors={[{ message: endpointError }]}
-            />
+            <FieldError className="text-pretty">
+              {failureSaid(endpointError)}
+            </FieldError>
           ) : mastra ? (
-            <FieldDescription>
+            <FieldDescription className="nth-last-2:mt-0">
               Give the address of your Mastra server. It needs to run one agent,
               and OpenBot's server has to be able to reach it.
             </FieldDescription>
           ) : (
-            <FieldDescription>
+            <FieldDescription className="nth-last-2:mt-0">
               Any agent that speaks AG-UI works. OpenBot connects to it, so it
               has to be reachable from OpenBot's server.
             </FieldDescription>
           )}
+          <TrustedGuidanceHint harness={harness} />
         </Field>
         <Field>
           <FieldLabel htmlFor="new-bot-key">

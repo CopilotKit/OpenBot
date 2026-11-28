@@ -7,10 +7,10 @@
  *
  * WHICH CREDENTIAL, BY SIGN-IN:
  *  - An API key (Anthropic, OpenAI, Google, any OpenAI-compatible endpoint): the provider directly.
- *  - A Gemini sign-in: `BOT_PROVIDER=openai`, `OPENAI_BASE_URL` = the server's provider OAuth proxy
+ *  - An xAI sign-in: `BOT_PROVIDER=openai`, `OPENAI_BASE_URL` = the server's provider OAuth proxy
  *    (`/api/model-provider/v1`) and `OPENAI_API_KEY` = its local bearer. Ordinary Chat Completions,
- *    which the server turns into Google's API with the person's token, exactly as for the Python
- *    harness. Nothing here knows it is Google.
+ *    which the server sends to xAI with the person's token, exactly as for the Python harness.
+ *    Nothing here knows it is xAI. Gemini takes an API key only.
  *  - A ChatGPT plan: `CHATGPT_PLAN_HARNESS_URL` names agent-langgraph-agui, which holds the Codex
  *    transport, and every model call goes there (`plan-model.ts`). Selected by its presence.
  *
@@ -30,8 +30,10 @@ import { ChatOpenAI } from "@langchain/openai";
 // moves to the Responses API moves here in the same change. Node loads it through the JSON hook in
 // json-modules.ts (see there for why and how).
 import { requiresResponsesApi } from "../../shared/model-providers.ts";
+import { withContextEditing } from "./context-room.ts";
 import { HarnessRunError, MODEL_UNREACHABLE } from "./errors.ts";
 import { PlanHarnessChatModel } from "./plan-model.ts";
+import { ChatCompletionsWithSignatures } from "./thought-signatures.ts";
 
 export type Env = Record<string, string | undefined>;
 
@@ -72,6 +74,8 @@ export type RunModel = {
   route?: ModelRoute;
   /** The run's thread, which a Claude plan's query is kept under. */
   threadId?: string;
+  /** The run's organization, when the server names one, which joins that query's name. */
+  organization?: string;
   /** The run's own stop, which cancels a Claude plan's query. */
   signal?: AbortSignal;
 };
@@ -229,13 +233,6 @@ function retries(run: RunModel): number {
   return run.sendOnce ? 0 : 2;
 }
 
-/** Chat Completions only, whatever LangChain prefers for the model name. */
-class ChatOpenAICompletionsOnly extends ChatOpenAI {
-  override _useResponsesApi(): boolean {
-    return false;
-  }
-}
-
 function openAIModel(model: string, run: RunModel, env: Env): BaseChatModel {
   const baseURL = env.OPENAI_BASE_URL?.trim() || undefined;
   // An endpoint that needs no key still needs a string for the SDK (Ollama, vLLM, LM Studio).
@@ -260,23 +257,47 @@ function openAIModel(model: string, run: RunModel, env: Env): BaseChatModel {
   // `reasoning_effort` as it is, for any model, as agent-langgraph-agui sends it: LangChain's own
   // `reasoning` is dropped for a model it does not know as OpenAI's (Gemini or Grok behind a
   // compatible endpoint, the Gemini sign-in's proxy), and those endpoints read the field too.
-  return new ChatOpenAICompletionsOnly({
+  //
+  // LangChain's own Chat Completions client, whatever it prefers for the model name. Not ChatOpenAI
+  // told never to use Responses: binding tools rebuilds a ChatOpenAI as a plain one
+  // (`ChatOpenAI.withConfig`), and that sent a model LangChain prefers on Responses there. It sends
+  // Gemini's thought signatures back too (thought-signatures.ts), which LangChain's own drops.
+  return new ChatCompletionsWithSignatures({
     ...fields,
     ...(run.effort ? { modelKwargs: { reasoning_effort: run.effort } } : {}),
   });
 }
 
+/**
+ * Whether a Claude model thinks adaptively when a request leaves `thinking` out: every Claude of
+ * the fifth generation on (Opus, Sonnet, Haiku, Fable, Mythos), as Anthropic documents them.
+ * Earlier ones (Opus 4.7 and 4.8 included) run without thinking when it is left out.
+ */
+function thinksByDefault(model: string): boolean {
+  const generation = /^claude-[a-z]+-(\d+)/.exec(model.trim().toLowerCase());
+  return !!generation && Number(generation[1]) >= 5;
+}
+
 function anthropicModel(model: string, run: RunModel, env: Env): BaseChatModel {
   const baseUrl = env.ANTHROPIC_BASE_URL?.trim() || undefined;
-  return new ChatAnthropic({
-    model,
-    apiKey: env.ANTHROPIC_API_KEY?.trim() || undefined,
-    maxRetries: retries(run),
-    ...(baseUrl ? { anthropicApiUrl: baseUrl } : {}),
-    ...(ANTHROPIC_EFFORTS.has(run.effort)
-      ? { outputConfig: { effort: run.effort as never } }
-      : {}),
-  });
+  // Anthropic clears old tool results on its side, so a long run stays inside the window
+  // (context-room.ts), unless a proxy at this address has already refused it.
+  return withContextEditing(
+    new ChatAnthropic({
+      model,
+      apiKey: env.ANTHROPIC_API_KEY?.trim() || undefined,
+      maxRetries: retries(run),
+      ...(baseUrl ? { anthropicApiUrl: baseUrl } : {}),
+      ...(ANTHROPIC_EFFORTS.has(run.effort)
+        ? { outputConfig: { effort: run.effort as never } }
+        : {}),
+      // Said outright for a model that thinks adaptively anyway, so the request is the same. Left
+      // out, @langchain/anthropic checks its own default (`disabled`, which it never sends) against
+      // Opus 5's rule that disabled thinking can't run at xhigh or max, and throws before asking:
+      // a person who picked Opus 5.5 at Extra high got "The Bot stopped" and no answer.
+      ...(thinksByDefault(model) ? { thinking: { type: "adaptive" } } : {}),
+    }),
+  );
 }
 
 /** `GOOGLE_GENERATIVE_AI_BASE_URL` may end in its API version, as the AI SDK takes it. */
@@ -399,7 +420,13 @@ function routedModel(run: RunModel, env: Env): BaseChatModel | undefined {
       model: run.model,
       effort: run.effort,
       botId: run.botId,
-      ...(claude ? { threadId: run.threadId ?? "", signal: run.signal } : {}),
+      ...(claude
+        ? {
+            threadId: run.threadId ?? "",
+            ...(run.organization ? { organization: run.organization } : {}),
+            signal: run.signal,
+          }
+        : {}),
     });
   }
   if (!route.token)

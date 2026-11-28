@@ -21,6 +21,7 @@ import { grantRoster } from "@/lib/agents/grant-roster";
 import { grantSummary } from "@/lib/agents/grant-summary";
 import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { skillListQueryOptions } from "@/lib/skills/queries";
 
@@ -68,7 +69,10 @@ export function SkillsPage() {
         {/* A read that failed says so; `isPending` goes false on it too, and it is not "none". */}
         {skillList.isPending ? null : !skillList.data ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load skills. Try again in a moment.
+            {loadFailure(
+              skillList.error,
+              "Couldn't load skills. Try again in a moment.",
+            )}
           </p>
         ) : skills.length === 0 ? (
           <PageEmpty

@@ -24,7 +24,7 @@ export interface Team {
   parentTeamId: string | null;
   source: TeamSource;
   /**
-   * How many people are in the team itself.
+   * How many people are in the team itself: the people its members list shows.
    * @minimum 0
    */
   memberCount: number;

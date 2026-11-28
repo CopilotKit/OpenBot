@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { setUsageDataMutationOptions } from "@/lib/desktop/mutations";
 import { desktopUsageDataQueryOptions } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { loadFailure } from "@/lib/load-failure";
 
 /** What OpenBot Desktop sends, and what it never does, in full. */
 export const USAGE_DATA_DOC =
@@ -57,7 +58,10 @@ export function UsageDataSection() {
             </ItemDescription>
             {change.error ? (
               <p className="text-destructive text-sm" role="alert">
-                Couldn't change this setting. Try again.
+                {loadFailure(
+                  change.error,
+                  "Couldn't change this setting. Try again.",
+                )}
               </p>
             ) : null}
           </ItemContent>

@@ -24,6 +24,11 @@ export type IdentityProvider = {
    * which is the normal case a year in and used to be the case where the provider vanished instead.
    */
   registeredBy: string | null;
+  /**
+   * Registered for the whole OpenBot, in its first organization: it counts for this organization too, and is not this
+   * organization's to remove. Only ever true outside `default`.
+   */
+  deployment: boolean;
 };
 
 /**
@@ -79,9 +84,10 @@ export function identityProviderListQueryOptions() {
           throw error;
         }
         providers.push(
-          ...page.identityProviders.map(({ id, ...provider }) => ({
+          ...page.identityProviders.map(({ id, deployment, ...provider }) => ({
             providerId: id,
             ...provider,
+            deployment: deployment === true,
           })),
         );
         cursor = page.nextCursor ?? undefined;

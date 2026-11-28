@@ -1,4 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { agentKeys } from "@/lib/agents/queries";
 import {
   pauseBot,
   resetBot,
@@ -82,8 +83,12 @@ export function resetBotMutationOptions(queryClient: QueryClient) {
       ).deleted,
     onSuccess: async () => {
       await invalidateLifecycle(queryClient);
-      // Conversations were deleted; the roster has to drop them.
-      await queryClient.invalidateQueries({ queryKey: channelKeys.all });
+      // Conversations were deleted; the roster has to drop them, and the Bots panel's order, which
+      // reads each Bot's `lastConversationAt` from the Bots list, has to forget them too.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+        queryClient.invalidateQueries({ queryKey: agentKeys.lists() }),
+      ]);
     },
   });
 }
