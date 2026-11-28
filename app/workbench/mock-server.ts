@@ -14,22 +14,27 @@
  *   # /api/auth/shell/enter. Everybody else is answered 401, like the workbench's app-signed-out scene.
  *   MOCK_SIGNED_OUT=1 bun app/workbench/mock-server.ts
  *
- *   # As a server without the phone app's sign-in hand-off: both /api/auth/shell/* answer 404.
+ *   # As a server without the phone app's sign-in hand-off: every /api/auth/shell/* answers 404.
  *   MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 bun app/workbench/mock-server.ts
  *
  * It listens on 127.0.0.1:${SERVER_PORT:-3001}. Besides the API it answers:
  *
  *   GET  /__mock/session                    {"signedIn": boolean}: whether a request with no cookie is
  *   POST /__mock/session {"signedIn": bool}   signed in, and to change it at run time.
- *   GET  /api/auth/shell/handoff?challenge=C[&auto=1]
+ *   GET  /api/auth/shell/config?platform=ios
+ *        What the phone app asks before signing in: {"handoff":true,"callback":"scheme",
+ *        "callbackUrl":"openbotshell://signed-in"}. 404 under MOCK_NO_HANDOFF.
+ *   GET  /api/auth/shell/handoff?challenge=C[&platform=ios][&auto=1]
  *        The page the phone app opens in its sign-in sheet. C is a PKCE S256 challenge (43
  *        characters of base64url). A page titled "Mock sign-in" with one link, #mock-sign-in, "Sign in
- *        as test person", to openbotshell://signed-in?ticket=T. T is single use and lasts 60 s.
+ *        as test person". Following the link issues a single-use ticket that lasts 60 s.
  *        With auto=1 the page follows its link by itself after 800 ms. 400 without a valid C.
  *   GET  /api/auth/shell/enter?ticket=T&verifier=V&to=/path
  *        Loaded by the web view. With a known, unused, unexpired T whose C is base64url(sha256(V)):
  *        sets the cookie better-auth.session_token=mock and answers 303 to `to` (an own path, else /).
  *        Otherwise 303 to /sign?native-sign-in=failed, setting nothing.
+ *   POST /api/auth/sign-out
+ *        Ends the mock's session: its cookie stops counting until the next /enter.
  *
  * Signed in, the API answers as the workbench's app-home scene does (workbench/session.ts,
  * api/extraHandlers.ts and the spec's generated answers), with a fixed person (Sam Rivera, in Acme),
@@ -63,6 +68,8 @@ const TICKET_MS = 60_000;
 
 /** Whether a request with no mock cookie is signed in. */
 let signedInByDefault = process.env.MOCK_SIGNED_OUT !== "1";
+/** The mock's one session was signed out: its cookie no longer counts until the next sign-in. */
+let mockSessionEnded = false;
 
 // The Bots and conversations every signed-in page shows. ---------------------------------------
 
@@ -333,6 +340,7 @@ async function generatedHandlersFromDisk(): Promise<RequestHandler[]> {
 // Signed in or not, per request. ---------------------------------------------------------------
 
 function hasMockCookie(request: Request): boolean {
+  if (mockSessionEnded) return false;
   const cookies = request.headers.get("cookie") ?? "";
   return cookies
     .split(";")
@@ -387,13 +395,24 @@ function handoffPage(url: URL): Response {
   const challenge = url.searchParams.get("challenge") ?? "";
   if (!CHALLENGE.test(challenge))
     return new Response("A PKCE S256 challenge is required.", { status: 400 });
-  const ticket = base64url(randomBytes(24));
-  tickets.set(ticket, {
-    challenge,
-    expires: Date.now() + TICKET_MS,
-    used: false,
-  });
-  const target = escapeHtml(`openbotshell://signed-in?ticket=${ticket}`);
+  // The real sign-in completes before its ticket is issued. Chrome's first-run screens
+  // and a person reading the confirmation can take longer than the ticket's whole lifetime.
+  if (url.searchParams.get("confirm") === "1") {
+    const ticket = base64url(randomBytes(24));
+    tickets.set(ticket, {
+      challenge,
+      expires: Date.now() + TICKET_MS,
+      used: false,
+    });
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: `openbotshell://signed-in?ticket=${ticket}`,
+        "cache-control": "no-store",
+      },
+    });
+  }
+  const target = escapeHtml(`?challenge=${challenge}&confirm=1`);
   const auto = url.searchParams.get("auto") === "1";
   const html = `<!doctype html>
 <html lang="en">
@@ -431,6 +450,7 @@ function enter(url: URL): Response {
   const challenge = base64url(createHash("sha256").update(verifier).digest());
   if (challenge !== ticket.challenge) return failed;
   ticket.used = true;
+  mockSessionEnded = false;
   return new Response(null, {
     status: 303,
     headers: {
@@ -493,6 +513,15 @@ async function start() {
         return Response.json({ signedIn: signedInByDefault });
       }
 
+      if (path === "/api/auth/shell/config") {
+        if (!HANDOFF) return new Response("Not found", { status: 404 });
+        return Response.json({
+          handoff: true,
+          callback: "scheme",
+          callbackUrl: "openbotshell://signed-in",
+        });
+      }
+
       if (
         path === "/api/auth/shell/handoff" ||
         path === "/api/auth/shell/enter"
@@ -512,6 +541,8 @@ async function start() {
       const known = signedIn(incoming);
       if (path === "/api/auth/sign-out" && incoming.method === "POST") {
         signedInByDefault = false;
+        // As a real server does: the session is over, so the same cookie no longer signs anybody in.
+        if (hasMockCookie(incoming)) mockSessionEnded = true;
         return Response.json(
           { success: true },
           {
