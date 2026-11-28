@@ -271,6 +271,7 @@ class RealBackendTestCase: ShellTestCase {
         }
         let grew = zip(lengths, lengths.dropFirst()).contains { $0 < $1 && $0 > 0 }
         note("reply: longest new text by 3 s step \(lengths); grew while shown (streaming) \(grew); after \(Int(Date().timeIntervalSince(started))) s")
+        sleep(3)
         screenshot("j4-reply")
         dismissKeyboardIfUp(app)
         note("after sending: \(debugState(app))")
@@ -300,6 +301,8 @@ class RealBackendTestCase: ShellTestCase {
             sleep(1)
         }
 
+        tab(app, .home).tap()
+        sleep(2)
         // Background for 40 s, then back.
         XCUIDevice.shared.press(.home)
         sleep(40)
@@ -465,6 +468,8 @@ final class RealBackendDebugUITests: RealBackendTestCase {
             throw XCTSkip("OPENBOT_SHELL_TEST_SESSION is not set")
         }
         try requireProduction()
+        note("video-mark start \(Date().timeIntervalSince1970)")
+        defer { note("video-mark end \(Date().timeIntervalSince1970)") }
         let app = launch(base: nil, moment: "session", extra: ["OPENBOT_SHELL_TEST_SESSION_COOKIE": session])
         guard tab(app, .home).waitForExistence(timeout: 30) else {
             screenshot("no-tabs")
