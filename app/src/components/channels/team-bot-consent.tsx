@@ -5,6 +5,7 @@ import {
   type TeamBotConsentDecision,
   teamBotConsentMutationOptions,
 } from "@/lib/team-bots";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * A Team Bot asking to use this person's own account on one server, where its owner has not
@@ -80,7 +81,7 @@ export function TeamBotConsentCard({
       )}
       {answer.error ? (
         <p className="text-destructive" role="alert">
-          {answer.error.message}
+          {failureSaid(answer.error)}
         </p>
       ) : null}
     </div>

@@ -13,6 +13,8 @@ import type {
 import { personBody } from "./accounts-api";
 import { teamBotOf } from "./bots-api";
 import { personLearningBody, reviewBody } from "./learning-api";
+import { marksPlugin } from "./marks-plugin";
+import { still } from "./page-still";
 import { SKILLS_PATH, skillBody } from "./skills-api";
 
 /**
@@ -254,6 +256,9 @@ function answer(
   }
   if (path === `${ORGANIZATION}/teams`)
     return { teams, canCreate: admin, nextCursor: null };
+  // No team here limits its models (team-models-screens-layout.test.tsx draws those that do).
+  if (/\/teams\/[^/]+\/models$/.test(path))
+    return { models: null, updatedBy: null, updatedAt: null };
   const one = /\/teams\/([^/]+)(\/members)?$/.exec(path);
   if (one) {
     const found = teams.find((candidate) => candidate.id === one[1]);
@@ -298,6 +303,8 @@ async function bundle(): Promise<string> {
     entrypoints: [join(import.meta.dir, "teams-screens.fixture.tsx")],
     target: "browser",
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    // A team's Models dialog draws each model's maker.
+    plugins: [marksPlugin],
   });
   if (!built.success) throw new AggregateError(built.logs, "bundle failed");
   const script = built.outputs.find((output) => output.kind === "entry-point");
@@ -477,7 +484,7 @@ const SCREENS: Screen[] = [
         await page.addStyleTag({
           content: await stylesheet([...new Set(classes)]),
         });
-        await page.waitForTimeout(400);
+        await still(page);
       }
       await account.click();
       await page.getByRole("menuitem", { name: "Teams" }).waitFor();
@@ -762,7 +769,7 @@ async function open(
   }
   await screen.lookAt?.(page);
   // Rows ease in and a dialog scales up: looked at once they are still.
-  await page.waitForTimeout(400);
+  await still(page);
   return page;
 }
 
@@ -945,7 +952,7 @@ async function restyle(page: Page) {
     ]),
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
-  await page.waitForTimeout(400);
+  await still(page);
 }
 
 /** Saves what the page shows now, when screenshots are asked for. */

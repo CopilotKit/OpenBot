@@ -1,11 +1,12 @@
 import { buttonVariants } from "@/components/ui/button";
 import { needsCard, usePlan } from "@/lib/plan/queries";
-import { blockedNotice, cardAction, trialLeft } from "@/lib/plan/words";
+import { blockedNotice, cardAction } from "@/lib/plan/words";
 import { cn } from "@/lib/utils";
 
 /**
- * A slim bar over every page while the organization's plan is something its people need to know:
- * how long its free trial has left, or that Bots can't run until a card is added or updated.
+ * A slim bar over every page while Bots can't run until a card is added or updated: the free trial
+ * is used up, or the last payment failed. Nothing while runs are left on the free trial, whose bar
+ * lives in Settings.
  *
  * Only where this OpenBot needs a plan (`required`); a self-hosted OpenBot and OpenBot Desktop draw
  * nothing. An owner or an admin is given the way to add the card (`addCardUrl`, the server's verdict
@@ -13,26 +14,11 @@ import { cn } from "@/lib/utils";
  *
  * The same bar as the update and self-host ones, so it reads as OpenBot's own, packed from the left.
  * The card is added on another page, so the button is a link that leaves the app: the person comes
- * back signed in, with the trial started.
+ * back signed in, and Bots run again.
  */
 export function PlanBanner() {
   const plan = usePlan();
-  if (!plan?.required) return null;
-
-  if (plan.status === "trialing" && plan.trialEndsAt) {
-    return (
-      <aside
-        aria-label="Plan"
-        className="flex h-10 shrink-0 items-center border-b border-border bg-muted/60 px-4 text-sm"
-      >
-        <p className="min-w-0 truncate text-foreground" role="status">
-          {trialLeft(plan.trialEndsAt)}
-        </p>
-      </aside>
-    );
-  }
-
-  if (!needsCard(plan)) return null;
+  if (!plan || !needsCard(plan)) return null;
   const said = blockedNotice(plan);
   return (
     <aside

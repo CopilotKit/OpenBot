@@ -174,3 +174,19 @@ test("a person who has left the group is not named", async () => {
   expect(headings[0]).toBe("Someone who left");
   expect(headings.join(" ")).not.toContain("Priya");
 });
+
+/*
+ * A person who deleted their account: what they said stays for the others with no sender (the
+ * server sets it to null), and reads "Deleted user", as GitHub's ghost does. Never "Someone who
+ * left", which is somebody still about who left the conversation.
+ */
+test("a line whose sender deleted their account reads Deleted user", async () => {
+  const left = groupWith([MARCUS]);
+  group = {
+    ...left,
+    messages: left.messages.map((message) => ({ ...message, ownerUserId: "" })),
+  };
+  const headings = await senders();
+  expect(headings[0]).toBe("Deleted user");
+  expect(headings).not.toContain("Someone who left");
+});

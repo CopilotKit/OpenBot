@@ -320,7 +320,7 @@ export const CreateGoalResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -504,7 +504,7 @@ export const UpdateGoalResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -664,7 +664,7 @@ export const PauseGoalResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -785,7 +785,7 @@ export const ResumeGoalResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -906,7 +906,7 @@ export const CompleteGoalResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -2885,7 +2885,7 @@ export const CreateGoalTriggerResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -4021,7 +4021,7 @@ export const UpdateGoalTriggerResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -4733,7 +4733,7 @@ export const EnableGoalTriggerResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -5400,7 +5400,7 @@ export const DisableGoalTriggerResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -6140,7 +6140,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 

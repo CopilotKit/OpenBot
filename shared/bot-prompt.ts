@@ -11,7 +11,6 @@
 import { notRun } from "./approval-outcomes";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
 import { DELEGATE_TOOL, DELEGATING_GUIDANCE } from "./orchestration";
-import { RESEARCH_APP_NAMES } from "./research";
 import { SUBAGENT_TOOL } from "./subagent";
 
 const OPENING_A_PAGE_LINES = [
@@ -35,12 +34,12 @@ const OPENING_A_PAGE_LINES = [
  * only a browser can do. The research guidance generated from the grants says how to use the tool;
  * this says only that the browser is not it.
  *
- * WITHOUT ONE, the browser is still not a search tool. A Bot typing a query into a search engine
- * meets cookie walls and CAPTCHAs, reads results pages built for people, and makes the person watch
- * it. It answers from what it knows, marked as unchecked as `PROVENANCE_GUIDANCE` asks, and offers a
- * search app with the card tool, because "I cannot search" with no way to fix it is the same dead end
- * a missing app used to be. The names are the catalogue's search apps, since the card resolves an
- * app by name and there is no app called "search"; see `RESEARCH_APP_NAMES`.
+ * WITHOUT ONE, THE BROWSER SEARCHES. OpenBot is open by default, and every edition turns its keyless
+ * web search on by itself, so a Bot without a search tool is rare. When it happens, a Bot that
+ * refuses ("I could load Google in that browser, but I'm set up not to") or sends the person to an
+ * administrator for a search app has failed them while holding a browser that can search. Found in
+ * dogfooding. So it searches with its browser, trying another engine past a cookie wall or a CAPTCHA,
+ * and never says an administrator has to add search.
  *
  * Worded as "if none of your tools searches the web" rather than "you do not hold a search tool",
  * because the variant is chosen by recognising the catalogue's research roles, and a search tool can
@@ -57,27 +56,17 @@ const WITH_SEARCH_LINES = [
 ];
 
 const WITHOUT_SEARCH_LINES = [
-  "Opening a page is not a web search. Never drive your browser to a search engine (Google, Bing,",
-  "DuckDuckGo or any other) to look something up, because results pages are built for people and sit",
-  "behind cookie walls and CAPTCHAs. Do not guess at addresses hoping one of them has the answer either.",
   "When you are asked to search for something, look something up, find the latest on a subject or",
-  "find a few examples of something, and none of your tools searches the web, answer from what you",
-  "already know and say plainly that you have not checked it against a source.",
-  `If you hold ${SHOW_APP_ACCESS_TOOL}, call it once in the conversation with the name of one search`,
-  `app (${RESEARCH_APP_NAMES.join(", ")}), preferring one this deployment already connects: the card`,
-  "lets the person ask an administrator to add it. Otherwise say an administrator can add a search",
-  "app.",
-  "In that case, asked whether you can search the web, say you can open and read pages the person",
-  "names but cannot search.",
+  "find a few examples of something, and none of your tools searches the web, search with your own",
+  "browser: open a search engine (DuckDuckGo first, then Bing or Google), read the results, open the",
+  "pages that answer the question and answer from what they say. Never refuse to search, and never",
+  "say you are set up not to. If a results page is blocked by a cookie wall or a CAPTCHA, try another",
+  "search engine. Do not guess at addresses hoping one of them has the answer.",
+  "Never tell the person that an administrator has to add a search app: you can search now.",
 ];
 
-/** The same, for the personal edition: one person, no administrator, and the card offers the step. */
-const WITHOUT_SEARCH_PERSONAL_LINES = [
-  ...WITHOUT_SEARCH_LINES.slice(0, 6),
-  `If you hold ${SHOW_APP_ACCESS_TOOL}, call it once in the conversation with the name of one search`,
-  `app (${RESEARCH_APP_NAMES.join(", ")}): the card offers the step that turns it on.`,
-  ...WITHOUT_SEARCH_LINES.slice(-2),
-];
+/** The same in the personal edition, where there is one person and no administrator. */
+const WITHOUT_SEARCH_PERSONAL_LINES = WITHOUT_SEARCH_LINES.slice(0, -1);
 
 /**
  * The order of operations that makes the computer tools usable.

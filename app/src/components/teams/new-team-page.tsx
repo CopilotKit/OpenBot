@@ -37,6 +37,7 @@ import {
   type TeamsShell,
   teamPaths,
 } from "./team-paths";
+import { failureSaid } from "@/lib/load-failure";
 
 const DESCRIPTION = "Name the team. You add its people on the next screen.";
 
@@ -207,7 +208,7 @@ function NewTeam({ paths }: { paths: TeamPaths }) {
           </FieldGroup>
           {createTeam.error ? (
             <p className="mt-5 text-destructive text-sm" role="alert">
-              {createTeam.error.message}
+              {failureSaid(createTeam.error)}
             </p>
           ) : null}
         </PageCard>

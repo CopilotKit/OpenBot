@@ -1211,6 +1211,28 @@ pub enum EventData {
         from_version: AppVersion,
         to_version: AppVersion,
     },
+    /// OpenBot for Business, with its booking calendar, came on screen because the person picked
+    /// it (`BusinessBooker`): on the first screen or in Move to Cloud. Said once for each each time
+    /// the setup window's page loads.
+    BusinessOpened {
+        place: BusinessPlace,
+    },
+    /// The booking calendar said a call was booked in it. Never the time booked or anything
+    /// typed into the calendar: the booking itself is Calendly's, tagged with the same place.
+    BusinessBooked {
+        place: BusinessPlace,
+    },
+}
+
+/// Where the setup window drew OpenBot for Business's booker, by the name its calendar is tagged
+/// with (`utm_content`, `shared/openbot-for-business.ts`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BusinessPlace {
+    /// The first screen, with OpenBot for Business picked.
+    Welcome,
+    /// Move to Cloud, with OpenBot for Business picked.
+    MoveToCloud,
 }
 
 impl EventData {
@@ -1235,6 +1257,8 @@ impl EventData {
             Self::UpdateCompleted { .. } => "oss.desktop.update_completed",
             Self::UpdateFailed { .. } => "oss.desktop.update_failed",
             Self::UpdateRestored { .. } => "oss.desktop.update_restored",
+            Self::BusinessOpened { .. } => "oss.desktop.business_opened",
+            Self::BusinessBooked { .. } => "oss.desktop.business_booked",
         }
     }
 }
@@ -1481,7 +1505,6 @@ pub enum EngineInstallOutcome {
 pub enum WindowsStageOutcome {
     Ready,
     WslAbsent,
-    WslOne,
     WslNoKernel,
     VirtualMachinePlatformDisabled,
     VirtualizationDisabled,
@@ -1504,8 +1527,6 @@ pub enum WindowsProbeKind {
     WslService,
     /// The Virtual Machine Platform optional feature's state (CIM, through Windows servicing).
     VirtualMachinePlatformFeature,
-    /// The default WSL version, from the registry.
-    DefaultWslVersion,
     /// `wsl.exe --version`.
     WslVersion,
     /// `wsl.exe --system`, which starts WSL's own VM.
@@ -1515,13 +1536,12 @@ pub enum WindowsProbeKind {
 }
 
 impl WindowsProbeKind {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::Virtualization,
         Self::Administrator,
         Self::WslFeature,
         Self::WslService,
         Self::VirtualMachinePlatformFeature,
-        Self::DefaultWslVersion,
         Self::WslVersion,
         Self::WslSystemStart,
         Self::Docker,
@@ -1534,7 +1554,6 @@ impl WindowsProbeKind {
             Self::WslFeature => "wsl_feature",
             Self::WslService => "wsl_service",
             Self::VirtualMachinePlatformFeature => "virtual_machine_platform_feature",
-            Self::DefaultWslVersion => "default_wsl_version",
             Self::WslVersion => "wsl_version",
             Self::WslSystemStart => "wsl_system_start",
             Self::Docker => "docker",
@@ -1839,7 +1858,7 @@ pub fn schema_json() -> serde_json::Value {
             "model_chosen": { "provider": ["openai", "anthropic", "google", "xai", "compatible", "none"], "credential_path": ["subscription", "api_key", "oauth", "none"], "custom_base_url": "bool" },
             "engine_detected": { "engine": ["docker", "podman", "none"], "responding": "bool" },
             "engine_installed": { "engine": ["docker", "podman", "none"], "outcome": ["success", "failure"] },
-            "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_one", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "nested_virtualization_unavailable", "not_administrator", "check_failed"] },
+            "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "nested_virtualization_unavailable", "not_administrator", "check_failed"] },
             "windows_probe": {
                 "probe": WindowsProbeKind::ALL.map(WindowsProbeKind::as_str),
                 "outcome": ["slow", "timed_out"],
@@ -1896,7 +1915,9 @@ pub fn schema_json() -> serde_json::Value {
             "update_restored": {
                 "from_version": { "pattern": APP_VERSION_PATTERN },
                 "to_version": { "pattern": APP_VERSION_PATTERN }
-            }
+            },
+            "business_opened": { "place": ["welcome", "move_to_cloud"] },
+            "business_booked": { "place": ["welcome", "move_to_cloud"] }
         },
         // Sent beside the context on every event: the install id the event is sent under, which
         // the server's events carry as their own `deployment_id`.
@@ -2246,6 +2267,57 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&serde_json::json!("langgraph_ts")));
+    }
+
+    /// OpenBot for Business opened and booked from the setup window: a closed place and nothing
+    /// else, so no time, name or address booked can ride along.
+    #[test]
+    fn business_events_carry_only_their_place() {
+        for (kind, name) in [
+            ("business_opened", "oss.desktop.business_opened"),
+            ("business_booked", "oss.desktop.business_booked"),
+        ] {
+            for place in ["welcome", "move_to_cloud"] {
+                let event = serde_json::from_value::<EventData>(serde_json::json!({
+                    "kind": kind,
+                    "place": place
+                }))
+                .expect("a business event is refused");
+                assert_eq!(event.event_name(), name);
+                assert_eq!(
+                    serde_json::to_value(&event).unwrap(),
+                    serde_json::json!({ "kind": kind, "place": place })
+                );
+                assert!(schema_json()["events"][kind]["place"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&serde_json::json!(place)));
+            }
+            for refused in [
+                serde_json::json!({ "kind": kind, "place": "account_menu" }),
+                serde_json::json!({ "kind": kind }),
+                serde_json::json!({
+                    "kind": kind,
+                    "place": "welcome",
+                    "start_time": "2026-11-25T15:00:00Z"
+                }),
+                serde_json::json!({
+                    "kind": kind,
+                    "place": "welcome",
+                    "email": "someone@example.invalid"
+                }),
+            ] {
+                assert!(serde_json::from_value::<EventData>(refused).is_err());
+            }
+        }
+        assert_eq!(
+            schema_json()["events"]["business_opened"],
+            serde_json::json!({ "place": ["welcome", "move_to_cloud"] })
+        );
+        assert_eq!(
+            schema_json()["events"]["business_booked"],
+            serde_json::json!({ "place": ["welcome", "move_to_cloud"] })
+        );
     }
 
     #[test]

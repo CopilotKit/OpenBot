@@ -4,6 +4,7 @@ import {
   useFrontendTool as useSDKFrontendTool,
 } from "@copilotkit/react-core/v2";
 import { withFinishedAt } from "@openbot/shared/computer-control";
+import { COMPUTER_START_WAIT_MS } from "@openbot/shared/computer-start";
 import { SEND_FILE_TOOL } from "@openbot/shared/send-file";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -19,6 +20,7 @@ import {
   frontendApprovalSnapshot,
   WAITING_FOR_PERSON,
 } from "./approval-context";
+import { heldByServer } from "./server-owned-interrupts";
 import { inStepOrder } from "./tool-steps";
 
 type RenderProps = { toolCallId: string; [key: string]: unknown };
@@ -27,6 +29,31 @@ const needsConversation = (outcome: unknown) =>
   !!outcome &&
   typeof outcome === "object" &&
   (outcome as { needsConversation?: unknown }).needsConversation === true;
+
+/** The gate ran the step and the computer answered that it is still starting, having done nothing. */
+const stillStarting = (step: ComputerStepOutcome) =>
+  step.outcome === "done" &&
+  "result" in step &&
+  !!step.result &&
+  typeof step.result === "object" &&
+  (step.result as { starting?: unknown }).starting === true;
+
+/** The pause before asking the gate again about a computer still starting, as `callComputer` pauses. */
+const START_ASK_AGAIN_MS = 2_000;
+
+/** Resolves after `ms`, or at once when `signal` is aborted. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
 
 /** What the Bot is told when a step in a conversation that asks first has nowhere to ask. */
 const NOT_ASKED =
@@ -121,6 +148,13 @@ export function useFrontendTool<T extends Record<string, unknown>>(
     handler: tool.handler
       ? async (args, context) => {
           /*
+           * A call the server holds is the server's: its run stopped on the server's own wait for
+           * the person, and the server carries the conversation on once they have done their part.
+           * Acted on here as well, a sign-in opened a second form. It waits, as a held step does.
+           */
+          if (heldByServer(context.agent, context.toolCall?.id))
+            return WAITING_FOR_PERSON;
+          /*
            * A computer action waits for the ones asked for before it in its step, and is not
            * taken after one that failed (`inStepOrder`), whether it goes to the gate or straight
            * to the computer.
@@ -166,28 +200,63 @@ export function useFrontendTool<T extends Record<string, unknown>>(
       return direct ?? tool.handler?.(args, context);
     }
     let step: ComputerStepOutcome;
-    try {
-      // The gate of the Bot whose run this is, which the person may have navigated away from.
-      step = await runComputerStep(
-        organizationId(),
-        "me",
-        { botId: botOf(context.agent), conversation: snapshot },
-        { "Idempotency-Key": idempotencyKey() },
-        { signal: context.signal, fallback: "That did not work." },
-      );
-    } catch (error) {
-      // The same two answers callComputer gives when the request itself does not complete.
-      if (error instanceof DOMException && error.name === "AbortError")
+    /*
+     * ASKED AGAIN WHILE THE COMPUTER IS STILL STARTING, as a direct computer call is (`callComputer`),
+     * until COMPUTER_START_WAIT_MS has gone. One step is answered inside what a request may wait, which
+     * is less than a cold computer can take to come up, and its answer then says nothing was done, so
+     * asking again cannot do it twice. Every change goes this way, a command among them: answered
+     * "still starting", the Bot was told to try again, and the step's card said the computer was
+     * starting where the command and what it printed should have been.
+     */
+    const startedAt = Date.now();
+    for (;;) {
+      try {
+        // The gate of the Bot whose run this is, which the person may have navigated away from.
+        step = await runComputerStep(
+          organizationId(),
+          "me",
+          { botId: botOf(context.agent), conversation: snapshot },
+          { "Idempotency-Key": idempotencyKey() },
+          { signal: context.signal, fallback: "That did not work." },
+        );
+      } catch (error) {
+        // The same two answers callComputer gives when the request itself does not complete.
+        if (error instanceof DOMException && error.name === "AbortError")
+          return { ok: false, reason: "Stopped.", stopped: true };
+        // Answered, not thrown: a thrown handler ends the Bot's turn with nothing said (see
+        // failedComputerCall), where a failed result lets it snapshot again or try another way.
+        if (error instanceof ClientError)
+          return failedComputerCall(error.status, { error: error.message });
+        return {
+          ok: false,
+          reason: "The assistant's computer could not be reached.",
+        };
+      }
+      /*
+       * A STEP THE SERVER IS RUNNING ALREADY IS NOT RUN HERE. The server runs a Bot's computer steps
+       * itself and runs each once, whoever asks; one it has started is `taken`, and is asked about
+       * again, with the same step, until its run answers. Its answer is this step's (below).
+       */
+      if (step.outcome === "taken" && step.running) {
+        await pause(START_ASK_AGAIN_MS, context.signal);
+        if (context.signal?.aborted)
+          return { ok: false, reason: "Stopped.", stopped: true };
+        continue;
+      }
+      if (!stillStarting(step)) break;
+      const left = COMPUTER_START_WAIT_MS - (Date.now() - startedAt);
+      if (left <= 0) break;
+      await pause(Math.min(START_ASK_AGAIN_MS, left), context.signal);
+      if (context.signal?.aborted)
         return { ok: false, reason: "Stopped.", stopped: true };
-      // Answered, not thrown: a thrown handler ends the Bot's turn with nothing said (see
-      // failedComputerCall), where a failed result lets it snapshot again or try another way.
-      if (error instanceof ClientError)
-        return failedComputerCall(error.status, { error: error.message });
-      return {
-        ok: false,
-        reason: "The assistant's computer could not be reached.",
-      };
     }
+    // Already run by the server: what that run answered is this step's answer, and nothing runs again.
+    if (step.outcome === "taken")
+      return step.result !== undefined
+        ? step.result
+        : failedComputerCall(200, {
+            error: "The computer action returned no result.",
+          });
     if (step.outcome === "waiting") {
       if (!context.agent)
         throw new Error("The interrupted conversation is unavailable.");

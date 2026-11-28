@@ -2,6 +2,10 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
+import {
+  CreateBotBody,
+  UpdateBotBody,
+} from "../app/src/lib/api/generated/bots/bots.zod";
 
 /**
  * The Bots and Team Bots operations each ask for their own resource's scope: a read for a GET, a
@@ -77,4 +81,31 @@ test("every scope those operations ask for is one an app can be given", () => {
   );
   for (const { scopes } of operations())
     for (const scope of scopes) expect(offered).toContain(scope);
+});
+
+/*
+ * A Bot's instructions hold up to 5000 characters. They were capped at 1000, which a person writing
+ * real instructions for a Bot ran into. Both places they are written: what it does, which a Bot
+ * with no address runs on, and the starter Bot's own instructions.
+ */
+test("a Bot's instructions take up to 5000 characters, on create and on a change", () => {
+  const bot = {
+    name: "Expense Review",
+    title: "",
+    roleDescription: "Review receipts.",
+    visibility: "private",
+  };
+  for (const body of [CreateBotBody, UpdateBotBody]) {
+    for (const field of ["roleDescription", "instructions"]) {
+      expect(
+        body.safeParse({ ...bot, [field]: "r".repeat(4999) }).success,
+      ).toBe(true);
+      expect(
+        body.safeParse({ ...bot, [field]: "r".repeat(5000) }).success,
+      ).toBe(true);
+      expect(
+        body.safeParse({ ...bot, [field]: "r".repeat(5001) }).success,
+      ).toBe(false);
+    }
+  }
 });

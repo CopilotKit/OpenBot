@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { SkillAgents } from "@/components/skills/skill-agents";
 import { SkillFields } from "@/components/skills/skill-fields";
+import { loadFailure } from "@/lib/load-failure";
 import { saveSkillMutationOptions } from "@/lib/skills/mutations";
 import { skillListQueryOptions } from "@/lib/skills/queries";
 
@@ -15,7 +16,7 @@ import { skillListQueryOptions } from "@/lib/skills/queries";
 export function EditSkill({ slug }: { slug: string }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { data, isPending } = useQuery(skillListQueryOptions());
+  const { data, error, isPending } = useQuery(skillListQueryOptions());
 
   /*
    * Read from the list already on screen rather than fetched again. It is the same request the page
@@ -37,7 +38,10 @@ export function EditSkill({ slug }: { slug: string }) {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this skill. Try again in a moment.
+          {loadFailure(
+            error,
+            "Couldn't load this skill. Try again in a moment.",
+          )}
         </p>
       </div>
     );

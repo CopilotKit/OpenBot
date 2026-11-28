@@ -126,7 +126,7 @@ function LiveComputerPanel({
           </TabsList>
           {youHaveIt ? (
             <span
-              className="rounded-full bg-amber-500/15 px-2.5 py-1 font-medium text-amber-800 text-xs dark:text-amber-300"
+              className="rounded-full bg-warning/15 px-2.5 py-1 font-medium text-warning text-xs"
               role="status"
             >
               You have control

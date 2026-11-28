@@ -32,6 +32,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -98,6 +100,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -147,6 +151,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -193,6 +199,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -225,11 +233,20 @@ paths:
         Return the models a person may pick for a conversation, with how hard
         each can think, the one a run uses when nobody picked, and who serves
         them. The models come from whatever serves OpenBot's model, the
-        provider or a gateway in front of it, read in the background, and are
-        narrowed to the ones an administrator allowed. With view=all, every
-        model listed before that narrowing, for an administrator choosing
+        provider or a gateway in front of it, read in the background. They
+        are narrowed for the caller in two ways. The organization's: only
+        once an administrator turns on the model allowlist and allows at
+        least one; an empty allowlist means every model. And the caller's
+        teams': when any team they are in, or a team above one, lists models
+        (getTeamModels), only the models one of those lists names, within
+        what the organization allows. The default is then one of those when
+        any can run, and nothing is left to pick when none can. With
+        view=all, every
+        model listed before either narrowing, for an administrator choosing
         which to allow. When the listing can't be read, the catalogue holds
-        the deployment's own model and nothing to pick.
+        the deployment's own model and nothing to pick. Where several AI
+        connections are connected, connections lists each with its own
+        models, and the fields beside it describe the default connection.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -243,6 +260,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -250,6 +269,8 @@ paths:
               examples:
                 offered:
                   $ref: '#/components/examples/ModelCatalogueExample'
+                connections:
+                  $ref: '#/components/examples/ModelCatalogueConnectionsExample'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -276,7 +297,9 @@ paths:
         conversations, each null for the default. Null too while the choice
         can't be used: the model is no longer offered, or the deployment moved
         to another provider. The choice is kept for when it can be used again.
-        Only the person themselves may read it.
+        Where several AI connections are connected, connection names the one
+        the model is on, and a connection that was removed is a choice that
+        can't be used. Only the person themselves may read it.
       security:
         - webSession: []
         - appOAuth: [model-choices:read]
@@ -287,6 +310,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -294,6 +319,10 @@ paths:
               examples:
                 chosen:
                   $ref: '#/components/examples/ModelChoiceExample'
+                onConnection:
+                  $ref: '#/components/examples/ModelChoiceOnConnectionExample'
+                noDefault:
+                  $ref: '#/components/examples/ModelChoiceNoDefaultExample'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -315,8 +344,11 @@ paths:
         conversations answer on, or null either to go back to the default. The
         model must be one the catalogue offers (getModelCatalogue), and the
         effort one that model takes. Every later run in the conversation reads
-        it, from any device. Only the person themselves may choose, and only
-        while choosing a model is on.
+        it, from any device. Where several AI connections are connected,
+        connection names the one the model is on, and the model must be one
+        that connection offers; without it, the default connection. Changing
+        the default connection never changes a choice. Only the person
+        themselves may choose, and only while choosing a model is on.
       security:
         - webSession: []
         - appOAuth: [model-choices:write]
@@ -338,12 +370,19 @@ paths:
                 value:
                   model: null
                   effort: null
+              onConnection:
+                value:
+                  model: claude-opus-5-5
+                  effort: high
+                  connection: anthropic
       responses:
         '200':
           description: The person's choice, as saved.
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -378,8 +417,9 @@ paths:
         run can use it now. Never a key. Also which other connections still
         have a key kept, so they can be used again without pasting it. Where
         whoever runs OpenBot sets the provider, editable is false and the
-        connection can't be changed here. Only an administrator of the
-        organization may read it.
+        connection can't be changed here. Where several AI connections are
+        connected (listAiConnections), this is the default one. Only an
+        administrator of the organization may read it.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -391,6 +431,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -430,7 +472,19 @@ paths:
         connection it replaces stays kept, so it can be used again (saved).
         Recorded on the audit trail, never with a key. Only an administrator
         of the organization may change it, and not where whoever runs OpenBot
-        sets the provider.
+        sets the provider. On OpenBot Cloud an administrator may also share
+        their own plan (openai, anthropic) or provider sign-in (xai)
+        as the organization's AI: send that login once they have signed in to
+        the provider through OpenBot (startPersonalAiSignIn) and the sign-in
+        is kept for them. Bots across the organization then run on that
+        sign-in for everyone with no AI of their own, and sharedSignIn names
+        whose it is. It stops working if that person removes their own
+        sign-in; another administrator can switch it at any time. With
+        several connections (listAiConnections) this changes the default: the
+        connection saved becomes the default, in place of the provider's own
+        connection where it already had one (its id stays the provider), and
+        a default of another provider stays connected as one of the others,
+        no longer the default.
       security:
         - webSession: []
         - appOAuth: [ai-connection:write]
@@ -476,6 +530,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -485,6 +541,8 @@ paths:
                   $ref: '#/components/examples/AiConnectionExample'
                 endpoint:
                   $ref: '#/components/examples/AiConnectionEndpointExample'
+                sharedPlan:
+                  $ref: '#/components/examples/AiConnectionSharedPlanExample'
         '400':
           $ref: '#/components/responses/InvalidAiConnection'
         '401':
@@ -503,8 +561,1090 @@ paths:
           $ref: '#/components/responses/CredentialsUnavailable'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Models]
+      operationId: deleteAiConnection
+      summary: Disconnect OpenBot's AI provider
+      description: >-
+        Stop the organization's Bots using the AI connection in use, with no
+        restart, and revoke the key it used. Runs already going finish on it.
+        Keys still kept for other connections stay kept (saved), so a switch
+        to one of them needs no key pasted. With several connections
+        (listAiConnections) this disconnects the default only, and the others
+        stay connected: where exactly one is left it becomes the default;
+        where more are left none is, and a run with no model picked is
+        refused until an administrator makes one the default
+        (makeAiConnectionDefault). With no other connection the organization
+        has no AI afterwards: on OpenBot Cloud a person's runs use their own
+        AI where they connected one, and nobody else's run until an
+        administrator connects another (replaceAiConnection). Disconnecting a
+        connection that isn't there changes nothing. Recorded on the audit trail, never with a key.
+        Only an administrator of the organization may disconnect it, and not
+        where whoever runs OpenBot sets the provider.
+      security:
+        - webSession: []
+        - appOAuth: [ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The connection after it was disconnected. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnection'
+              examples:
+                disconnected:
+                  $ref: '#/components/examples/AiConnectionDisconnectedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AiConnectionFixed'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Models]
+      operationId: getPersonalAiConnection
+      summary: Read a person's own AI connection
+      description: >-
+        Return the AI connection a person set for themselves, never its key,
+        and which AI their runs use: their own, the organization's, or none
+        yet. On OpenBot Cloud each person brings their own AI, and it is
+        theirs alone: it follows them into every organization they are in,
+        no administrator can read or use it, and the organization's Bots
+        never run on it for anybody else. Where an organization's AI is the
+        only one (a self-hosted OpenBot, OpenBot Desktop on its own),
+        available is false and the person's runs use the organization's.
+        Where the person connected several of their own
+        (listPersonalAiConnections), connection is the default one. Only the
+        person themselves may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The person's own AI connection, and which AI their runs use. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalAiConnection'
+              examples:
+                own:
+                  $ref: '#/components/examples/PersonalAiConnectionExample'
+                organization:
+                  $ref: '#/components/examples/PersonalAiConnectionOrganizationExample'
+                none:
+                  $ref: '#/components/examples/PersonalAiConnectionNoneExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Models]
+      operationId: replacePersonalAiConnection
+      summary: Set a person's own AI connection
+      description: >-
+        Connect the AI a person's runs use, with their own key or an address,
+        or a key a sign-in through OpenBot kept for them (useSavedKey). OpenBot
+        checks the connection with the provider first: a key, an address or a
+        model it can't use is refused and nothing is saved. Once saved, the
+        person's next run uses it, ahead of the organization's. The key is
+        encrypted and kept for the person alone, never in the organization's
+        vault, and never sent back. A plan (openai, anthropic) or a provider
+        sign-in (xai) is accepted only once the person has signed in
+        to that provider through OpenBot (startPersonalAiSignIn) and the
+        sign-in was approved: the server keeps that sign-in for them alone
+        and renews it itself. Without one it is refused, since the server
+        runs the person's Bots and can't use a sign-in held on a computer.
+        With several connections of their own (listPersonalAiConnections)
+        this changes their default: the connection saved becomes the default,
+        in place of the provider's own connection where they already had one
+        (its id stays the provider), and a default of another provider stays
+        connected as one of the others, no longer the default.
+        Recorded on the audit trail, never with a key. Only the person
+        themselves may set it, and only where available is true.
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiConnectionInput'
+            examples:
+              apiKey:
+                value:
+                  provider: anthropic
+                  login: api-key
+                  apiKey: sk-ant-example
+              chatgptPlan:
+                value:
+                  provider: openai
+                  login: plan
+              xaiSignIn:
+                value:
+                  provider: xai
+                  login: oauth
+                  model: grok-4.7
+      responses:
+        '200':
+          description: The person's own AI connection, as saved and in use. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalAiConnection'
+              examples:
+                own:
+                  $ref: '#/components/examples/PersonalAiConnectionExample'
+        '400':
+          $ref: '#/components/responses/InvalidAiConnection'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/PersonalAiConnectionUnavailable'
+        '422':
+          $ref: '#/components/responses/AiConnectionRefused'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Models]
+      operationId: deletePersonalAiConnection
+      summary: Remove a person's own AI connection
+      description: >-
+        Stop a person's runs using their own AI, and revoke every key kept
+        for them. With several connections of their own
+        (listPersonalAiConnections) it removes all of them, not only the
+        default; removePersonalAiConnection removes one. Their next run uses
+        the organization's AI where it has one;
+        where it has none and an AI is required, they connect one again before
+        Bots run for them. Removing a connection that isn't there changes
+        nothing. Recorded on the audit trail. Only the person themselves may
+        remove it.
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The person's AI connection after the removal. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalAiConnection'
+              examples:
+                organization:
+                  $ref: '#/components/examples/PersonalAiConnectionOrganizationExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Models]
+      operationId: startPersonalAiSignIn
+      summary: Start signing in to an AI provider
+      description: >-
+        Start a sign-in to an AI provider that the server runs itself, for a
+        provider PersonalAiConnection lists in signIns. The answer holds the
+        address the person approves it at, in their browser, the code to
+        check there where the provider shows one, and how it finishes. With
+        finish poll, read the sign-in (getPersonalAiSignIn) every interval
+        seconds until it is approved, failed or expired. With finish code,
+        the person approves, copies the code Claude's page shows them or
+        the address ChatGPT sends their browser to, and sends it back with
+        finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies
+        anything: Desktop listens on the person's own computer for the
+        provider's redirect and the app sends what arrives with
+        finishPersonalAiSignIn. For Claude, loopbackPort names the port
+        Desktop listens on; ChatGPT's browser sign-in always redirects to
+        localhost:1455. Approved, what the
+        provider handed OpenBot is kept for the person alone, never sent to
+        the browser: a Claude or ChatGPT plan's sign-in (connect with login
+        plan), or an xAI sign-in (connect with login oauth). The
+        server renews a sign-in that expires itself. Only the person
+        themselves may sign in, and only where available is true. Google
+        is refused: Gemini connects with an API key only.
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiSignInInput'
+            examples:
+              xai:
+                value:
+                  provider: xai
+              chatgpt:
+                value:
+                  provider: openai
+              chatgptWithACode:
+                value:
+                  provider: openai
+                  method: device
+              claude:
+                value:
+                  provider: anthropic
+              claudeInDesktop:
+                value:
+                  provider: anthropic
+                  loopbackPort: 53682
+      responses:
+        '201':
+          description: The sign-in, waiting for the person to approve it.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiSignIn'
+              examples:
+                waiting:
+                  $ref: '#/components/examples/AiSignInExample'
+                chatgpt:
+                  $ref: '#/components/examples/AiSignInChatGptBrowserExample'
+                chatgptWithACode:
+                  $ref: '#/components/examples/AiSignInChatGptExample'
+                claude:
+                  $ref: '#/components/examples/AiSignInClaudeExample'
+        '400':
+          $ref: '#/components/responses/InvalidAiConnection'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/PersonalAiConnectionUnavailable'
+        '422':
+          $ref: '#/components/responses/AiConnectionRefused'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/SignInId'
+    get:
+      tags: [Models]
+      operationId: getPersonalAiSignIn
+      summary: Read a sign-in to an AI provider
+      description: >-
+        Ask the provider once whether the person approved the sign-in, and
+        say where it stands. pending: not yet, read it again after interval
+        seconds. approved: what the provider handed OpenBot is kept for the
+        person, never in this answer. failed or expired: it is over, and
+        detail says why in OpenBot's own words; start another. Reading it
+        again after it is approved answers approved and asks the provider
+        nothing. Only the person who started it may read it.
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:write]
+        - apiKey: []
+      responses:
+        '200':
+          description: Where the sign-in stands. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiSignInStatus'
+              examples:
+                pending:
+                  $ref: '#/components/examples/AiSignInPendingExample'
+                approved:
+                  $ref: '#/components/examples/AiSignInApprovedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/AiSignInNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}/code:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/SignInId'
+    post:
+      tags: [Models]
+      operationId: finishPersonalAiSignIn
+      summary: Finish a sign-in with the provider's code
+      description: >-
+        Finish a sign-in whose finish is code: send the code the provider's
+        page showed the person once they approved it. OpenBot hands it to the
+        provider at once and answers where the sign-in stands: approved, with
+        what the provider handed back kept for the person and never in this
+        answer, or failed with detail saying why in OpenBot's own words. A
+        sign-in that is already approved answers approved and sends nothing.
+        Only the person who started it may finish it.
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiSignInCodeInput'
+            examples:
+              claude:
+                value:
+                  code: Zm9vYmFyLWNvZGU#c3RhdGUtZXhhbXBsZQ
+      responses:
+        '200':
+          description: Where the sign-in stands. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiSignInStatus'
+              examples:
+                approved:
+                  $ref: '#/components/examples/AiSignInClaudeApprovedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/AiSignInNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/ai-connections:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Models]
+      operationId: listAiConnections
+      summary: List the organization's AI connections
+      description: >-
+        Return one page of the AI connections the organization's Bots can
+        run on, one per provider, never a key. A person picks a model from
+        any of them for a conversation (replaceModelChoice with connection);
+        a run with no pick uses the one that isDefault, which is the
+        connection getAiConnection describes. When a removal leaves exactly
+        one connection, it becomes the default. With more left and none the
+        default (after an older app disconnected the default,
+        deleteAiConnection), a run with no pick is refused with a stopped
+        choice saying to choose a default (getModelChoice, no-default), and a
+        run whose pick names a connection that is ready still runs. signIns
+        names the providers the server signs in to for the organization itself
+        (startAiSignIn): on OpenBot Cloud and a self-hosted OpenBot. OpenBot
+        Desktop running its own OpenBot keeps its own plan sign-in, and its
+        signIns is empty. Where whoever runs OpenBot
+        sets the provider, the list holds that one connection and none can
+        be added. Only an administrator of the organization may list them. A
+        missing cursor starts at the first page and nextCursor null ends the
+        list.
+      security:
+        - webSession: []
+        - appOAuth: [ai-connection:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the organization's AI connections. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnectionPage'
+              examples:
+                two:
+                  $ref: '#/components/examples/AiConnectionPageExample'
+                noDefault:
+                  $ref: '#/components/examples/AiConnectionPageNoDefaultExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Models]
+      operationId: connectAiConnection
+      summary: Connect an AI provider for the organization
+      description: >-
+        Connect one more AI provider the organization's Bots can run on,
+        beside the ones already connected. OpenBot checks the connection with
+        the provider first: a key, an address or a sign-in it can't use is
+        refused and nothing is saved. Each provider has at most one
+        connection: connecting a provider that already has one replaces it
+        (a key replaced, a plan swapped for a key) and keeps its id, so
+        conversations that picked it keep running on it. The first connection
+        becomes the default; a later one does not (makeAiConnectionDefault).
+        A key goes into the organization's vault and is never sent back. A
+        plan or a provider sign-in is accepted once an administrator signed
+        in to it for the organization (startAiSignIn). Recorded on the audit
+        trail, never with a key. Only an administrator of the organization
+        may connect one, and not where whoever runs OpenBot sets the
+        provider.
+      security:
+        - webSession: []
+        - appOAuth: [ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiConnectionInput'
+            examples:
+              apiKey:
+                value:
+                  provider: openai
+                  login: api-key
+                  apiKey: sk-example
+              plan:
+                value:
+                  provider: anthropic
+                  login: plan
+      responses:
+        '201':
+          description: The connection, as saved. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnectionEntry'
+              examples:
+                connected:
+                  $ref: '#/components/examples/AiConnectionEntryExample'
+        '400':
+          $ref: '#/components/responses/InvalidAiConnection'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AiConnectionFixed'
+        '422':
+          $ref: '#/components/responses/AiConnectionRefused'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/CredentialsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/ai-connections/{connectionId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AiConnectionId'
+    delete:
+      tags: [Models]
+      operationId: removeAiConnection
+      summary: Remove one of the organization's AI connections
+      description: >-
+        Stop the organization's Bots using one AI connection, with no
+        restart, and revoke its key or sign-in. Runs already going finish on
+        it. Conversations that picked it keep their pick, which stops
+        applying: their next run uses the default. The server moves the
+        default only when a removal leaves exactly one connection, which
+        becomes the default. Removing the default with more than one left
+        leaves the organization with no default until an administrator makes
+        another one default (makeAiConnectionDefault), and a client that wants
+        a particular one to take over makes it default first. Recorded on the
+        audit trail, never with
+        a key. Only an administrator of the organization may remove one, and
+        not where whoever runs OpenBot sets the provider.
+      security:
+        - webSession: []
+        - appOAuth: [ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The connection was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AiConnectionNotFound'
+        '409':
+          $ref: '#/components/responses/AiConnectionFixed'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/ai-connections/{connectionId}/make-default:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AiConnectionId'
+    post:
+      tags: [Models]
+      operationId: makeAiConnectionDefault
+      summary: Make one of the organization's AI connections the default
+      description: >-
+        Make a run with no pick use this AI connection, with no restart:
+        getAiConnection describes it from then on, and OpenBot's own model
+        calls (titles, routing, summaries) use it. Picks people made for
+        their conversations don't change. A connection that can't run now
+        (ready false) is refused. Recorded on the audit trail. Only an
+        administrator of the organization may change it.
+      security:
+        - webSession: []
+        - appOAuth: [ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The connection, now the default. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnectionEntry'
+              examples:
+                default:
+                  $ref: '#/components/examples/AiConnectionEntryExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AiConnectionNotFound'
+        '409':
+          $ref: '#/components/responses/AiConnectionNotReady'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/ai-connection-sign-ins:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Models]
+      operationId: startAiSignIn
+      summary: Start signing in to an AI provider for the organization
+      description: >-
+        Start a sign-in to an AI provider that the server runs itself, for
+        the organization, for a provider listAiConnections names in signIns.
+        It works as startPersonalAiSignIn does, and what the provider hands
+        back is kept for the organization: connect it with
+        connectAiConnection and login plan or oauth. The server renews it
+        itself. Offered on OpenBot
+        Cloud and a self-hosted OpenBot; OpenBot Desktop running its own
+        OpenBot keeps its own plan sign-in and offers none here. Only an
+        administrator of the organization may sign in for it.
+      security:
+        - webSession: []
+        - appOAuth: [ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiSignInInput'
+            examples:
+              claude:
+                value:
+                  provider: anthropic
+              claudeInDesktop:
+                value:
+                  provider: anthropic
+                  loopbackPort: 53682
+      responses:
+        '201':
+          description: The sign-in, waiting for the administrator to approve it.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiSignIn'
+              examples:
+                claude:
+                  $ref: '#/components/examples/AiSignInClaudeExample'
+        '400':
+          $ref: '#/components/responses/InvalidAiConnection'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AiConnectionFixed'
+        '422':
+          $ref: '#/components/responses/AiConnectionRefused'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/ai-connection-sign-ins/{signInId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SignInId'
+    get:
+      tags: [Models]
+      operationId: getAiSignIn
+      summary: Read a sign-in to an AI provider for the organization
+      description: >-
+        Ask the provider once whether the organization's sign-in was
+        approved, and say where it stands, as getPersonalAiSignIn does. Only
+        an administrator of the organization may read it.
+      security:
+        - webSession: []
+        - appOAuth: [ai-connection:write]
+        - apiKey: []
+      responses:
+        '200':
+          description: Where the sign-in stands. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiSignInStatus'
+              examples:
+                pending:
+                  $ref: '#/components/examples/AiSignInPendingExample'
+                approved:
+                  $ref: '#/components/examples/AiSignInApprovedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AiSignInNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/ai-connection-sign-ins/{signInId}/code:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SignInId'
+    post:
+      tags: [Models]
+      operationId: finishAiSignIn
+      summary: Finish the organization's sign-in with the provider's code
+      description: >-
+        Finish a sign-in for the organization whose finish is code, as
+        finishPersonalAiSignIn does. Only an administrator of the
+        organization may finish it.
+      security:
+        - webSession: []
+        - appOAuth: [ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiSignInCodeInput'
+            examples:
+              claude:
+                value:
+                  code: Zm9vYmFyLWNvZGU#c3RhdGUtZXhhbXBsZQ
+      responses:
+        '200':
+          description: Where the sign-in stands. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiSignInStatus'
+              examples:
+                approved:
+                  $ref: '#/components/examples/AiSignInClaudeApprovedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AiSignInNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Models]
+      operationId: listPersonalAiConnections
+      summary: List a person's own AI connections
+      description: >-
+        Return one page of the AI connections a person connected for
+        themselves, one per provider, never a key. They are theirs alone, as
+        getPersonalAiConnection describes, and a person's runs use them ahead
+        of the organization's: a person with any of their own never runs on
+        the organization's. A run with no pick uses the one that isDefault;
+        connections can exist with none the default, as listAiConnections
+        describes. signIns names the providers the server signs the person in
+        to itself. Only the person themselves may list them, and only where
+        available is true. A missing cursor starts at the first page and
+        nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the person's own AI connections. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnectionPage'
+              examples:
+                two:
+                  $ref: '#/components/examples/AiConnectionPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/PersonalAiConnectionUnavailable'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Models]
+      operationId: connectPersonalAiConnection
+      summary: Connect an AI provider of a person's own
+      description: >-
+        Connect one more AI provider for a person, beside the ones they
+        already connected, as connectAiConnection does for the organization:
+        checked with the provider first, one connection per provider, a
+        provider already connected replaced with its id kept, and the first
+        one the default. A plan or a provider sign-in is accepted once the
+        person signed in to it through OpenBot (startPersonalAiSignIn). The
+        key is kept for the person alone, never in the organization's vault,
+        and never sent back. Recorded on the audit trail, never with a key.
+        Only the person themselves may connect one, and only where available
+        is true.
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiConnectionInput'
+            examples:
+              chatgptPlan:
+                value:
+                  provider: openai
+                  login: plan
+      responses:
+        '201':
+          description: The connection, as saved. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnectionEntry'
+              examples:
+                connected:
+                  $ref: '#/components/examples/AiConnectionEntryExample'
+        '400':
+          $ref: '#/components/responses/InvalidAiConnection'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/PersonalAiConnectionUnavailable'
+        '422':
+          $ref: '#/components/responses/AiConnectionRefused'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections/{connectionId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/AiConnectionId'
+    delete:
+      tags: [Models]
+      operationId: removePersonalAiConnection
+      summary: Remove one of a person's own AI connections
+      description: >-
+        Stop a person's runs using one of their own AI connections and revoke
+        its key or sign-in, as removeAiConnection does for the organization:
+        picks on it stop applying, and the default moves as removeAiConnection
+        says: to the one left, when exactly one is left. Removing their last one sends
+        their runs back to the organization's AI. Recorded on the audit
+        trail. Only the person themselves may remove one.
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The connection was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/AiConnectionNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections/{connectionId}/make-default:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/AiConnectionId'
+    post:
+      tags: [Models]
+      operationId: makePersonalAiConnectionDefault
+      summary: Make one of a person's own AI connections the default
+      description: >-
+        Make the person's runs with no pick use this connection of their own,
+        as makeAiConnectionDefault does for the organization. A connection
+        that can't run now is refused. Only the person themselves may change
+        it.
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The connection, now the default. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnectionEntry'
+              examples:
+                default:
+                  $ref: '#/components/examples/AiConnectionEntryExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/AiConnectionNotFound'
+        '409':
+          $ref: '#/components/responses/AiConnectionNotReady'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
+    AiConnectionId:
+      name: connectionId
+      in: path
+      required: true
+      description: The AI connection's id, as listAiConnections or listPersonalAiConnections gave it. Opaque.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: ^[A-Za-z0-9_.:-]+$
+    SignInId:
+      name: signInId
+      in: path
+      required: true
+      description: The sign-in's id, as startPersonalAiSignIn gave it.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 4096
+        pattern: ^[A-Za-z0-9_-]+$
     CredentialId:
       name: credentialId
       in: path
@@ -707,8 +1847,9 @@ components:
           enum: [all, allowed]
           description: >-
             Who decides what people may pick. all: one person on their own
-            machine, offered every model listed. allowed: a team, offered the
-            models an administrator allowed.
+            machine, offered every model listed. allowed: a team, offered every
+            model listed until an administrator narrows it with the model
+            allowlist (on, with at least one model allowed).
         default:
           type: string
           description: What a run uses when nobody picked. Always one of models.
@@ -727,6 +1868,155 @@ components:
           description: >-
             Whether the listing was read. False means only the deployment's own
             model is known.
+        connections:
+          type: array
+          description: >-
+            Every AI connection the person's runs can use, each with its own
+            models, the default first: their own connections where they have
+            any, the organization's otherwise. The fields above describe the
+            default connection. Absent from an OpenBot older than several
+            connections; a client then offers the models above.
+          items:
+            $ref: '#/components/schemas/ModelCatalogueConnection'
+    ModelCatalogueConnection:
+      type: object
+      description: >-
+        One AI connection's models, as a person picks from them. Never a key
+        or an address. For a member reading the organization's connections,
+        login is null and a problem's detail says an administrator has to fix
+        it.
+      required: [id, owner, provider, login, source, isDefault, ready, problem, default, models, listed]
+      properties:
+        id:
+          type: string
+          description: The connection's id, as a pick names it (replaceModelChoice).
+        owner:
+          type: string
+          x-extensible-enum: [personal, organization]
+          description: >-
+            Whose connection it is. personal: the person's own, which they fix
+            themselves. organization: the organization's, which an
+            administrator fixes.
+        provider:
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
+        login:
+          description: How OpenBot signs in to it. Null for a member reading the organization's.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionLogin'
+            - type: 'null'
+        source:
+          type: string
+          x-extensible-enum: [openai, anthropic, google, xai, gateway, chatgpt, claude]
+          description: >-
+            Who serves its models, as ModelCatalogue's source says it. What a
+            Bot's default model is matched on.
+        isDefault:
+          type: boolean
+          description: Whether a run with no pick uses it.
+        ready:
+          type: boolean
+          description: Whether a run can use it now.
+        problem:
+          description: Why it can't run now. Null while ready.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionProblem'
+            - type: 'null'
+        default:
+          type: string
+          description: The model a run on it uses when nobody picked one. Always one of models.
+        models:
+          type: array
+          description: Newest first, narrowed to what an administrator allowed.
+          items:
+            $ref: '#/components/schemas/ModelOption'
+        listed:
+          type: boolean
+          description: Whether its listing was read.
+    AiConnectionProblem:
+      type: object
+      description: Why an AI connection can't run now, in OpenBot's own words.
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          x-extensible-enum: [sign-in-ended, key-refused, unreachable, no-key, no-default, sign-in-retired]
+          description: >-
+            sign-in-ended: the provider stopped renewing the sign-in, so it
+            has to be signed in to again. key-refused: the provider refuses
+            its key. unreachable: its address doesn't answer. no-key: its key
+            is no longer kept. no-default: several connections are connected
+            and none is the default, so a run with no pick has nothing to use
+            until one is made default. sign-in-retired: OpenBot no longer
+            offers this provider's sign-in (a Google sign-in for Gemini), so
+            it can't run, and signing in again isn't offered. Saving a key on
+            the same connection fixes it: its id stays, so every Bot that used
+            it runs on the key with nothing else to change.
+        detail:
+          type: string
+          description: One sentence a person reads, saying what to do.
+    AiConnectionEntry:
+      type: object
+      description: One AI connection in a list. Never a key.
+      required: [id, provider, login, model, endpointHost, isDefault, ready, problem, connectedAt]
+      properties:
+        id:
+          type: string
+          description: >-
+            The connection's id. Opaque; clients never read anything into it.
+            Unique within its list only: a person's own connection and the
+            organization's may share an id, so a client says whose it means.
+        provider:
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
+        login:
+          $ref: '#/components/schemas/AiConnectionLogin'
+        model:
+          type: [string, 'null']
+          description: The model named for an endpoint or a sign-in. Null for an API key or a plan.
+        endpointHost:
+          type: [string, 'null']
+          description: The host of the endpoint's address, never its path or anything that signs in. Null unless the login is endpoint.
+        isDefault:
+          type: boolean
+          description: Whether a run with no pick uses it.
+        ready:
+          type: boolean
+          description: Whether a run can use it now.
+        problem:
+          description: Why it can't run now. Null while ready.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionProblem'
+            - type: 'null'
+        connectedAt:
+          type: string
+          format: date-time
+          description: When it was connected or last changed.
+        sharedSignIn:
+          description: Whose plan or provider sign-in it shares, for an organization's connection on OpenBot Cloud. Null otherwise.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionSharedSignIn'
+            - type: 'null'
+    AiConnectionPage:
+      type: object
+      description: One page of AI connections, and the providers the server signs in to itself.
+      required: [connections, nextCursor, signIns]
+      properties:
+        connections:
+          type: array
+          description: Oldest first.
+          items:
+            $ref: '#/components/schemas/AiConnectionEntry'
+        nextCursor:
+          type: [string, 'null']
+          description: Where the next page starts. Null ends the list.
+        signIns:
+          type: array
+          description: >-
+            The providers the server can sign in to itself for whoever owns
+            this list (startAiSignIn for the organization,
+            startPersonalAiSignIn for a person). Every provider not listed
+            connects with a key or an address.
+          items:
+            $ref: '#/components/schemas/AiConnectionProvider'
     ModelChoice:
       type: object
       description: >-
@@ -752,6 +2042,35 @@ components:
               type: string
         unverified:
           $ref: '#/components/schemas/UnverifiedModel'
+        connection:
+          type: [string, 'null']
+          description: >-
+            The AI connection the chosen model is on, by id. Null for the
+            default connection. Absent from an OpenBot older than several
+            connections.
+        stopped:
+          description: >-
+            The connection the conversation's next run would use (the
+            choice's, or the default with no choice) when it is connected but
+            can't run now, and why; or, with no choice and no default, that a
+            default has to be chosen (connection null, code no-default). Null
+            when it can run. A client shows this after a refused run instead
+            of reading the refusal's words.
+          oneOf:
+            - $ref: '#/components/schemas/StoppedAiConnection'
+            - type: 'null'
+    StoppedAiConnection:
+      type: object
+      description: >-
+        Why a conversation's next run can't start: the connection it would use
+        can't run now, or there is no default to use.
+      required: [connection, problem]
+      properties:
+        connection:
+          type: [string, 'null']
+          description: The connection's id. Null when there is no default connection to name (no-default).
+        problem:
+          $ref: '#/components/schemas/AiConnectionProblem'
     UnverifiedModel:
       type: object
       description: >-
@@ -791,22 +2110,42 @@ components:
           description: >-
             Keep an explicitly named model as an override even when it is the
             deployment's default. Omit to use the default as a reset.
+        connection:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 200
+          pattern: ^[A-Za-z0-9_.:-]+$
+          description: >-
+            The AI connection the model is on, by id, one the catalogue lists
+            in connections. Absent or null: the default connection.
     AiConnectionProvider:
       type: string
       description: >-
         The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic:
         Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI.
+        trustedrouter: TrustedRouter. openai-compatible: any server that
+        speaks OpenAI's API, at an address given.
+      enum: [openai, anthropic, google, xai, unbiased, trustedrouter, openai-compatible]
+    AiConnectionProviderAnswer:
+      type: string
+      x-extensible-enum: [openai, anthropic, google, xai, unbiased, trustedrouter, openai-compatible]
+      description: >-
+        The AI provider OpenBot's Bots run on, as the server answers it.
+        openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai:
+        xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter.
         openai-compatible: any server that speaks OpenAI's API, at an address
-        given.
-      enum: [openai, anthropic, google, xai, unbiased, openai-compatible]
+        given. The list can grow: a client shows a provider it doesn't know
+        by its id. A request still names one of AiConnectionProvider.
     AiConnectionLogin:
       type: string
       description: >-
         How OpenBot signs in to the provider. plan: the person's Claude or
         ChatGPT plan (openai, anthropic). api-key: a key from the provider
         (openai, anthropic). endpoint: an address and, where it asks for one,
-        a key (google, xai, unbiased, openai-compatible). oauth: the person's
-        Google or xAI sign-in (google, xai).
+        a key (google, xai, unbiased, trustedrouter, openai-compatible).
+        oauth: the person's xAI sign-in (xai). A Google sign-in (google,
+        oauth) saved before Gemini took an API key only is still listed,
+        with the problem sign-in-retired, and is never accepted again.
       enum: [plan, api-key, endpoint, oauth]
     AiConnectionSaved:
       type: object
@@ -816,7 +2155,7 @@ components:
       required: [provider, login, endpointHost]
       properties:
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         login:
           $ref: '#/components/schemas/AiConnectionLogin'
         endpointHost:
@@ -842,7 +2181,7 @@ components:
         provider:
           description: The provider. Null while none is chosen yet.
           oneOf:
-            - $ref: '#/components/schemas/AiConnectionProvider'
+            - $ref: '#/components/schemas/AiConnectionProviderAnswer'
             - type: 'null'
         login:
           description: How OpenBot signs in to it. Null while none is chosen yet.
@@ -890,13 +2229,40 @@ components:
           type: [string, 'null']
           format: date-time
           description: When it was last changed. Null if never.
+        sharedSignIn:
+          description: >-
+            Whose plan or provider sign-in the organization's AI runs on, when
+            an administrator shared their own on OpenBot Cloud. Null for a key,
+            an address, a sign-in held on this computer, or none. A server
+            older than this field leaves it out.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionSharedSignIn'
+            - type: 'null'
+    AiConnectionSharedSignIn:
+      type: object
+      description: The person whose own sign-in the organization's AI shares. Never a token.
+      required: [personId, name, ready]
+      properties:
+        personId:
+          type: string
+          description: The person's id.
+        name:
+          type: string
+          description: Their name as OpenBot shows it, or their email address where they have none.
+        ready:
+          type: boolean
+          description: >-
+            Whether their sign-in is still kept and can run a Bot. False once
+            they removed it or the provider stopped renewing it.
     AiConnectionInput:
       type: object
       additionalProperties: false
       description: >-
         The connection to switch to. openai and anthropic take plan or
-        api-key; google and xai take endpoint or oauth; unbiased and
-        openai-compatible take endpoint. Any other pair is refused.
+        api-key; xai takes endpoint or oauth; google, unbiased,
+        trustedrouter and openai-compatible take endpoint. Any other pair is
+        refused: google with oauth is refused with the words of the problem
+        sign-in-retired.
       required: [provider, login]
       properties:
         provider:
@@ -932,11 +2298,296 @@ components:
           maxLength: 500
           pattern: \S
           description: The model to run on. Required for endpoint and oauth. Trimmed.
+    PersonalAiConnection:
+      type: object
+      description: >-
+        A person's own AI connection, and which AI their runs use. Never a
+        key. uses, required and available are the server's verdicts; a client
+        renders them and never recomputes them.
+      required: [connection, organization, uses, required, available, signIns]
+      properties:
+        connection:
+          $ref: '#/components/schemas/AiConnection'
+        organization:
+          $ref: '#/components/schemas/OrganizationAiSummary'
+        uses:
+          type: string
+          x-extensible-enum: [personal, organization, none]
+          description: >-
+            The AI the person's next run uses. personal: their own.
+            organization: the organization's, which they have none of their
+            own to put ahead of. none: neither, so Bots can't run for them yet.
+        required:
+          type: boolean
+          description: >-
+            Whether the person has to have an AI (their own or the
+            organization's) before they use OpenBot. True on OpenBot Cloud,
+            which brings no AI of its own: while uses is none, the apps send
+            them to connect their own, and the server runs no Bot for them.
+        available:
+          type: boolean
+          description: >-
+            Whether the person can set an AI connection of their own here.
+            False where the organization's AI is the only one.
+        signIns:
+          type: array
+          description: >-
+            The providers the server can sign the person in to itself
+            (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan
+            (anthropic), and an xAI sign-in, each where
+            this server is set up for it. Each still connects with a key or an
+            address too, and every provider not listed connects only that way.
+          items:
+            $ref: '#/components/schemas/AiConnectionProviderAnswer'
+    OrganizationAiSummary:
+      type: object
+      description: >-
+        Whether the organization has an AI for everyone in it, as a member may
+        know it: never its key, its address or who set it.
+      required: [ready, provider]
+      properties:
+        ready:
+          type: boolean
+          description: Whether the organization's AI can run a Bot now.
+        provider:
+          description: The organization's provider. Null while it has none.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionProviderAnswer'
+            - type: 'null'
+    AiSignInInput:
+      type: object
+      additionalProperties: false
+      required: [provider]
+      properties:
+        provider:
+          $ref: '#/components/schemas/AiConnectionProvider'
+        method:
+          type: string
+          enum: [browser, device]
+          description: >-
+            How to sign in, for a provider that offers more than one way.
+            openai: browser (the default) approves in the browser and
+            finishes with the address ChatGPT sends the browser to; device
+            shows a code to enter at ChatGPT instead, which works only once
+            the person has turned on device code sign-in in ChatGPT's
+            security settings. Every other provider has one way and ignores
+            it.
+        loopbackPort:
+          type: integer
+          minimum: 1024
+          maximum: 65535
+          description: >-
+            anthropic only: the port OpenBot Desktop listens on, on the
+            person's own computer, for Claude's redirect. Claude then sends
+            the browser to http://localhost:{loopbackPort}/callback instead
+            of a page that shows a code, and the app sends the code and state
+            that arrive there (code#state) with finishPersonalAiSignIn, so
+            the person copies nothing. Absent, Claude's page shows the code
+            to copy. Every other provider ignores it.
+    AiSignInCodeInput:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          pattern: \S
+          writeOnly: true
+          description: >-
+            What the person copied once they approved the sign-in: the code
+            the provider's page showed (Claude), or the whole address the
+            provider sent their browser to (ChatGPT). Trimmed. Never sent
+            back.
+    AiSignIn:
+      type: object
+      description: A sign-in to an AI provider, waiting for the person to approve it in their browser.
+      required: [id, provider, url, userCode, expiresAt, interval, finish]
+      properties:
+        id:
+          type: string
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: The sign-in's id, for reading where it stands.
+        provider:
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
+        url:
+          type: string
+          format: uri
+          description: The provider's page where the person approves the sign-in.
+        userCode:
+          type: [string, 'null']
+          description: The code the provider's page shows, for the person to check. Null when it shows none.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the sign-in can no longer be approved.
+        interval:
+          type: integer
+          minimum: 1
+          maximum: 600
+          description: How many seconds to wait between reads.
+        finish:
+          type: string
+          x-extensible-enum: [poll, code]
+          description: >-
+            How the sign-in finishes. poll: read it (getPersonalAiSignIn)
+            every interval seconds until it is approved, failed or expired.
+            code: once the person approves it, the provider shows them a
+            code (Claude) or sends their browser to an address that doesn't
+            load (ChatGPT), and they send that code or address back with
+            finishPersonalAiSignIn.
+    AiSignInStatus:
+      type: object
+      description: Where a sign-in to an AI provider stands. Never a key.
+      required: [id, provider, status, detail, interval]
+      properties:
+        id:
+          type: string
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+        provider:
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
+        status:
+          type: string
+          x-extensible-enum: [pending, approved, failed, expired]
+          description: >-
+            pending: not approved yet. approved: what the provider handed
+            OpenBot (a key, or a sign-in the server renews) is kept for the
+            person. failed or expired: over; start another.
+        detail:
+          type: [string, 'null']
+          description: Why it failed or expired, in OpenBot's own words. Null otherwise.
+        interval:
+          type: integer
+          minimum: 1
+          maximum: 600
+          description: How many seconds to wait before reading it again, while it is pending.
   responses:
+    PersonalAiConnectionUnavailable:
+      description: >-
+        A person can't set an AI connection of their own here (available is
+        false): the organization's AI is the only one. Or the Idempotency-Key
+        was already used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            organizationOnly:
+              value:
+                type: https://open.bot/errors/personal-ai-connection-unavailable
+                title: This OpenBot uses its organization's AI.
+                status: 409
+                detail: Bots here use your organization's AI. An admin changes it in Settings.
+                code: PERSONAL_AI_CONNECTION_UNAVAILABLE
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AiConnectionNotFound:
+      description: >-
+        No AI connection has that id here: it was never connected, was
+        removed, or belongs to somebody else.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/ai-connection-not-found
+                title: AI connection not found.
+                status: 404
+                detail: That AI connection isn't connected anymore.
+                code: AI_CONNECTION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AiConnectionNotReady:
+      description: >-
+        The AI connection can't run now (ready false), so it can't be the
+        default. Or the Idempotency-Key was already used for a different
+        request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notReady:
+              value:
+                type: https://open.bot/errors/ai-connection-not-ready
+                title: This AI connection can't run now.
+                status: 409
+                detail: Your Claude plan sign-in ended. Sign in again before you make it the default.
+                code: AI_CONNECTION_NOT_READY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AiSignInNotFound:
+      description: >-
+        No sign-in has that id for this person: it was never started, was
+        started by somebody else, or its id was changed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/ai-sign-in-not-found
+                title: Sign-in not found.
+                status: 404
+                detail: That sign-in isn't there. Sign in again.
+                code: AI_SIGN_IN_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     InvalidCredential:
       description: >-
         A field is missing or out of bounds, a connector or app token was sent
         without a key id, or a name or a note holds text that can't be kept.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -957,6 +2608,9 @@ components:
       description: >-
         No live credential has that id: it never existed or is revoked
         already. Or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -975,6 +2629,9 @@ components:
                 traceId: trace_example
     CredentialsUnavailable:
       description: This OpenBot keeps no vault.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -995,6 +2652,9 @@ components:
       description: >-
         This OpenBot's Bots don't read a model key from the vault. Or the
         organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1015,6 +2675,9 @@ components:
       description: >-
         The body is malformed, the model isn't one the catalogue offers, or
         the model can't think at that effort.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1046,6 +2709,9 @@ components:
       description: >-
         The conversation is somebody else's choice to make, an administrator
         turned choosing a model off, or the caller may not use Bots.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1078,6 +2744,9 @@ components:
         The body is malformed, the provider doesn't take that login, the
         address isn't http or https or has something in it that signs in, or
         a key, an address or a model the login needs is missing.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1088,7 +2757,19 @@ components:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
-                detail: Google Gemini doesn't take a plan. Pick an API key or a sign-in.
+                detail: xAI doesn't take a plan. Pick an API key or a sign-in.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            googleSignInRetired:
+              summary: A Google sign-in for Gemini, which OpenBot no longer offers.
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
@@ -1121,6 +2802,9 @@ components:
         Whoever runs this OpenBot sets its AI provider (editable is false), so
         it can't be changed here. Or the Idempotency-Key was already used for
         a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1159,6 +2843,9 @@ components:
         AI_CONNECTION_ENGINE_NOT_READY, the plan's engine isn't answering
         yet. detail is OpenBot's own sentence, naming the provider or the
         host, never what the provider said.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1202,7 +2889,7 @@ components:
                 type: https://open.bot/errors/ai-connection-refused
                 title: OpenBot couldn't use that connection.
                 status: 422
-                detail: Sign in to Google first, then try again.
+                detail: Sign in to xAI first, then try again.
                 code: AI_CONNECTION_SIGN_IN_MISSING
                 category: validation
                 retryable: false
@@ -1220,6 +2907,133 @@ components:
                 requestId: req_example
                 traceId: trace_example
   examples:
+    PersonalAiConnectionExample:
+      summary: The person's own Anthropic key, ahead of the organization's OpenAI.
+      value:
+        connection:
+          provider: anthropic
+          login: api-key
+          model: null
+          endpointHost: null
+          keySet: true
+          ready: true
+          source: stored
+          editable: true
+          saved: []
+          changedAt: '2026-11-21T09:00:00.000Z'
+        organization:
+          ready: true
+          provider: openai
+        uses: personal
+        required: true
+        available: true
+        signIns: [openai, anthropic, xai]
+    PersonalAiConnectionOrganizationExample:
+      summary: Nothing of their own, so their runs use the organization's.
+      value:
+        connection:
+          provider: null
+          login: null
+          model: null
+          endpointHost: null
+          keySet: false
+          ready: false
+          source: none
+          editable: true
+          saved: []
+          changedAt: null
+        organization:
+          ready: true
+          provider: openai
+        uses: organization
+        required: true
+        available: true
+        signIns: [openai, anthropic, xai]
+    PersonalAiConnectionNoneExample:
+      summary: Neither theirs nor the organization's, so they connect one first.
+      value:
+        connection:
+          provider: null
+          login: null
+          model: null
+          endpointHost: null
+          keySet: false
+          ready: false
+          source: none
+          editable: true
+          saved: []
+          changedAt: null
+        organization:
+          ready: false
+          provider: null
+        uses: none
+        required: true
+        available: true
+        signIns: [openai, anthropic, xai]
+    AiSignInExample:
+      summary: An xAI sign-in, waiting for approval.
+      value:
+        id: c2lnbi1pbi1leGFtcGxl
+        provider: xai
+        url: https://accounts.x.ai/oauth2/device?user_code=BCDF-GHJK
+        userCode: BCDF-GHJK
+        expiresAt: '2026-11-21T09:10:00.000Z'
+        interval: 5
+        finish: poll
+    AiSignInChatGptBrowserExample:
+      summary: A ChatGPT plan sign-in in the browser, finished with the address ChatGPT sends it to.
+      value:
+        id: Y2hhdGdwdC1icm93c2Vy
+        provider: openai
+        url: https://auth.openai.com/oauth/authorize?client_id=example&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&scope=openid+profile+email+offline_access&code_challenge=example&code_challenge_method=S256&state=example
+        userCode: null
+        expiresAt: '2026-11-21T09:15:00.000Z'
+        interval: 5
+        finish: code
+    AiSignInChatGptExample:
+      summary: A ChatGPT plan sign-in with a code (method device), waiting for the person to enter it at ChatGPT.
+      value:
+        id: Y2hhdGdwdC1zaWduLWlu
+        provider: openai
+        url: https://auth.openai.com/codex/device
+        userCode: VU3W-87566
+        expiresAt: '2026-11-21T09:15:00.000Z'
+        interval: 5
+        finish: poll
+    AiSignInClaudeExample:
+      summary: A Claude plan sign-in, finished with the code Claude's page shows.
+      value:
+        id: Y2xhdWRlLXNpZ24taW4
+        provider: anthropic
+        url: https://claude.com/cai/oauth/authorize?code=true&client_id=example&response_type=code&scope=user%3Ainference&code_challenge=example&code_challenge_method=S256&state=example
+        userCode: null
+        expiresAt: '2026-11-21T09:15:00.000Z'
+        interval: 5
+        finish: code
+    AiSignInClaudeApprovedExample:
+      summary: The Claude plan sign-in, approved and kept for the person.
+      value:
+        id: Y2xhdWRlLXNpZ24taW4
+        provider: anthropic
+        status: approved
+        detail: null
+        interval: 5
+    AiSignInPendingExample:
+      summary: Not approved yet.
+      value:
+        id: c2lnbi1pbi1leGFtcGxl
+        provider: xai
+        status: pending
+        detail: null
+        interval: 5
+    AiSignInApprovedExample:
+      summary: Approved, with the sign-in kept for the person.
+      value:
+        id: c2lnbi1pbi1leGFtcGxl
+        provider: xai
+        status: approved
+        detail: null
+        interval: 5
     AiConnectionExample:
       summary: An Anthropic key, kept, with an OpenAI key still kept from before.
       value:
@@ -1252,6 +3066,23 @@ components:
             login: endpoint
             endpointHost: generativelanguage.googleapis.com
         changedAt: '2026-11-17T09:00:00.000Z'
+    AiConnectionSharedPlanExample:
+      summary: On OpenBot Cloud, an administrator's own Claude plan, shared as the organization's AI.
+      value:
+        provider: anthropic
+        login: plan
+        model: null
+        endpointHost: null
+        keySet: false
+        ready: true
+        source: stored
+        editable: true
+        saved: []
+        changedAt: '2026-11-22T09:00:00.000Z'
+        sharedSignIn:
+          personId: 01a20142-2410-79b4-8c4d-f64c84c10a87
+          name: Dana Reyes
+          ready: true
     AiConnectionFixedExample:
       summary: A team's OpenBot, where whoever runs it sets the provider.
       value:
@@ -1265,6 +3096,22 @@ components:
         editable: false
         saved: []
         changedAt: null
+    AiConnectionDisconnectedExample:
+      summary: Disconnected, with an OpenAI key still kept from before.
+      value:
+        provider: null
+        login: null
+        model: null
+        endpointHost: null
+        keySet: false
+        ready: false
+        source: none
+        editable: true
+        saved:
+          - provider: openai
+            login: api-key
+            endpointHost: null
+        changedAt: '2026-11-21T09:30:00.000Z'
     AiConnectionNoneExample:
       summary: Nothing chosen yet.
       value:
@@ -1351,3 +3198,144 @@ components:
       value:
         model: gpt-6.1-pro
         effort: xhigh
+    ModelChoiceOnConnectionExample:
+      summary: A model chosen on a connection that isn't the default, which can't run now.
+      value:
+        model: claude-opus-5-5
+        effort: high
+        connection: anthropic
+        stopped:
+          connection: anthropic
+          problem:
+            code: sign-in-ended
+            detail: Your Claude plan sign-in ended. Sign in again to use it.
+    ModelChoiceNoDefaultExample:
+      summary: No choice, and several connections with none the default.
+      value:
+        model: null
+        effort: null
+        connection: null
+        stopped:
+          connection: null
+          problem:
+            code: no-default
+            detail: Choose a default AI in Settings so Bots can start work.
+    ModelCatalogueConnectionsExample:
+      summary: A ChatGPT plan as the default and a Claude plan beside it.
+      value:
+        provider: openai
+        source: chatgpt
+        exposure: all
+        default: gpt-6.2-sol
+        models:
+          - id: gpt-6.2-sol
+            label: GPT-6.2 Sol
+            vendor: openai
+        choosable: true
+        listed: true
+        connections:
+          - id: openai
+            owner: personal
+            provider: openai
+            login: plan
+            source: chatgpt
+            isDefault: true
+            ready: true
+            problem: null
+            default: gpt-6.2-sol
+            models:
+              - id: gpt-6.2-sol
+                label: GPT-6.2 Sol
+                vendor: openai
+            listed: true
+          - id: anthropic
+            owner: personal
+            provider: anthropic
+            login: plan
+            source: claude
+            isDefault: false
+            ready: true
+            problem: null
+            default: claude-opus-5-5
+            models:
+              - id: claude-opus-5-5
+                label: Claude Opus 5.5
+                vendor: anthropic
+                efforts: [low, medium, high]
+              - id: claude-sonnet-5-5
+                label: Claude Sonnet 5.5
+                vendor: anthropic
+            listed: true
+    AiConnectionEntryExample:
+      summary: An OpenAI key, connected beside the default.
+      value:
+        id: openai
+        provider: openai
+        login: api-key
+        model: null
+        endpointHost: null
+        isDefault: false
+        ready: true
+        problem: null
+        connectedAt: '2026-11-23T09:00:00.000Z'
+    AiConnectionPageExample:
+      summary: A Claude plan as the default, an xAI sign-in that ended, and a Google sign-in OpenBot no longer offers.
+      value:
+        connections:
+          - id: anthropic
+            provider: anthropic
+            login: plan
+            model: null
+            endpointHost: null
+            isDefault: true
+            ready: true
+            problem: null
+            connectedAt: '2026-11-20T09:00:00.000Z'
+          - id: xai
+            provider: xai
+            login: oauth
+            model: grok-4.7
+            endpointHost: null
+            isDefault: false
+            ready: false
+            problem:
+              code: sign-in-ended
+              detail: Your xAI sign-in ended. Sign in again to use it.
+            connectedAt: '2026-11-21T09:00:00.000Z'
+          - id: google
+            provider: google
+            login: oauth
+            model: gemini-3.8-flash
+            endpointHost: null
+            isDefault: false
+            ready: false
+            problem:
+              code: sign-in-retired
+              detail: Google sign-in for Gemini has ended. Add a Gemini API key in Settings under AI providers to keep using Gemini.
+            connectedAt: '2026-11-22T09:00:00.000Z'
+        nextCursor: null
+        signIns: [openai, anthropic, xai]
+    AiConnectionPageNoDefaultExample:
+      summary: Two connections left after an older app disconnected the default, neither the default.
+      value:
+        connections:
+          - id: openai
+            provider: openai
+            login: api-key
+            model: null
+            endpointHost: null
+            isDefault: false
+            ready: true
+            problem: null
+            connectedAt: '2026-11-20T09:00:00.000Z'
+          - id: google
+            provider: google
+            login: endpoint
+            model: gemini-3.8-flash
+            endpointHost: generativelanguage.googleapis.com
+            isDefault: false
+            ready: true
+            problem: null
+            connectedAt: '2026-11-21T09:00:00.000Z'
+        nextCursor: null
+        signIns: []

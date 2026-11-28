@@ -20,6 +20,7 @@ import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route as ComposioRoute } from "@/routes/_authed/admin/plugins/composio";
 import { APPS_PATH, answerAppsApi, appBody } from "./apps-api";
+import { connectionsCall, startResponse } from "./connections-api";
 
 /**
  * WHAT A FAILED ADD SAYS WHEN A SECOND ADD IS PRESSED BEFORE THE FIRST ONE ANSWERS.
@@ -114,6 +115,11 @@ beforeEach(() => {
         201,
       );
     }
+    // The sign-in Connect goes on to once an app is added.
+    if (connectionsCall(path, init)?.operation === "connect")
+      return startResponse({
+        authorizationUrl: `https://sign-in.example/${path}`,
+      });
     // Every read this screen and its invalidation make.
     const apps = answerAppsApi(input, init, {
       composioConfigured: true,
@@ -155,6 +161,31 @@ beforeEach(() => {
 const originalOptions = { ...ComposioRoute.options };
 afterEach(() => {
   Object.assign(ComposioRoute.options, originalOptions);
+});
+
+/*
+ * Each press is Connect, which claims a tab for the sign-in on the click: a tab that records nothing
+ * and is closed when the add is refused.
+ */
+let originalOpen: typeof window.open;
+beforeEach(() => {
+  originalOpen = window.open;
+  window.open = (() => {
+    let closed = false;
+    return {
+      get closed() {
+        return closed;
+      },
+      opener: null,
+      close: () => {
+        closed = true;
+      },
+      location: { replace: () => {} },
+    } as unknown as Window;
+  }) as typeof window.open;
+});
+afterEach(() => {
+  window.open = originalOpen;
 });
 
 function renderPicker() {
@@ -213,11 +244,11 @@ test("an add that fails while a second one is pressed still says what went wrong
 
   // The press that will fail, held open by the stub.
   await userEvent.click(
-    await within(slackRow).findByRole("button", { name: "Add" }),
+    await within(slackRow).findByRole("button", { name: "Connect Slack" }),
   );
   // And the press that overtakes it, which rebuilds the shared observer under the first one.
   await userEvent.click(
-    await within(gmailRow).findByRole("button", { name: "Add" }),
+    await within(gmailRow).findByRole("button", { name: "Connect Gmail" }),
   );
 
   /*
@@ -228,7 +259,7 @@ test("an add that fails while a second one is pressed still says what went wrong
    */
   expect(
     within(slackRow)
-      .getByRole("button", { name: "Adding…" })
+      .getByRole("button", { name: "Connecting…" })
       .hasAttribute("disabled"),
   ).toBe(true);
 
@@ -241,6 +272,8 @@ test("an add that fails while a second one is pressed still says what went wrong
 
   // And the row drains on the refusal exactly as it would on a success, so a retry is possible.
   await waitFor(() => {
-    expect(within(slackRow).getByRole("button", { name: "Add" })).toBeTruthy();
+    expect(
+      within(slackRow).getByRole("button", { name: "Connect Slack" }),
+    ).toBeTruthy();
   });
 });

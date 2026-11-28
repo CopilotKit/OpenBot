@@ -23,6 +23,7 @@ import {
   reduceQueue,
 } from "@/components/channels/composer";
 import { StillWorkingError } from "@/components/channels/composer/queue";
+import { ComposerColumn } from "@/components/channels/conversation-columns";
 import {
   NotifyPrompt,
   notifyPromptAnswered,
@@ -31,6 +32,7 @@ import { StarPrompt } from "@/components/star-prompt/star-prompt";
 import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
+import type { Failure } from "@/lib/load-failure";
 import { useNotificationPermission } from "@/lib/notifications/permission";
 import { newId } from "../../lib/new-id";
 
@@ -53,11 +55,14 @@ export function ConversationView({
   pending = false,
   autoFocus = false,
   stopped,
+  refusals,
+  stoppedNotice,
   onCarryOn,
   working,
   stoppable,
   queueWhileBusy = false,
   restoring = false,
+  readOnly = false,
   intro,
   starterSuggestions,
   onSubmit,
@@ -65,6 +70,8 @@ export function ConversationView({
   voiceCall,
   modelPicker,
   routine,
+  draftKey,
+  composerOpening,
 }: {
   messages: readonly Message[];
   threadId?: string;
@@ -110,7 +117,11 @@ export function ConversationView({
   /** Focus the composer the moment it can take a caret; forwarded to the composer. */
   autoFocus?: boolean;
   /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
-  stopped?: string;
+  stopped?: Failure;
+  /** Turns the server refused, each under its own message; see the transcript's `refusals`. */
+  refusals?: ReadonlyMap<string, string>;
+  /** Drawn under `stopped`, or else the latest refusal (the transcript's `stoppedNotice`). */
+  stoppedNotice?: ReactNode;
   /** Carry on with a turn that was cut off part way; a button beside `stopped`. */
   onCarryOn?: () => void;
   /** Work the conversation waits on that is not this tab's run. Drawn at the end of the transcript. */
@@ -137,6 +148,11 @@ export function ConversationView({
   /** History has been asked for and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
   restoring?: boolean;
   /**
+   * The transcript's message rows are for reading only; queued messages and notices stay live. See
+   * `ChatTranscript`.
+   */
+  readOnly?: boolean;
+  /**
    * The top of the conversation, drawn above the first message and scrolled away with it. Only
    * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
    */
@@ -154,6 +170,13 @@ export function ConversationView({
   modelPicker?: ReactNode;
   /** The Bot and conversation for the composer's routine clock. See `Composer`. */
   routine?: { agentId: string; channelId: string };
+  /** Which conversation's unsent message the composer keeps. See `Composer`. */
+  draftKey?: string;
+  /**
+   * Changed to open the composer again, so it reads its draft once more: it reads it only as it
+   * opens, and a message put back in the draft afterwards would not show otherwise.
+   */
+  composerOpening?: number;
 }) {
   /*
    * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
@@ -547,29 +570,16 @@ export function ConversationView({
           onSendQueuedNow={disabled ? undefined : sendQueuedNow}
           queued={queued}
           restoring={restoring}
+          readOnly={readOnly}
           {...(stopped ? { stopped } : {})}
+          {...(refusals ? { refusals } : {})}
+          {...((stopped || refusals) && stoppedNotice ? { stoppedNotice } : {})}
           {...(stopped && onCarryOn && !disabled ? { onCarryOn } : {})}
           working={working}
         />
       </div>
-      {/*
-       * THE TRANSCRIPT'S SIDE INSET IN A NARROW PANE, AND THE SAME 768px COMPOSER IN A WIDE ONE.
-       *
-       * The composer had no inset of its own, so in a pane narrower than its 768px column it ran to
-       * the pane's border, and the starter tasks above it with it, while the transcript kept 16px a
-       * side. Now the column always pads `px-4`, as the transcript's does, and is allowed 2rem more
-       * than `max-w-3xl` to pay for it: from an 800px pane up the composer is 768px wide exactly as
-       * before, and below that it stands 16px off each edge.
-       *
-       * A width, not a breakpoint, on purpose. A viewport breakpoint does not know how much of the
-       * window the sidebar takes, and a container query would need `@container` on an ancestor of
-       * the composer, which is layout containment: it would become the containing block for the @
-       * menu, which is `position: fixed` at the caret (see `DictationSurface`).
-       */}
-      <div
-        className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
-        data-slot="composer-column"
-      >
+      {/* The composer's column, shared with a group conversation; see `ComposerColumn`. */}
+      <ComposerColumn>
         {notice}
         {/*
          * Notifications are offered once this person has started a task: a Bot is working for them,
@@ -593,6 +603,8 @@ export function ConversationView({
          */}
         {disabled ||
         stopped ||
+        // A turn refused here is said under its message, and counts as an error the same way.
+        (refusals?.size ?? 0) > 0 ||
         notificationPermission === "checking" ||
         (notificationPermission === "default" &&
           !notifyPromptAnswered()) ? null : (
@@ -612,7 +624,7 @@ export function ConversationView({
          */}
         {attached ? (
           <div
-            className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
+            className="mx-5 -mb-4 rounded-t-xl border border-border border-b-0 bg-muted pb-4"
             data-slot="composer-drawer"
           >
             {attached}
@@ -621,8 +633,10 @@ export function ConversationView({
           starterSuggestions
         )}
         <Composer
+          key={composerOpening}
           modelPicker={modelPicker}
           {...(routine ? { routine } : {})}
+          {...(draftKey ? { draftKey } : {})}
           agents={agents}
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}
@@ -684,7 +698,7 @@ export function ConversationView({
            */
           stoppable={stoppable ?? pending}
         />
-      </div>
+      </ComposerColumn>
     </div>
   );
 }

@@ -12,7 +12,7 @@ import {
 } from "@/lib/api/generated/bot-grants/bot-grants";
 import type { AppAccessApproval } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { pluginKeys } from "@/lib/plugins/queries";
+import { invalidatePlugins } from "@/lib/plugins/mutations";
 import { type AppAccessRequest, accessRequestOf } from "./queries";
 
 const FALLBACK = "That request could not be sent.";
@@ -24,8 +24,7 @@ const FALLBACK = "That request could not be sent.";
  * standing. The app-access keys sit under `pluginKeys.all`, so one invalidation covers the Bot page,
  * the card, the inbox and the plugin screens the approval just changed.
  */
-const refresh = (queryClient: QueryClient) =>
-  queryClient.invalidateQueries({ queryKey: pluginKeys.all });
+const refresh = (queryClient: QueryClient) => invalidatePlugins(queryClient);
 
 /** What approving does, as the inbox and the card read it. */
 function approvalOf(approval: AppAccessApproval): {
@@ -49,16 +48,41 @@ export function requestAppAccessMutationOptions(queryClient: QueryClient) {
     mutationFn: async (variables: {
       agentId: string;
       app: string;
+      /** The actions asked for, for a Bot that holds the app and needs these too. */
+      actions?: string[];
     }): Promise<{ request: AppAccessRequest }> => ({
       request: accessRequestOf(
         await createAppAccessRequest(
           organizationId(),
-          { botId: variables.agentId, appId: variables.app },
+          {
+            botId: variables.agentId,
+            appId: variables.app,
+            ...actionsBody(variables.actions),
+          },
           { "Idempotency-Key": idempotencyKey() },
           { fallback: FALLBACK },
         ),
       ),
     }),
+    onSettled: () => refresh(queryClient),
+  });
+}
+
+/**
+ * Ask an admin to add an app nobody has added yet, for everyone in the organization, with no Bot
+ * named. `app` is the directory entry's slug. A second press answers the request already waiting.
+ */
+export function requestAppMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (app: string): Promise<AppAccessRequest> =>
+      accessRequestOf(
+        await createAppAccessRequest(
+          organizationId(),
+          { appId: app },
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: "Couldn't send that request. Try again." },
+        ),
+      ),
     onSettled: () => refresh(queryClient),
   });
 }
@@ -121,6 +145,8 @@ export function approveBotAppMutationOptions(queryClient: QueryClient) {
     mutationFn: async (variables: {
       agentId: string;
       app: string;
+      /** The actions to give, for a Bot that holds the app and needs these too. */
+      actions?: string[];
     }): Promise<{
       request: AppAccessRequest;
       enabled: boolean;
@@ -132,6 +158,7 @@ export function approveBotAppMutationOptions(queryClient: QueryClient) {
           variables.agentId,
           variables.app,
           { "Idempotency-Key": idempotencyKey() },
+          actionsBody(variables.actions),
           { fallback: "Couldn't turn that app on. Try again." },
         ),
       ),
@@ -147,12 +174,15 @@ export function approveBotAppMutationOptions(queryClient: QueryClient) {
 export async function giveBotApp(variables: {
   agentId: string;
   app: string;
+  /** The actions to give, for a Bot that holds the app and needs these too. */
+  actions?: string[];
 }): Promise<{ granted: string[] }> {
   const given = await giveBotAppOperation(
     organizationId(),
     variables.agentId,
     variables.app,
     { "Idempotency-Key": idempotencyKey() },
+    actionsBody(variables.actions),
     { fallback: "Couldn't give that app to this Bot." },
   );
   return { granted: given.given };
@@ -202,4 +232,9 @@ export function dismissAppAccessRequestMutationOptions(
       ),
     onSettled: () => refresh(queryClient),
   });
+}
+
+/** The body naming the actions a press gives, or none: the server then gives the read-only ones. */
+function actionsBody(actions: string[] | undefined) {
+  return actions && actions.length > 0 ? { actions } : undefined;
 }

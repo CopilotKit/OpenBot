@@ -19,6 +19,7 @@ import {
   test,
 } from "bun:test";
 import { rmSync } from "node:fs";
+import { releaseManifestDigest } from "../../shared/management-contract";
 import { ManagementAgent, UPGRADES_NOT_SET_UP } from "../src/agent";
 import { ManagementClient } from "../src/client";
 import { AgentConfig, type ReadyAgent } from "../src/config";
@@ -168,7 +169,7 @@ describe("the agent without upgrades set up", () => {
       );
       fleet.desired = {
         version: "v1.2.0",
-        releaseManifestSha256: "0".repeat(64),
+        releaseManifestSha256: await releaseManifestDigest("{}"),
         releaseManifest: "{}",
         charts: {
           openbot: {

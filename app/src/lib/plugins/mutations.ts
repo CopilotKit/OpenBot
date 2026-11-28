@@ -26,6 +26,7 @@ import type {
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { desktopShell } from "@/lib/desktop/shell";
+import { enterpriseKeys } from "@/lib/enterprise/queries";
 import { confirmOnReturn } from "./confirm-on-return";
 import { pluginKeys } from "./queries";
 import type { SharedUseApproval } from "./shared-use";
@@ -78,7 +79,14 @@ export type PluginKind = "mcp" | "skill";
  * the exemption is structural rather than a decision this comment has to be trusted about.
  */
 export function invalidatePlugins(queryClient: QueryClient) {
-  return queryClient.invalidateQueries({ queryKey: pluginKeys.all });
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
+    /*
+     * Connectors on Admin, Apps lists every app added, and the server approves one an admin adds,
+     * connects or gives a Bot while the allowlist is on. Asked again, it shows both.
+     */
+    queryClient.invalidateQueries({ queryKey: enterpriseKeys.overview() }),
+  ]);
 }
 
 /**

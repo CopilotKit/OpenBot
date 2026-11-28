@@ -5,6 +5,7 @@ import {
   IconChevronRight,
   IconCircleCheck,
   IconPlug,
+  IconPlus,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -21,6 +22,7 @@ import {
   usePendingRequestCounts,
 } from "@/components/plugins/access-requests";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { Button } from "@/components/ui/button";
 import {
   Item,
   ItemActions,
@@ -34,6 +36,10 @@ import {
   appsQueryOptions,
   catalogueQueryOptions,
 } from "@/lib/apps/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { mayAddApps } from "@/lib/auth/roles";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   directoryProvider,
@@ -130,6 +136,10 @@ export function PluginsListPage({
   children?: React.ReactNode;
 } = {}) {
   const paths = useManagePaths();
+  const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
+  const role = useQuery(currentUserQueryOptions()).data?.role;
+  // Offered to exactly the people Connections offers its Add custom MCP to.
+  const mayAddServer = mayAddApps(edition === "personal", role);
   const plugins = useQuery(appsQueryOptions());
   const catalogue = useQuery(catalogueQueryOptions());
   const setup = useQuery(appSetupQueryOptions());
@@ -169,6 +179,22 @@ export function PluginsListPage({
 
   return (
     <PageShell
+      /*
+       * The page's one verb, as on Connections: an MCP server OpenBot doesn't list, added by its
+       * address. The same form, opened from here, so an admin finds it where apps are set up.
+       */
+      action={
+        mayAddServer ? (
+          <Button
+            render={(props) => <Link {...props} to="/admin/plugins/new" />}
+            size="sm"
+            variant="outline"
+          >
+            <IconPlus />
+            Add custom MCP
+          </Button>
+        ) : undefined
+      }
       description="Connect services for your company, then choose which Bots can use each service’s tools."
       title="Apps"
     >
@@ -176,7 +202,10 @@ export function PluginsListPage({
       {plugins.isPending || catalogue.isPending ? null : plugins.error ||
         catalogue.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load apps. Try again in a moment.
+          {loadFailure(
+            [plugins.error, catalogue.error],
+            "Couldn't load apps. Try again in a moment.",
+          )}
         </p>
       ) : (
         <>
@@ -197,6 +226,10 @@ export function PluginsListPage({
             ) : (
               <PageRows>
                 {plugins.data?.map((server, index) => {
+                  const note = toolsListError(server.lastError, {
+                    title: server.title,
+                    personal: edition === "personal",
+                  });
                   return (
                     <React.Fragment key={server.id}>
                       {/*
@@ -221,17 +254,15 @@ export function PluginsListPage({
                           {/*
                            * The vendor's last failure takes the description's place when there is
                            * one. A server with no tools and no explanation reads as a server that
-                           * offers nothing, which sends somebody looking in the wrong place.
+                           * offers nothing, which sends somebody looking in the wrong place. Red
+                           * only for a failure: an app waiting for somebody to connect is not one.
                            */}
                           <ItemDescription
                             className={
-                              server.lastError ? "text-destructive" : undefined
+                              note?.error ? "text-destructive" : undefined
                             }
                           >
-                            {toolsListError(server.lastError, {
-                              title: server.title,
-                              personal: false,
-                            }) ?? server.summary}
+                            {note?.text ?? server.summary}
                           </ItemDescription>
                         </ItemContent>
                         <ItemActions>
@@ -259,7 +290,7 @@ export function PluginsListPage({
           </PageSection>
 
           <PageSection
-            description="Reviewed, first-party servers. Open one to add it."
+            description="Reviewed, first-party servers. Open one to connect it."
             title="Explore apps"
           >
             {explore.length === 0 ? (
@@ -288,7 +319,7 @@ export function PluginsListPage({
                             count={requestCounts?.byApp[entry.key] ?? 0}
                           />
                           <span className="text-muted-foreground text-xs">
-                            Not added
+                            Not connected
                           </span>
                           <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
                         </ItemActions>

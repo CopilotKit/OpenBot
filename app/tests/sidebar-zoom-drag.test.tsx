@@ -1,9 +1,10 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { personBody } from "./accounts-api";
+import { test } from "./renderer-crash";
 
 /**
  * The sidebar's edge narrows the sidebar well past where it used to stop, and the sidebar never
@@ -47,11 +48,11 @@ const ZOOMED = { width: 820, height: 540 };
 const ZOOMED_MOST = Math.floor(ZOOMED.width * 0.4);
 
 /**
- * The narrowest each shape may be dragged: the panel's floor, plus the 3rem strip beside one; and
+ * The narrowest each shape may be dragged: the panel's floor, plus the 3.5rem strip beside one; and
  * where a drag stopped before (`was`), which it now goes well past.
  */
 const SHAPES = [
-  { name: "app", strip: true, floor: 180 + 48, was: 220 + 48 },
+  { name: "app", strip: true, floor: 180 + 56, was: 220 + 56 },
   { name: "admin-settings", strip: false, floor: 180, was: 220 },
 ] as const;
 type Shape = (typeof SHAPES)[number];
@@ -343,6 +344,43 @@ async function drag(page: Page, by: number) {
   await page.mouse.up();
 }
 
+/**
+ * A drag whose last move and release reach the page together, before it has drawn that move: what
+ * a busy window does, and what a browser does when it holds a move back for the next frame and then
+ * hands it over just ahead of the release. Pressed and moved by hand most of the way; the last move
+ * and the release dispatched in one go; then the hand let go.
+ */
+async function dragReleasedWithLastMove(page: Page, by: number) {
+  const rail = page.locator('[data-slot="sidebar-rail"]');
+  const box = await rail.boundingBox();
+  if (!box) throw new Error("the sidebar's edge has no box");
+  const x = box.x + box.width / 4;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + by / 2, y, { steps: 6 });
+  await rail.evaluate(
+    (element, at) => {
+      for (const type of ["pointermove", "pointerup"])
+        element.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            pointerId: 1,
+            pointerType: "mouse",
+            isPrimary: true,
+            button: type === "pointerup" ? 0 : -1,
+            clientX: at.x,
+            clientY: at.y,
+          }),
+        );
+    },
+    { x: x + by, y },
+  );
+  await page.mouse.up();
+}
+
 async function shot(page: Page, name: string) {
   if (!shots) return;
   mkdirSync(shots, { recursive: true });
@@ -358,7 +396,7 @@ describe.skipIf(!asked)("the sidebar's edge at any zoom", () => {
       for (const [engine, browser] of engines) {
         const page = await open(browser, shape, ZOOMED);
         try {
-          // 340px by default, which is more than two-fifths of the zoomed window.
+          // 360px by default, which is more than two-fifths of the zoomed window.
           expect(await measured(page)).toMatchObject({
             width: ZOOMED_MOST,
             window: ZOOMED.width,
@@ -425,6 +463,31 @@ describe.skipIf(!asked)("the sidebar's edge at any zoom", () => {
           await page.setViewportSize(WIDE);
           await drag(page, 600);
           expect(await measured(page)).toMatchObject({ width: 480 });
+        } finally {
+          await page.close();
+        }
+      }
+    }, 120_000);
+
+    /*
+     * Let go, the sidebar is at the width it was let go at, there and then: it follows the pointer
+     * to the end rather than easing the last of the way after it. It used to ease when the release
+     * came before the last move was drawn, so now and then it was still a few pixels short.
+     */
+    test(`${shape.name}: let go just after the last move, the sidebar is drawn at the released width at once`, async () => {
+      for (const [engine, browser] of engines) {
+        const page = await open(browser, shape, ZOOMED);
+        try {
+          for (const by of [-40, 30]) {
+            const before = (await measured(page)).width;
+            await dragReleasedWithLastMove(page, by);
+            expect({ engine, ...(await measured(page)) }).toEqual({
+              engine,
+              width: before + by,
+              window: ZOOMED.width,
+              stored: String(before + by),
+            });
+          }
         } finally {
           await page.close();
         }

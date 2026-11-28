@@ -26,6 +26,7 @@ import {
   sharedConnectionPath,
   sharedConnectionResponse,
 } from "./connections-api";
+import { still } from "./page-still";
 import { SKILLS_PATH, skillPath, skillsResponse } from "./skills-api";
 
 /**
@@ -406,6 +407,9 @@ function answer(method: string, url: URL): Response | undefined {
     return undefined;
   }
   if (method !== "GET") return undefined;
+  // The organization's apps switch, which a skill's tool list reads: open, the default.
+  if (path === "/api/v2/organizations/default/settings/apps")
+    return json({ lockedDown: false });
   // Managed updates don't apply to this OpenBot, so Admin doesn't list them.
   if (path === "/api/v2/organizations/default/management")
     return Response.json(
@@ -918,7 +922,7 @@ async function open(
   await page.evaluate(() => document.fonts.ready);
   await screen.lookAt?.(page);
   // Rows ease in and a dialog scales up: looked at once they are still.
-  await page.waitForTimeout(400);
+  await still(page);
   return { page, unanswered };
 }
 

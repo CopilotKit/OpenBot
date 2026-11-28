@@ -90,9 +90,27 @@ at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 
 `LANGGRAPH_TS_AG_UI_URL` is where the server finds the TypeScript LangGraph engine,
 `agent-langgraph-ts`, which new Bots run on. It is called with `MANAGED_AGENT_TOKEN`, like the managed
-Bot. Unset, and with no picked harness that is that engine, new Bots run on the server's built-in
-engine. `scripts/start.sh` points it at the engine on 4215 on a laptop, and Compose's `server`
-service reaches it by name. OpenBot Desktop needs neither: its picked harness is that engine.
+Bot, and reaches the model through the server's model gateway with `MODEL_GATEWAY_TOKEN` where one
+is set. The engine is required for new Bots: a server that cannot find it refuses them, with a
+sentence telling the person to ask an admin, and logs why. It does not run them on its built-in
+agent instead. The server looks in this order: `LANGGRAPH_TS_AG_UI_URL`; then the picked harness,
+when it is that engine (OpenBot Desktop's); then `LANGGRAPH_TS_COMPOSE_AG_UI_URL`, which
+`docker-compose.yml` always sets to its own `agent-langgraph-ts` service. So Compose and
+`scripts/start.sh` run the engine and wire it in every edition, the personal edition included, and
+OpenBot Desktop needs neither setting. The one-container image runs the engine itself, beside the
+server on the container's loopback, and wires it in with nothing set (see
+[deployment.md](deployment.md)); `EMBEDDED_ENGINE=off` turns that off, for an image pointed at an
+engine that runs elsewhere through this address.
+
+`OPENBOT_DEFAULT_BOT_ENGINE=built-in` puts every Bot back on the server's built-in agent, for a
+deployment that does not run the engine.
+
+That engine speaks plain AG-UI, as a Bot somebody connects does. Its instructions are the run's
+system messages, and every OpenBot tool it calls ends its run with the call unanswered, for the
+server to answer and carry on, so it reads neither `AGENT_TOOL_TOKEN` nor `OPENBOT_TOOL_URL`. The one
+OpenBot extension it reads is the model for the run, in `forwardedProps` (`openbotModel`,
+`openbotModelRoute`, `openbotOrganization`, `openbotSendOnce`), which an agent that brings its own
+model ignores.
 
 ## General variables
 
@@ -112,8 +130,8 @@ service reaches it by name. OpenBot Desktop needs neither: its picked harness is
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
 | `GOOGLE_API_KEY`     | unset                              | Google key when `BOT_PROVIDER=google`.                              |
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
-| `CLAUDE_CODE_OAUTH_TOKEN`, `CHATGPT_AUTH_FILE` | unset    | A model plan sign-in in place of a key: the Anthropic token from `claude setup-token`, or the file a signed-in ChatGPT plan writes. Set one, not both. The built-in Bots then run on the plan through the installed harness that holds it (`agent-claude-sdk` for Claude, `agent-langgraph-agui` for ChatGPT), named by `PICKED_HARNESS_IMAGE` and `PICKED_HARNESS_URL`, with `MANAGED_AGENT_TOKEN`. A ChatGPT plan can instead name that harness by `CHATGPT_PLAN_HARNESS_URL` (and `CHATGPT_PLAN_HARNESS_TOKEN`, which defaults to `MANAGED_AGENT_TOKEN`), which is how the TypeScript LangGraph engine reaches it too: OpenBot Desktop runs that engine as the Bot on a ChatGPT plan and `agent-langgraph-agui` beside it. The server refuses to start with both set, or with either set and that harness missing. OpenBot Desktop writes these itself; see below. |
-| `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-2.5-flash`. Set, it is the default for built-in Bots and the picked harness while the credential lists it; a person can still pick another in the composer. Unset, the [model list](#the-model-list) chooses the default. |
+| `CLAUDE_CODE_OAUTH_TOKEN`, `CHATGPT_AUTH_FILE` | unset    | A model plan sign-in in place of a key: the Anthropic token from `claude setup-token`, or the file a signed-in ChatGPT plan writes. Set one, not both. The built-in Bots then run on the plan through the installed harness that holds it (`agent-claude-sdk` for Claude, `agent-langgraph-agui` for ChatGPT), named by `PICKED_HARNESS_IMAGE` and `PICKED_HARNESS_URL`, with `MANAGED_AGENT_TOKEN`. A ChatGPT plan can instead name that harness by `CHATGPT_PLAN_HARNESS_URL` (and `CHATGPT_PLAN_HARNESS_TOKEN`, which defaults to `MANAGED_AGENT_TOKEN`), which is how the TypeScript LangGraph engine reaches it too. OpenBot Desktop signs in to a ChatGPT plan with OpenAI's Sign in with ChatGPT plan usage and runs `agent-openai-agents` (the OpenAI Agents SDK) as the plan's Bot and as its harness, at `CHATGPT_PLAN_HARNESS_URL`; `CHATGPT_AUTH_FILE` then holds that sign-in's credential record, which the engine renews. A server that runs the ChatGPT sign-in itself keeps `agent-langgraph-agui` for it. The server refuses to start with both set, or with either set and that harness missing. OpenBot Desktop writes these itself; see below. |
+| `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-3.8-flash`. Set, it is the default for built-in Bots and the picked harness while the credential lists it; a person can still pick another in the composer. Unset, the [model list](#the-model-list) chooses the default. |
 | `CHATGPT_CODEX_CLIENT_VERSION` | `0.167.0` | The Codex client version the LangGraph harness names when it reads a ChatGPT plan's model list. Change it only if the plan's list comes back empty after a Codex release. |
 | `OPENBOT_MODEL_CAPABILITIES_URL` | `https://models.dev/api.json` | Where the model list reads each model's thinking levels, line and price when the provider's own listing does not say. `off` reads none: providers that publish their own (Anthropic, xAI, a ChatGPT plan) still show thinking levels, and the default falls back to the configured model. See [The model list](#the-model-list). |
 | `AGENT_STALL_TIMEOUT_MS` | unset (off)                    | How long a Bot's stream may produce nothing before the turn is ended for it, in milliseconds. A value that is not a whole number of zero or more refuses to start. |
@@ -125,9 +143,10 @@ service reaches it by name. OpenBot Desktop needs neither: its picked harness is
 | `OPENBOT_TOOL_GUIDES` | unset                             | Path to a JSON file of `{ "<ACTION>": guide }` that replaces or adds to the guides OpenBot ships for Composio actions; `null` for an action puts the app's own words back. Read once. A file that cannot be read is logged and left out, and the shipped guides are used. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
-| `OPENBOT_ORGANIZATION_AUTHORITY` | `local` (one organization) | Which organization authority this OpenBot runs on, which decides how many organizations it holds. `local` keeps one: everybody who signs in is a member of `default`, and creating another is refused. `intelligence-platform`, for a self-hosted OpenBot, holds as many as people make, each with an organization, a project and a key of its own on this deployment's CopilotKit Intelligence, made through Intelligence's platform routes; it needs `INTELLIGENCE_PLATFORM_TOKEN`. An organization made before it was set, such as one an OpenBot held on 1.1.2, is given its own Intelligence organization at the next start and starts fresh there: its earlier conversation history, Learning and memory stay with `default` and aren't moved, while its members, Bots and settings are kept. `ops` is a hosted OpenBot by CopilotKit's. Anything but `local` needs people to sign in. Any other value refuses to start. |
+| `OPENBOT_ORGANIZATION_AUTHORITY` | `local` (one organization) | Which organization authority this OpenBot runs on, which decides how many organizations it holds. `local` keeps one: everybody who signs in is a member of `default`, and creating another is refused. `intelligence-platform`, for a self-hosted OpenBot, holds as many as people make, each with an organization, a project and a key of its own on this deployment's CopilotKit Intelligence, made through Intelligence's platform routes; it needs `INTELLIGENCE_PLATFORM_TOKEN`. A self-hosted OpenBot is one company's, so everybody who signs in there is a member of `default`, the company's shared organization, and more are made only when somebody creates one (see `OPENBOT_OWN_ORGANIZATIONS`). An organization made before it was set, such as one an OpenBot held on 1.1.2, is given its own Intelligence organization at the next start and starts fresh there: its earlier conversation history, Learning and memory stay with `default` and aren't moved, while its members, Bots and settings are kept. `ops` is a hosted OpenBot by CopilotKit's. Anything but `local` needs people to sign in. Any other value refuses to start. |
 | `INTELLIGENCE_PLATFORM_TOKEN`, `INTELLIGENCE_PLATFORM_TOKEN_FILE` | unset | With `OPENBOT_ORGANIZATION_AUTHORITY=intelligence-platform`: the platform service token this deployment's Intelligence was given (its `CPKI_EI_PLATFORM_SERVICE_TOKEN_FILE`), given directly or in a file. Required there, and never logged. |
 | `INTELLIGENCE_PLATFORM_URL` | `INTELLIGENCE_API_URL` | With `OPENBOT_ORGANIZATION_AUTHORITY=intelligence-platform`: where Intelligence's platform routes are, when not at its API's address. |
+| `OPENBOT_OWN_ORGANIZATIONS` | `false` (one shared organization) | With `OPENBOT_ORGANIZATION_AUTHORITY=intelligence-platform`: `true` gives everybody an organization of their own at their first sign-in and puts nobody in `default` for signing in, as OpenBot Cloud does. Left `false`, everybody shares `default`. An OpenBot that gave everybody their own before and has it `false` now makes each of those people a member of `default` at its next start, once, and leaves them their own as an ordinary organization they own, with everything in it; somebody `default` had removed is not put back. Any value but `true` or `false` refuses to start. On Helm, `config.organizations.ownOrganizations`. |
 | `SMTP_HOST`          | unset (no email)                   | The mail server OpenBot sends email through. Today that is an invitation to an organization. Unset, OpenBot sends no email: the invited person sees the invitation in the app when they sign in with that address, and the inviter passes its link on. The email's link is on `OPENBOT_PUBLIC_URL` (or `BETTER_AUTH_URL`); with neither, no email is sent. When the mail server does not take a message, the invitation is still made and the inviter is told to pass the link on. With `SMTP_HOST` unset, none of the mail settings below is read. |
 | `MAIL_FROM`          | unset                              | The sender, such as `OpenBot <openbot@example.com>`. Required with `SMTP_HOST`: without it the server refuses to start. |
 | `SMTP_PORT`          | `587`, or `465` with `SMTP_SECURE=true` | The mail server's port. A value that is not a port number from 1 to 65535 refuses to start. |
@@ -327,13 +346,13 @@ The built-in Bots call a gateway's Chat Completions API (`/chat/completions`), w
 
 The model picker in a Bot's composer offers the models the deployment's credential can use, and how hard each one can think, per conversation and turn by turn: a change applies to the next message. It applies to built-in Bots and to the harness picked in setup when it is OpenBot's own LangGraph or Claude Agent SDK harness; a Bot on any other framework picks its own model.
 
-Who decides what is offered depends on who uses the deployment. With `OPENBOT_SINGLE_USER=true` (OpenBot Desktop among them), the one person is offered every model the credential lists, and no allowlist narrows it. In a team, people pick among the models an admin allows in Admin, Providers; until an admin allows one, people get the default and see no picker. An allowed model the provider stops listing drops out on its own, and a pick saved on it runs on the default. "Only allowed models" in the same place also refuses runs on any other model, a remote Bot's own included.
+Who decides what is offered depends on who uses the deployment. With `OPENBOT_SINGLE_USER=true` (OpenBot Desktop among them), the one person is offered every model the credential lists, and no allowlist narrows it. In a team, people pick among the models an admin allows in Admin, AI providers; until an admin allows one, people get the default and see no picker. An allowed model the provider stops listing drops out on its own, and a pick saved on it runs on the default. "Only allowed models" in the same place also refuses runs on any other model, a remote Bot's own included.
 
 | Signed in with | Models listed from | Thinking levels from |
 | -------------- | ------------------ | -------------------- |
 | OpenAI key | `GET https://api.openai.com/v1/models`, chat models only, dropping any past its `shutdown_date` | models.dev |
 | Anthropic key | `GET https://api.anthropic.com/v1/models` | Anthropic's own `capabilities.effort` |
-| Google key or sign-in | Google's model list (the OpenAI-compatible `/models` for a key, the native list for a sign-in) | models.dev |
+| Google key | Google's model list (the OpenAI-compatible `/models`) | models.dev |
 | xAI key or sign-in | `GET https://api.x.ai/v1/language-models` | xAI's own `capabilities.reasoning_effort` and default |
 | ChatGPT plan | the plan's own Codex listing, read by the LangGraph harness that holds the sign-in | the plan's `supported_reasoning_levels` and default |
 | Claude plan | `GET https://api.anthropic.com/v1/models` with the plan's token | Anthropic's own `capabilities.effort` |
@@ -390,7 +409,7 @@ Joining includes recent thread messages and previous voice chats, capped at 12,0
 Ending a nonempty call saves its text transcript to the database and creates a compact, expandable
 Voice chat card in the same channel. A separate summary request uses the deployment's default chat
 model and its existing credential: OpenAI-compatible or Anthropic API keys, Claude or ChatGPT plan
-sign-in, or the deployment's Google/xAI OAuth proxy. It does not need a separate OpenAI key when
+sign-in, or the deployment's xAI OAuth proxy. It does not need a separate OpenAI key when
 another provider is selected. Plan summaries use an isolated conversation with no tools. A failed
 summary leaves the saved transcript available with a retry button. A successful retry updates the
 sidebar preview only while that call is still the latest activity. Interrupted answers are marked
@@ -819,6 +838,8 @@ some of a provider's variables and not all of them stops the server at start-up 
 | `TWILIO_FROM_NUMBER`        | The Twilio number OpenBot sends from.                                                                                                                                                                                                              |
 | `EXPO_PROJECT_ID`           | The native app's EAS project id, a UUID. Switches on push notifications and sign-in from the native app (without it, the server does not trust the app's `openbotmobile://` sign-in redirect). A device registers only when the app reports this same project id; any other value is refused. A value that is not a UUID stops the server at start-up.                  |
 | `EXPO_ACCESS_TOKEN`         | Optional. Sent as `Authorization: Bearer` on every request to Expo's push service; without it those requests carry no token.                                                                                                                       |
+| `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY` | Optional, both or neither. The VAPID key pair (RFC 8292) browsers subscribe to push notifications with, in URL-safe base64. Unset, the server makes a pair the first time a browser asks for the key and keeps it in its database, sealed with `KEY_ENCRYPTION_KEY`. Set them only where several databases must sign with one key. One without the other, or a pair that does not match, stops the server at start-up. |
+| `WEB_PUSH_SUBJECT`          | Optional. Who the browsers' push services may contact about this deployment's notifications: an `https:` URL or a `mailto:` address. Unset, an `https` `OPENBOT_PUBLIC_URL`, or OpenBot's own site. Anything else stops the server at start-up. |
 
 With SMS on, point the Twilio number's incoming-message webhook at
 `<DELIVERY_PUBLIC_URL>/api/delivery/webhooks/sms`. OpenBot passes
@@ -829,6 +850,11 @@ The native app in `mobile/` reads two variables of its own when it is built, fro
 `EXPO_PUBLIC_SERVER_URL`, the deployment's public URL (required, `https` outside development, no
 credentials or query string), and `EXPO_PUBLIC_EAS_PROJECT_ID`, the same project id as
 `EXPO_PROJECT_ID` above.
+
+Push to browsers needs nothing set: a person turns notifications on in the web app, in their browser,
+and from then on their Bots' replies, questions and approvals reach that browser the way the person's
+notification settings route push. On iPhone and iPad a browser gets them only from OpenBot added to
+the Home Screen, on iOS or iPadOS 16.4 or later.
 
 ## Inbound email triggers
 
@@ -862,7 +888,7 @@ them, including a saved off. See [automatic-learning.md](automatic-learning.md).
 | `OPENBOT_LEARNING_AUTO_ASSIGN`           | `false` or `0` stops the server assigning the project's `openbot` container automatically. On otherwise. Stands aside for a `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` the configured Intelligence has. |
 | `INTELLIGENCE_SERVICE_TOKEN`             | An Intelligence service token that creates the `openbot` Learning container (local evaluation installs only; see [Creating the container](automatic-learning.md#creating-the-container)). Requires `INTELLIGENCE_PROJECT_ID`. |
 | `INTELLIGENCE_PROJECT_ID`                | The numeric ID of the runtime key's Intelligence project, where the service token creates the container. Set both or neither, or the server refuses to start. |
-| `OPENBOT_MEMORY_SOURCE_DEFAULTS`         | `false` or `0` stops OpenBot making each app a person connected into a memory source for the Bots they talk to. On otherwise. Existing sources are left as they are. |
+| `OPENBOT_MEMORY_SOURCE_DEFAULTS`         | `true` or `1` makes each app a person connected into a memory source for the Bots they talk to, as OpenBot did before, and imports that app's records (pages, files, issues) for review. Off otherwise: memory holds facts about the person, and a person adds a memory source by hand on a Bot's Memory page. |
 | `OPENBOT_PROACTIVE_DEFAULTS`             | `true` or `1` switches on an hourly check-in on everything a Bot can read the first time a person talks to it alone, as OpenBot did before. Off otherwise: a Bot offers a check-in on one thing in the conversation, and it runs only once the person accepts. Existing settings are left as they are. |
 
 ## OpenTelemetry export

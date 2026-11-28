@@ -3,7 +3,7 @@
  */
 
 /**
- * A way OpenBot reaches a person outside it: push notifications to their phones, Slack, Microsoft Teams, or text messages.
+ * A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.
  */
 export type NotificationTransport =
   (typeof NotificationTransport)[keyof typeof NotificationTransport];

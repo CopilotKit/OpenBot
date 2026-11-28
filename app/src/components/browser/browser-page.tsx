@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { settledRefusal } from "@/lib/computers/refusal";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { recorderKeys } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
 import { TEACH_A_BOT } from "./browser-nav-item";
@@ -90,7 +91,10 @@ export function BrowserPage() {
     return (
       <PageShell title={TITLE}>
         <p className="mt-6 text-destructive text-sm" role="alert">
-          Couldn't load your browser. Try again in a moment.
+          {loadFailure(
+            state.error,
+            "Couldn't load your browser. Try again in a moment.",
+          )}
         </p>
         <YourRecordings action={<LearnedLink />} />
       </PageShell>
@@ -137,7 +141,10 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
     reopen.data ?? open.data;
   if (!opened) {
     // A browser that is there and not answering says so while it is asked to open, rather than leaving the page empty.
-    const said = state.problem ?? open.error?.message;
+    // The refusal kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+    const said: Failure | null = state.problem
+      ? { message: state.problem }
+      : open.error;
     /*
      * Refused for good (the organization is at its computer limit, say): asking again would be refused again, so the
      * page says so calmly, with no Try again. A browser that isn't answering is still the news over it.
@@ -179,7 +186,7 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
         ) : said ? (
           <div className="mt-6 flex flex-col items-start gap-3">
             <p className="text-destructive text-sm" role="alert">
-              {said}
+              {failureSaid(said)}
             </p>
             {retry ? (
               <Button onClick={retry} size="sm" variant="outline">

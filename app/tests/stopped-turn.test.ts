@@ -35,6 +35,34 @@ describe("a later run of a turn that fails", () => {
     expect(stoppedReason("Runner connection dropped")).toBe(TURN_CUT_OFF);
   });
 
+  /*
+   * FOUND ON A CLOUD 1.2.0-rc.1 DOGFOOD. A Bot's connection to its model was cut part way, and the
+   * run ended with the fetch's own words, shown in red word for word.
+   */
+  test("a run whose connection was cut says the turn was cut off, never the socket's words", () => {
+    for (const said of [
+      // Bun's fetch, exactly as the conversation showed it.
+      "ECONNRESET: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()",
+      // Node's and undici's for the same.
+      "socket hang up",
+      "read ECONNRESET",
+      "terminated",
+      "other side closed",
+    ]) {
+      expect([said, stoppedReason(said)]).toEqual([said, TURN_CUT_OFF]);
+      expect([said, laterRunFailure(new TypeError(said))]).toEqual([
+        said,
+        TURN_CUT_OFF,
+      ]);
+    }
+    // A sentence that only mentions a connection is still passed on in its own words.
+    expect(
+      stoppedReason(
+        "The connection to Claude dropped. Ask the Bot to carry on.",
+      ),
+    ).toBe("The connection to Claude dropped. Ask the Bot to carry on.");
+  });
+
   test("passes on any other failure in its own words", () => {
     expect(laterRunFailure(new Error("The model refused the request."))).toBe(
       "The model refused the request.",
@@ -106,27 +134,32 @@ describe("the reason a turn ended", () => {
     const refused = new Error(
       `REST run request failed: {"error":"Agent not found","message":"Agent 'pipeline-bot' does not exist"}`,
     );
-    expect(await failedRunReason(refused, "pipeline-bot", gone)).toBe(
+    expect((await failedRunReason(refused, "pipeline-bot", gone)).message).toBe(
       "This Bot isn't shared with you any more, so your message wasn't sent. Its owner or an admin can share it again.",
     );
     // Joining its thread sends nothing, so nothing is said about a message.
     expect(
-      await failedRunReason(
-        "REST connect request failed: Not found",
-        "pipeline-bot",
-        gone,
-      ),
+      (
+        await failedRunReason(
+          "REST connect request failed: Not found",
+          "pipeline-bot",
+          gone,
+        )
+      ).message,
     ).toBe(
       "This Bot isn't shared with you any more. Its owner or an admin can share it again.",
     );
     // Still theirs, or nobody could say: the back end is what failed, as before.
     for (const answer of [here, unknown])
-      expect(await failedRunReason(refused, "pipeline-bot", answer)).toBe(
+      expect(
+        (await failedRunReason(refused, "pipeline-bot", answer)).message,
+      ).toBe(
         "OpenBot couldn't reach its backend, so your message wasn't sent. Try again, or quit and reopen OpenBot.",
       );
     // A Bot's own words are never second-guessed, whatever the server would say of the Bot.
     expect(
-      await failedRunReason("invalid x-api-key", "pipeline-bot", gone),
+      (await failedRunReason("invalid x-api-key", "pipeline-bot", gone))
+        .message,
     ).toBe("invalid x-api-key");
   });
 
@@ -143,10 +176,12 @@ describe("the reason a turn ended", () => {
     // The Bot is still theirs, and the server is not asked again: it already said why.
     let asked = false;
     expect(
-      await failedRunReason(refused, "general-assistant", async () => {
-        asked = true;
-        return false;
-      }),
+      (
+        await failedRunReason(refused, "general-assistant", async () => {
+          asked = true;
+          return false;
+        })
+      ).message,
     ).toBe(sentence);
     expect(asked).toBe(false);
 

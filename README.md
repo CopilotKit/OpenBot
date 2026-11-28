@@ -88,7 +88,7 @@ OpenBot has three parts. On your laptop, setup runs the backend and Intelligence
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-overview-dark.svg">
-  <img src="docs/assets/architecture-overview-light.svg" alt="Mac, Windows, web, iOS, Android, Slack, and Teams connect to the OpenBot backend. Built-in Bots in the server and your agents on any execution platform share an AG-UI lane. Computer execution uses Kubernetes by default or a compatible sandbox provider; tools use MCP and adapters. CopilotKit Intelligence runs alongside OpenBot on your infrastructure." width="100%">
+  <img src="docs/assets/architecture-overview-light.svg" alt="Open-source frontends (web, Mac, Windows, iOS, Android, Slack, Teams, or your own) reach the OpenBot backend through the OpenBot API. Its core includes CopilotKit Intelligence for memory, learning, and governance. Lanes run from the core, each with a built-in option inside the backend and your own outside it: agents (Built-in Bots or your own custom agents, or any agent such as ADK, LangChain, or Claude Agent SDK, hosted on AgentCore, LangSmith, Gemini Agent Runtime, or elsewhere), computers (a virtual machine for every user and bot, or your own sandbox such as Daytona, E2B, or Modal), tools (thousands of built-in connectors, or any MCP server or hub), and vaults (the built-in vault, or 1Password, HashiCorp Vault, or AWS Secrets Manager). More lanes follow the same pattern." width="100%">
 </picture>
 
 | Part | What it does |
@@ -535,6 +535,7 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | `server`                 | 3001                       | Hono API, CopilotKit runtime, auth, policy, audit, plugins, components, coworkers, and channels. |
 | `agent-computer`         | 4100                       | Chromium plus `/workspace` and browser profile.                                                  |
 | `agent-langgraph-agui`   | 4201 host / 4206 container | The managed Bot: the LangGraph harness the team edition's Risk Analyst runs on.                  |
+| `agent-langgraph-ts`     | 4215                       | The TypeScript LangGraph engine new Bots run on. Compose runs it in every edition.               |
 | `agent-harness`          | 4202 to 4214, per framework | The agent framework picked in OpenBot Desktop setup, behind the `harness` Compose profile.       |
 | `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per person, and one per Isolated Bot.                           |
 | PostgreSQL               | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |

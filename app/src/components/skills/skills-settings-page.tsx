@@ -43,6 +43,12 @@ import { grantSummary } from "@/lib/agents/grant-summary";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
+import {
+  type Failure,
+  failureSaid,
+  isHeld,
+  loadFailure,
+} from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { removeSkillMutationOptions } from "@/lib/skills/mutations";
 import { type Skill, skillListQueryOptions } from "@/lib/skills/queries";
@@ -81,10 +87,11 @@ export function SkillsSettingsPage({
   const { data: agents } = useQuery(agentListQueryOptions());
   const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
   const browser = useQuery(browserStateQueryOptions());
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
   const removeSkill = useMutation({
     ...removeSkillMutationOptions(queryClient),
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
     onSuccess: () => setError(null),
   });
 
@@ -94,6 +101,12 @@ export function SkillsSettingsPage({
   const loaded = !skillList.isPending && !me.isPending;
   /** Both reads answered, so `written` is the whole truth and an empty list means none. */
   const writtenKnown = skillList.data !== undefined && me.data !== undefined;
+  /*
+   * OpenBot holding off (a move, or the database out of reach) is said once, here, for the page:
+   * the sections below read from the same organization, and said it two more times.
+   */
+  const heldAbove =
+    loaded && !writtenKnown && isHeld([skillList.error, me.error]);
   const skills = skillList.data ?? [];
   /*
    * The server has already left out skills this person may not see. Theirs are the ones they own;
@@ -216,12 +229,15 @@ export function SkillsSettingsPage({
       >
         {error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {error}
+            {failureSaid(error)}
           </p>
         ) : null}
         {loaded && !writtenKnown ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load the skills you wrote. Try again in a moment.
+            {loadFailure(
+              [skillList.error, me.error],
+              "Couldn't load the skills you wrote. Try again in a moment.",
+            )}
           </p>
         ) : null}
 
@@ -245,6 +261,7 @@ export function SkillsSettingsPage({
               New skill
             </Button>
           }
+          heldAbove={heldAbove}
           written={written}
           writtenKnown={writtenKnown}
         />
@@ -279,7 +296,7 @@ export function SkillsSettingsPage({
           </PageSection>
         ) : null}
 
-        <LearningReview />
+        <LearningReview heldAbove={heldAbove} />
 
         {/* Only where OpenBot can run a browser for this person. */}
         {browser.data?.available ? (

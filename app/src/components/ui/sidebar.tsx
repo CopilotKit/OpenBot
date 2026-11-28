@@ -5,6 +5,7 @@ import { useRender } from "@base-ui/react/use-render";
 import { IconLayoutSidebar } from "@tabler/icons-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
+import * as ReactDOM from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -28,7 +29,7 @@ import { cn } from "@/lib/utils";
 
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "18rem";
-const SIDEBAR_WIDTH_ICON = "3rem";
+const SIDEBAR_WIDTH_ICON = "3.5rem";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 
 type SidebarContextProps = {
@@ -288,7 +289,7 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
+          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-lg group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
         >
           {children}
         </div>
@@ -356,6 +357,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   const { toggleSidebar, state, isMobile } = useSidebar();
   const resize = React.useContext(SidebarResizeContext);
   const drag = React.useRef<{
+    panel: HTMLElement;
     startX: number;
     startWidth: number;
     min: number;
@@ -383,6 +385,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         const startWidth = panel.getBoundingClientRect().width;
         const min = narrowest(panel);
         drag.current = {
+          panel,
           startX: event.clientX,
           startWidth,
           min,
@@ -411,6 +414,16 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         drag.current = null;
         if (!current?.moved || !resize) return;
         dragged.current = true;
+        /*
+         * Drawn at the released width before the sidebar eases again. The last move's width may not
+         * be drawn yet (a busy window, or a browser handing over a held-back move just ahead of the
+         * release), and drawn together with the easing coming back, the sidebar eased the last few
+         * pixels after the pointer instead of being where it was let go. Reading the panel's box makes
+         * the browser lay it out at that width now, while it does not ease, so turning the easing back
+         * on leaves nothing to ease.
+         */
+        ReactDOM.flushSync(() => resize.setWidth(current.width));
+        current.panel.getBoundingClientRect();
         resize.setResizing(false);
         resize.commitWidth(current.width);
       }}
@@ -446,7 +459,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:border md:peer-data-[variant=inset]:border-sidebar-border md:peer-data-[variant=inset]:shadow-xs md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-lg md:peer-data-[variant=inset]:border md:peer-data-[variant=inset]:border-sidebar-border md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className,
       )}
       {...props}
@@ -620,7 +633,7 @@ const sidebarMenuButtonVariants = cva(
       variant: {
         default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         outline:
-          "bg-background shadow-[0_0_0_1px_var(--sidebar-border)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_var(--sidebar-accent)]",
+          "bg-background ring-1 ring-sidebar-border hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:ring-sidebar-accent",
       },
       size: {
         default: "h-8 text-sm",

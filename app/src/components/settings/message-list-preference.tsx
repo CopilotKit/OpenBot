@@ -24,6 +24,7 @@ import {
   saveUserPreferencesMutationOptions,
   useUserPreferences,
 } from "@/lib/settings/message-list";
+import { failureSaid } from "@/lib/load-failure";
 
 export function MessageListPreference() {
   const preferences = useUserPreferences();
@@ -111,7 +112,7 @@ export function MessageListPreference() {
       {preferences.isError ? (
         <div className="px-3 pb-3">
           <p role="alert" className="text-sm text-destructive">
-            {preferences.error.message}
+            {failureSaid(preferences.error)}
           </p>
           <Button
             variant="ghost"
@@ -124,7 +125,7 @@ export function MessageListPreference() {
       ) : null}
       {save.isError ? (
         <p role="alert" className="px-3 pb-3 text-sm text-destructive">
-          {save.error.message}
+          {failureSaid(save.error)}
         </p>
       ) : null}
       {save.isPending ? (

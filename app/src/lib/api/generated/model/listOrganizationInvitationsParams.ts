@@ -6,6 +6,12 @@ import type { LimitParameter } from "./limitParameter";
 
 export type ListOrganizationInvitationsParams = {
   /**
+   * Part of an address, matched without regard to case. Leading and trailing spaces are ignored; empty lists every invitation.
+   * @maxLength 200
+   * @pattern ^[^\x00]*$
+   */
+  search?: string;
+  /**
    * Most items in one page.
    * @minimum 1
    * @maximum 100

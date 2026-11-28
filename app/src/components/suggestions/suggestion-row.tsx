@@ -22,8 +22,10 @@ import {
   resolveSuggestionMutationOptions,
   sourceSite,
 } from "@/lib/proactive";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * One thing a Bot's check-in found: what it is, a line of why, where it was read, and what to do
@@ -74,7 +76,11 @@ export function SuggestionRow({
         <>
           <Button
             disabled={act.isPending}
-            onClick={() => act.mutate({ id: suggestion.id, action: "start" })}
+            onClick={() => {
+              // Bots can't run until a card is added: the dialog says why, in place of a run.
+              if (stopIfNeedsCard()) return;
+              act.mutate({ id: suggestion.id, action: "start" });
+            }}
             size="sm"
             variant="outline"
           >
@@ -151,7 +157,7 @@ export function SuggestionRow({
         ) : null,
         error ? (
           <span className="text-destructive" key="error" role="alert">
-            {error.message}
+            {failureSaid(error)}
           </span>
         ) : null,
       ]}

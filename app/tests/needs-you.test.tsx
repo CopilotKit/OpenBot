@@ -657,10 +657,12 @@ test("a task the person stopped reads Stopped on the board, in its card's words,
     expect(
       row("Chase the supplier").querySelector(".tabler-icon-player-stop"),
     ).not.toBeNull();
-    expect(row("Chase the supplier").querySelector(".bg-amber-50")).toBeNull();
+    expect(
+      row("Chase the supplier").querySelector(".bg-warning\\/10"),
+    ).toBeNull();
     expect(row("File the expense report").dataset.taskState).toBe("failed");
     expect(
-      row("File the expense report").querySelector(".bg-amber-50"),
+      row("File the expense report").querySelector(".bg-warning\\/10"),
     ).not.toBeNull();
 
     // One that couldn't finish on its own still says so, in its card's words, and why.
@@ -813,11 +815,11 @@ test("one wait inside a task is one row and one count, and rows that wait on nob
       }),
     ).toBeTruthy();
     expect(
-      row("Order Fernhill seeds").querySelector(".bg-amber-50"),
+      row("Order Fernhill seeds").querySelector(".bg-warning\\/10"),
     ).not.toBeNull();
     // Listed, and not waiting on the person: no tint. A finished delegated one is not listed.
     expect(
-      row("Draft the board update").querySelector(".bg-amber-50"),
+      row("Draft the board update").querySelector(".bg-warning\\/10"),
     ).toBeNull();
     expect(surface.queryByText("Check the venue's doors time")).toBeNull();
   }

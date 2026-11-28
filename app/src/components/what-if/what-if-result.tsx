@@ -79,20 +79,20 @@ const PAGE_WORDS: Record<NonNullable<WhatIfLayer["page"]>, string> = {
 const VERDICTS: Record<WhatIfVerdict, { label: string; tone: string }> = {
   allows: {
     label: "Allows",
-    tone: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    tone: "bg-success/10 text-success",
   },
   refuses: { label: "Refuses", tone: "bg-destructive/10 text-destructive" },
   asks: {
     label: "Asks first",
-    tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    tone: "bg-warning/10 text-warning",
   },
   hands_off: {
     label: "Hands off",
-    tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    tone: "bg-warning/10 text-warning",
   },
   trial: {
     label: "Would refuse",
-    tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    tone: "bg-warning/10 text-warning",
   },
 };
 
@@ -100,8 +100,8 @@ const VERDICTS: Record<WhatIfVerdict, { label: string; tone: string }> = {
 const DECIDES_ROW: Record<WhatIfVerdict, string> = {
   allows: "",
   refuses: "bg-destructive/5",
-  asks: "bg-amber-500/5",
-  hands_off: "bg-amber-500/5",
+  asks: "bg-warning/5",
+  hands_off: "bg-warning/5",
   trial: "",
 };
 
@@ -116,7 +116,7 @@ export const OUTCOMES: Record<
   allowed: {
     label: "Allowed",
     icon: IconCircleCheck,
-    tone: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    tone: "bg-success/10 text-success",
   },
   refused: {
     label: "Refused",
@@ -126,12 +126,12 @@ export const OUTCOMES: Record<
   asks: {
     label: "Asks first",
     icon: IconMessageQuestion,
-    tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    tone: "bg-warning/10 text-warning",
   },
   hands_off: {
     label: "Person does it",
     icon: IconHandStop,
-    tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    tone: "bg-warning/10 text-warning",
   },
 };
 

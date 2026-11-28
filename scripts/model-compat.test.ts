@@ -398,6 +398,12 @@ test("every published harness is one the matrix can run", () => {
   for (const image of published) {
     const harness = known.find((row) => row.image === image);
     expect(harness, image).toBeDefined();
+    // A ChatGPT plan's engine runs only on a plan's sign-in, which no key in the matrix is: the
+    // end-to-end suite's live ChatGPT-plan lane checks it instead.
+    if (harness?.credential === "chatgpt-plan") {
+      expect(providersFor(harness)).toEqual([]);
+      continue;
+    }
     expect(providersFor(harness!).length, image).toBeGreaterThan(0);
   }
 });

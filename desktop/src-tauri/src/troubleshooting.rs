@@ -88,6 +88,8 @@ pub enum Missed {
     /// CPUs, memory and free disk, as `[local check]` measures them.
     EngineSize,
     ServerLog,
+    /// What the OpenBot the app is connected to says about itself (`connected::about`).
+    ConnectedOpenBot,
 }
 
 impl Missed {
@@ -116,6 +118,10 @@ impl Missed {
                 "The server's log, for model provider errors: the container engine didn't answer \
                  within {after}."
             ),
+            Missed::ConnectedOpenBot => format!(
+                "What the OpenBot this app is connected to says about itself: it didn't answer \
+                 within {after}."
+            ),
         }
     }
 
@@ -127,6 +133,7 @@ impl Missed {
             Missed::EngineDiskUse => "the container engine's disk use",
             Missed::EngineSize => "the container engine's CPUs, memory and free disk",
             Missed::ServerLog => "the server's log",
+            Missed::ConnectedOpenBot => "what the connected OpenBot says about itself",
         }
     }
 }
@@ -615,6 +622,332 @@ pub fn tail(path: &Path, max_bytes: u64) -> std::io::Result<String> {
         Some(newline) => text[newline + 1..].to_owned(),
         None => text,
     })
+}
+
+/*
+ * CONNECTED TO AN OPENBOT THAT RUNS ELSEWHERE.
+ *
+ * Nothing of an installation on this computer applies then: no engine, no containers, no server log
+ * here. What helps is what the app saw of that OpenBot: whether it answers and which release it
+ * runs, which account and organization the app works in there, the app's own recent problems as
+ * its page recorded them (`page_problems`), each failed request with the request id that finds it
+ * in that OpenBot's own logs, the relay's recent lines, and the end of this app's log.
+ *
+ * Ids are kept here: they are how a failure is found on the server. Everything else is redacted as
+ * the log is, and the problems were redacted as they arrived.
+ */
+
+/// How many of the relay's latest lines go in.
+pub const RELAY_LINES: usize = 200;
+
+/// Where `gather_connected` finds what goes into a bundle while the app is connected.
+pub struct ConnectedSources<'a> {
+    pub desktop: String,
+    pub failure: Option<String>,
+    /// This app's log folder (`logging::folder`).
+    pub log_folder: Option<&'a Path>,
+    /// The home folder, written as `~`.
+    pub home: Option<&'a str>,
+    /// The address of the OpenBot the app is connected to.
+    pub address: Option<String>,
+    /// Whether the app is signed in there and showing it now.
+    pub signed_in: bool,
+    /// The page's own release, as it last named it.
+    pub front_end: Option<String>,
+    /// What that OpenBot says about itself (`connected::about::ask`), by the deadline.
+    pub about: Ask<crate::connected::about::About>,
+    /// The app's recent problems, oldest first.
+    pub problems: Vec<crate::page_problems::Problem>,
+    pub limit: Duration,
+}
+
+/// What goes into a bundle while connected, gathered by `gather_connected`.
+#[derive(Debug, Default)]
+pub struct ConnectedFacts {
+    pub desktop: String,
+    pub system: String,
+    pub failure: Option<String>,
+    pub address: Option<String>,
+    pub signed_in: bool,
+    pub front_end: Option<String>,
+    pub about: Option<crate::connected::about::About>,
+    pub problems: Vec<crate::page_problems::Problem>,
+    pub desktop_log: Option<(PathBuf, String)>,
+    pub missed: Vec<Missed>,
+    pub limit: Duration,
+}
+
+/// Gather a bundle while connected and lay it out, within `sources.limit` and a moment to hand over.
+pub fn gather_connected(sources: ConnectedSources) -> String {
+    let limit = sources.limit;
+    let deadline = Instant::now() + limit;
+    let ask_about = sources.about;
+    let about = ask(move || ask_about(deadline));
+    let desktop_log = sources.log_folder.and_then(newest_log).and_then(|path| {
+        tail(&path, DESKTOP_TAIL_BYTES)
+            .ok()
+            .map(|tail| (path, tail))
+    });
+    let mut missed = Vec::new();
+    let about = match about.by(deadline + HANDOVER) {
+        Some(Ok(about)) => about,
+        Some(Err(NoAnswer)) | None => {
+            missed.push(Missed::ConnectedOpenBot);
+            None
+        }
+    };
+    if !missed.is_empty() {
+        log::warn!(
+            "[logs] no answer within {}s from the connected OpenBot",
+            limit.as_secs()
+        );
+    }
+    connected_bundle(
+        &ConnectedFacts {
+            desktop: sources.desktop,
+            system: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+            failure: sources.failure,
+            address: sources.address,
+            signed_in: sources.signed_in,
+            front_end: sources.front_end,
+            about,
+            problems: sources.problems,
+            desktop_log,
+            missed,
+            limit,
+        },
+        sources.home,
+    )
+}
+
+/// The relay's lines in `log`, the latest `RELAY_LINES` of them.
+pub fn relay_lines(log: &str) -> String {
+    let lines: Vec<&str> = log
+        .lines()
+        .filter(|line| line.contains("[relay]"))
+        .map(str::trim_end)
+        .collect();
+    lines[lines.len().saturating_sub(RELAY_LINES)..].join("\n")
+}
+
+/// What the connected bundle says was taken out, so a person knows it is safe to paste, and what
+/// was kept on purpose.
+pub const CONNECTED_REDACTED_NOTE: &str = "Redacted on this computer before copying: API keys, \
+tokens, passwords, cookies and email addresses. The home folder is written as ~. Request, account \
+and organization ids are kept, so a failure can be found in the server's logs.";
+
+/// `text` with its ids kept and every credential and email address replaced, and the home folder,
+/// by each of `homes`, as `~`.
+fn keeping_ids(text: &str, homes: &[String]) -> String {
+    let mut text = crate::logging::redact_keeping_ids(text).into_owned();
+    let mut homes: Vec<&String> = homes.iter().filter(|home| home.len() > 3).collect();
+    homes.sort_by_key(|home| std::cmp::Reverse(home.len()));
+    for home in homes {
+        text = text.replace(home.as_str(), "~");
+    }
+    text
+}
+
+/// The bundle while connected, as text. Each part is redacted for what it is: what holds ids keeps
+/// them (`keeping_ids`), and the failure and the log are redacted in full.
+pub fn connected_bundle(facts: &ConnectedFacts, home: Option<&str>) -> String {
+    let homes = home.map(crate::logging::home_forms).unwrap_or_default();
+    let full = |text: &str| crate::logging::scrub_homes(text, &homes).into_owned();
+    let ids = |text: &str| keeping_ids(text, &homes);
+    let failure = facts
+        .failure
+        .as_deref()
+        .map(|failure| bounded(failure.trim(), FAILURE_BYTES))
+        .filter(|failure| !failure.is_empty());
+    let about = facts.about.as_ref();
+    let where_to = facts
+        .address
+        .as_deref()
+        .map(crate::connected::host_of)
+        .unwrap_or_else(|| "an OpenBot it has no address for".to_owned());
+
+    let mut out = String::new();
+    out.push_str("# OpenBot troubleshooting logs\n\n");
+    // The summary: which build, where it is connected, what that OpenBot said, what the app saw.
+    let mut summary = vec![ids(&format!(
+        "Summary: {} on {}, connected to {where_to}.",
+        facts.desktop, facts.system
+    ))];
+    if let Some(failure) = failure {
+        let said: Vec<&str> = failure
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .take(2)
+            .collect();
+        summary.push(full(&format!("Failed: {}", said.join(" / "))));
+    }
+    summary.push(match about {
+        Some(about) => ids(&format!(
+            "The connected OpenBot: {}{}.",
+            about.health,
+            about
+                .release
+                .as_deref()
+                .map(|release| format!(", release {release}"))
+                .unwrap_or_default()
+        )),
+        None if facts.missed.contains(&Missed::ConnectedOpenBot) => {
+            "The connected OpenBot: didn't answer in time.".to_owned()
+        }
+        None => "The connected OpenBot: not asked.".to_owned(),
+    });
+    summary.push(match facts.problems.last() {
+        None => "Problems the app recorded: none since OpenBot Desktop started.".to_owned(),
+        Some(latest) => {
+            let mut counted: Vec<(&str, usize)> = Vec::new();
+            for problem in &facts.problems {
+                match counted
+                    .iter_mut()
+                    .find(|(name, _)| *name == problem.named())
+                {
+                    Some((_, count)) => *count += 1,
+                    None => counted.push((problem.named(), 1)),
+                }
+            }
+            let counted: Vec<String> = counted
+                .iter()
+                .map(|(name, count)| {
+                    if *count == 1 {
+                        format!("1 {name}")
+                    } else {
+                        format!("{count} {name}s")
+                    }
+                })
+                .collect();
+            ids(&format!(
+                "Problems the app recorded: {} ({}). The latest: {}",
+                facts.problems.len(),
+                counted.join(", "),
+                latest.line()
+            ))
+        }
+    });
+    if !facts.missed.is_empty() {
+        let named: Vec<&str> = facts.missed.iter().map(|missed| missed.named()).collect();
+        summary.push(format!(
+            "Couldn't collect: {}. See What couldn't be collected.",
+            named.join(", ")
+        ));
+    }
+    out.push_str(&summary.join("\n"));
+    out.push_str(&format!("\n\n{CONNECTED_REDACTED_NOTE}\n\n"));
+    out.push_str(&ids(&format!(
+        "{}\nSystem: {}\n",
+        facts.desktop, facts.system
+    )));
+
+    out.push_str("\n## The connected OpenBot\n\n");
+    let mut lines = vec![format!(
+        "Address: {}",
+        facts.address.as_deref().unwrap_or("none on record")
+    )];
+    lines.push(if facts.signed_in {
+        "Signed in: yes, and showing it now.".to_owned()
+    } else {
+        "Signed in: no. The app isn't showing it now; sign in from the setup window.".to_owned()
+    });
+    match about {
+        Some(about) => {
+            lines.push(format!("Health (GET /health): {}", about.health));
+            lines.push(format!(
+                "Release: {}",
+                about.release.as_deref().unwrap_or("not known")
+            ));
+            if let Some(edition) = &about.edition {
+                lines.push(format!("Edition: {edition}"));
+            }
+            if !about.api.is_empty() {
+                lines.push(format!("API versions: {}", about.api.join(", ")));
+            }
+            lines.push(format!(
+                "Organization id: {}",
+                about.organization.as_deref().unwrap_or("not known")
+            ));
+            lines.push(format!(
+                "Account id: {}",
+                about.account.as_deref().unwrap_or("not known")
+            ));
+            for unanswered in &about.unanswered {
+                lines.push(format!("Not known: {unanswered}"));
+            }
+        }
+        None if facts.missed.contains(&Missed::ConnectedOpenBot) => {
+            lines.push("It didn't answer in time.".to_owned())
+        }
+        None => lines.push("Not asked.".to_owned()),
+    }
+    lines.push(format!(
+        "Front end: {}",
+        facts
+            .front_end
+            .as_deref()
+            .map(|version| format!("{version}, as the app's page named its own release"))
+            .unwrap_or_else(|| "not known: the page hasn't named its release".to_owned())
+    ));
+    out.push_str(&ids(&lines.join("\n")));
+    out.push('\n');
+
+    out.push_str("\n## What failed\n\n");
+    match failure {
+        Some(failure) => {
+            out.push_str(&full(failure));
+            out.push('\n');
+        }
+        None => out.push_str("Nothing reported a failure.\n"),
+    }
+    if !facts.missed.is_empty() {
+        out.push_str("\n## What couldn't be collected\n\n");
+        for missed in &facts.missed {
+            out.push_str(&format!("- {}\n", missed.said(facts.limit)));
+        }
+    }
+
+    out.push_str(&format!(
+        "\n## Problems the app recorded (oldest first, the last {})\n\n",
+        crate::page_problems::KEPT
+    ));
+    if facts.problems.is_empty() {
+        out.push_str(
+            "None since OpenBot Desktop started. The app records requests that failed or got no \
+             answer, errors on its pages and runs that failed, as they happen.\n",
+        );
+    } else {
+        let lines: Vec<String> = facts
+            .problems
+            .iter()
+            .map(|problem| problem.line())
+            .collect();
+        out.push_str(&format!("```\n{}\n```\n", ids(&lines.join("\n"))));
+    }
+
+    out.push_str("\n## Relay (recent lines)\n\n");
+    let relay = facts
+        .desktop_log
+        .as_ref()
+        .map(|(_, tail)| relay_lines(tail))
+        .unwrap_or_default();
+    if relay.is_empty() {
+        out.push_str("None in this app's recent log.\n");
+    } else {
+        out.push_str(&format!("```\n{}\n```\n", full(&relay)));
+    }
+
+    out.push_str("\n## OpenBot Desktop log (end)\n\n");
+    match &facts.desktop_log {
+        Some((path, tail)) => out.push_str(&full(&format!(
+            "{}\n\n```\n{}\n```\n",
+            path.display(),
+            tail.trim_end()
+        ))),
+        None => out.push_str("Not found on this computer.\n"),
+    }
+    out
 }
 
 /// Save a bundle in `folder` as `openbot-troubleshooting-<stamp>.txt`, and say where.

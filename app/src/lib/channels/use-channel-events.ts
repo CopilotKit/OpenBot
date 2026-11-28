@@ -1,3 +1,4 @@
+import { CAPABILITIES_QUERY } from "@openbot/shared/client-capabilities";
 import {
   type Query,
   type QueryClient,
@@ -6,6 +7,7 @@ import {
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { HELD_OUT_NOW, holdOut, SSO_REQUIRED_CLOSE } from "@/lib/auth/held-out";
+import { CAPABILITIES } from "@/lib/client";
 import { nudgeMoment } from "@/lib/notices";
 import {
   isBotReply,
@@ -14,6 +16,7 @@ import {
 import { currentOrganizationId } from "@/lib/organizations/current";
 import { apiSocketPath, socketUrl as buildSocketUrl } from "@/lib/socket-url";
 import { type BotTask, taskKeys } from "@/lib/tasks/queries";
+import { forgetHeardBusy, noteBusyHeard } from "./held-busy";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -471,6 +474,9 @@ export function applyToRoster(
   queryClient: QueryClient,
   activity: ChannelActivityEvent,
 ): void {
+  // Held apart from the cache as well, so a read of the roster that says nothing of it keeps it.
+  if (activity.busy !== undefined)
+    noteBusyHeard(activity.channelId, activity.busy);
   let listed = true;
   queryClient.setQueryData(
     channelKeys.list(),
@@ -605,8 +611,13 @@ export function applyToBotLists(
 const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
+/**
+ * The socket names the newer messages this app understands in its query, as every request does in
+ * its OpenBot-Capabilities header (`lib/client.ts`): a browser can't set a header on a WebSocket.
+ */
 function socketUrl() {
-  return buildSocketUrl(apiSocketPath("/conversation-events"));
+  const query = new URLSearchParams({ [CAPABILITIES_QUERY]: CAPABILITIES });
+  return `${buildSocketUrl(apiSocketPath("/conversation-events"))}?${query}`;
 }
 
 export function useChannelEvents() {
@@ -625,6 +636,11 @@ export function useChannelEvents() {
 
       socket.onopen = () => {
         retryDelay = FIRST_RETRY_MS;
+        /*
+         * A turn's end said while the socket was down was never heard, so what it said before is
+         * let go of: the read below is the best word there is. This tab's own turns stay held.
+         */
+        forgetHeardBusy();
         // Recover events missed while the socket was disconnected.
         void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
         void queryClient.invalidateQueries({ queryKey: channelKeys.details() });

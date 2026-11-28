@@ -4,10 +4,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod desktop_about;
 mod desktop_connected;
 mod desktop_connection;
 mod desktop_host_access;
+mod desktop_move;
 mod desktop_page;
+mod desktop_reload;
 mod desktop_stall;
 mod desktop_status;
 mod desktop_telemetry;
@@ -16,6 +19,7 @@ mod intelligence_bridge;
 mod key_menu;
 mod notice;
 mod outside_links;
+mod window_size;
 mod zoom;
 
 #[cfg(test)]
@@ -95,17 +99,6 @@ struct Shell {
     install_token: Mutex<Option<(PathBuf, Option<String>)>>,
     /// A verified down allows a following Stop/Quit to be an idempotent no-op.
     stopped_container_root: Mutex<Option<PathBuf>>,
-    /// A ChatGPT sign-in waiting for the browser redirect to complete it.
-    ///
-    /// Held for the same reason the Claude one is: a person leaves and comes back in the middle.
-    /// Unlike that one, nothing is typed here — the callback finishes it.
-    signing_in_to_chatgpt: Mutex<Option<openbot_desktop_lib::plan::SigningInToChatGpt>>,
-    /// A plan sign-in waiting for the code from the browser.
-    ///
-    /// Held across two commands because a person has to leave and approve in the middle of it, and
-    /// the flow that showed the URL is the only one that can redeem the code: each start mints its
-    /// own PKCE challenge and state, so a second start invalidates the first.
-    signing_in: Mutex<Option<openbot_desktop_lib::plan::SigningIn>>,
     /// The configured setup destination, resolved using Tauri's build mode and platform.
     /// WebView2's current URL can still be about:blank during startup; it is never a setup source.
     setup_url: Mutex<Option<String>>,
@@ -137,12 +130,20 @@ struct Shell {
     /// The app connected to an OpenBot that runs somewhere else: its relay and sign-in while the
     /// window shows it. See `desktop_connected`.
     connected: desktop_connected::State,
+    /// The app's own recent problems, as OpenBot's page records them (`record_problem`), for Get
+    /// Troubleshooting Logs…. See `page_problems`.
+    page_problems: openbot_desktop_lib::page_problems::Recorder,
+    /// The move from OpenBot (Self-Contained) to OpenBot Cloud. See `desktop_move`.
+    moving: desktop_move::State,
     /// The last security floor this app verified (`security_floor`).
     security_floor: security_floor::Known,
     /// This run already stopped OpenBot here for the security floor and showed its notice.
     security_floor_held: std::sync::atomic::AtomicBool,
     /// The floor kept in the config folder has been read in this run (`know_kept_security_floor`).
     security_floor_read: std::sync::atomic::AtomicBool,
+    /// The main window's size: setup's, fixed, or the person's own on OpenBot's page
+    /// (`window_size`).
+    window_size: window_size::State,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -277,6 +278,10 @@ struct Progress {
     /// The step waits for the person's go-ahead in this window: see `install::GoAhead`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     asks: bool,
+    /// The go-ahead it waits for comes before the system's password prompt, which comes up only on
+    /// Continue: see `engine::StepLine::before_prompt`.
+    #[serde(rename = "beforePrompt", skip_serializing_if = "std::ops::Not::not")]
+    before_prompt: bool,
     /// The engine itself is being updated: see `engine::StepLine::updating`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     updating: bool,
@@ -311,6 +316,9 @@ struct SavedConfiguration {
     model_api_keys: SavedModelApiKeys,
     model_sessions: SavedModelSessions,
     model: Option<openbot_desktop_lib::saved_intent::ModelIntent>,
+    /// A ChatGPT sign-in an earlier version saved, which has to be done again
+    /// (`env::chatgpt_sign_in_changed`). The window says so above the sign-in.
+    chatgpt_sign_in_changed: bool,
 }
 
 #[derive(Serialize)]
@@ -972,6 +980,7 @@ fn report_line<R: tauri::Runtime>(
             downloads: None,
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         },
@@ -992,10 +1001,17 @@ fn emit_progress<R: tauri::Runtime>(app: &tauri::AppHandle<R>, progress: Progres
 }
 
 /// The setup page's heartbeat, every few seconds while its setup, start or update screens show and
-/// as soon as a row's progress reaches it: the highest progress number it has taken, and whether it
-/// has just loaded. Off the main thread, and it waits on nothing.
+/// as soon as a row's progress reaches it: the highest progress number it has taken, whether it
+/// has just loaded, the heading of the screen it shows, and whether it has drawn anything at all
+/// (`desktop_stall::Shown`). Off the main thread, and it waits on nothing.
 #[tauri::command]
-async fn setup_heartbeat(app: tauri::AppHandle, seen: u64, fresh: bool) {
+async fn setup_heartbeat(
+    app: tauri::AppHandle,
+    seen: u64,
+    fresh: bool,
+    screen: Option<String>,
+    drawn: Option<bool>,
+) {
     // The setup page has painted: "Getting OpenBot ready" comes off the window (`first_paint`).
     if let Some(up) = first_paint::page_painted() {
         log::info!(
@@ -1004,8 +1020,71 @@ async fn setup_heartbeat(app: tauri::AppHandle, seen: u64, fresh: bool) {
             up.as_secs_f64()
         );
     }
-    desktop_stall::heartbeat(&app, seen, fresh);
+    desktop_stall::heartbeat(
+        &app,
+        seen,
+        fresh,
+        desktop_stall::Shown::from_page(screen, drawn),
+    );
 }
+
+/// The most of a page error's message and of its stack that goes in the log.
+const PAGE_ERROR_MESSAGE: usize = 2_000;
+const PAGE_ERROR_STACK: usize = 6_000;
+
+/**
+An error in the setup window's page, for the Desktop log: a screen that failed to draw (caught by
+the page's error boundary, which shows "OpenBot hit a problem" in its place), an uncaught error, or
+a promise rejected with nothing to catch it. Before this, a page that broke left a plain window and
+nothing in the log. `kind` is which of the three; the log's own scrub takes out keys and the like.
+*/
+#[tauri::command]
+async fn page_error(kind: String, message: String, stack: Option<String>) {
+    let bounded = |text: &str, most: usize| text.chars().take(most).collect::<String>();
+    let kind = bounded(&kind, 40);
+    let message = bounded(&message, PAGE_ERROR_MESSAGE);
+    match stack.filter(|stack| !stack.trim().is_empty()) {
+        Some(stack) => log::error!(
+            "[page] {kind}: {message}\n{}",
+            bounded(&stack, PAGE_ERROR_STACK)
+        ),
+        None => log::error!("[page] {kind}: {message}"),
+    }
+}
+
+/**
+The setup page was reloaded and is still stuck (`desktop_stall`): OpenBot says so in a native
+alert, since the page can't, with Restart and Get logs. Restart starts this app again and leaves
+OpenBot running, as the restart after an update does; Get logs saves the troubleshooting logs and
+shows the file, as the menu's Get Troubleshooting Logs… does.
+*/
+fn setup_page_stuck(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    show_prompt(app, setup_stuck_prompt(), move |restart| {
+        if restart {
+            log::info!("[ui] restarting OpenBot from the stuck window's alert");
+            restart_into_update(&handle);
+        }
+        log::info!("[ui] getting the troubleshooting logs from the stuck window's alert");
+        save_troubleshooting_logs_from_menu(handle);
+    });
+}
+
+/**
+The stuck window's alert. Its words hold for both ways a page gets stuck: a blank page, and one
+frozen on its last screen, which still shows that screen. Before, it said "it still isn't showing
+anything", which is false of a frozen page.
+*/
+pub(crate) fn setup_stuck_prompt() -> app_update::Prompt {
+    app_update::Prompt {
+        title: SETUP_STUCK_TITLE.to_owned(),
+        message: SETUP_STUCK_MESSAGE.to_owned(),
+        buttons: Some(("Restart", "Get logs")),
+    }
+}
+
+const SETUP_STUCK_TITLE: &str = "OpenBot's window isn't responding";
+const SETUP_STUCK_MESSAGE: &str = "OpenBot tried reloading it, and it still isn't updating. Restart OpenBot to try again. Get logs saves what happened to a file you can share.";
 
 /// The running step last written to the log, so a step that says the same thing on every poll
 /// (an engine that is still starting) is one entry rather than one a second.
@@ -1120,6 +1199,7 @@ fn report_running_row<R: tauri::Runtime>(
         elsewhere,
         asks,
         updating,
+        before_prompt,
         detail: _,
     } = line;
     setup_phase(step);
@@ -1145,6 +1225,7 @@ fn report_running_row<R: tauri::Runtime>(
             downloads: None,
             elsewhere,
             asks,
+            before_prompt,
             updating,
             paused,
         },
@@ -1595,13 +1676,14 @@ fn on_podman_at_stop(shell: &Shell, root: &Path) -> bool {
     owned.or_else(|| preparation::saved_engine(root)) == Some(engine::Engine::Podman)
 }
 
-/// The person chose Try again after closing the password prompt, so Install asks again now rather
-/// than after its short wait. See `install::GoAhead`. False when nothing was waiting for it.
+/// The person chose Continue before the password prompt, which lets it come up, or Try again after
+/// closing it, so Install asks again now rather than after its short wait. See `install::GoAhead`.
+/// False when nothing was waiting for it.
 #[tauri::command]
 fn allow_podman_install() -> bool {
     let waiting = install::allow_podman_install();
     log::info!(
-        "[install] Try again to install Podman{}",
+        "[install] go-ahead (Continue or Try again) to install Podman{}",
         if waiting {
             ""
         } else {
@@ -1641,6 +1723,7 @@ fn report_running_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: line.elsewhere,
             asks: line.asks,
+            before_prompt: line.before_prompt,
             updating: line.updating,
             paused: false,
         },
@@ -1674,6 +1757,7 @@ fn report_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         },
@@ -1822,7 +1906,6 @@ async fn windows_blocker_from<R: tauri::Runtime>(
         let outcome = match &result {
             Ok(None) => Outcome::Ready,
             Ok(Some(win::Blocker::WslAbsent)) => Outcome::WslAbsent,
-            Ok(Some(win::Blocker::WslOne)) => Outcome::WslOne,
             Ok(Some(win::Blocker::WslNoKernel)) => Outcome::WslNoKernel,
             Ok(Some(win::Blocker::VirtualMachinePlatformDisabled)) => {
                 Outcome::VirtualMachinePlatformDisabled
@@ -1844,7 +1927,9 @@ fn record_setup_event<R: tauri::Runtime>(app: tauri::AppHandle<R>, event: serde_
     if let Ok(
         event @ (telemetry::EventData::StepViewed { .. }
         | telemetry::EventData::HarnessChosen { .. }
-        | telemetry::EventData::ModelChosen { .. }),
+        | telemetry::EventData::ModelChosen { .. }
+        | telemetry::EventData::BusinessOpened { .. }
+        | telemetry::EventData::BusinessBooked { .. }),
     ) = serde_json::from_value(event)
     {
         desktop_telemetry::record(&app, event);
@@ -4403,30 +4488,6 @@ async fn deployment_ready<R: tauri::Runtime>(
     Ok(())
 }
 
-/// The reference for an image the shell runs directly, rather than through Compose.
-///
-/// Require completed local installation before starting an authentication container.
-///
-/// With the sign-in's own image made present by `present`. Install pulls a plan's image only for an
-/// installation already on that plan (`preparation::PLAN_IMAGES`), so a sign-in downloads it when
-/// it is missing (`download_missing`).
-fn prepared_sign_in_with(
-    root: &Path,
-    published: &str,
-    present: impl FnOnce(&engine::Address, &String) -> Result<(), Problem>,
-) -> Result<(engine::Address, String), Problem> {
-    let status = engine::detect_saved(preparation::saved_engine(root));
-    let address = status
-        .address
-        .filter(|_| status.responding)
-        .ok_or_else(|| preparation::required(status.detail))?
-        .pin()?;
-    preparation::require(root, None, &address)?;
-    let image = sign_in_reference(root, published, deployment::reference)?;
-    present(&address, &image)?;
-    Ok((address, image))
-}
-
 /**
 Download the images of `images` the engine at `address` does not have, showing the download on the
 `images` row exactly as Install shows it (`report_downloads`), and saying the row done after.
@@ -4486,6 +4547,7 @@ fn download_missing<R: tauri::Runtime>(
     Ok(())
 }
 
+#[cfg(test)]
 fn sign_in_reference(
     root: &Path,
     published: &str,
@@ -4567,7 +4629,14 @@ impl ChosenModel {
             }
         }
         match (self.provider.as_str(), self.login.as_str()) {
-            ("google" | "xai", "oauth") => {
+            /*
+             * A Google sign-in saved before Gemini took an API key only. Refused here, so Start
+             * never hands the server a Google sign-in, and the window says what to do instead.
+             */
+            ("google", "oauth") => Err(Problem::plain(
+                openbot_desktop_lib::provider_oauth::GOOGLE_SIGN_IN_ENDED,
+            )),
+            ("xai", "oauth") => {
                 let saved = openbot_desktop_lib::provider_oauth::read(root, &self.provider)
                     .map_err(Problem::plain)?;
                 let model = given(self.model);
@@ -4634,6 +4703,10 @@ impl ChosenModel {
                 };
                 if store.is_empty() {
                     return Err("That ChatGPT plan was not signed in to.".into());
+                }
+                // A sign-in an earlier version saved, through Codex: the plan's engine can't use it.
+                if !openbot_env::is_sign_in_with_chatgpt_record(&store) {
+                    return Err(openbot_env::CHATGPT_SIGN_IN_CHANGED.into());
                 }
                 Ok(openbot_env::ModelCredential::ChatGptPlan { store })
             }
@@ -5181,16 +5254,29 @@ async fn start_stack_inner<R: tauri::Runtime>(
      */
     let requested_harness = harness.clone();
     let harness = harness::for_credential(&credential, harness);
-    let picked = harness::picked(harness.as_ref(), &root).map_err(|error| {
+    /*
+     * A deployment missing its image list is an unfinished install, said as one, so the window
+     * runs Install (which downloads only the list again) and starts. Asked before the Bot's image is
+     * read from that list: a list something outside OpenBot deleted read as "This version of
+     * OpenBot does not include the Bot you picked", the window never offered Install, and every
+     * Retry failed at once.
+     */
+    if let Some(problem) = preparation::incomplete_deployment(&root) {
+        log::warn!("[start] {}", logging::Failure::described(&problem));
+        return Err(problem);
+    }
+    let picked = harness::pick(harness.as_ref(), &root).map_err(|error| match error {
+        // A list there but not readable is the same unfinished install.
+        harness::PickError::ImageList(detail) => preparation::required(detail),
         // Two registers, because one of these refusals is about a release and the other is
         // about a pick. "OpenBot v0.0.8 does not include agent-langgraph-agui" is the
         // evidence, not the sentence: it names a published image, which is not a thing the
         // person chose or can change.
-        Problem::with(
+        harness::PickError::Refused(detail) => Problem::with(
             "This version of OpenBot does not include the Bot you picked. Go back and choose \
                  another, or update OpenBot.",
-            error,
-        )
+            detail,
+        ),
     })?;
 
     // The installation's own engine, brought up when it is stopped: here, before startup is held,
@@ -5918,8 +6004,8 @@ fn quit_cleanup<P>(shell: &Shell, mut progress: P) -> Stopped
 where
     P: FnMut(QuitStep, QuitStepState),
 {
-    // A ChatGPT sign-in left waiting would keep its container, and the callback port, after Quit.
-    openbot_desktop_lib::plan::release_chatgpt_callback_port();
+    // A ChatGPT sign-in left waiting would keep its loopback port after Quit.
+    openbot_desktop_lib::chatgpt_sign_in::cancel();
     let engine = engine_at_stop(shell, &cleanup_root(shell, &stack::default_root()));
     let on_podman = on_podman_at_stop(shell, &cleanup_root(shell, &stack::default_root()));
     let (down, intelligence) = healed_once_before(
@@ -6082,6 +6168,7 @@ impl QuitStatus {
             downloads: None,
             elsewhere: false,
             asks: false,
+            before_prompt: false,
             updating: false,
             paused: false,
         };
@@ -6426,7 +6513,7 @@ fn stop_for_uninstall(asked: uninstall::Asked) -> i32 {
         println!("{line}")
     });
     for failure in &failures {
-        println!("{failure}");
+        println!("{failure} {}", uninstall::UNINSTALLING_ANYWAY);
     }
     i32::from(!failures.is_empty())
 }
@@ -6508,6 +6595,21 @@ fn machine_home_fallback_line(root: &Path, profile: Option<&str>) -> String {
     format!("{install} can't hold OpenBot's storage, so it's on {profile}.")
 }
 
+/// At every launch, delete the Google sign-in for Gemini an earlier version saved in the install
+/// folder `root` (`provider_oauth::forget_google_sign_in`). The saved choice stays, so the AI screen
+/// and Start still say to add a Gemini API key. Logged; a launch never stops over it.
+fn forget_google_sign_in_at_launch(root: &Path) {
+    match openbot_desktop_lib::provider_oauth::forget_google_sign_in(root) {
+        Ok(0) => {}
+        Ok(count) => {
+            log::info!("[launch] deleted the saved Google sign-in for Gemini ({count} file(s))")
+        }
+        Err(error) => {
+            log::warn!("[launch] could not delete the saved Google sign-in for Gemini: {error}")
+        }
+    }
+}
+
 /// On Windows, put the Podman machine's disk in the install folder `root`, or in the user profile
 /// when the drive cannot hold it. Other systems keep Podman's own place.
 fn use_machine_home(root: &Path) {
@@ -6585,6 +6687,41 @@ impl uninstall::Computer for ThisComputerAtUninstall {
                 wire_name(failure)
             )
         })
+    }
+
+    /// Exactly the volumes `stack::leftover_volumes` proves are this installation's, with the
+    /// stopped containers holding them, as Start fresh removes them. Nothing is forced: a running
+    /// container of this installation keeps everything, and says so.
+    fn remove_volumes(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
+        if !root.join("docker-compose.yml").is_file() {
+            return Ok(());
+        }
+        let secrets = openbot_desktop_lib::vault::already_given_no_ui(
+            root,
+            &root.join(".env"),
+            &openbot_env::MINTED[..],
+        )
+        .map_err(|problem| problem.said)?;
+        let leftovers =
+            stack::leftover_volumes(engine, root, &secrets).map_err(|problem| problem.said)?;
+        if leftovers.volumes.is_empty() {
+            return Ok(());
+        }
+        stack::reset_leftover_volumes(
+            engine,
+            root,
+            &secrets,
+            &leftovers.volumes,
+            &leftovers.container_names(),
+        )
+        .map_err(|problem| match problem.detail {
+            Some(detail) => format!("{} {detail}", problem.said),
+            None => problem.said,
+        })
+    }
+
+    fn remove_images(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
+        openbot_desktop_lib::superseded_images::remove_own(engine, root)
     }
 
     fn machine(&mut self, name: &str) -> Result<Option<bool>, String> {
@@ -7764,6 +7901,7 @@ fn show_openbot_on<R: tauri::Runtime>(
     let destination: tauri::Url = destination
         .parse()
         .map_err(|_| "OpenBot returned an invalid app destination.".to_string())?;
+    let destination = opened_by_setup(destination);
     // Through the entry address, so the window has the install's cookie (`owned_app_entry`).
     let destination = owned_app_entry(&shell, &root, &address, &destination);
     let outcome = window
@@ -7866,9 +8004,9 @@ fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String>
 /// The setup screens' background in light and in dark, which the macOS title bar takes while they
 /// show. The same values as `--surface-main` in styles.css (OpenBot's `--sidebar`, in sRGB).
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-const SETUP_BACKGROUND: tauri::window::Color = tauri::window::Color(0xed, 0xed, 0xf5, 0xff);
+const SETUP_BACKGROUND: tauri::window::Color = tauri::window::Color(0xe9, 0xee, 0xf4, 0xff);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-const SETUP_BACKGROUND_DARK: tauri::window::Color = tauri::window::Color(0x0d, 0x0b, 0x13, 0xff);
+const SETUP_BACKGROUND_DARK: tauri::window::Color = tauri::window::Color(0x07, 0x0d, 0x14, 0xff);
 
 /// Whether `url` is the setup page rather than OpenBot.
 fn on_setup_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> bool {
@@ -8058,19 +8196,28 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     #[cfg(target_os = "macos")]
     let builder = builder.traffic_light_position(TRAFFIC_LIGHTS);
     /*
-     * Built visible, as the configured window always was, and built where it was last: the size
-     * and place `tauri_plugin_window_state` saved go to the builder, so the first frame is already
-     * there. Built at the system's default spot and moved after, a reopened window showed blank at
-     * 104,104 for about 230 ms on Windows, then jumped to its saved 400,90. The plugin's own restore
-     * then finds it already in place. Never built hidden to avoid that: on Windows a WebView2 page
-     * under a window first created hidden stopped taking native updates mid-setup, for minutes,
-     * until the window was activated or clicked.
+     * Built visible, as the configured window always was, and built where it was last: the place
+     * `tauri_plugin_window_state` saved goes to the builder, so the first frame is already there.
+     * Built at the system's default spot and moved after, a reopened window showed blank at
+     * 104,104 for about 230 ms on Windows, then jumped to its saved 400,90. Never built hidden to
+     * avoid that: on Windows a WebView2 page under a window first created hidden stopped taking
+     * native updates mid-setup, for minutes, until the window was activated or clicked.
+     *
+     * At setup's size, though, not the saved one: the window opens on setup, which has one size the
+     * person can't change (`window_size`). The saved size, and whether it was maximized, is
+     * OpenBot's, and the window gets it back when it hands over to OpenBot's page. The plugin's
+     * own restore is skipped for this window (`skip_initial_state`), or it would put it back here.
      */
     let builder = match saved_main_window(app) {
-        Some(place) => builder
-            .position(place.x, place.y)
-            .inner_size(place.width, place.height)
-            .maximized(place.maximized),
+        Some(place) => {
+            if let Some(shell) = app.try_state::<Shell>() {
+                shell.window_size.remember_app(window_size::AppSize {
+                    size: Some((place.width, place.height)),
+                    maximized: place.maximized,
+                });
+            }
+            builder.position(place.x, place.y)
+        }
         None => builder,
     };
     /*
@@ -8116,6 +8263,9 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     // At the level kept from the last launch before anything paints (`zoom`).
     let _ = window.set_zoom(saved_zoom(app));
     fit_main_window_to_screen(app);
+    // Setup's size on a screen too small for the configured one (`window_size::setup_size`). After
+    // the fit above, whose own resize, on macOS, tao makes later, in the order asked.
+    fit_setup_to_screen(&window);
     Ok(())
 }
 
@@ -8281,8 +8431,16 @@ fn app_makes_room_for_window_buttons(root: &Path) -> bool {
 /**
 The window's appearance and title bar for the page it shows.
 
-Setup: the setup screens' theme, a transparent title bar over their ground, the title shown. The
-window starts this way (in `setup`), so the first paint already matches.
+Setup: the setup screens' theme, and on macOS the same overlay title bar OpenBot's own page gets:
+the sidebar and the inset page run to the window's top edge and the window's buttons sit over the
+sidebar, whose padding clears them. No title text: the sidebar says OpenBot. The page marks its own
+drag handles (desktop/src/dragRegions.ts). On Windows the system's bar stays, in the setup
+screens' ground, without its title text. The window starts this way (`tauri.conf.json`, and
+`first_paint` on Windows), so the first paint already matches.
+
+MEASURED on a real build of 5725dbc0: with the transparent bar setup used before, macOS kept the
+title bar's strip above the page, with "OpenBot" in it over the sidebar's own OpenBot, and the
+inset page started below it.
 
 OpenBot from this machine: one surface, as Mac apps with a sidebar have it. The title bar becomes an
 overlay, its title text is hidden (the sidebar carries the name), and the page is marked so its
@@ -8305,8 +8463,7 @@ fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, page: WindowPag
     #[cfg(target_os = "macos")]
     {
         let _ = window.set_title_bar_style(match page {
-            WindowPage::Setup => tauri::TitleBarStyle::Transparent,
-            WindowPage::OwnedApp => tauri::TitleBarStyle::Overlay,
+            WindowPage::Setup | WindowPage::OwnedApp => tauri::TitleBarStyle::Overlay,
             WindowPage::LocalApp | WindowPage::Other => tauri::TitleBarStyle::Visible,
         });
         let ground = match setup_theme(window.app_handle()).or_else(|| window.theme().ok()) {
@@ -8314,8 +8471,9 @@ fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, page: WindowPag
             _ => SETUP_BACKGROUND,
         };
         let _ = window.set_background_color((page == WindowPage::Setup).then_some(ground));
-        show_window_title(window, page != WindowPage::OwnedApp);
     }
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    show_window_title(window, window_title_shown(page));
     // OpenBot's own page tints the bar to its own light or dark through `appearance`.
     #[cfg(target_os = "windows")]
     match page {
@@ -8478,7 +8636,97 @@ pub(crate) fn tint_title_bar_of(hwnd: isize, dark: Option<bool>) {
     };
 }
 
-/// The title text in the title bar. AppKit, so on the main thread.
+/**
+Whether the title bar shows the window's title ("OpenBot") on `page`. Never on setup: its sidebar
+says OpenBot, and the title over it said it twice. On macOS not on OpenBot's own page either, whose
+sidebar takes the title bar's place; Windows keeps its own bar there, title and all.
+*/
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+fn window_title_shown(page: WindowPage) -> bool {
+    match page {
+        WindowPage::Setup => false,
+        WindowPage::OwnedApp => !cfg!(target_os = "macos"),
+        WindowPage::LocalApp | WindowPage::Other => true,
+    }
+}
+
+/// The title text in the title bar (`window_title_shown`). On Windows the frame only; the window
+/// keeps its title for the taskbar and Alt+Tab (`show_title_text_of`).
+#[cfg(target_os = "windows")]
+fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) {
+    if let Ok(hwnd) = window.hwnd() {
+        show_title_text_of(hwnd.0 as isize, shown);
+    }
+}
+
+/**
+The title text in the Windows title bar of the window `hwnd`, drawn or not, and the frame redrawn
+now. `SetWindowThemeAttribute` with `WTNCA_NODRAWCAPTION` hides the caption's text only: the window
+keeps its title, so the taskbar and Alt+Tab still say OpenBot, and the icon and buttons stay. Called
+as the main window first shows (`first_paint`), so setup never shows the title, and for each page it
+loads (`match_title_bar`).
+*/
+#[cfg(target_os = "windows")]
+pub(crate) fn show_title_text_of(hwnd: isize, shown: bool) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+        SWP_NOZORDER,
+    };
+    /// `WTA_NONCLIENT`: the options below are for the window's frame.
+    const NONCLIENT: i32 = 1;
+    /// `WTNCA_NODRAWCAPTION`.
+    const NO_CAPTION: u32 = 0x1;
+    /// `WTA_OPTIONS`: which flags are set (`flags`), of those it names (`mask`).
+    #[repr(C)]
+    struct Options {
+        flags: u32,
+        mask: u32,
+    }
+    #[link(name = "uxtheme")]
+    extern "system" {
+        fn SetWindowThemeAttribute(
+            window: *mut std::ffi::c_void,
+            attribute: i32,
+            value: *const std::ffi::c_void,
+            size: u32,
+        ) -> i32;
+    }
+    let window = HWND(hwnd as *mut std::ffi::c_void);
+    let options = Options {
+        flags: if shown { 0 } else { NO_CAPTION },
+        mask: NO_CAPTION,
+    };
+    // SAFETY: `window` is a live window handle, and `options` is the `WTA_OPTIONS` this attribute
+    // takes, which outlives the call.
+    unsafe {
+        SetWindowThemeAttribute(
+            window.0,
+            NONCLIENT,
+            (&options as *const Options).cast(),
+            std::mem::size_of::<Options>() as u32,
+        );
+    }
+    // SAFETY: a plain call on a window handle; it neither moves, sizes, reorders nor activates it.
+    let _ = unsafe {
+        SetWindowPos(
+            window,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED
+                | SWP_NOMOVE
+                | SWP_NOSIZE
+                | SWP_NOZORDER
+                | SWP_NOOWNERZORDER
+                | SWP_NOACTIVATE,
+        )
+    };
+}
+
+/// The title text in the title bar (`window_title_shown`). AppKit, so on the main thread.
 #[cfg(target_os = "macos")]
 fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) {
     let target = window.clone();
@@ -8504,6 +8752,18 @@ header, which has no sidebar beside it, and every place the page marks `data-des
 app sidebar's strip and panel, a skin's top bar and rail). The
 sidebar renders after the page loads and again on navigation, so new headers are marked as they
 appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
+
+The top strip of the app's, Admin's and Settings' shells moves the window across its whole width,
+over the page as well as over the sidebar, as a Mac window's title bar does. MEASURED: only the top
+of the sidebar moved it; a press over the page beside it (the bars over the page, the page's own top
+bar, the window's tint above them) did nothing. Over the page the strip reaches as far down as the
+sidebar's top row, and past any bars over the page to the bottom of the page's first row
+(`TOP_ROW`, as tall as the bar `PageShell` draws); over the sidebar, to its top row. Every page
+draws a different top bar, so the strip is a height, not a mark on each page's bar: a press in it
+is lent the mark on what it landed on, for Tauri's own drag script to move the window from (and
+zoom it on a double-click), and the mark is given back on release. A control in the strip (a
+button, a link, a field, anything Tauri treats as one) is never lent it, and stays a control. Below
+the strip, nothing changes.
 */
 const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   document.documentElement.dataset.desktopTitlebar = "overlay";
@@ -8531,9 +8791,96 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     for (const main of document.querySelectorAll('[data-slot="sidebar-wrapper"] > main')) {
       const beside = main.parentElement.querySelector(':scope > [data-slot="sidebar"]');
       if (!beside || beside.dataset.state === "collapsed") main.setAttribute(DRAG, "");
-      else main.removeAttribute(DRAG);
+      else if (main !== lent) main.removeAttribute(DRAG);
     }
   };
+  // The page's first row under the bars over it: the height of the bar `PageShell` draws.
+  const TOP_ROW = 56;
+  // What Tauri's drag script (tauri 2.12, window/scripts/drag.js) treats as a control.
+  const CONTROL_TAGS = new Set(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "LABEL", "SUMMARY"]);
+  const CONTROL_ROLES = new Set(["button", "link", "menuitem", "tab", "checkbox", "radio", "switch", "option"]);
+  const control = (el) =>
+    CONTROL_TAGS.has(el.tagName) ||
+    (el.hasAttribute("contenteditable") && el.getAttribute("contenteditable") !== "false") ||
+    (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1") ||
+    CONTROL_ROLES.has(el.getAttribute("role"));
+  // Where the shell's top strip ends: over the sidebar, at its top row; over the page, at that or
+  // at the page's first row under the bars over it, whichever is lower.
+  const stripBottom = (wrapper, overSidebar) => {
+    let bottom = 0;
+    const rows = wrapper.querySelectorAll(
+      '[data-slot="sidebar-header"], [data-slot="section-panel"] > [data-desktop-drag]',
+    );
+    for (const row of rows) {
+      const box = row.getBoundingClientRect();
+      if (box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+    // The strip of sections, with no panel beside it: the room it leaves for the window's buttons.
+    for (const strip of wrapper.querySelectorAll('[data-slot="strip"]')) {
+      const box = strip.getBoundingClientRect();
+      if (box.height > 0)
+        bottom = Math.max(bottom, box.top + parseFloat(getComputedStyle(strip).paddingTop));
+    }
+    const main = overSidebar ? null : wrapper.querySelector(":scope > main");
+    if (main) {
+      const style = getComputedStyle(main);
+      let top =
+        main.getBoundingClientRect().top +
+        parseFloat(style.borderTopWidth) +
+        parseFloat(style.paddingTop);
+      for (const child of main.children) {
+        if (child.tagName !== "ASIDE") break;
+        top = Math.max(top, child.getBoundingClientRect().bottom);
+      }
+      bottom = Math.max(bottom, top + TOP_ROW);
+    }
+    return bottom;
+  };
+  // The element a press in the top strip was lent the mark on, and the mark it had before, until
+  // the press is released.
+  let lent = null;
+  let lentOver = null;
+  const giveBack = () => {
+    if (!lent) return;
+    if (lent.getAttribute(DRAG) === "deep") {
+      if (lentOver === null) lent.removeAttribute(DRAG);
+      else lent.setAttribute(DRAG, lentOver);
+    }
+    lent = null;
+    mark();
+  };
+  // Capturing on the window, so the mark is there before Tauri's script, on the document, looks.
+  window.addEventListener(
+    "mousedown",
+    (event) => {
+      giveBack();
+      if (event.button !== 0 || !(event.target instanceof Element)) return;
+      const wrapper = event.target.closest('[data-slot="sidebar-wrapper"]');
+      if (!wrapper) return;
+      const overSidebar = event.target.closest('[data-slot="sidebar-container"]') !== null;
+      if (event.clientY >= stripBottom(wrapper, overSidebar)) return;
+      // What Tauri walks from: the element pressed, or what holds a picture's lines (an icon).
+      let held = null;
+      for (const el of event.composedPath()) {
+        if (!(el instanceof HTMLElement)) continue;
+        held = held || el;
+        const attr = el.getAttribute(DRAG);
+        if (attr === "false") return;
+        // Tauri moves the window from here already.
+        if (attr === "deep" || ((attr === "" || attr === "true") && el === event.target)) return;
+        if (attr === null && control(el)) return;
+      }
+      if (!held) return;
+      // "deep" rather than bare, so a press on an icon's lines, which Tauri walks past, drags too.
+      lentOver = held.getAttribute(DRAG);
+      held.setAttribute(DRAG, "deep");
+      lent = held;
+    },
+    true,
+  );
+  // After Tauri's script has seen the release, which is when a double-click zooms on macOS. A press
+  // that moved the window may never see its release here: the next press takes the mark back.
+  window.addEventListener("mouseup", giveBack);
   let queued = false;
   new MutationObserver(() => {
     if (queued) return;
@@ -8816,6 +9163,75 @@ mod app_page_tests {
             "if cfg!(target_os = \"windows\") && page != WindowPage::Other {\n                let _ = window.eval(desktop_page::QUIT_SHORTCUT_PAGE);"
         ));
         assert!(desktop_page::QUIT_SHORTCUT_PAGE.contains("\"plugin:openbot-desktop|quit\""));
+    }
+
+    /**
+    Found in dogfooding: the app had no reload, and Command-R did nothing. View → Reload, with
+    Command-R, loads OpenBot's page again: on this computer (OpenBot (Self-Contained)) and through
+    the relay (OpenBot Cloud). Never the setup screens, which a reload would throw back mid-install,
+    and never another page the window shows. The page keeps itself when a field holds what the person
+    typed (`reload-page.js`, tested in `reloadPage.test.ts`).
+    */
+    #[test]
+    fn view_reload_reloads_openbots_page_and_never_setup() {
+        use desktop_reload::Reloaded;
+        let (app, window) = app();
+        let setup = if cfg!(windows) {
+            "http://tauri.localhost/"
+        } else {
+            "tauri://localhost/"
+        };
+        *app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let on = |url: &str| {
+            window.navigate(url.parse().unwrap()).unwrap();
+            let reloaded = desktop_reload::reload(app.handle());
+            assert_eq!(
+                window.url().unwrap().as_str(),
+                url,
+                "Reload never moves the window"
+            );
+            reloaded
+        };
+
+        // Mid-setup: left as it is.
+        assert_eq!(on(setup), Reloaded::NotOpenBot);
+        // A page on another loopback port: left as it is.
+        assert_eq!(on("http://127.0.0.1:3011/"), Reloaded::NotOpenBot);
+        // OpenBot (Self-Contained), the OpenBot this computer runs.
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        assert_eq!(on("http://127.0.0.1:3010/channel/c1"), Reloaded::Asked);
+        // OpenBot Cloud, through the relay.
+        desktop_connected::showing_for_test(app.handle(), "http://127.0.0.1:4410");
+        assert_eq!(on("http://127.0.0.1:4410/"), Reloaded::Asked);
+
+        // The page is told what Reload asks, as it loads (read as text: the real webview and
+        // AppKit's menus can't be built here).
+        let main = include_str!("main.rs");
+        let at = |pieces: &[&str]| main.find(&pieces.concat()).unwrap();
+        let page_load = &main[at(&[".on_page_load(", "|window, payload| {"])..];
+        let page_load = &page_load[..page_load.find("\n        })").unwrap()];
+        assert!(page_load.contains("let _ = window.eval(desktop_reload::PAGE);"));
+        assert!(desktop_reload::PAGE.contains("window.__openbotReload = "));
+        // In the View menu, first, with Command-R, and chosen there it reloads.
+        let menus = &main[at(&["\nfn install", "_menus"])..];
+        let view = &menus[menus.find("\"View\",").expect("a View menu")..];
+        let first = &view[view.find("&MenuItem::with_id(").unwrap()..];
+        let first = &first[..first.find(")?").unwrap()];
+        assert!(
+            first.contains("desktop_reload::MENU_ID")
+                && first.contains("desktop_reload::MENU_LABEL")
+                && first.contains("Some(desktop_reload::MENU_ACCELERATOR)"),
+            "{first}"
+        );
+        assert_eq!(desktop_reload::MENU_LABEL, "Reload");
+        assert_eq!(desktop_reload::MENU_ACCELERATOR, "CmdOrCtrl+R");
+        assert!(main.contains(
+            &[
+                "        desktop_reload::MENU_ID => {\n",
+                "            desktop_reload::reload(app);"
+            ]
+            .concat()
+        ));
     }
 
     /// "The text is too small and you can't zoom in." The window now zooms as a browser does: the
@@ -9679,6 +10095,16 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     failure: Option<String>,
 ) -> Result<(), String> {
+    let saved = write_troubleshooting_logs(app, failure)?;
+    reveal_saved_logs(app, saved);
+    Ok(())
+}
+
+/// The logs gathered and saved in the log folder, and where.
+fn write_troubleshooting_logs<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    failure: Option<String>,
+) -> Result<PathBuf, String> {
     use time::macros::format_description;
     let text = gather_troubleshooting_logs(app, failure);
     let folder = logging::folder(app)
@@ -9695,8 +10121,7 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
     // The stamp, not the file name: the log's own scrubbing takes a name that long and mixed for a
     // key.
     log::info!("[logs] saved troubleshooting logs in the log folder, stamped {stamp}");
-    reveal_saved_logs(app, saved);
-    Ok(())
+    Ok(saved)
 }
 
 /**
@@ -9752,6 +10177,10 @@ fn reveal_through<Reveal>(
 /// `tauri_plugin_opener::reveal_item_in_dir`. On macOS an Objective-C exception from AppKit is
 /// caught and returned as the error, so even on the main thread a reveal cannot take the app down.
 fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
+    // A test never opens the file manager on the computer it runs on.
+    if cfg!(test) {
+        return Ok(());
+    }
     #[cfg(target_os = "macos")]
     let revealed = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
         tauri_plugin_opener::reveal_item_in_dir(path)
@@ -9791,6 +10220,9 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     failure: Option<String>,
 ) -> String {
+    if desktop_connected::is_connected(app) {
+        return gather_connected_troubleshooting_logs(app, failure);
+    }
     let home = logging::home_folder();
     let folder = logging::folder(app).ok();
     // The engine the back end runs on; before setup has chosen one, whichever is answering.
@@ -9832,15 +10264,7 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
         })
     };
     let text = troubleshooting::gather(troubleshooting::Sources {
-        desktop: format!(
-            "OpenBot Desktop {} ({})",
-            desktop_version(app),
-            build_description(
-                env!("OPENBOT_BUILD_COMMIT"),
-                env!("OPENBOT_BUILD_BRANCH"),
-                env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
-            )
-        ),
+        desktop: desktop_description(app),
         failure,
         log_folder: folder.as_deref(),
         home: home.as_deref(),
@@ -9850,6 +10274,66 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
     });
     log::info!("[logs] gathered troubleshooting logs");
     text
+}
+
+/// `OpenBot Desktop 1.2.0 (Built … from …)`, as the launch line says it.
+fn desktop_description<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    format!(
+        "OpenBot Desktop {} ({})",
+        desktop_version(app),
+        build_description(
+            env!("OPENBOT_BUILD_COMMIT"),
+            env!("OPENBOT_BUILD_BRANCH"),
+            env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
+        )
+    )
+}
+
+/**
+Get Troubleshooting Logs while the app is connected to an OpenBot that runs elsewhere: what the app
+saw of it, within `troubleshooting::LIMIT` however slow it is (`troubleshooting::gather_connected`).
+Nothing of an installation on this computer is asked: none runs here.
+
+Before, a connected app's menus had no such item, and its log held only the relay's lines: a reply
+that broke on OpenBot Cloud left nothing a person could send. Now the file has the app's own recent
+problems as its page recorded them (`record_problem`), each failed request with the request id that
+finds it in that OpenBot's logs.
+*/
+fn gather_connected_troubleshooting_logs<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    failure: Option<String>,
+) -> String {
+    let home = logging::home_folder();
+    let folder = logging::folder(app).ok();
+    let shell = app.state::<Shell>();
+    let text = troubleshooting::gather_connected(troubleshooting::ConnectedSources {
+        desktop: desktop_description(app),
+        failure,
+        log_folder: folder.as_deref(),
+        home: home.as_deref(),
+        address: desktop_connected::address_now(app),
+        signed_in: desktop_connected::connected_address(app).is_some(),
+        front_end: shell.page_problems.front_end(),
+        about: desktop_connected::about(app),
+        problems: shell.page_problems.recent(),
+        limit: troubleshooting_limit(),
+    });
+    log::info!("[logs] gathered troubleshooting logs while connected");
+    text
+}
+
+/**
+A problem OpenBot's page recorded as it happened (`page_problems`): kept for Get Troubleshooting
+Logs… and written to the log. Only OpenBot's own page can ask (`desktop_page::record_problem`).
+*/
+pub(crate) fn record_page_problem<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    reported: &openbot_desktop_lib::page_problems::Reported,
+) -> Result<(), String> {
+    let home = logging::home_folder();
+    app.state::<Shell>()
+        .page_problems
+        .record(reported, home.as_deref())
 }
 
 /**
@@ -10233,6 +10717,23 @@ fn owned_app_entry(
         page,
         install_token_for(shell, root, address).as_deref(),
     )
+}
+
+/**
+The mark on the address `show_openbot` opens OpenBot at: setup opened it. Setup fades out to the
+window's ground before it asks (`leaveFor` in desktop/src/handover.ts), and OpenBot's page, seeing
+the mark, fades its first paint up from the same ground and takes the mark off its address
+(app/index.html, app/src/lib/desktop/from-setup.ts). A page from before it ignores the fragment.
+Only `show_openbot` adds it: the window going back to OpenBot at launch, or to its settings, is not
+a handover from setup.
+*/
+const FROM_SETUP: &str = "from-setup";
+
+/// `page` marked as opened by setup ([`FROM_SETUP`]), in its fragment, which the entry address
+/// carries on to the page (`owned_app_entry`) and no server reads.
+fn opened_by_setup(mut page: tauri::Url) -> tauri::Url {
+    page.set_fragment(Some(FROM_SETUP));
+    page
 }
 
 /// [`owned_app_url`] without a window: the Recorder's native host is a process of its own, started
@@ -10631,15 +11132,14 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
                 xai: hint(Category::XaiOauth, false),
             },
             model: intent.model,
+            chatgpt_sign_in_changed: openbot_env::chatgpt_sign_in_changed(&root),
         },
         values,
     }
 }
 
-/// Start a Claude plan sign-in and return the address a browser has to open.
-///
-/// Blocking work on a blocking thread: it starts a container and waits on its output, and doing
-/// that on the UI thread is a window that stops repainting mid-setup.
+/// Start a Claude plan sign-in, the setup window's own, and return the address a browser has to
+/// open. Always the loopback one: the setup window is the same build as this shell.
 #[tauri::command]
 async fn begin_claude_sign_in<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -10647,35 +11147,28 @@ async fn begin_claude_sign_in<R: tauri::Runtime>(
 ) -> Result<String, Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
-    /*
-     * The image is decided here, not by the window, and it is the Claude Agent SDK harness whatever
-     * harness the person picked. It is not being used as a Bot: it is the container that happens to
-     * carry Anthropic's bundled CLI, which is what does the OAuth. Letting the screen name an image
-     * would make the sign-in depend on a choice that has nothing to do with it.
-     */
-    #[cfg(target_os = "linux")]
-    let service_app = app.clone();
-    // The sign-in's image downloads in its task, said to the window as Install says it.
-    let progress_app = app.clone();
-    let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        // Install pulls this image only for an installation already on a Claude plan
-        // (`preparation::PLAN_IMAGES`): a first sign-in downloads it here, shown as Install shows it.
-        let (address, image) = prepared_sign_in_with(
-            &root,
-            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
-            |address, image| {
-                download_missing(&progress_app, address, std::slice::from_ref(image), || {
-                    Ok(())
-                })
-            },
-        )?;
-        #[cfg(target_os = "linux")]
-        {
-            let shell = service_app.state::<Shell>();
-            let _startup = shell.startup.lock().unwrap();
-            ensure_linux_podman_api(&shell, &address)?;
-        }
-        openbot_desktop_lib::plan::SigningIn::begin(&address, &image).map_err(Problem::from)
+    start_claude_sign_in(
+        &app,
+        openbot_desktop_lib::claude_sign_in::Redirect::Loopback,
+    )
+    .await
+}
+
+/**
+Start the native Claude plan sign-in (`claude_sign_in`) and send the browser to it. No image and no
+container: the browser comes back to a listener of this app's own.
+
+Opened here rather than by the window, because the window would need the shell plugin's JS half for
+the one call. The URL is returned as well, and the screen shows it: on Linux without a registered
+browser, and in a session where the open silently does nothing, a link somebody can copy is the
+difference between a stuck screen and a finished sign-in.
+*/
+async fn start_claude_sign_in<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    redirect: openbot_desktop_lib::claude_sign_in::Redirect,
+) -> Result<String, Problem> {
+    let url = tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::claude_sign_in::begin(redirect)
     })
     .await
     .map_err(|error| {
@@ -10683,40 +11176,33 @@ async fn begin_claude_sign_in<R: tauri::Runtime>(
             "The sign-in did not start. Try again.",
             format!("the sign-in task did not run: {error}"),
         )
-    })??;
-    *app.state::<Shell>().signing_in.lock().unwrap() = Some(signing);
-
-    /*
-     * Opened here rather than by the window, because the window would need the shell plugin's JS
-     * half for the one call. The URL is returned as well, and the screen shows it: on Linux without
-     * a registered browser, and in a session where the open silently does nothing, a link somebody
-     * can copy is the difference between a stuck screen and a finished sign-in.
-     */
-    let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
+    })?
+    .map_err(Problem::plain)?;
+    let _ = tauri_plugin_opener::OpenerExt::opener(app).open_url(&url, None::<&str>);
     Ok(url)
 }
 
 /**
-Redeem the code from the browser and return the plan token.
+Finish the Claude plan sign-in and return the plan token: with no code, once the browser comes back
+to this computer; with one, the `code#state` an older app page pasted from Claude's page.
 
 The token crosses to the window and comes back in the model choice, which is the same path a typed
-key takes. It is never logged, and the failure messages never carry the command's output: see
-`SigningIn::gave_up`.
+key takes. It is never logged, and no failure carries it.
 */
 #[tauri::command]
-async fn finish_claude_sign_in(app: tauri::AppHandle, code: String) -> Result<String, String> {
-    // Taken, not borrowed. A sign-in is single-use, and leaving it in place would let a second
-    // attempt write a code into a flow that has already finished.
-    let signing = app
-        .state::<Shell>()
-        .signing_in
-        .lock()
-        .unwrap()
-        .take()
-        .ok_or_else(|| "That sign-in is no longer running. Start it again.".to_string())?;
-    tauri::async_runtime::spawn_blocking(move || signing.finish(&code))
-        .await
-        .map_err(|error| format!("The sign-in did not finish: {error}"))?
+async fn finish_claude_sign_in(code: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::claude_sign_in::finish(code.as_deref())
+    })
+    .await
+    .map_err(|error| format!("The sign-in did not finish: {error}"))?
+}
+
+/// Stop a Claude plan sign-in the person has left: another provider, Back, Escape. Whoever waits
+/// in `finish_claude_sign_in` hears it stopped, and its port is given back.
+#[tauri::command]
+async fn cancel_claude_sign_in() {
+    openbot_desktop_lib::claude_sign_in::cancel();
 }
 
 /// Start a ChatGPT plan sign-in and return the address a browser has to open.
@@ -10727,29 +11213,10 @@ async fn begin_chatgpt_sign_in<R: tauri::Runtime>(
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
-    #[cfg(target_os = "linux")]
-    let service_app = app.clone();
-    // The sign-in's image downloads in its task, said to the window as Install says it.
-    let progress_app = app.clone();
-    let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        // Install pulls this image only for an installation already on a ChatGPT plan
-        // (`preparation::PLAN_IMAGES`): a first sign-in downloads it here, shown as Install shows it.
-        let (address, image) = prepared_sign_in_with(
-            &root,
-            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
-            |address, image| {
-                download_missing(&progress_app, address, std::slice::from_ref(image), || {
-                    Ok(())
-                })
-            },
-        )?;
-        #[cfg(target_os = "linux")]
-        {
-            let shell = service_app.state::<Shell>();
-            let _startup = shell.startup.lock().unwrap();
-            ensure_linux_podman_api(&shell, &address)?;
-        }
-        openbot_desktop_lib::plan::SigningInToChatGpt::begin(&address, &image)
+    // OpenAI's Sign in with ChatGPT plan usage, natively: PKCE, a 127.0.0.1 loopback and this
+    // computer's host id. No image and no container. See `chatgpt_sign_in`.
+    let url = tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::chatgpt_sign_in::begin(&root).map_err(Problem::plain)
     })
     .await
     .map_err(|error| {
@@ -10758,7 +11225,6 @@ async fn begin_chatgpt_sign_in<R: tauri::Runtime>(
             format!("the sign-in task did not run: {error}"),
         )
     })??;
-    *app.state::<Shell>().signing_in_to_chatgpt.lock().unwrap() = Some(signing);
     let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
     Ok(url)
 }
@@ -10771,14 +11237,8 @@ redemption, which is why there is no code field on that half of the screen.
 */
 #[tauri::command]
 async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String> {
-    let signing = app
-        .state::<Shell>()
-        .signing_in_to_chatgpt
-        .lock()
-        .unwrap()
-        .take()
-        .ok_or_else(|| "That sign-in is no longer running. Start it again.".to_string())?;
-    tauri::async_runtime::spawn_blocking(move || signing.finish())
+    let _ = app;
+    tauri::async_runtime::spawn_blocking(openbot_desktop_lib::chatgpt_sign_in::finish)
         .await
         .map_err(|error| format!("The sign-in did not finish: {error}"))?
 }
@@ -10791,19 +11251,10 @@ already stopped listening for. The browser tab gets OpenBot's page saying the si
 */
 #[tauri::command]
 async fn cancel_chatgpt_sign_in(app: tauri::AppHandle) -> Result<(), String> {
-    // Started but not yet waited on: dropping it removes its container.
-    let held = app
-        .state::<Shell>()
-        .signing_in_to_chatgpt
-        .lock()
-        .unwrap()
-        .take();
-    tauri::async_runtime::spawn_blocking(move || {
-        drop(held);
-        openbot_desktop_lib::plan::cancel_chatgpt_sign_in();
-    })
-    .await
-    .map_err(|error| format!("The sign-in did not stop: {error}"))
+    let _ = app;
+    tauri::async_runtime::spawn_blocking(openbot_desktop_lib::chatgpt_sign_in::cancel)
+        .await
+        .map_err(|error| format!("The sign-in did not stop: {error}"))
 }
 
 /// The model screen's rows. Independent of the Bot, and required to stay that way: no harness is
@@ -10825,10 +11276,9 @@ async fn begin_model_oauth(
     .map_err(|e| e.to_string())?
 }
 
-/// Nothing for a provider whose session stays in the native credential file; the minted API key
-/// for one whose sign-in produces a key (Unbiased), which the window carries on as a typed one.
+/// Finish xAI sign-in and keep the session in the native credential file.
 #[tauri::command]
-async fn finish_model_oauth(attempt_id: String) -> Result<Option<String>, String> {
+async fn finish_model_oauth(attempt_id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::provider_oauth::finish(&attempt_id)
     })
@@ -12117,6 +12567,179 @@ fn lifted_top(top: f64, outer: f64, area: &tauri::LogicalRect<f64, f64>) -> Opti
 }
 
 /**
+The main window's size for the page it shows (`window_size`): setup's fixed size on the setup page,
+and on any other page, OpenBot's, resizable, at the size the person last gave it.
+
+Called for each page the window loads, after `match_title_bar`, which re-styles the title bar, and
+after a theme change, which does too. Whether the window can be resized or zoomed is set every time;
+its size changes only as it goes from setup to OpenBot's page or back. Setup's Shutting down screen
+changes nothing: quitting from OpenBot's page, the window stays as it was until it goes.
+*/
+fn match_window_size<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let setup = window_page(app, url) == WindowPage::Setup;
+    if setup && url.fragment() == Some(SHUTTING_DOWN_FRAGMENT) {
+        return;
+    }
+    let shell = app.state::<Shell>();
+    let change = shell.window_size.show(setup, || app_size_of(&window));
+    let fixed = shell.window_size.fixed();
+    // Before resizing: a window that can't be resized still takes a size it is given.
+    let _ = window.set_resizable(!fixed);
+    let _ = window.set_maximizable(!fixed);
+    match change {
+        window_size::Change::Stays => {}
+        window_size::Change::ToSetup => {
+            log::info!("[window] setup: one size, not resizable");
+            if window.is_fullscreen().unwrap_or(false) {
+                // Left as it is: it goes back to its size from before full screen when the person
+                // leaves it, and can't be resized until OpenBot's page is back.
+                return;
+            }
+            // Out of maximized first on Windows, where a maximized window keeps its state through a
+            // new size. Not on macOS: a zoomed window is no longer zoomed once it takes a new size,
+            // and tao un-zooms it later, on its own turn (`set_maximized_async`), which would put
+            // back its size from before it was zoomed over setup's.
+            #[cfg(not(target_os = "macos"))]
+            if window.is_maximized().unwrap_or(false) {
+                let _ = window.unmaximize();
+            }
+            fit_setup_to_screen(&window);
+        }
+        window_size::Change::ToApp(app_size) => {
+            log::info!("[window] OpenBot's page: resizable, at {app_size:?}");
+            if let Some(window_size::AppSize { size, maximized }) = app_size {
+                if let Some((width, height)) = size {
+                    resize_in_place(&window, width, height);
+                }
+                if maximized {
+                    let _ = window.maximize();
+                }
+            } else {
+                // First launch: enough width for onboarding's desktop layout, capped to the
+                // screen's work area. Later launches restore the person's own dimensions above.
+                let room = screen_room(&window);
+                let (width, height) = window_size::setup_size(
+                    (1120.0, 860.0),
+                    room.map(|(area, _)| (area.size.width, area.size.height)),
+                    room.map_or(0.0, |(_, frame)| frame),
+                );
+                resize_in_place(&window, width, height);
+            }
+        }
+    }
+}
+
+/// OpenBot's size as the window has it now, as setup takes over from OpenBot's page. None in full
+/// screen, which is left as it is.
+fn app_size_of<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+) -> Option<window_size::AppSize> {
+    if window.is_fullscreen().unwrap_or(false) {
+        return None;
+    }
+    window_size::capture_app_size(
+        window.is_maximized().unwrap_or(false),
+        cfg!(windows),
+        || window.unmaximize().ok(),
+        || {
+            let scale = window.scale_factor().ok()?;
+            let size = window.inner_size().ok()?.to_logical::<f64>(scale);
+            Some((size.width, size.height))
+        },
+    )
+}
+
+/// The window at setup's size: the configured one, or less on a screen too small for it
+/// (`window_size::setup_size`). Its top-left corner stays, as far as the screen lets it.
+fn fit_setup_to_screen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let Some(configured) = window
+        .app_handle()
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|configured| configured.label == "main")
+    else {
+        return;
+    };
+    let room = screen_room(window);
+    let (width, height) = window_size::setup_size(
+        (configured.width, configured.height),
+        room.map(|(area, _)| (area.size.width, area.size.height)),
+        room.map_or(0.0, |(_, frame)| frame),
+    );
+    let (Ok(scale), Ok(inner)) = (window.scale_factor(), window.inner_size()) else {
+        return;
+    };
+    let inner = inner.to_logical::<f64>(scale);
+    if (inner.width - width).abs() >= 1.0 || (inner.height - height).abs() >= 1.0 {
+        resize_in_place(window, width, height);
+    }
+}
+
+/**
+Give the window a content area `width` by `height` logical pixels, no taller than its screen's work
+area, with its top-left corner where it was, or moved up as far as its bottom needs to stay on the
+screen (`lifted_top`).
+
+Worked out here from the size asked for, not read back from the window after: on macOS tao sets a
+size later, on its own turn (`set_content_size_async`), so the window still reads its old size
+just after, and `fit_main_window_to_screen` would fit the old one. The place is set after the size
+for the same reason, in the same order, so the corner is where this says whichever corner AppKit
+keeps as the size changes.
+*/
+fn resize_in_place<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, width: f64, height: f64) {
+    let room = screen_room(window);
+    let height = match room {
+        Some((area, frame)) => height.min((area.size.height - frame - 2.0 * SCREEN_MARGIN).floor()),
+        None => height,
+    };
+    let corner = match (window.scale_factor(), window.outer_position()) {
+        (Ok(scale), Ok(position)) => Some(position.to_logical::<f64>(scale)),
+        _ => None,
+    };
+    let _ = window.set_size(tauri::LogicalSize::new(width, height));
+    if let Some(corner) = corner {
+        let top = room
+            .and_then(|(area, frame)| lifted_top(corner.y, frame + height, &area))
+            .unwrap_or(corner.y);
+        let _ = window.set_position(tauri::LogicalPosition::new(corner.x, top));
+    }
+}
+
+/**
+Quit while setup holds the window: the window-state plugin has just saved setup's size, so OpenBot's
+goes back over it for the next launch (`window_size::keep_app_size`). Called from `RunEvent::Exit`,
+which the plugin hears first. Best effort: the next launch opens on setup either way.
+*/
+fn keep_app_size_for_next_launch<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(app_size) = app.state::<Shell>().window_size.app_size_to_keep() else {
+        return;
+    };
+    let Ok(directory) = app.path().app_config_dir() else {
+        return;
+    };
+    let file = directory.join(tauri_plugin_window_state::DEFAULT_FILENAME);
+    let scale = app
+        .get_webview_window("main")
+        .and_then(|window| window.scale_factor().ok())
+        .unwrap_or(1.0);
+    let Some(kept) = std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|saved| window_size::keep_app_size(&saved, "main", app_size, scale))
+    else {
+        return;
+    };
+    match std::fs::write(&file, kept) {
+        Ok(()) => log::info!("[window] kept OpenBot's size for the next launch: {app_size:?}"),
+        Err(error) => log::warn!("[window] could not keep OpenBot's size: {error}"),
+    }
+}
+
+/**
 On launch: a window taller than its monitor's work area is brought within it, and one whose bottom
 edge is past the work area is moved up.
 
@@ -12556,6 +13179,24 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
         Err(std::sync::TryLockError::WouldBlock) => None,
         Err(std::sync::TryLockError::Poisoned(error)) => panic!("{error}"),
     };
+    // The move to OpenBot Cloud is at work on setup's screens, and is about to remove the OpenBot
+    // here: the window comes forward as it is, and the move decides where it goes when it ends
+    // (`setup_again_after_move`).
+    let moving = desktop_move::moving(app);
+    if moving {
+        log::info!("[window] a move to OpenBot Cloud is running; the window stays where it is");
+    }
+    // Its screens waiting for an answer hold the window too, while it is on them: showing the
+    // OpenBot here in their place left the move unstarted with nothing to say so (1.2.0-rc.3).
+    let offered = !moving
+        && desktop_move::offered_on_screen(app)
+        && window.url().is_ok_and(|url| on_setup_page(app, &url));
+    if offered {
+        log::info!(
+            "[window] the move to OpenBot Cloud is waiting for an answer; the window stays on it"
+        );
+    }
+    let startup = startup.filter(|_| !moving && !offered);
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
     // The page the window belongs on, and the address it loads it at: for the owned app, through its
@@ -12591,6 +13232,30 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     let _ = window.show();
     let _ = window.unminimize();
     focus(&window, "OpenBot is showing");
+}
+
+/**
+A move to OpenBot Cloud ended, moved or not. Its screens are setup's, so the window should still be
+on setup. If anything took it elsewhere meanwhile, it goes back to setup, which opens the OpenBot now
+chosen: OpenBot Cloud after a move, whose own gate asks for its terms before anything else, and the
+OpenBot here after a move that didn't happen. Never left on an app the move just removed.
+*/
+fn setup_again_after_move<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if window.url().is_ok_and(|url| on_setup_page(app, &url)) {
+        return;
+    }
+    log::info!("[move] the window left setup during the move; it goes back to setup");
+    let navigated = setup_destination(app).and_then(|setup| {
+        window
+            .navigate(setup)
+            .map_err(|error| format!("could not go back to setup: {error}"))
+    });
+    if let Err(error) = navigated {
+        log::warn!("[move] {error}");
+    }
 }
 
 fn schedule_second_instance_restore<T, F>(
@@ -12966,16 +13631,35 @@ fn sign_in_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf,
         .unwrap_or_else(|_| cleanup_root(&app.state::<Shell>(), &stack::default_root())))
 }
 
-/// Start a plan's sign-in, the setup window's own, and the address the browser was sent to.
+/**
+Start a plan's sign-in, the setup window's own, and the address the browser was sent to.
+
+`loopback`: the page finishes a Claude plan's sign-in on its own, with no code. An app page older
+than that sends nothing, and gets the manual flow it pastes a code from, as it always has. It tells
+the two apart by the address it is given (its `redirect_uri`).
+*/
 pub(crate) async fn begin_plan_sign_in_now(
     app: tauri::AppHandle,
     plan: openbot_desktop_lib::ai_connection::Plan,
+    loopback: bool,
 ) -> Result<String, String> {
     use openbot_desktop_lib::ai_connection::Plan;
-    let root = sign_in_root(&app)?.to_string_lossy().into_owned();
+    use openbot_desktop_lib::claude_sign_in::Redirect;
+    let root = sign_in_root(&app)?;
     match plan {
-        Plan::Claude => begin_claude_sign_in(app, root).await,
-        Plan::ChatGpt => begin_chatgpt_sign_in(app, root).await,
+        Plan::Claude => {
+            remember_selected_root(
+                &app.state::<Shell>(),
+                &stack::root_from(&root.to_string_lossy()),
+            );
+            let redirect = if loopback {
+                Redirect::Loopback
+            } else {
+                Redirect::Manual
+            };
+            start_claude_sign_in(&app, redirect).await
+        }
+        Plan::ChatGpt => begin_chatgpt_sign_in(app, root.to_string_lossy().into_owned()).await,
     }
     .map_err(|problem| problem.said)
 }
@@ -12994,7 +13678,7 @@ pub(crate) async fn finish_plan_sign_in_now(
     let root = sign_in_root(&app)?;
     match plan {
         Plan::Claude => {
-            let token = finish_claude_sign_in(app, code.unwrap_or_default()).await?;
+            let token = finish_claude_sign_in(code).await?;
             tauri::async_runtime::spawn_blocking(move || {
                 openbot_desktop_lib::vault::remember(&root, "CLAUDE_CODE_OAUTH_TOKEN", &token)
             })
@@ -13025,17 +13709,14 @@ pub(crate) async fn cancel_plan_sign_in_now(
     use openbot_desktop_lib::ai_connection::Plan;
     match plan {
         Plan::Claude => {
-            // Dropping a sign-in that was started removes its container.
-            let held = app.state::<Shell>().signing_in.lock().unwrap().take();
-            tauri::async_runtime::spawn_blocking(move || drop(held))
-                .await
-                .map_err(|error| error.to_string())
+            cancel_claude_sign_in().await;
+            Ok(())
         }
         Plan::ChatGpt => cancel_chatgpt_sign_in(app).await,
     }
 }
 
-/// Start a Google, xAI or Unbiased AI sign-in, sending the browser to it.
+/// Start an xAI sign-in, sending the browser to it.
 pub(crate) async fn begin_provider_sign_in_now(
     app: tauri::AppHandle,
     provider: String,
@@ -13179,24 +13860,29 @@ fn settle_menu_stop(shell: &Shell, fallback_root: &Path, stopped: Stopped) -> Op
 fn chose(app: &tauri::AppHandle, item: &str) {
     match item {
         "open" => show_whichever_applies(app),
-        // The two a connected app's menus carry in place of Status and the troubleshooting logs.
+        // The two a connected app's menus carry in place of Status.
         CONNECTED_SIGN_OUT_MENU_ID => desktop_connected::sign_out_from_menu(app.clone()),
         CONNECTED_LOG_FOLDER_MENU_ID => {
             let _ = open_log_folder_now(app);
         }
-        // Stop, Status and the engine's logs are about OpenBot on this computer. A connected app's
-        // menus do not carry them, and a shortcut or a stale menu does not reach them either.
-        "stop" | "status" | "logs" if desktop_connected::is_connected(app) => {}
+        // Stop and Status are about OpenBot on this computer. A connected app's menus do not carry
+        // them, and a shortcut or a stale menu does not reach them either.
+        "stop" | "status" if desktop_connected::is_connected(app) => {}
         // Stop without quitting: the stack is what costs something to leave running, and somebody
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone(), AskedFrom::Menu),
         "status" => show_status_window(app),
+        // Connected or not: connected, the file says what the app saw of the OpenBot it is
+        // connected to (`gather_connected_troubleshooting_logs`).
         "logs" => save_troubleshooting_logs_from_menu(app.clone()),
         app_update::MENU_ID => check_for_updates_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
         "quit" => {
             app.exit(0);
+        }
+        desktop_reload::MENU_ID => {
+            desktop_reload::reload(app);
         }
         other => {
             if let Some(step) = zoom::Step::of_menu(other) {
@@ -13350,26 +14036,39 @@ fn desktop_version<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
 }
 
 /**
-What About OpenBot says: the version, and which build this is.
+What About OpenBot says: the version, where OpenBot runs and as whom (`desktop_about`), and which
+build this is.
 
 The build is the commit it was built from, marked `-dirty` when the tree had uncommitted changes,
 and when; see `build_identity` in build.rs. macOS shows the version and the build on one line and
-the credits under them; Windows and Linux show the comments.
+the credits under them; Windows and Linux show the comments. Where OpenBot runs goes first in both.
 */
-fn about_openbot(version: String) -> tauri::menu::AboutMetadata<'static> {
+fn about_openbot(version: String, runs: &[String]) -> tauri::menu::AboutMetadata<'static> {
     let built = build_description(
         env!("OPENBOT_BUILD_COMMIT"),
         env!("OPENBOT_BUILD_BRANCH"),
         env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
     );
+    let said = if runs.is_empty() {
+        built
+    } else {
+        format!("{}\n\n{built}", runs.join("\n"))
+    };
     tauri::menu::AboutMetadata {
         name: Some("OpenBot".into()),
         short_version: Some(version),
         version: Some(env!("OPENBOT_BUILD_COMMIT").into()),
-        credits: Some(built.clone()),
-        comments: Some(built),
+        credits: Some(said.clone()),
+        comments: Some(said),
         ..Default::default()
     }
+}
+
+/// About OpenBot for this app now: its version, and where OpenBot runs and as whom.
+fn about_openbot_now<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> tauri::menu::AboutMetadata<'static> {
+    about_openbot(desktop_version(app), &desktop_about::lines_now(app))
 }
 
 /// The first entry of each launch in the log file: which build, on what, where the log's UTC times
@@ -13447,7 +14146,7 @@ const TROUBLESHOOTING_MENU_LABEL: &str = "Get Troubleshooting Logs…";
 const TROUBLESHOOTING_MENU_GATHERING: &str = "Gathering Logs…";
 
 /// The menus' Sign Out and Open Log Folder while the app is connected to an OpenBot that runs
-/// elsewhere. See `desktop_connected`.
+/// elsewhere, beside Get Troubleshooting Logs…. See `desktop_connected`.
 const CONNECTED_SIGN_OUT_MENU_ID: &str = "sign-out";
 const CONNECTED_SIGN_OUT_MENU_LABEL: &str = "Sign Out";
 const CONNECTED_LOG_FOLDER_MENU_ID: &str = "log-folder";
@@ -13474,8 +14173,9 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
     // The menu bar menu follows the system's appearance; its icons are drawn for each.
     let dark = system_is_dark(app);
     let running = app.state::<Shell>().root.lock().unwrap().is_some();
-    // Connected to an OpenBot that runs elsewhere: Show Window, the app's log folder, Sign Out and
-    // Quit. Nothing here starts, stops or reports on OpenBot, because none runs on this computer.
+    // Connected to an OpenBot that runs elsewhere: Show Window, the app's log folder, the
+    // troubleshooting logs, Sign Out and Quit. Nothing here starts, stops or reports on an OpenBot
+    // on this computer, because none runs here; the logs say what the app saw of the one it shows.
     let connected = desktop_connected::is_connected(app);
     // Check for Updates… only in a build offered updates: anywhere else it could only say no.
     let updates = app_update_feed(app).is_some();
@@ -13522,6 +14222,13 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
                 )?),
                 MenuEntry::Plain(MenuItem::with_id(
                     app,
+                    "logs",
+                    logs_label,
+                    logs_enabled,
+                    None::<&str>,
+                )?),
+                MenuEntry::Plain(MenuItem::with_id(
+                    app,
                     CONNECTED_SIGN_OUT_MENU_ID,
                     CONNECTED_SIGN_OUT_MENU_LABEL,
                     true,
@@ -13531,7 +14238,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
                 MenuEntry::Native(PredefinedMenuItem::about(
                     app,
                     Some("About"),
-                    Some(about_openbot(desktop_version(app))),
+                    Some(about_openbot_now(app)),
                 )?),
             ];
             // The app itself still updates.
@@ -13589,7 +14296,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         entries.push(MenuEntry::Native(PredefinedMenuItem::about(
             app,
             Some("About"),
-            Some(about_openbot(desktop_version(app))),
+            Some(about_openbot_now(app)),
         )?));
         if updates {
             entries.push(check_for_updates()?);
@@ -13614,7 +14321,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         let mut entries = vec![MenuEntry::Native(PredefinedMenuItem::about(
             app,
             Some("About OpenBot"),
-            Some(about_openbot(desktop_version(app))),
+            Some(about_openbot_now(app)),
         )?)];
         // Where every Mac app keeps it: under About.
         if updates {
@@ -13634,6 +14341,13 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
                 CONNECTED_LOG_FOLDER_MENU_ID,
                 CONNECTED_LOG_FOLDER_MENU_LABEL,
                 true,
+                None::<&str>,
+            )?));
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
+                app,
+                "logs",
+                logs_label,
+                logs_enabled,
                 None::<&str>,
             )?));
             entries.push(MenuEntry::Plain(MenuItem::with_id(
@@ -13735,13 +14449,22 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
      *
      * The page zooms as a browser's does, in the order and with the keys a Mac's View menu has
      * them. Items of our own, not the predefined zoom items: those ask the first responder, and a
-     * web view has no zoom of its own to answer them. See `zoom`.
+     * web view has no zoom of its own to answer them. See `zoom`. Reload first, as a browser's View
+     * menu has it: OpenBot's page loaded again, never the setup screens (`desktop_reload`).
      */
     let view = Submenu::with_items(
         app,
         "View",
         true,
         &[
+            &MenuItem::with_id(
+                app,
+                desktop_reload::MENU_ID,
+                desktop_reload::MENU_LABEL,
+                true,
+                Some(desktop_reload::MENU_ACCELERATOR),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(
                 app,
                 zoom::MENU_ACTUAL_SIZE,
@@ -14191,6 +14914,9 @@ fn main() {
                         | tauri_plugin_window_state::StateFlags::POSITION
                         | tauri_plugin_window_state::StateFlags::MAXIMIZED,
                 )
+                // The main window is built at its saved place already, at setup's size; its saved
+                // size is OpenBot's, for the handover (`build_main_window`, `window_size`).
+                .skip_initial_state("main")
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
@@ -14243,6 +14969,7 @@ fn main() {
             already_configured,
             begin_claude_sign_in,
             finish_claude_sign_in,
+            cancel_claude_sign_in,
             begin_chatgpt_sign_in,
             begin_model_oauth,
             finish_model_oauth,
@@ -14260,6 +14987,7 @@ fn main() {
             local_eval_steps,
             local_eval_update_step,
             setup_heartbeat,
+            page_error,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,
@@ -14282,6 +15010,15 @@ fn main() {
             desktop_connected::sign_out_of_openbot,
             desktop_connected::use_this_computer,
             desktop_connected::take_connection_notice,
+            // The move from OpenBot (Self-Contained) to OpenBot Cloud. See `desktop_move`.
+            desktop_move::move_offer,
+            desktop_move::move_footprint,
+            desktop_move::keep_self_contained,
+            desktop_move::move_preview,
+            desktop_move::move_destinations,
+            desktop_move::move_to_cloud,
+            desktop_move::cancel_move,
+            desktop_move::open_moved_cloud,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
@@ -14290,14 +15027,22 @@ fn main() {
         // no such setting, and Tauri has no configuration option for it either, so the page is
         // asked to refuse. Every navigation, because the window navigates to OpenBot and back.
         .on_page_load(|window, payload| {
-            // A new page in the main window is not the setup page until it sends a heartbeat.
-            if window.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
-            {
-                desktop_stall::page_loaded(window);
+            let page = window_page(window.app_handle(), payload.url());
+            // A new page in the main window is not taking progress until it sends a heartbeat. The
+            // setup page has to send one, or it is reloaded once (`desktop_stall`).
+            if window.label() == "main" {
+                match payload.event() {
+                    tauri::webview::PageLoadEvent::Started => {
+                        desktop_stall::page_loaded(window, page == WindowPage::Setup);
+                    }
+                    tauri::webview::PageLoadEvent::Finished if page == WindowPage::Setup => {
+                        desktop_stall::setup_page_finished(window.app_handle());
+                    }
+                    tauri::webview::PageLoadEvent::Finished => {}
+                }
             }
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
-            let page = window_page(window.app_handle(), payload.url());
             // "Getting OpenBot ready" covers the main window until the setup page's first
             // heartbeat (`first_paint`). Any other page sends none, so it goes as that page starts;
             // and a setup page that loaded but never says it painted is shown after ten seconds.
@@ -14324,6 +15069,9 @@ fn main() {
                 );
             }
             match_title_bar(&window.window(), page);
+            if window.label() == "main" {
+                match_window_size(window.app_handle(), payload.url());
+            }
             // The level kept from the last launch, on every page this window loads (`zoom`).
             let _ = window.set_zoom(saved_zoom(window.app_handle()));
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp) {
@@ -14332,6 +15080,8 @@ fn main() {
                     window.app_handle(),
                     payload.url(),
                 )));
+                // What View → Reload would lose, and the reload (`desktop_reload`).
+                let _ = window.eval(desktop_reload::PAGE);
             }
             // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
             if cfg!(target_os = "windows") && page != WindowPage::Other {
@@ -14377,6 +15127,9 @@ fn main() {
                     .and_then(|own| own.url().ok())
                 {
                     match_title_bar(window, window_page(app, &url));
+                    if window.label() == "main" {
+                        match_window_size(app, &url);
+                    }
                 }
             }
             _ => {}
@@ -14437,7 +15190,7 @@ fn main() {
             watch_for_app_updates(app.handle());
             get_updates_ready(app.handle());
             desktop_telemetry::initialize(app.handle());
-            desktop_stall::initialize(app.handle());
+            desktop_stall::initialize(app.handle(), setup_page_stuck);
             // Connected to an OpenBot that runs elsewhere, no installation here is looked for.
             let connected = desktop_connected::is_connected(app.handle());
             if connected {
@@ -14468,6 +15221,9 @@ fn main() {
             );
             // On Windows, the Podman machine's disk goes in the install folder.
             use_machine_home(&selected_root_or_default(app.handle()));
+            if !connected {
+                forget_google_sign_in_at_launch(&selected_root_or_default(app.handle()));
+            }
 
             remember_setup_url(app.handle())?;
             // After the setup page's address is known, which the notice is shown at.
@@ -14556,6 +15312,8 @@ fn main() {
                 // that is setup's planned restart, from the Start menu as the screen offers, not an
                 // abandonment. After Quit, setup already said how it ended and this adds nothing.
                 tauri::RunEvent::Exit => {
+                    // After the window-state plugin saved the window (`window_size`).
+                    keep_app_size_for_next_launch(app);
                     if windows_restart_owed(app) {
                         desktop_telemetry::restart_required(app);
                     }
@@ -16914,7 +17672,7 @@ mod tests {
         std::fs::create_dir_all(root.join(".langchain")).unwrap();
         std::fs::write(
             root.join(openbot_env::CHATGPT_STORE_FILE),
-            "{\"refresh_token\":\"stored\"}\n",
+            "{\"client_id\":\"oaiapp_stored\",\"access_token\":\"stored-access\",\"refresh_token\":\"stored\",\"scopes\":[\"chatgpt.tokens.use.direct\"]}\n",
         )
         .unwrap();
 
@@ -17095,7 +17853,7 @@ mod tests {
         persist_endpoint_fixture(
             &root,
             &openbot_env::ModelCredential::ChatGptPlan {
-                store: r#"{"refresh_token":"synthetic-refresh"}"#.into(),
+                store: r#"{"client_id":"oaiapp_synthetic","access_token":"synthetic-access","refresh_token":"synthetic-refresh","scopes":["chatgpt.tokens.use.direct"]}"#.into(),
             },
         );
         assert_eq!(saved(&root), (Some(true), Some(false), Some(false)));
@@ -17113,6 +17871,34 @@ mod tests {
             },
         );
         assert_eq!(saved(&root), (Some(false), Some(false), Some(true)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An installation an earlier version signed in to ChatGPT through Codex: its saved sign-in is
+    /// not offered, the window is told to say the sign-in changed, and a Start on it says the same
+    /// thing, never the stack coming up with a Bot that cannot answer.
+    #[test]
+    fn an_earlier_versions_chatgpt_sign_in_is_asked_for_again() {
+        let root = temp_root("openbot-chatgpt-sign-in-changed");
+        std::fs::create_dir_all(&root).unwrap();
+        persist_endpoint_fixture(
+            &root,
+            &openbot_env::ModelCredential::ChatGptPlan {
+                store: r#"{"access_token":"a.b.c","refresh_token":"codex-refresh","id_token":"i","account_id":"acct"}"#.into(),
+            },
+        );
+        let saved = already_configured_for_root(root.to_string_lossy().into_owned()).saved;
+        assert_eq!(saved.model_sessions.openai, Some(false));
+        assert!(saved.chatgpt_sign_in_changed);
+        let chosen: ChosenModel = serde_json::from_value(serde_json::json!({
+            "provider": "openai", "login": "plan", "saved": true
+        }))
+        .unwrap();
+        let said = chosen
+            .into_credential(&root)
+            .err()
+            .map(|problem| problem.said);
+        assert_eq!(said.as_deref(), Some(openbot_env::CHATGPT_SIGN_IN_CHANGED));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -17240,35 +18026,120 @@ mod tests {
     fn oauth_start_reads_private_session_without_contacting_unstarted_proxy() {
         let root = temp_root("oauth-start");
         std::fs::create_dir_all(root.join(".openbot")).unwrap();
-        for provider in ["google", "xai"] {
-            let path = root.join(openbot_desktop_lib::provider_oauth::FILE);
-            let record = serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":provider,"clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","proxyToken":"synthetic-proxy"});
-            std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
-            let choice = ChosenModel {
-                provider: provider.into(),
-                login: "oauth".into(),
-                api_key: None,
-                base_url: None,
-                container_base_url: None,
-                model: Some("chosen-model".into()),
-                token: None,
-                saved: Some(true),
-            };
-            let credential = start_stack_credential_with(&root, choice, |_, _| {
-                panic!("OAuth must not resolve an API key")
-            })
-            .unwrap();
-            assert_eq!(
-                credential,
-                openbot_env::ModelCredential::ProviderOAuth {
-                    provider: provider.into(),
-                    path: path.to_string_lossy().into_owned(),
-                    proxy_token: "synthetic-proxy".into(),
-                    model: "chosen-model".into()
-                }
-            );
-        }
+        let path = root.join(openbot_desktop_lib::provider_oauth::FILE);
+        let record = serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":"xai","clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","proxyToken":"synthetic-proxy"});
+        std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+        let credential = start_stack_credential_with(&root, oauth_choice("xai"), |_, _| {
+            panic!("OAuth must not resolve an API key")
+        })
+        .unwrap();
+        assert_eq!(
+            credential,
+            openbot_env::ModelCredential::ProviderOAuth {
+                provider: "xai".into(),
+                path: path.to_string_lossy().into_owned(),
+                proxy_token: "synthetic-proxy".into(),
+                model: "chosen-model".into()
+            }
+        );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn oauth_choice(provider: &str) -> ChosenModel {
+        ChosenModel {
+            provider: provider.into(),
+            login: "oauth".into(),
+            api_key: None,
+            base_url: None,
+            container_base_url: None,
+            model: Some("chosen-model".into()),
+            token: None,
+            saved: Some(true),
+        }
+    }
+
+    /// A Google sign-in saved before Gemini took an API key only: Start refuses it in the words
+    /// the window shows, even with its session still on disk, and never hands it to the server.
+    #[test]
+    fn a_saved_google_sign_in_is_refused_at_start() {
+        let root = temp_root("oauth-start-google");
+        std::fs::create_dir_all(root.join(".openbot")).unwrap();
+        let record = serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":"google","clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","quotaProject":"synthetic-project","proxyToken":"synthetic-proxy"});
+        std::fs::write(
+            root.join(openbot_desktop_lib::provider_oauth::FILE),
+            serde_json::to_vec(&record).unwrap(),
+        )
+        .unwrap();
+        let refused = start_stack_credential_with(&root, oauth_choice("google"), |_, _| {
+            panic!("a Google sign-in must not resolve an API key")
+        })
+        .unwrap_err();
+        assert_eq!(
+            refused.said,
+            "Google sign-in for Gemini has ended. Add a Gemini API key to keep your Bots running on Gemini."
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A launch deletes the Google sign-in for Gemini an earlier version saved, and a copy a write
+    /// left half-done beside it, and leaves an xAI sign-in and anything it can't tell is Google's.
+    /// The saved Google choice stays: Start still says to add a Gemini API key.
+    #[test]
+    fn a_launch_deletes_a_saved_google_sign_in_and_keeps_an_xai_one() {
+        let session = |provider: &str| serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":provider,"clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","quotaProject":"synthetic-project","proxyToken":"synthetic-proxy"});
+        let google = temp_root("launch-forgets-google");
+        let xai = temp_root("launch-keeps-xai");
+        for (root, provider) in [(&google, "google"), (&xai, "xai")] {
+            std::fs::create_dir_all(root.join(".openbot")).unwrap();
+            std::fs::write(
+                root.join(openbot_desktop_lib::provider_oauth::FILE),
+                serde_json::to_vec(&session(provider)).unwrap(),
+            )
+            .unwrap();
+        }
+        let half_written = google.join(".openbot/model-oauth.json.synthetic.tmp");
+        std::fs::write(
+            &half_written,
+            serde_json::to_vec(&session("google")).unwrap(),
+        )
+        .unwrap();
+        let unreadable = google.join(".openbot/other.tmp");
+        std::fs::write(&unreadable, b"not a sign-in").unwrap();
+
+        forget_google_sign_in_at_launch(&google);
+        forget_google_sign_in_at_launch(&xai);
+
+        assert!(!google
+            .join(openbot_desktop_lib::provider_oauth::FILE)
+            .exists());
+        assert!(!half_written.exists());
+        assert!(unreadable.exists());
+        assert_eq!(
+            openbot_desktop_lib::provider_oauth::read(&xai, "xai")
+                .unwrap()
+                .proxy_token,
+            "synthetic-proxy"
+        );
+        let refused = start_stack_credential_with(&google, oauth_choice("google"), |_, _| {
+            panic!("a Google sign-in must not resolve an API key")
+        })
+        .unwrap_err();
+        assert_eq!(
+            refused.said,
+            "Google sign-in for Gemini has ended. Add a Gemini API key to keep your Bots running on Gemini."
+        );
+        // And launch runs it, in setup, for the installation this computer runs.
+        let main = include_str!("main.rs");
+        let setup = &main[main.find(".setup(move |app| {\n").unwrap()..];
+        let setup = &setup[..setup.find("\n        })\n").unwrap()];
+        assert!(
+            setup.contains(
+                "if !connected {\n                forget_google_sign_in_at_launch(&selected_root_or_default(app.handle()));\n            }"
+            ),
+            "launch does not delete a saved Google sign-in"
+        );
+        std::fs::remove_dir_all(google).unwrap();
+        std::fs::remove_dir_all(xai).unwrap();
     }
 
     #[test]
@@ -20145,16 +21016,25 @@ mod tests {
                 ..saved
             }
         );
-        // The builder takes the saved place, and the window is never built hidden.
+        // The builder takes the saved place, at setup's size: the saved size and maximized are
+        // OpenBot's, for the handover (`window_size`), and the plugin does not put them back on
+        // the window as it is built. The window is never built hidden.
         let main = include_str!("main.rs");
         let body = &main[main.find("fn build_main_window").unwrap()..];
         let body = &body[..body.find("\n}\n").unwrap()];
         assert!(body.contains("match saved_main_window(app)"), "{body}");
         assert!(
-            body.contains(".position(place.x, place.y)")
-                && body.contains(".inner_size(place.width, place.height)"),
+            body.contains("builder.position(place.x, place.y)"),
             "{body}"
         );
+        assert!(!body.contains(".inner_size(place."), "{body}");
+        assert!(!body.contains(".maximized(place."), "{body}");
+        assert!(
+            body.contains("size: Some((place.width, place.height)),")
+                && body.contains("maximized: place.maximized,"),
+            "{body}"
+        );
+        assert!(main.contains(".skip_initial_state(\"main\")"));
         assert!(!body.contains(".visible(false)"), "{body}");
         assert!(!body.contains(".show()"), "{body}");
     }
@@ -20327,15 +21207,19 @@ mod tests {
     /// (`WebviewWindowBuilder::from_config(..)?.build()` in tauri's `app::setup`).
     #[test]
     fn the_main_window_built_in_setup_keeps_every_property_the_configured_window_had() {
-        // The entry as it stood while Tauri created the window from it.
+        // The entry as it stood while Tauri created the window from it, but for what setup's
+        // window is now: one size it can't be resized or zoomed from, under an overlay title bar
+        // with no title text (`window_size`, `match_title_bar`), from the first frame.
         let pinned = serde_json::json!({
             "title": "OpenBot",
             "width": 1000,
             "height": 800,
             "minWidth": 720,
             "minHeight": 560,
-            "resizable": true,
-            "titleBarStyle": "Transparent",
+            "resizable": false,
+            "maximizable": false,
+            "titleBarStyle": "Overlay",
+            "hiddenTitle": true,
             "backgroundThrottling": "disabled",
             "dragDropEnabled": false
         });
@@ -20371,6 +21255,9 @@ mod tests {
             (built.min_width, built.min_height),
             (Some(720.0), Some(560.0))
         );
+        assert!(!built.resizable && !built.maximizable);
+        assert_eq!(built.title_bar_style, tauri::TitleBarStyle::Overlay);
+        assert!(built.hidden_title);
         assert_eq!(window.label(), "main");
 
         // Never built hidden: on Windows a WebView2 page under a window first created hidden
@@ -20423,10 +21310,10 @@ mod tests {
     fn the_windows_title_bar_is_dark_from_its_first_show_and_redrawn_on_every_change() {
         let dark = title_bar_attributes(Some(true));
         assert_eq!(dark[0], (IMMERSIVE_DARK_MODE, 1), "{dark:?}");
-        assert!(dark.contains(&(CAPTION_COLOR, 0x0013_0b0d)), "{dark:?}");
+        assert!(dark.contains(&(CAPTION_COLOR, 0x0014_0d07)), "{dark:?}");
         let light = title_bar_attributes(Some(false));
         assert_eq!(light[0], (IMMERSIVE_DARK_MODE, 0), "{light:?}");
-        assert!(light.contains(&(CAPTION_COLOR, 0x00f5_eded)), "{light:?}");
+        assert!(light.contains(&(CAPTION_COLOR, 0x00f4_eee9)), "{light:?}");
         // Windows's own colours, and the window's theme left to decide its dark or light.
         let own = title_bar_attributes(None);
         assert!(own
@@ -20505,6 +21392,139 @@ mod tests {
         );
     }
 
+    /// Dusty on a real Mac build of 5725dbc0: the title bar's strip showed above setup's page with
+    /// "OpenBot" in it, over the sidebar that already says OpenBot. Setup now gets the overlay bar
+    /// OpenBot's own page gets, and no title text on macOS or Windows; the page marks its own drag
+    /// handles, which the setup window's capability lets it use.
+    #[test]
+    fn setup_runs_under_an_overlay_title_bar_with_no_title_text() {
+        assert!(!window_title_shown(WindowPage::Setup));
+        assert_eq!(
+            window_title_shown(WindowPage::OwnedApp),
+            !cfg!(target_os = "macos")
+        );
+        assert!(window_title_shown(WindowPage::LocalApp));
+        assert!(window_title_shown(WindowPage::Other));
+
+        let main = include_str!("main.rs");
+        let body = |name: &str| {
+            let from = &main[main.find(name).unwrap_or_else(|| panic!("{name}"))..];
+            &from[..from.find("\n}\n").unwrap()]
+        };
+        let matched = body("fn match_title_bar<R: tauri::Runtime>");
+        assert!(
+            matched.contains(
+                "WindowPage::Setup | WindowPage::OwnedApp => tauri::TitleBarStyle::Overlay"
+            ),
+            "{matched}"
+        );
+        assert!(!matched.contains("TitleBarStyle::Transparent"), "{matched}");
+        assert!(
+            matched.contains("show_window_title(window, window_title_shown(page));"),
+            "{matched}"
+        );
+        // Windows: the frame's caption only, so the taskbar still says OpenBot, from the first show.
+        let windows = body("pub(crate) fn show_title_text_of(");
+        assert!(windows.contains("SetWindowThemeAttribute("), "{windows}");
+        assert!(windows.contains("SWP_FRAMECHANGED"), "{windows}");
+        assert!(!windows.contains("SetWindowTextW"), "{windows}");
+        let first_paint = include_str!("first_paint.rs");
+        let hidden = first_paint
+            .find("crate::show_title_text_of(window.0 as isize, false);")
+            .expect("the first show hides the title text");
+        let tinted = first_paint
+            .find("crate::tint_title_bar_of(window.0 as isize, Some(dark));")
+            .unwrap();
+        assert!(hidden < tinted, "the tint redraws the frame after");
+
+        // The setup page drags the window from its own handles (desktop/src/dragRegions.ts). A
+        // double-click there asks to zoom, which a window that can't be resized refuses.
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let permissions = capability["permissions"].as_array().unwrap();
+        for wanted in [
+            "core:window:allow-start-dragging",
+            "core:window:allow-internal-toggle-maximize",
+        ] {
+            assert!(
+                permissions.iter().any(|permission| permission == wanted),
+                "{wanted}"
+            );
+        }
+        assert!(
+            capability.get("remote").is_none(),
+            "the setup page's own, not a site's"
+        );
+    }
+
+    /// "For the install process the UI should start out at a specific fixed size, and then when we
+    /// transition it can be resized." Each page the window loads sizes it (`window_size`): after
+    /// the title bar is styled, on a theme change too, and OpenBot's size is kept at a quit on setup.
+    #[test]
+    fn the_window_is_sized_for_each_page_it_loads() {
+        let main = include_str!("main.rs");
+        let loaded = &main[main.find(".on_page_load(|window, payload| {").unwrap()..];
+        let loaded = &loaded[..loaded.find("\n        })\n").unwrap()];
+        let styled = loaded
+            .find("match_title_bar(&window.window(), page);")
+            .unwrap();
+        let sized = loaded
+            .find("match_window_size(window.app_handle(), payload.url());")
+            .expect("every page sizes the window");
+        assert!(styled < sized, "{loaded}");
+        let changed = &main[main
+            .find("tauri::WindowEvent::ThemeChanged(_) => {")
+            .unwrap()..];
+        let changed = &changed[..changed.find("\n            }\n").unwrap()];
+        assert!(
+            changed.contains("match_window_size(app, &url);"),
+            "{changed}"
+        );
+        let exit = &main[main.find("tauri::RunEvent::Exit => {").unwrap()..];
+        let exit = &exit[..exit.find("\n                }\n").unwrap()];
+        assert!(
+            exit.contains("keep_app_size_for_next_launch(app);"),
+            "{exit}"
+        );
+
+        let body = &main[main.find("fn match_window_size<").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        // Quitting from OpenBot's page shows Shutting down on the setup page: nothing moves.
+        assert!(
+            body.contains("url.fragment() == Some(SHUTTING_DOWN_FRAGMENT)"),
+            "{body}"
+        );
+        // Resizable or not on every page, and the green button (maximize box) with it.
+        let resizable = body.find("window.set_resizable(!fixed)").unwrap();
+        assert!(body.contains("window.set_maximizable(!fixed)"), "{body}");
+        assert!(resizable < body.find("match change").unwrap(), "{body}");
+        // Back on setup: out of maximized (Windows; macOS un-zooms as it takes the new size), at
+        // setup's size, on the screen.
+        let restored = body.find("window.unmaximize()").unwrap();
+        assert!(
+            body[..restored].contains("#[cfg(not(target_os = \"macos\"))]"),
+            "{body}"
+        );
+        assert!(body.contains("fit_setup_to_screen(&window);"), "{body}");
+        // On OpenBot's page: its own size, on the screen, maximized again if it was.
+        assert!(
+            body.contains("resize_in_place(&window, width, height);"),
+            "{body}"
+        );
+        // Worked out from the size asked for: on macOS the window reads its old size until tao
+        // gets round to the new one, so nothing after the resize reads the window's size back.
+        let resized = &main[main.find("fn resize_in_place<").unwrap()..];
+        let resized = &resized[..resized.find("\n}\n").unwrap()];
+        let sized = resized.find("window.set_size(").unwrap();
+        assert!(!resized[sized..].contains("inner_size()"), "{resized}");
+        assert!(
+            resized[sized..].contains("window.set_position("),
+            "{resized}"
+        );
+        assert!(!body.contains("fit_main_window_to_screen"), "{body}");
+        assert!(body.contains("window.maximize()"), "{body}");
+    }
+
     /// The developer's app is trusted only at a loopback IP, so `localhost` is read as `127.0.0.1`.
     #[test]
     fn the_developers_app_at_localhost_is_shown_at_127_0_0_1() {
@@ -20534,13 +21554,104 @@ mod tests {
             build_description("397d98a", "", 0),
             "Built 1970-01-01 00:00 UTC from 397d98a"
         );
-        let about = about_openbot("0.3.4-internal.892.g0c140734ecf0".into());
+        let about = about_openbot("0.3.4-internal.892.g0c140734ecf0".into(), &[]);
         assert_eq!(
             about.short_version.as_deref(),
             Some("0.3.4-internal.892.g0c140734ecf0")
         );
         assert_eq!(about.version.as_deref(), Some(env!("OPENBOT_BUILD_COMMIT")));
         assert!(about.credits.unwrap().starts_with("Built "));
+    }
+
+    /*
+    Found in dogfooding: nothing in OpenBot Desktop said whether it ran OpenBot (Self-Contained) or
+    OpenBot Cloud, or which account it used there. About OpenBot said only the version and the
+    build. It now says where OpenBot runs, and on OpenBot Cloud as whom, above the build, on macOS
+    (the credits) and on Windows (the comments) alike, beside the version it already showed.
+    */
+    #[test]
+    fn about_openbot_says_self_contained_or_openbot_cloud_and_as_whom() {
+        use openbot_desktop_lib::connected::choice;
+        let base = temp_root("about-openbot-mode");
+        let root = base.join("OpenBot");
+        let config = base.join("config");
+        let said = |app: &tauri::App<tauri::test::MockRuntime>| {
+            let about = about_openbot_now(app.handle());
+            assert_eq!(about.short_version.as_deref(), Some("1.2.0"));
+            assert_eq!(
+                about.credits, about.comments,
+                "macOS and Windows say the same"
+            );
+            about.credits.unwrap()
+        };
+
+        // Nothing set up yet: About says nothing about where OpenBot runs.
+        let app = launched_at(&root, &config, "1.2.0");
+        assert!(said(&app).starts_with("Built "));
+
+        // OpenBot (Self-Contained): installed on this computer, no connection on record.
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+        let app = launched_at(&root, &config, "1.2.0");
+        let credits = said(&app);
+        assert!(
+            credits.starts_with("OpenBot (Self-Contained)\n\nBuilt "),
+            "{credits}"
+        );
+        assert!(!credits.contains("OpenBot Cloud"));
+
+        // OpenBot Cloud, before it has said which account: the mode alone.
+        choice::write(
+            &config,
+            &choice::Choice {
+                mode: choice::Mode::Connected,
+                address: Some("https://api.open.bot".into()),
+                organization_id: Some("org_mine".into()),
+            },
+        )
+        .unwrap();
+        let app = launched_at(&root, &config, "1.2.0");
+        let credits = said(&app);
+        assert!(credits.starts_with("OpenBot Cloud\n\nBuilt "), "{credits}");
+        assert!(!credits.contains("Self-Contained"));
+
+        // Once it has said: the account too.
+        desktop_connected::remember_account(
+            app.handle(),
+            "https://api.open.bot",
+            "sam@example.com",
+        );
+        let credits = said(&app);
+        assert!(
+            credits.starts_with("OpenBot Cloud\nSigned in as sam@example.com\n\nBuilt "),
+            "{credits}"
+        );
+
+        // The sign-in ended: no account named.
+        desktop_connected::session_ended(app.handle(), "api.open.bot");
+        assert!(said(&app).starts_with("OpenBot Cloud\n\nBuilt "));
+
+        // An account from another address than the one on record is never named here.
+        desktop_connected::remember_account(
+            app.handle(),
+            "https://openbot.example.com",
+            "sam@example.com",
+        );
+        assert!(!said(&app).contains("sam@example.com"));
+
+        // Back on this computer: OpenBot (Self-Contained) again.
+        choice::write(
+            &config,
+            &choice::Choice {
+                mode: choice::Mode::Local,
+                address: Some("https://api.open.bot".into()),
+                organization_id: None,
+            },
+        )
+        .unwrap();
+        assert!(said(&app).starts_with("OpenBot (Self-Contained)\n\nBuilt "));
+        let _ = std::fs::remove_dir_all(base);
     }
 
     /// An internal build after 0.3.3 is packaged as `0.3.4-internal.892.g0c140734ecf0`, and the
@@ -20571,7 +21682,7 @@ mod tests {
             // The fake engine answered, so nothing on this machine was asked.
             assert_eq!(status["engine"], "docker");
             assert!(status["build"].as_str().unwrap().starts_with("Built "));
-            let about = about_openbot(desktop_version(app.handle()));
+            let about = about_openbot_now(app.handle());
             assert_eq!(about.short_version.as_deref(), Some(packaged));
             status["version"].as_str().unwrap().to_owned()
         };
@@ -23983,6 +25094,7 @@ fn main() {
             "agent-langgraph-ts",
             "agent-langgraph-agui",
             "agent-claude-sdk",
+            "agent-openai-agents",
         ] {
             images.images.insert(
                 name.into(),
@@ -24048,9 +25160,10 @@ fn main() {
                 )
             }
             "chatgpt-plan" => {
-                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                // The TypeScript Bot in its own container, and the plan's own engine beside it.
-                ("compose --profile harness --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-harness agent-chatgpt-plan", Some("agent-langgraph-ts"))
+                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"client_id\":\"oaiapp_synthetic\",\"access_token\":\"synthetic-access\",\"refresh_token\":\"synthetic-plan\",\"scopes\":[\"chatgpt.tokens.use.direct\"]}"});
+                // The plan's own engine is the OpenAI Agents SDK Bot the plan picked, as for a Claude
+                // plan: no container of the Bot's own.
+                ("compose --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-chatgpt-plan", Some("agent-openai-agents"))
             }
             "claude-plan" | "claude-plan-switched" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
@@ -24059,8 +25172,8 @@ fn main() {
                 ("compose --profile claude-plan up -d --no-build --pull never postgres agent-computer server agent-claude-plan", Some("agent-claude-sdk"))
             }
             "chatgpt-plan-switched" => {
-                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-harness agent-chatgpt-plan", Some("agent-langgraph-ts"))
+                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"client_id\":\"oaiapp_synthetic\",\"access_token\":\"synthetic-access\",\"refresh_token\":\"synthetic-plan\",\"scopes\":[\"chatgpt.tokens.use.direct\"]}"});
+                ("compose --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-chatgpt-plan", Some("agent-openai-agents"))
             }
             _ => panic!("unknown test case"),
         };
@@ -24071,7 +25184,7 @@ fn main() {
          */
         let switched_to = match case {
             "claude-plan-switched" => Some("localhost/agent-claude-sdk@sha256:00"),
-            "chatgpt-plan-switched" => Some("localhost/agent-langgraph-agui@sha256:00"),
+            "chatgpt-plan-switched" => Some("localhost/agent-openai-agents@sha256:00"),
             _ => None,
         };
         if let Some(image) = switched_to {
@@ -24431,142 +25544,6 @@ fn main() {
         harness_start_ipc_case("claude-plan");
     }
 
-    /*
-     * A sign-in to a plan on an installation that installed without that plan's image: the
-     * sign-in runs in that image, so it downloads it first, showing the download as Install shows
-     * it, and then starts the sign-in's container from it. Before, it refused the sign-in as an
-     * unfinished install. The fixture engine refuses the container itself, so the flow stops there,
-     * before any browser would open.
-     */
-    fn plan_sign_in_ipc_case(command: &str, published: &str) {
-        let root = temp_root("openbot-plan-sign-in-ipc");
-        write_installed_deployment(&root);
-        let mut images: deployment::Images =
-            serde_json::from_str(&std::fs::read_to_string(deployment::images_path(&root)).unwrap())
-                .unwrap();
-        images.images.insert(
-            published.into(),
-            deployment::Image {
-                reference: format!("localhost/{published}@sha256:00"),
-            },
-        );
-        std::fs::write(
-            deployment::images_path(&root),
-            serde_json::to_string(&images).unwrap(),
-        )
-        .unwrap();
-        preparation::record(&root, None, vec!["fixture-image".into()]).unwrap();
-        let image = format!("localhost/{published}@sha256:00");
-        let path = SerializedPath::set_only_with("docker", "harness");
-        let record = root.join("commands.log");
-        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
-        std::env::set_var("OPENBOT_TEST_ENGINE_MISSING_IMAGE", &image);
-        let app = tauri::test::mock_builder()
-            .manage(Shell::default())
-            .invoke_handler(tauri::generate_handler![
-                begin_claude_sign_in,
-                begin_chatgpt_sign_in
-            ])
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .unwrap();
-        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
-        {
-            use tauri::Listener;
-            let told = told.clone();
-            app.listen_any("setup:progress", move |event| {
-                told.lock()
-                    .unwrap()
-                    .push(serde_json::from_str(event.payload()).unwrap());
-            });
-        }
-        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .unwrap();
-        let answer = tauri::test::get_ipc_response(
-            &window,
-            tauri::webview::InvokeRequest {
-                cmd: command.into(),
-                callback: tauri::ipc::CallbackFn(0),
-                error: tauri::ipc::CallbackFn(1),
-                url: if cfg!(any(windows, target_os = "android")) {
-                    "http://tauri.localhost"
-                } else {
-                    "tauri://localhost"
-                }
-                .parse()
-                .unwrap(),
-                body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "root": root })),
-                headers: Default::default(),
-                invoke_key: tauri::test::INVOKE_KEY.into(),
-            },
-        );
-        let commands = std::fs::read_to_string(&record).unwrap_or_default();
-        let problem = answer.expect_err("the fixture engine refuses the sign-in's container");
-        assert_ne!(
-            problem["said"].as_str(),
-            Some(preparation::REQUIRED),
-            "{command}: refused as an unfinished install: {problem:?}\n{commands}"
-        );
-        let pulled_at = commands
-            .find(&format!("\tpull {image}"))
-            .unwrap_or_else(|| panic!("{command}: {image} was not pulled:\n{commands}"));
-        let ran_at = commands
-            .lines()
-            .position(|line| line.contains("\trun ") && line.contains(&image))
-            .map(|line| {
-                commands
-                    .lines()
-                    .take(line)
-                    .map(|l| l.len() + 1)
-                    .sum::<usize>()
-            })
-            .unwrap_or_else(|| panic!("{command}: the sign-in never ran {image}:\n{commands}"));
-        assert!(
-            pulled_at < ran_at,
-            "{command}: ran before the pull:\n{commands}"
-        );
-        let told = told.lock().unwrap();
-        assert!(
-            told.iter().any(|row| row["step"] == "images"
-                && row["running"] == true
-                && row["downloads"].is_object()),
-            "{command}: no download was shown: {told:?}"
-        );
-        assert!(
-            told.iter()
-                .any(|row| row["step"] == "images" && row["running"] == false && row["ok"] == true),
-            "{command}: the download never finished on screen: {told:?}"
-        );
-        drop(path);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_first_claude_plan_sign_in_downloads_its_image() {
-        if crate::test_support::isolated_process(
-            "tests::a_first_claude_plan_sign_in_downloads_its_image",
-        ) {
-            return;
-        }
-        plan_sign_in_ipc_case(
-            "begin_claude_sign_in",
-            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
-        );
-    }
-
-    #[test]
-    fn a_first_chatgpt_plan_sign_in_downloads_its_image() {
-        if crate::test_support::isolated_process(
-            "tests::a_first_chatgpt_plan_sign_in_downloads_its_image",
-        ) {
-            return;
-        }
-        plan_sign_in_ipc_case(
-            "begin_chatgpt_sign_in",
-            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
-        );
-    }
-
     #[test]
     fn a_switch_to_a_claude_plan_downloads_its_bot_before_start() {
         if crate::test_support::isolated_process(
@@ -24685,6 +25662,152 @@ fn main() {
         );
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    /// Start, on the fake engine, of an installed deployment with `bot` picked.
+    fn start_with_picked_bot(root: &Path, label: &str, bot: &str) -> Problem {
+        let record = temp_root(&format!("{label}-record")).join("commands.log");
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        let _path = SerializedPath::set_only_with("docker", "dead-service");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let problem = tauri::async_runtime::block_on(start_stack_inner(
+            app.handle().clone(),
+            root.to_path_buf(),
+            "https://intelligence.example.test".into(),
+            "wss://gateway.example.test".into(),
+            ChosenModel {
+                provider: "openai".into(),
+                login: "api-key".into(),
+                api_key: Some("synthetic-openai-key".into()),
+                base_url: None,
+                container_base_url: None,
+                model: None,
+                token: None,
+                saved: Some(false),
+            },
+            Some(harness::HarnessChoice {
+                id: bot.into(),
+                agent_url: None,
+            }),
+        ))
+        .expect_err("this Start is refused");
+        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+        problem
+    }
+
+    /// An image list something outside OpenBot deleted is an unfinished install, so the window
+    /// runs Install (which downloads only the list again) and starts. It was read as a release
+    /// without the picked Bot: "This version of OpenBot does not include the Bot you picked", no
+    /// Install, and every Retry failed at once, until Repair put the list back.
+    #[test]
+    fn start_with_its_image_list_deleted_asks_for_install_rather_than_blaming_the_bot() {
+        if crate::test_support::isolated_process(
+            "tests::start_with_its_image_list_deleted_asks_for_install_rather_than_blaming_the_bot",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-image-list-deleted-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+        std::fs::remove_file(deployment::images_path(&root)).unwrap();
+
+        let problem = start_with_picked_bot(
+            &root,
+            "openbot-image-list-deleted",
+            harness::DEFAULT_HARNESS,
+        );
+
+        assert_eq!(
+            problem.connection,
+            Some(openbot_desktop_lib::problem::Connection::Installation),
+            "the window runs Install only for an installation problem: {problem:?}"
+        );
+        assert_eq!(problem.said, preparation::REQUIRED, "{problem:?}");
+        assert!(!problem.said.contains("does not include"), "{problem:?}");
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("container-images.json"), "{detail}");
+        assert!(!detail.contains("does not include"), "{detail}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A list that is there and is not a list is the same unfinished install.
+    #[test]
+    fn start_with_an_unreadable_image_list_asks_for_install_rather_than_blaming_the_bot() {
+        if crate::test_support::isolated_process(
+            "tests::start_with_an_unreadable_image_list_asks_for_install_rather_than_blaming_the_bot",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-image-list-unreadable-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+        std::fs::write(deployment::images_path(&root), "not a list").unwrap();
+
+        let problem = start_with_picked_bot(
+            &root,
+            "openbot-image-list-unreadable",
+            harness::DEFAULT_HARNESS,
+        );
+
+        assert_eq!(
+            problem.connection,
+            Some(openbot_desktop_lib::problem::Connection::Installation),
+            "{problem:?}"
+        );
+        assert_eq!(problem.said, preparation::REQUIRED, "{problem:?}");
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("is not readable")),
+            "{problem:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A Bot the release laid out here really does not publish is still said as that, and is not
+    /// sent to Install, which could not change it.
+    #[test]
+    fn start_of_a_bot_the_release_does_not_publish_still_says_so() {
+        if crate::test_support::isolated_process(
+            "tests::start_of_a_bot_the_release_does_not_publish_still_says_so",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-bot-not-in-release-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+
+        // The fixture's list names no harness image, so the default Bot is not in this release.
+        let problem = start_with_picked_bot(
+            &root,
+            "openbot-bot-not-in-release",
+            harness::DEFAULT_HARNESS,
+        );
+
+        assert_eq!(
+            problem.said,
+            "This version of OpenBot does not include the Bot you picked. Go back and choose \
+             another, or update OpenBot.",
+            "{problem:?}"
+        );
+        assert_ne!(
+            problem.connection,
+            Some(openbot_desktop_lib::problem::Connection::Installation),
+            "{problem:?}"
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.starts_with("OpenBot v0.0.8 does not include ")),
+            "{problem:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// Start never waits for account attribution. A CLI that takes longer than the handshake's
@@ -27108,7 +28231,7 @@ fn main() {
         .unwrap();
         let own = upgrade::own();
         let root = f.owned.to_string_lossy().into_owned();
-        let shown = format!("http://127.0.0.1:{}/", f.ports.app);
+        let shown = format!("http://127.0.0.1:{}/#{FROM_SETUP}", f.ports.app);
         let window_url = |app: &tauri::App<tauri::test::MockRuntime>| {
             app.get_webview_window("main")
                 .unwrap()
@@ -27164,7 +28287,7 @@ fn main() {
         )
         .unwrap();
         let root = f.owned.to_string_lossy().into_owned();
-        let shown = format!("http://127.0.0.1:{}/", f.ports.app);
+        let shown = format!("http://127.0.0.1:{}/#{FROM_SETUP}", f.ports.app);
         let version = openbot_desktop_lib::client_version::app_version();
         let window_url = |app: &tauri::App<tauri::test::MockRuntime>| {
             app.get_webview_window("main")
@@ -27566,6 +28689,21 @@ fn main() {
             "owned API must not authorize a foreign app: initial={initial_adoption}, shown={shown:?}, restore={destination}");
     }
 
+    /// The window sent to OpenBot by setup arrives with the mark, through the entry address as
+    /// without it, so the page knows to fade up from the ground setup faded out to.
+    #[test]
+    fn the_address_setup_opens_openbot_at_carries_the_mark_through_the_entry_address() {
+        let page: tauri::Url = "http://127.0.0.1:3010/".parse().unwrap();
+        let marked = opened_by_setup(page.clone());
+        assert_eq!(marked.as_str(), "http://127.0.0.1:3010/#from-setup");
+        assert_eq!(page.fragment(), None);
+        let entered = openbot_desktop_lib::install_token::entry(&marked, Some("t"));
+        assert_eq!(entered.fragment(), None);
+        assert!(entered
+            .query_pairs()
+            .any(|(key, value)| key == "to" && value == "/#from-setup"));
+    }
+
     #[test]
     fn app_adoption_and_restore_allow_the_app_its_own_server_container_publishes() {
         let f = RestoreFixture::new();
@@ -27583,8 +28721,344 @@ fn main() {
                 .url()
                 .unwrap()
                 .as_str(),
+            format!("http://127.0.0.1:{}/#{FROM_SETUP}", f.ports.app)
+        );
+    }
+
+    /*
+    FOUND MOVING TO OPENBOT CLOUD: the person signed in to OpenBot Cloud in the browser and came back
+    to the window with a Dock click while the move was still running. The click sent the window to
+    the OpenBot on this computer, which was up, in place of the move's screens; the move then removed
+    it, and "hello world" sent from its home got no answer ("Load failed").
+    */
+    #[test]
+    fn a_dock_click_during_a_move_leaves_the_window_on_the_move() {
+        let f = RestoreFixture::new();
+        let setup = "tauri://localhost/";
+        let app = f.app(&f.owned, setup);
+        let window = app.get_webview_window("main").unwrap();
+        window.navigate(setup.parse().unwrap()).unwrap();
+        window.hide().unwrap();
+        desktop_move::set_moving_for_test(app.handle(), true);
+
+        restore_window_on(app.handle(), &f.ports);
+
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            setup,
+            "a restore during the move must not replace its screens with the OpenBot it removes"
+        );
+        assert!(
+            window.is_visible().unwrap(),
+            "the window still comes forward"
+        );
+
+        // Once the move is over, a restore decides again, as it always has.
+        desktop_move::set_moving_for_test(app.handle(), false);
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            window.url().unwrap().as_str(),
             format!("http://127.0.0.1:{}/", f.ports.app)
         );
+    }
+
+    /*
+    Seen on 1.2.0-rc.3: the person picked OpenBot Cloud, and while the OpenBot here started and
+    updated for the move, came back to the window from the Dock. The restore showed that OpenBot, now
+    up, in place of the move's screens, so the move was never started and nothing said so. While the
+    move's screens wait for an answer, a restore leaves the window on them; once the person keeps
+    OpenBot here, a restore decides as it always has.
+    */
+    #[test]
+    fn a_dock_click_while_the_move_waits_for_an_answer_leaves_the_window_on_it() {
+        let f = RestoreFixture::new();
+        let setup = "tauri://localhost/";
+        let app = f.app(&f.owned, setup);
+        let config = f.base.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        desktop_connected::use_for_test(
+            app.handle(),
+            config,
+            openbot_desktop_lib::connected::credentials::Store::of(
+                keyring_core::mock::Store::new().unwrap(),
+            ),
+        );
+        let window = app.get_webview_window("main").unwrap();
+        window.navigate(setup.parse().unwrap()).unwrap();
+        window.hide().unwrap();
+        desktop_move::set_offered_on_screen_for_test(app.handle(), true);
+
+        restore_window_on(app.handle(), &f.ports);
+
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            setup,
+            "a restore must not replace the move's screens with the OpenBot here before it is answered"
+        );
+        assert!(
+            window.is_visible().unwrap(),
+            "the window still comes forward"
+        );
+
+        // Kept here: answered, and a restore shows the OpenBot here, as it always has.
+        tauri::async_runtime::block_on(desktop_move::keep_self_contained(app.handle().clone()))
+            .unwrap();
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            format!("http://127.0.0.1:{}/", f.ports.app)
+        );
+    }
+
+    /*
+    The safety net under the above: a move that ends with the window somewhere other than setup
+    (here the OpenBot on this computer, as the Dock click left it) sends it back to setup, which opens
+    the OpenBot now chosen. After a move that is OpenBot Cloud, whose gate asks for its terms first.
+    The move here ends at once: the app is already connected to an OpenBot elsewhere.
+    */
+    #[test]
+    fn a_move_that_ends_sends_the_window_back_to_setup() {
+        use openbot_desktop_lib::connected::{choice, credentials};
+        let f = RestoreFixture::new();
+        let setup = "tauri://localhost/";
+        let app = f.app(&f.owned, setup);
+        let config = f.base.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        desktop_connected::use_for_test(
+            app.handle(),
+            config.clone(),
+            credentials::Store::of(keyring_core::mock::Store::new().unwrap()),
+        );
+        choice::write(
+            &config,
+            &choice::Choice {
+                mode: choice::Mode::Connected,
+                address: Some("https://cloud.openbot.example".into()),
+                organization_id: None,
+            },
+        )
+        .unwrap();
+        let window = app.get_webview_window("main").unwrap();
+        let local = format!("http://127.0.0.1:{}/", f.ports.app);
+        window.navigate(local.parse().unwrap()).unwrap();
+
+        let ended = tauri::async_runtime::block_on(desktop_move::move_to_cloud(
+            app.handle().clone(),
+            "https://cloud.openbot.example".into(),
+            None,
+            None,
+        ));
+
+        assert!(ended.is_err(), "the move ends without moving: {ended:?}");
+        assert!(!desktop_move::moving(app.handle()));
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            setup,
+            "a move that ends must not leave the window on the OpenBot it was moving from"
+        );
+
+        // On setup already, as a move's own screens are, the window stays where it is.
+        let ended = tauri::async_runtime::block_on(desktop_move::move_to_cloud(
+            app.handle().clone(),
+            "https://cloud.openbot.example".into(),
+            None,
+            None,
+        ));
+        assert!(ended.is_err());
+        assert_eq!(window.url().unwrap().as_str(), setup);
+    }
+
+    /// OpenBot Desktop at `release`, launched on the OpenBot installed at `root`, its answers in
+    /// `config`: a later launch of the same computer is another app over the same folders.
+    fn launched_at(
+        root: &Path,
+        config: &Path,
+        release: &str,
+    ) -> tauri::App<tauri::test::MockRuntime> {
+        use openbot_desktop_lib::connected::credentials;
+        let shell = Shell::default();
+        remember_selected_root(&shell, root);
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context.package_info_mut().version = release.parse().unwrap();
+        let app = tauri::test::mock_builder()
+            .manage(shell)
+            .build(context)
+            .unwrap();
+        desktop_connected::use_for_test(
+            app.handle(),
+            config.to_path_buf(),
+            credentials::Store::of(keyring_core::mock::Store::new().unwrap()),
+        );
+        app
+    }
+
+    /// Whether the setup window, asking as it does at launch in a build that offers OpenBot Cloud,
+    /// is told the move is due.
+    fn move_due(app: &tauri::App<tauri::test::MockRuntime>) -> bool {
+        let offer = tauri::async_runtime::block_on(desktop_move::move_offer(
+            app.handle().clone(),
+            Some(true),
+        ));
+        serde_json::to_value(offer).unwrap()["due"] == serde_json::json!(true)
+    }
+
+    fn keep(app: &tauri::App<tauri::test::MockRuntime>) {
+        tauri::async_runtime::block_on(desktop_move::keep_self_contained(app.handle().clone()))
+            .unwrap();
+    }
+
+    /// A move that ended with a problem of `kind`, as `move_to_cloud` ends.
+    fn move_ended(app: &tauri::App<tauri::test::MockRuntime>, kind: &'static str) {
+        let mut problem = Problem::with("The move didn't finish.", "for the log".to_owned());
+        problem.kind = Some(kind);
+        desktop_move::note_outcome(app.handle(), &Err(problem));
+    }
+
+    /// The move's screens hold the window from the offer until the person answers it: offered at
+    /// launch, they are on screen; kept here, they are not, and a launch that isn't offered it never is.
+    #[test]
+    fn the_move_holds_the_window_from_its_offer_until_it_is_answered() {
+        let base = temp_root("move-offer-on-screen");
+        let root = base.join("OpenBot");
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+        let config = base.join("config");
+        let app = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+        assert!(move_due(&app));
+        assert!(desktop_move::offered_on_screen(app.handle()));
+        keep(&app);
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+
+        // The next launch isn't offered it: nothing holds the window.
+        let next = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!move_due(&next));
+        assert!(!desktop_move::offered_on_screen(next.handle()));
+    }
+
+    /*
+    FOUND ON 1.2.0-rc.3, a Mac with two older installs of OpenBot on its disk: the shell answered
+    "Move to OpenBot Cloud?" 15.3 seconds after launch (0.25 seconds on another computer), because
+    it walked every one of OpenBot's folders to say how much the move frees before it answered at
+    all, and the window held every start and update for that answer. The question is answered at
+    once; the size is measured on its own and follows.
+    */
+    #[test]
+    fn the_move_question_is_answered_at_once_however_long_sizing_takes() {
+        let base = temp_root("move-offer-at-once");
+        let root = base.join("OpenBot");
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+        let app = launched_at(&root, &base.join("config"), "1.2.0-rc.3");
+        desktop_move::slow_sizing_for_test(app.handle(), std::time::Duration::from_secs(3));
+
+        let asked = std::time::Instant::now();
+        let offer = tauri::async_runtime::block_on(desktop_move::move_offer(
+            app.handle().clone(),
+            Some(true),
+        ));
+        let took = asked.elapsed();
+        let offer = serde_json::to_value(offer).unwrap();
+        assert_eq!(offer["due"], serde_json::json!(true), "{offer}");
+        assert!(
+            took < std::time::Duration::from_secs(1),
+            "the move question took {took:?} to answer: it waited for the size"
+        );
+        // Not known yet: the screen says the move without it.
+        assert_eq!(offer["footprintBytes"], serde_json::Value::Null, "{offer}");
+
+        // The size follows, once it is measured.
+        let size =
+            tauri::async_runtime::block_on(desktop_move::move_footprint(app.handle().clone()));
+        assert!(
+            size.is_some_and(|bytes| bytes > 0),
+            "the installation's files weren't sized: {size:?}"
+        );
+        assert!(asked.elapsed() >= std::time::Duration::from_secs(3));
+        // Measured once a run: asked again, the answer carries it at once.
+        let again = tauri::async_runtime::block_on(desktop_move::move_offer(
+            app.handle().clone(),
+            Some(true),
+        ));
+        assert_eq!(
+            serde_json::to_value(again).unwrap()["footprintBytes"],
+            serde_json::json!(size)
+        );
+    }
+
+    /*
+    FOUND ON 1.2.0-rc.2: the person's move failed its last check five times ("messages: 1331 of
+    1369"). They quit, the move was offered again at the next launch, and they chose Keep to get back
+    to work. 1.2.0-rc.3 fixed the move and said "offer: due false": Keep was on record, so it never
+    offered the move again, and they couldn't find it. A Keep that followed a failed move is offered
+    again at the first launch after an update, once. A plain Keep is not, a finished move never is,
+    and Settings offers the move as it did.
+    */
+    #[test]
+    fn a_keep_after_a_failed_move_is_offered_again_after_an_update() {
+        let base = temp_root("move-offer-again");
+        let root = base.join("OpenBot");
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+
+        // rc.2: offered, the move fails its check, then Keep.
+        let config = base.join("after-failure");
+        let rc2 = launched_at(&root, &config, "1.2.0-rc.2");
+        assert!(move_due(&rc2), "offered at first");
+        move_ended(&rc2, "move-mismatch");
+        assert!(move_due(&rc2), "a failed move is no answer");
+        keep(&rc2);
+        assert!(!move_due(&rc2), "not again in the same release");
+        assert!(desktop_move::offered_in_settings(rc2.handle()));
+        drop(rc2);
+        // rc.3, after the update: offered again.
+        let rc3 = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(move_due(&rc3), "offered again after the update");
+        assert!(move_due(&rc3), "until it is answered");
+        // Keep again: it sticks, in the next release too.
+        keep(&rc3);
+        assert!(!move_due(&rc3));
+        drop(rc3);
+        let released = launched_at(&root, &config, "1.2.0");
+        assert!(!move_due(&released), "offered again once, not every update");
+        assert!(desktop_move::offered_in_settings(released.handle()));
+        drop(released);
+
+        // A plain Keep, or one after a sign-in that didn't finish: never offered again at launch.
+        for (name, ended) in [("plain", None), ("sign-in", Some("sign-in"))] {
+            let config = base.join(name);
+            let rc2 = launched_at(&root, &config, "1.2.0-rc.2");
+            if let Some(kind) = ended {
+                move_ended(&rc2, kind);
+            }
+            keep(&rc2);
+            drop(rc2);
+            let rc3 = launched_at(&root, &config, "1.2.0-rc.3");
+            assert!(
+                !move_due(&rc3),
+                "{name}: a Keep with no failed move before it sticks"
+            );
+            assert!(desktop_move::offered_in_settings(rc3.handle()));
+        }
+
+        // A finished move, after failed ones: never offered again, at launch or in Settings.
+        let config = base.join("moved");
+        let rc2 = launched_at(&root, &config, "1.2.0-rc.2");
+        move_ended(&rc2, "move-mismatch");
+        keep(&rc2);
+        move_ended(&rc2, "move-failed");
+        openbot_desktop_lib::move_to_cloud::record_moved(&config).unwrap();
+        drop(rc2);
+        let rc3 = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!move_due(&rc3), "a finished move is never offered again");
+        assert!(!desktop_move::offered_in_settings(rc3.handle()));
+        drop(rc3);
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
 

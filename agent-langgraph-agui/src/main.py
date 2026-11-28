@@ -25,6 +25,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
 
 from . import chatgpt_models
+from .thought_signatures import SignedChatOpenAI, is_gemini, signed
 from .tool_runtime import (
     ToolAwareAgent,
     billing_refusal,
@@ -257,19 +258,25 @@ def _model(plan_models=None):
     model = run.model or settings.model
     prefix, separator, named = model.partition(":")
     if separator and prefix in MODEL_PROVIDERS:
-        return init_chat_model(
-            model,
-            **_google_genai_kwargs(prefix),
-            **_provider_kwargs(prefix, named, run.effort),
-            **_retries(run),
-        )
-    return init_chat_model(
+        provider, model = prefix, named
+    return _chat_model(
         model,
-        model_provider=provider,
+        provider,
         **_google_genai_kwargs(provider),
         **_provider_kwargs(provider, model, run.effort),
         **_retries(run),
     )
+
+
+def _chat_model(model: str, provider: str, **kwargs):
+    """`init_chat_model`, except that OpenAI-compatible models keep Gemini's thought signatures.
+
+    `init_chat_model` makes an `openai` model as `ChatOpenAI(model=..., **kwargs)`; this makes the
+    same, as `SignedChatOpenAI`, which differs only for a Gemini model (thought_signatures.py).
+    """
+    if provider == "openai":
+        return SignedChatOpenAI(model=model, **kwargs)
+    return init_chat_model(model, model_provider=provider, **kwargs)
 
 
 async def _plan_model():
@@ -332,6 +339,9 @@ async def answer(state: MessagesState):
     try:
         model = await _plan_model()
         messages = model_messages(state["messages"])
+        if is_gemini(model):
+            # Only Gemini can read one: no other provider is sent a call's sealed value.
+            messages = signed(messages, current_tools().signatures)
         if _wants_system_turns_first(model):
             messages = _system_turns_first(messages)
         return {"messages": [await bind_tools(model).ainvoke(messages)]}
@@ -410,8 +420,12 @@ async def plan_models():
     return {"object": "list", "data": [model.as_entry() for model in models]}
 
 
+# No count ends a run. A call the caller owns ends the run on its own, so there a run is one model
+# step; but a deployment's tools are answered here, step after step in one run, and LangGraph's
+# 25 graph steps ended a turn at its twelfth tool call with an error. A person's turn has no step
+# ceiling: it ends when the model answers in words, or when the caller stops the run.
 add_langgraph_fastapi_endpoint(
     app=app,
-    agent=ToolAwareAgent(name="openbot", graph=graph, config={"recursion_limit": 25}),
+    agent=ToolAwareAgent(name="openbot", graph=graph, config={"recursion_limit": sys.maxsize}),
     path="/",
 )
