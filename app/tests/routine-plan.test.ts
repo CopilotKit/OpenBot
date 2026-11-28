@@ -44,6 +44,23 @@ describe("planRoutine", () => {
     expect(plan.runNow).toBe(false);
   });
 
+  test("a given cron is used in place of the form's", () => {
+    const plan = planRoutine(base, "America/New_York", "0 9 */2 * *");
+    if (plan.kind !== "routine") throw new Error("expected a routine");
+    expect(plan.routine.cron).toBe("0 9 */2 * *");
+    expect(plan.routine.timezone).toBe("America/New_York");
+  });
+
+  test("a given cron is the schedule of a goal on a schedule", () => {
+    const plan = planRoutine(
+      { ...base, doneWhen: "Signed" },
+      "UTC",
+      "0 9 */2 * *",
+    );
+    if (plan.kind !== "goal") throw new Error("expected a goal");
+    expect(plan.schedule).toEqual({ cron: "0 9 */2 * *", timezone: "UTC" });
+  });
+
   test("act, event, no outcome: a recurring goal", () => {
     const plan = planRoutine(
       { ...base, starts: "event", eventType: "issues.opened" },

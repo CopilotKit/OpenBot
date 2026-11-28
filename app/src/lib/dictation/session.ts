@@ -1,10 +1,12 @@
 import { MAX_DICTATION_SECONDS } from "@openbot/shared/dictation";
+import { type Failure, failureOf } from "@/lib/load-failure";
 import type { Recording } from "./recording";
 
 export type DictationState = {
   phase: "idle" | "requesting" | "recording" | "transcribing" | "error";
   seconds: number;
-  error?: string;
+  /** Why it stopped, kept whole so a hold is said calmly (lib/load-failure.tsx). */
+  error?: Failure;
   canRetry: boolean;
   stream?: MediaStream;
 };
@@ -66,7 +68,7 @@ export class DictationSession {
       const recording = await this.deps.record((error) => {
         if (generation !== this.generation) return;
         this.cancel();
-        this.update({ ...idle, phase: "error", error: error.message });
+        this.update({ ...idle, phase: "error", error });
       });
       if (generation !== this.generation) {
         recording.cancel();
@@ -86,10 +88,12 @@ export class DictationSession {
       this.update({
         ...idle,
         phase: "error",
-        error:
-          error instanceof Error && error.name === "NotAllowedError"
-            ? "Microphone access was denied. Allow it in your browser and try again."
-            : "Could not start recording. Check your microphone and try again.",
+        error: {
+          message:
+            error instanceof Error && error.name === "NotAllowedError"
+              ? "Microphone access was denied. Allow it in your browser and try again."
+              : "Could not start recording. Check your microphone and try again.",
+        },
       });
     }
   };
@@ -113,7 +117,7 @@ export class DictationSession {
       this.update({
         ...idle,
         phase: "error",
-        error: "Could not finish recording. Please record again.",
+        error: { message: "Could not finish recording. Please record again." },
       });
     }
   };
@@ -148,10 +152,7 @@ export class DictationSession {
         ...this.state,
         phase: "error",
         canRetry: true,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Transcription failed. Please retry.",
+        error: failureOf(error, "Transcription failed. Please retry."),
       });
     }
   }

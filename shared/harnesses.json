@@ -142,6 +142,20 @@
       "webCreate": true
     },
     {
+      "id": "openai-agents-sdk",
+      "name": "OpenAI Agents SDK",
+      "summary": "OpenAI's own. The one that takes a ChatGPT plan instead of a key.",
+      "webSummary": null,
+      "image": "agent-openai-agents",
+      "port": 4216,
+      "healthPath": "/health",
+      "runPath": "",
+      "credential": "chatgpt-plan",
+      "maintainer": "community",
+      "mark": "openai",
+      "webCreate": false
+    },
+    {
       "id": "strands",
       "name": "AWS Strands",
       "summary": "Amazon's. Bedrock first, any model after.",

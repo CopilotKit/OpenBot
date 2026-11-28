@@ -5,7 +5,7 @@ import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 
 /**
- * The version in the sidebar's account row reads whole.
+ * The version in the account row (at the top of the account menu) reads whole.
  *
  * Seen on a Windows update test: the row read "Fresh Clone   main-2…". The name and the version
  * shared the row 4 to 1, and the version was cut short to fit its fifth, which a release's "v1.0.2"
@@ -13,15 +13,14 @@ import { compile } from "tailwindcss";
  * version is now as wide as its words, and the name gives way.
  *
  * Rendered in a real Chromium, because where text is cut is the browser's layout to decide. The row
- * is the real component in the real sidebar parts with the app's stylesheet, at the sidebar's width
- * before anybody drags it (340px) and at the narrowest it can be dragged to (220px).
+ * is the real component with the app's stylesheet, at 340px and at 220px.
  *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/account-version-layout.test.tsx
  *
  * The organization the person works in reads under their name, and has the row's whole width: seen
  * in an end-to-end test, "Ana Lindqvist's organizati..." was cut beside a build's version with
- * nothing to show the rest. The version now sits on the name's line only, and a name that is still
- * cut reads whole in a tooltip, on hover and on keyboard focus alike.
+ * nothing to show the rest. The version now sits on the name's line only. The strip's avatar, which
+ * opens the menu, names the person and the organization in its tooltip.
  *
  * With OPENBOT_APP_SHOTS=<dir> it also saves the row with a build's and a release's version at each
  * width, as account-version-<build|release>-<width>.png, and the row with a long organization in
@@ -220,14 +219,12 @@ async function measured(page: Page) {
 async function organizationLine(page: Page, organization: string) {
   return page.evaluate((organization) => {
     const line = [
-      ...document.querySelectorAll<HTMLElement>(
-        "[data-sidebar=menu-button] span",
-      ),
+      ...document.querySelectorAll<HTMLElement>("[data-slot=account-row] span"),
     ].find(
       (element) =>
         element.children.length === 0 && element.textContent === organization,
     ) as HTMLElement;
-    const button = line.closest("[data-sidebar=menu-button]") as HTMLElement;
+    const button = line.closest("[data-slot=account-row]") as HTMLElement;
     const version = button.querySelector(
       '[data-slot="openbot-version"]',
     ) as HTMLElement;
@@ -256,7 +253,7 @@ async function tooltip(page: Page): Promise<string | null> {
   return popup.innerText();
 }
 
-describe.skipIf(!asked)("the organization in the sidebar's account row", () => {
+describe.skipIf(!asked)("the organization in the account row", () => {
   for (const width of WIDTHS)
     for (const version of BUILDS) {
       test(`at ${width}px, ${ORGANIZATION} has the row's whole width beside ${version}`, async () => {
@@ -277,51 +274,35 @@ describe.skipIf(!asked)("the organization in the sidebar's account row", () => {
       }, 60_000);
     }
 
-  for (const width of WIDTHS) {
-    test(`at ${width}px, a name still cut reads whole on hover and on keyboard focus`, async () => {
-      const page = await open(width, LONG_NAME, BUILDS[2], {
-        organization: LONG_ORGANIZATION,
-      });
-      try {
-        expect((await organizationLine(page, LONG_ORGANIZATION)).cut).toBe(
-          true,
-        );
-        const row = page.locator("[data-sidebar=menu-button]");
-
-        await row.hover();
-        const hovered = await tooltip(page);
-        expect(hovered).toContain(LONG_ORGANIZATION);
-        expect(hovered).toContain(LONG_NAME);
-
-        await page.mouse.move(590, 310);
-        await page
-          .locator('[data-slot="tooltip-content"]')
-          .waitFor({ state: "hidden" });
-        await page.keyboard.press("Tab");
-        expect(
-          await row.evaluate((element) => element === document.activeElement),
-        ).toBe(true);
-        expect(await tooltip(page)).toContain(LONG_ORGANIZATION);
-
-        // Opening the menu puts the tooltip away: it never sits over the menu.
-        await page.keyboard.press("Enter");
-        await page.locator('[role="menu"]').waitFor({ state: "visible" });
-        await page
-          .locator('[data-slot="tooltip-content"]')
-          .waitFor({ state: "hidden" });
-      } finally {
-        await page.close();
-      }
-    }, 60_000);
-  }
-
-  test("a name that reads whole offers no tooltip", async () => {
-    const page = await open(340, "Sam Rivera", RELEASE, {
-      organization: "Acme",
+  /*
+   * The strip's avatar shows no name, so its tooltip always names the person and the organization,
+   * on hover and on keyboard focus alike, and goes when the menu opens over it.
+   */
+  test("the strip's avatar names the person and the organization in its tooltip", async () => {
+    const page = await open(340, LONG_NAME, BUILDS[2], {
+      organization: LONG_ORGANIZATION,
     });
     try {
-      await page.locator("[data-sidebar=menu-button]").hover();
-      expect(await tooltip(page)).toBeNull();
+      const avatar = page.locator("button[aria-haspopup]");
+
+      await avatar.hover();
+      const hovered = await tooltip(page);
+      expect(hovered).toContain(LONG_ORGANIZATION);
+      expect(hovered).toContain(LONG_NAME);
+
+      await page.mouse.move(590, 310);
+      await page
+        .locator('[data-slot="tooltip-content"]')
+        .waitFor({ state: "hidden" });
+      await avatar.focus();
+      expect(await tooltip(page)).toContain(LONG_ORGANIZATION);
+
+      // Opening the menu puts the tooltip away: it never sits over the menu.
+      await page.keyboard.press("Enter");
+      await page.locator('[role="menu"]').waitFor({ state: "visible" });
+      await page
+        .locator('[data-slot="tooltip-content"]')
+        .waitFor({ state: "hidden" });
     } finally {
       await page.close();
     }
@@ -356,7 +337,7 @@ describe.skipIf(!asked)("the organization in the sidebar's account row", () => {
                     path: join(shots, `${name}.png`),
                     clip: { x: 0, y: 0, width: 600, height: 64 },
                   });
-                  await page.locator("[data-sidebar=menu-button]").hover();
+                  await page.locator("button[aria-haspopup]").hover();
                   if (await tooltip(page))
                     await page.screenshot({
                       path: join(shots, `${name}-tooltip.png`),
@@ -376,7 +357,7 @@ describe.skipIf(!asked)("the organization in the sidebar's account row", () => {
   );
 });
 
-describe.skipIf(!asked)("the version in the sidebar's account row", () => {
+describe.skipIf(!asked)("the version in the account row", () => {
   for (const width of WIDTHS) {
     for (const version of BUILDS) {
       test(`at ${width}px, ${version} reads whole and the long name gives way`, async () => {

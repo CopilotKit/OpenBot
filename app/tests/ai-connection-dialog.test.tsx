@@ -10,6 +10,7 @@ import {
   ReplaceAiConnectionBody,
 } from "@/lib/api/generated/models/models.zod";
 import { personBody } from "./accounts-api";
+import { still } from "./page-still";
 
 /**
  * Settings → General → AI model changes the AI connection in the app, with OpenBot running.
@@ -340,7 +341,7 @@ async function style(page: Page) {
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
   // A dialog scales in: looked at once it is still.
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(
@@ -401,7 +402,13 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
       test(`a refused key says why and changes nothing; a good one connects, in ${engine}, ${theme}`, async () => {
         const server = new FakeServer();
         const window = WIDE;
-        const page = await open("/settings", server, engine, theme, window);
+        const page = await open(
+          "/settings/providers",
+          server,
+          engine,
+          theme,
+          window,
+        );
         try {
           const row = page.getByRole("button", {
             name: /OpenAI.*Uses your OpenAI API key\./,
@@ -412,6 +419,10 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
 
           const dialog = page.getByRole("dialog");
           await dialog.getByText("AI connection", { exact: true }).waitFor();
+          // Styled before anything in it is pressed, screenshots or not: unstyled, the dialog is
+          // not lifted over the modal's backdrop, which then takes the press, as it never does in
+          // the app.
+          await style(page);
           await expect(
             dialog.getByText("API key", { exact: true }).count(),
           ).resolves.toBe(1);
@@ -430,7 +441,8 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
             "Anthropic",
             "Google Gemini",
             "xAI",
-            "Unbiased AI",
+            "TrustedRouter",
+            "Privatemode",
             "Any OpenAI-compatible endpoint",
           ]);
           expect(await measured(page)).toEqual(FINE);
@@ -500,7 +512,13 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
           { provider: "anthropic", login: "api-key", endpointHost: null },
         ],
       };
-      const page = await open("/settings", server, engine, "light", WIDE);
+      const page = await open(
+        "/settings/providers",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
       try {
         await page.getByRole("button", { name: /^Anthropic/ }).click();
         const dialog = page.getByRole("dialog");
@@ -530,7 +548,13 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
     for (const theme of THEMES)
       test(`at a phone's width the dialog fits, in ${engine}, ${theme}`, async () => {
         const server = new FakeServer();
-        const page = await open("/settings", server, engine, theme, PHONE);
+        const page = await open(
+          "/settings/providers",
+          server,
+          engine,
+          theme,
+          PHONE,
+        );
         try {
           await page.getByRole("button", { name: /^OpenAI/ }).click();
           const dialog = page.getByRole("dialog");

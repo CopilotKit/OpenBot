@@ -18,11 +18,24 @@ import { EASE_OUT } from "@/lib/motion";
  * card) is drawn at the top of the sheet as well. A Bot's screen opens itself while the Bot works,
  * and on a narrow window that sheet used to hide the approval the Bot then stopped for, until the
  * person thought to close it. Beside the main pane it is already in view, and is not repeated.
+ *
+ * A caller that opens a detail by itself can tell whether it would be a sheet over the main pane
+ * (`detailFitsBeside`, `onRoomChange`), so it can give way to what the main pane asks of the person.
  */
 
 const ANIMATION_DURATION_SECONDS = 0.3;
 const DEFAULT_DETAIL_WIDTH = 400;
 const MIN_MAIN_WIDTH = 400;
+
+/**
+ * Whether a detail this wide opens beside the main pane in this much room, or as a sheet over it.
+ */
+export function detailFitsBeside(
+  room: number,
+  detailWidth: number = DEFAULT_DETAIL_WIDTH,
+): boolean {
+  return room >= detailWidth + MIN_MAIN_WIDTH;
+}
 
 /**
  * The content overlaps the tail of the pane rather than following it.
@@ -40,6 +53,7 @@ export function DetailPanel({
   detail,
   detailWidth = DEFAULT_DETAIL_WIDTH,
   waiting,
+  onRoomChange,
   children,
 }: {
   open: boolean;
@@ -51,17 +65,23 @@ export function DetailPanel({
   detailWidth?: number;
   /** What in the main pane waits on the person: drawn atop the sheet, which would cover it. */
   waiting?: ReactNode;
+  /** The width the main pane and the detail share, as it is measured and whenever it changes. */
+  onRoomChange?: (width: number) => void;
   children: ReactNode;
 }) {
   // Reduced motion keeps the fade, which explains the change, and drops the movement.
   const shouldReduceMotion = useReducedMotion();
   const container = useRef<HTMLDivElement>(null);
   const [overlay, setOverlay] = useState(true);
+  const reportRoom = useRef(onRoomChange);
+  reportRoom.current = onRoomChange;
   useLayoutEffect(() => {
     const element = container.current;
     if (!element) return;
-    const measure = (width: number) =>
-      setOverlay(width < detailWidth + MIN_MAIN_WIDTH);
+    const measure = (width: number) => {
+      setOverlay(!detailFitsBeside(width, detailWidth));
+      reportRoom.current?.(width);
+    };
     measure(element.getBoundingClientRect().width);
     const observer = new ResizeObserver(([entry]) => {
       if (entry) measure(entry.contentRect.width);

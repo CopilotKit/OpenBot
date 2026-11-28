@@ -50,8 +50,8 @@ const cloudProviders = [
   {
     id: "google",
     name: "Google Gemini",
-    // Google's guidelines allow only "Sign in with Google" beside its G.
-    signsInWith: "Google",
+    // Gemini takes an API key only: no sign-in.
+    signsInWith: null,
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     model: "gemini-3.8-flash",
     keyUrl: "https://aistudio.google.com/apikey",
@@ -70,18 +70,28 @@ const cloudProviders = [
 ];
 
 /** Signs in through a device authorization that mints an API key, then uses it like a typed one. */
-const unbiased = {
-  id: "unbiased",
-  name: "Unbiased AI",
-  baseUrl: "https://api.unbiased.ai/v1",
-  model: "pareto",
-  keyUrl: "https://platform.unbiased.ai/dashboard/keys",
-  keyLink: "Get an Unbiased AI API key",
+const trustedRouter = {
+  id: "trustedrouter",
+  name: "TrustedRouter",
+  baseUrl: "https://api.trustedrouter.com/v1",
+  model: "anthropic/claude-sonnet-5.5",
+  keyUrl: "https://trustedrouter.com/console/api-keys",
+  keyLink: "Get a TrustedRouter API key",
+};
+
+/** A hosted endpoint with an API key and no sign-in. */
+const privatemode = {
+  id: "privatemode",
+  name: "Privatemode",
+  baseUrl: "https://proxyless-api.privatemode.ai/v1",
+  model: "glm-latest",
+  keyUrl: "https://portal.privatemode.ai",
+  keyLink: "Get a Privatemode API key",
 };
 
 const allProviders: Provider[] = [
   ...providers,
-  ...[...cloudProviders, unbiased].map(
+  ...[...cloudProviders, trustedRouter, privatemode].map(
     (provider): Provider => ({
       id: provider.id,
       name: provider.name,
@@ -127,6 +137,10 @@ mock.module("./Mark", () => ({
   // vendored file, which needs Vite's glob.
   ButtonMark: ({ id }: { id: string | null }) =>
     id ? <img alt="" data-mark={id} /> : null,
+  // A cloud's mark, named, as OpenBot for Business's Self-Hosted row lists them.
+  MarkImage: ({ id, name }: { id: string; name: string }) => (
+    <img alt={name} data-mark={id} />
+  ),
 }));
 
 const { ProviderPicker } = await import("./ProviderPicker");
@@ -198,6 +212,210 @@ async function pick(view: ReturnType<typeof render>, name: RegExp) {
   await userEvent.click(await view.findByRole("radio", { name }));
 }
 
+test("provider catalogue scrolls separately from the anchored selection and actions", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return allProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = render(
+    <ProviderPicker
+      chosen={null}
+      held={{}}
+      root="/tmp/openbot-provider-root"
+      onBack={() => {}}
+      onChoose={() => {}}
+      failure={<p>Start needs another attempt.</p>}
+      status={<p>Setting up OpenBot meanwhile.</p>}
+    />,
+  );
+  await view.findByRole("radio", { name: /^OpenAI-compatible/ });
+  const sheet = view
+    .getByRole("heading", { name: "Connect your AI" })
+    .closest<HTMLElement>(".sheet");
+  const body = sheet?.querySelector<HTMLElement>(":scope > .setup-body");
+  const footer = view
+    .getByRole("button", { name: "Continue" })
+    .closest<HTMLElement>(".setup-footer");
+  if (!sheet || !body || !footer) {
+    throw new Error("Provider layout must have a sheet, body and footer.");
+  }
+  expect(sheet.classList.contains("provider-layout")).toBe(true);
+  expect(
+    sheet?.querySelector(":scope > .setup-header-block h1"),
+  ).not.toBeNull();
+  expect(body).not.toBeNull();
+  expect(footer?.parentElement).toBe(sheet);
+  expect(
+    view.getByRole("button", { name: "Back" }).closest(".setup-footer"),
+  ).toBe(footer);
+  expect(view.getByText("Setting up OpenBot meanwhile.").parentElement).toBe(
+    footer,
+  );
+  expect(view.getByText("Start needs another attempt.").parentElement).toBe(
+    body,
+  );
+  expect(
+    view.getByRole("group", { name: "Model provider" }).parentElement,
+  ).toBe(body);
+  expect(body?.querySelector(".setup-panel")).toBeNull();
+
+  body.scrollTop = 100;
+  await pick(view, /^OpenAI-compatible/);
+  expect(body.scrollTop).toBe(0);
+  expect(
+    document.activeElement ===
+      view.getByRole("radio", { name: /^OpenAI-compatible/ }),
+  ).toBe(true);
+  expect(
+    view
+      .getByRole("group", { name: "Model provider" })
+      .closest(".setup-provider-identity")?.parentElement,
+  ).toBe(sheet);
+  expect(
+    view
+      .getByLabelText("Base URL")
+      .closest(".setup-content.setup-panel.chosen-provider")?.parentElement,
+  ).toBe(body);
+  await userEvent.click(view.getByText("Advanced compatible endpoint options"));
+  expect(
+    view
+      .getByLabelText("Container Base URL, if different")
+      .closest(".setup-body"),
+  ).toBe(body);
+  await userEvent.click(
+    view.getByRole("button", { name: "Choose a different provider" }),
+  );
+  expect(
+    view.getByRole("group", { name: "Model provider" }).parentElement,
+  ).toBe(body);
+  expect(body?.querySelector(".setup-panel")).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Continue" }).closest(".setup-footer"),
+  ).toBe(footer);
+});
+
+for (const returnKey of ["{Enter}", "{Escape}"]) {
+  test(`returning to the catalogue with ${returnKey} restores the previous provider focus`, async () => {
+    invokeHandler = async (command) => {
+      if (command === "providers") return providers;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const choices: unknown[] = [];
+    const view = await renderPicker((choice) => choices.push(choice));
+    const user = userEvent.setup({ document });
+
+    // Repeat with both providers: the return target must follow the latest choice.
+    for (const name of [/^Anthropic/, /^OpenAI/, /^Anthropic/]) {
+      const radio = await view.findByRole("radio", { name });
+      radio.focus();
+      await user.keyboard(" ");
+      expect(document.activeElement === view.getByRole("radio", { name })).toBe(
+        true,
+      );
+      expect(view.getAllByRole("radio")).toHaveLength(1);
+      expect(
+        view
+          .getByRole("tab", { name: "Sign in with my plan" })
+          .getAttribute("aria-selected"),
+      ).toBe("true");
+
+      view.getByRole("button", { name: "Choose a different provider" }).focus();
+      await user.keyboard(returnKey);
+      expect(view.getAllByRole("radio")).toHaveLength(providers.length);
+      expect(document.activeElement === view.getByRole("radio", { name })).toBe(
+        true,
+      );
+      expect(
+        view
+          .getAllByRole("radio")
+          .every((input) => !(input as HTMLInputElement).checked),
+      ).toBe(true);
+    }
+    expect(choices).toEqual([]);
+    expect(invokeCalls.map(({ command }) => command)).toEqual(["providers"]);
+  });
+}
+
+test("provider focus restoration does not steal focus from fields or unrelated updates", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const onChoose = () => {};
+  const view = await renderPicker(onChoose);
+  const radio = await view.findByRole("radio", { name: /^Anthropic/ });
+  const back = view.getByRole("button", { name: "Back" });
+  back.focus();
+  // A selection dispatched while another control owns focus must not claim it.
+  fireEvent.click(radio);
+  expect(document.activeElement === back).toBe(true);
+  await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+  const key = view.getByLabelText("Anthropic API key");
+  await userEvent.type(key, "test-key");
+  view.rerender(
+    <ProviderPicker
+      chosen={null}
+      held={{}}
+      root=" /tmp/openbot-provider-root "
+      onBack={() => {}}
+      onChoose={onChoose}
+      status="Updated setup progress"
+    />,
+  );
+  expect(document.activeElement === key).toBe(true);
+  expect((key as HTMLInputElement).value).toBe("test-key");
+  await userEvent.setup({ document }).keyboard("{Escape}");
+  expect(view.getAllByRole("radio")).toHaveLength(1);
+  expect(document.activeElement === key).toBe(true);
+});
+
+test("plan wait, signed-in confirmation and API key share one body with stable footer actions", async () => {
+  const finished = deferred<string>();
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    if (command === "finish_chatgpt_sign_in") return finished.promise;
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  await pick(view, /^OpenAI/);
+  const identity = view.getByRole("group", { name: "Model provider" });
+  const footer = view
+    .getByRole("button", { name: "Continue" })
+    .closest<HTMLElement>(".setup-footer");
+  const panel = view.container.querySelector(
+    ".setup-body > .setup-content.setup-panel.chosen-provider",
+  );
+  expect(panel).not.toBeNull();
+  expect(footer).not.toBeNull();
+  if (!footer) throw new Error("Provider actions must have a footer.");
+  expect(identity.closest(".setup-provider-identity")?.parentElement).toBe(
+    footer.parentElement,
+  );
+  expect(identity.closest(".setup-body")).toBeNull();
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
+  );
+  expect(
+    (await view.findByText("Waiting for you to approve it…")).closest(
+      ".chosen-provider",
+    ),
+  ).toBe(panel);
+  await act(async () => finished.resolve("chatgpt-token"));
+  expect(
+    (await view.findByText(/Signed in to OpenAI/)).closest(".chosen-provider"),
+  ).toBe(panel);
+  await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+  expect(
+    view.getByLabelText("OpenAI API key").closest(".chosen-provider"),
+  ).toBe(panel);
+  expect(view.getByRole("group", { name: "Model provider" })).toBe(identity);
+  expect(
+    view.getByRole("button", { name: "Continue" }).closest(".setup-footer"),
+  ).toBe(footer);
+});
+
 /*
  * Every "Sign in with" button carries the mark of the provider it signs in to, as the web app's
  * sign-in buttons do. They carried none, and Google's and xAI's rows had no mark to carry.
@@ -206,14 +424,6 @@ test("every Sign in with button carries its provider's mark", async () => {
   const marked: Provider[] = [
     { ...providers[0], mark: "openai" },
     { ...providers[1], mark: "anthropic" },
-    {
-      id: "google",
-      name: "Google Gemini",
-      summary: "Use an API key or sign in.",
-      logins: ["endpoint", "oauth"],
-      mark: "google-color",
-      caution: null,
-    },
     {
       id: "xai",
       name: "xAI",
@@ -238,9 +448,7 @@ test("every Sign in with button carries its provider's mark", async () => {
     const name =
       provider.id === "anthropic"
         ? "Sign in again with Anthropic"
-        : provider.id === "google"
-          ? "Sign in with Google"
-          : `Sign in with ${provider.name}`;
+        : `Sign in with ${provider.name}`;
     const button = view.getByRole("button", { name });
     expect(button.querySelector("img")?.getAttribute("data-mark")).toBe(
       provider.mark,
@@ -333,26 +541,28 @@ test("a finished sign-in shows its tick for a second, and choosing another row t
 });
 
 /*
- * A first sign-in to a plan downloads that plan's image, which Install leaves to the plan. The
- * native side reports the download on the `images` row as Install does, and the model screen shows
- * it as Install shows a download, its size and all, until the sign-in's link is ready.
+ * A first sign-in to a ChatGPT plan downloads that plan's image, which runs the login and which
+ * Install leaves to the plan. The native side reports the download on the `images` row as Install
+ * does, and the model screen shows it as Install shows a download, its size and all, until the
+ * sign-in's link is ready.
  */
 test("a plan sign-in that downloads its image shows the download as Install does", async () => {
   const begun = deferred<string>();
   invokeHandler = async (command) => {
     if (command === "providers") return providers;
-    if (command === "begin_claude_sign_in") return begun.promise;
+    if (command === "begin_chatgpt_sign_in") return begun.promise;
+    if (command === "finish_chatgpt_sign_in") return deferred<string>().promise;
     if (command === "cancel_chatgpt_sign_in") return null;
     throw new Error(`unexpected command ${command}`);
   };
   const view = await renderPicker(() => {});
-  await pick(view, /Anthropic/);
+  await pick(view, /OpenAI/);
   await userEvent.click(
-    view.getByRole("button", { name: "Sign in with Anthropic" }),
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
   );
   await waitFor(() =>
     expect(
-      invokeCalls.some((call) => call.command === "begin_claude_sign_in"),
+      invokeCalls.some((call) => call.command === "begin_chatgpt_sign_in"),
     ).toBe(true),
   );
   await act(async () => {
@@ -392,7 +602,7 @@ test("a plan sign-in that downloads its image shows the download as Install does
   expect(view.queryByRole("list", { name: "Sign-in download" })).toBeNull();
   expect(view.getByRole("status").textContent).toBe("OpenBot is downloaded.");
   await act(async () => {
-    begun.resolve("https://claude.test");
+    begun.resolve("https://auth.openai.test");
   });
 });
 
@@ -508,22 +718,24 @@ test("a ChatGPT sign-in that finished is not cancelled when the screen moves on"
   ).toBe(false);
 });
 
+/*
+ * Claude's plan sign-in used to hand back a code to paste here. It now comes back to Desktop on
+ * its own, as ChatGPT's does: no code box, and the link stays shown while it waits.
+ */
 test.each([
   {
     name: "Anthropic",
     signIn: "claude",
-    says: "Anthropic opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.",
-    asksForCode: true,
+    says: "Anthropic opens in your browser. You won't type anything here or need an API key.",
   },
   {
     name: "OpenAI",
     signIn: "chatgpt",
     says: "OpenAI opens in your browser. You won't type anything here or need an API key.",
-    asksForCode: false,
   },
 ])(
-  "$name's plan sign-in says beforehand whether it will ask for a code",
-  async ({ name, signIn, says, asksForCode }) => {
+  "$name's plan sign-in finishes on its own, with no code to paste",
+  async ({ name, signIn, says }) => {
     const finished = deferred<string>();
     invokeHandler = async (command) => {
       if (command === "providers") return providers;
@@ -543,11 +755,50 @@ test.each([
       view.getByRole("button", { name: `Sign in with ${name}` }),
     );
     await view.findByText("Open the sign-in page");
-    expect(Boolean(view.queryByLabelText("Code from your browser"))).toBe(
-      asksForCode,
+    expect(view.queryByLabelText("Code from your browser")).toBeNull();
+    expect(view.getByRole("status").textContent).toBe(
+      "Waiting for you to approve it…",
     );
+    // The current wait must appear before the secondary reopen link.
+    expect(
+      view.getByRole("status").nextElementSibling ===
+        view
+          .getByRole("link", { name: "Open the sign-in page" })
+          .closest(".fallback"),
+    ).toBe(true);
+    // The browser comes back: signed in, with nothing typed.
+    await act(async () => finished.resolve(`synthetic-${signIn}-plan-token`));
+    await view.findByText(new RegExp(`Signed in to ${name}`));
+    expect(
+      invokeCalls.find((call) => call.command === `finish_${signIn}_sign_in`)
+        ?.args,
+    ).toBeUndefined();
   },
 );
+
+test("leaving a Claude plan sign-in that waits for the browser stops it", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_claude_sign_in") return "https://sign-in.example";
+    if (command === "finish_claude_sign_in") return deferred<string>().promise;
+    if (command === "cancel_claude_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  await pick(view, /Anthropic/);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with Anthropic" }),
+  );
+  await view.findByText("Open the sign-in page");
+  await userEvent.click(
+    view.getByRole("button", { name: "Choose a different provider" }),
+  );
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "cancel_claude_sign_in"),
+    ).toBe(true),
+  );
+});
 
 test("a saved provider-scoped plan session enables continue without exposing a token", async () => {
   const choices: unknown[] = [];
@@ -570,7 +821,7 @@ test("a saved provider-scoped plan session enables continue without exposing a t
 
   await pick(view, /OpenAI/);
   expect(view.getByText(/A saved OpenAI sign-in will be checked/)).toBeTruthy();
-  expect(view.getByText(/Your Bot will use LangChain/)).toBeTruthy();
+  expect(view.getByText(/Your Bot will use OpenAI Agents SDK/)).toBeTruthy();
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 
   expect(choices).toEqual([
@@ -618,15 +869,6 @@ for (const provider of providers) {
         await userEvent.click(
           view.getByRole("button", { name: `Sign in with ${provider.name}` }),
         );
-        if (provider.id === "anthropic") {
-          await userEvent.type(
-            await view.findByLabelText("Code from your browser"),
-            "synthetic-code",
-          );
-          await userEvent.click(
-            view.getByRole("button", { name: "Finish signing in" }),
-          );
-        }
       }
       await view.findByText(
         new RegExp(
@@ -988,61 +1230,68 @@ test("recorded Claude plan intent survives reopening beside an unrelated saved A
   ).toBeTruthy();
 });
 
-test("a saved compatible endpoint restores public fields and requests its scoped key", async () => {
-  invokeHandler = async (command) => {
-    if (command === "providers") return endpointProviders;
-    throw new Error(`unexpected protected command ${command}`);
-  };
-  const user = userEvent.setup({ document });
-  const choices: unknown[] = [];
-  const view = await renderPickerWithHeld(
-    {
-      OPENAI_BASE_URL: "https://models.example/v1",
-      OPENAI_CONTAINER_BASE_URL: "http://ollama:11434/v1",
-      BOT_MODEL: "local-model",
-      saved: {
-        model: "compatible-endpoint",
-        modelApiKeys: { compatible: true },
+// The second is the address of a provider OpenBot no longer offers: it resumes as any other endpoint.
+test.each(["https://models.example/v1", "https://api.retired-ai.example/v1"])(
+  "a saved compatible endpoint at %s restores public fields and requests its scoped key",
+  async (baseUrl) => {
+    invokeHandler = async (command) => {
+      if (command === "providers") return endpointProviders;
+      throw new Error(`unexpected protected command ${command}`);
+    };
+    const user = userEvent.setup({ document });
+    const choices: unknown[] = [];
+    const view = await renderPickerWithHeld(
+      {
+        OPENAI_BASE_URL: baseUrl,
+        OPENAI_CONTAINER_BASE_URL: "http://ollama:11434/v1",
+        BOT_MODEL: "local-model",
+        saved: {
+          model: "compatible-endpoint",
+          modelApiKeys: { compatible: true },
+        },
       },
-    },
-    (choice) => choices.push(choice),
-  );
-  expect(await view.findByLabelText("Base URL")).toHaveProperty(
-    "value",
-    "https://models.example/v1",
-  );
-  expect(view.getByLabelText("Model name")).toHaveProperty(
-    "value",
-    "local-model",
-  );
-  expect(
-    view.getByLabelText("API key, if the endpoint needs one"),
-  ).toHaveProperty("value", "");
-  expect(view.getByText(/A saved API key for this endpoint/)).toBeTruthy();
-  await user.click(view.getByRole("button", { name: "Continue" }));
-  expect(choices).toEqual([
-    {
+      (choice) => choices.push(choice),
+    );
+    expect(await view.findByLabelText("Base URL")).toHaveProperty(
+      "value",
+      baseUrl,
+    );
+    expect(view.getByLabelText("Model name")).toHaveProperty(
+      "value",
+      "local-model",
+    );
+    expect(
+      view.getByLabelText("API key, if the endpoint needs one"),
+    ).toHaveProperty("value", "");
+    expect(view.getByText(/A saved API key for this endpoint/)).toBeTruthy();
+    await user.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices).toEqual([
+      {
+        provider: "openai-compatible",
+        login: "endpoint",
+        baseUrl,
+        containerBaseUrl: "http://ollama:11434/v1",
+        model: "local-model",
+        saved: true,
+      },
+    ]);
+    expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
+
+    await user.clear(view.getByLabelText("Base URL"));
+    await user.type(
+      view.getByLabelText("Base URL"),
+      "https://other.example/v1",
+    );
+    expect(view.queryByText(/A saved API key for this endpoint/)).toBeNull();
+    await user.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices[1]).toEqual({
       provider: "openai-compatible",
       login: "endpoint",
-      baseUrl: "https://models.example/v1",
-      containerBaseUrl: "http://ollama:11434/v1",
+      baseUrl: "https://other.example/v1",
       model: "local-model",
-      saved: true,
-    },
-  ]);
-  expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
-
-  await user.clear(view.getByLabelText("Base URL"));
-  await user.type(view.getByLabelText("Base URL"), "https://other.example/v1");
-  expect(view.queryByText(/A saved API key for this endpoint/)).toBeNull();
-  await user.click(view.getByRole("button", { name: "Continue" }));
-  expect(choices[1]).toEqual({
-    provider: "openai-compatible",
-    login: "endpoint",
-    baseUrl: "https://other.example/v1",
-    model: "local-model",
-  });
-});
+    });
+  },
+);
 
 test("saved endpoint key can be explicitly replaced or omitted", async () => {
   invokeHandler = async (command) => {
@@ -1161,7 +1410,7 @@ test("OAuth tab switch cancels a late authorization before opening the browser",
   );
 });
 
-for (const provider of cloudProviders) {
+for (const provider of cloudProviders.filter((row) => row.signsInWith)) {
   test(`${provider.name} OAuth completes through native storage without exposing tokens`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers")
@@ -1217,7 +1466,60 @@ for (const provider of cloudProviders) {
   });
 }
 
-for (const provider of [...cloudProviders, unbiased]) {
+/*
+ * Gemini takes an API key only. A Google sign-in saved before that is not resumed: the screen says
+ * it ended, and its one button opens Google Gemini's API key, which then goes on as any key does.
+ */
+test("a saved Google sign-in says it ended and its button opens Gemini's API key", async () => {
+  const { recordedModel } = await import("./ProviderPicker");
+  const held: HeldConfiguration = {
+    OPENAI_BASE_URL: "http://127.0.0.1:3001/api/model-provider/v1",
+    BOT_MODEL: "gemini-3-pro",
+    saved: { model: "google-oauth", modelSessions: { google: true } },
+  };
+  expect(recordedModel(held)).toBeNull();
+  invokeHandler = async (command) => {
+    if (command === "providers") return allProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const choices: unknown[] = [];
+  const view = await renderPickerWithHeld(held, (choice) =>
+    choices.push(choice),
+  );
+  const notice = await view.findByRole("alert");
+  expect(notice.textContent).toContain("Google sign-in for Gemini has ended");
+  expect(notice.textContent).toContain(
+    "Add a Gemini API key to keep your Bots running on Gemini.",
+  );
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(
+    await view.findByRole("button", { name: "Add a Gemini API key" }),
+  );
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByRole("tab", { name: "Sign in" })).toBeNull();
+  expect(view.getByLabelText("Model name")).toHaveProperty(
+    "value",
+    "gemini-3.8-flash",
+  );
+  await user.type(
+    view.getByLabelText("Google Gemini API key"),
+    "synthetic-gemini-key",
+  );
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  expect(choices).toEqual([
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+      model: "gemini-3.8-flash",
+      apiKey: "synthetic-gemini-key",
+    },
+  ]);
+  // Nothing about a Google sign-in reached the native side.
+  expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
+});
+
+for (const provider of [...cloudProviders, trustedRouter, privatemode]) {
   test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers") return allProviders;
@@ -1402,100 +1704,6 @@ for (const provider of [...cloudProviders, unbiased]) {
   });
 }
 
-test("an Unbiased AI sign-in mints an API key that goes on as its endpoint credential", async () => {
-  const finish = deferred<string>();
-  invokeHandler = async (command) => {
-    if (command === "providers")
-      return allProviders.map((row) =>
-        row.id === "unbiased" ? { ...row, logins: ["oauth", "endpoint"] } : row,
-      );
-    if (command === "begin_model_oauth")
-      return {
-        attemptId: "unbiased-attempt",
-        url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK",
-        userCode: "BCDF-GHJK",
-      };
-    if (command === "plugin:opener|open_url") return null;
-    if (command === "finish_model_oauth") return finish.promise;
-    throw new Error(`unexpected command ${command}`);
-  };
-  const choices: unknown[] = [];
-  const view = await renderPicker((choice) => choices.push(choice));
-  const user = userEvent.setup({ document: view.container.ownerDocument });
-  await user.click(await view.findByRole("radio", { name: /Unbiased AI/ }));
-  // Sign-in is the way in by default, with the gateway's model already named.
-  expect(
-    view.getByRole("tab", { name: "Sign in" }).getAttribute("aria-selected"),
-  ).toBe("true");
-  expect(view.getByLabelText("Model name")).toHaveProperty("value", "pareto");
-  await user.click(
-    view.getByRole("button", { name: "Sign in with Unbiased AI" }),
-  );
-  // The code is on screen for matching against the approval page, beside the link to it.
-  await view.findByText("BCDF-GHJK");
-  expect(invokeCalls).toContainEqual({
-    command: "plugin:opener|open_url",
-    args: { url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK" },
-  });
-  await act(async () => {
-    finish.resolve("sk_pareto_synthetic");
-  });
-  await view.findByText("Signed in to Unbiased AI.");
-  await waitFor(() => expect(choices).toHaveLength(1), { timeout: 4000 });
-  expect(choices).toEqual([
-    {
-      provider: "openai-compatible",
-      login: "endpoint",
-      apiKey: "sk_pareto_synthetic",
-      baseUrl: "https://api.unbiased.ai/v1",
-      model: "pareto",
-    },
-  ]);
-  // Held, never shown.
-  expect(view.container.textContent).not.toContain("sk_pareto_synthetic");
-});
-
-test("a refused Unbiased AI sign-in shows why, submits nothing and keeps no key", async () => {
-  invokeHandler = async (command) => {
-    if (command === "providers")
-      return allProviders.map((row) =>
-        row.id === "unbiased" ? { ...row, logins: ["oauth", "endpoint"] } : row,
-      );
-    if (command === "begin_model_oauth")
-      return {
-        attemptId: "unbiased-attempt",
-        url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK",
-        userCode: "BCDF-GHJK",
-      };
-    if (command === "plugin:opener|open_url") return null;
-    if (command === "finish_model_oauth")
-      throw new Error(
-        "Unbiased AI sign-in was not approved: the user denied this authorization.",
-      );
-    throw new Error(`unexpected command ${command}`);
-  };
-  const choices: unknown[] = [];
-  const view = await renderPicker((choice) => choices.push(choice));
-  const user = userEvent.setup({ document: view.container.ownerDocument });
-  await user.click(await view.findByRole("radio", { name: /Unbiased AI/ }));
-  await user.click(
-    view.getByRole("button", { name: "Sign in with Unbiased AI" }),
-  );
-  await view.findByText(/not approved: the user denied this authorization/);
-  // The wait is over: no code, no link, and the button offers a fresh start, not "again".
-  expect(view.queryByText("BCDF-GHJK")).toBeNull();
-  expect(view.queryByText("Signed in to Unbiased AI.")).toBeNull();
-  expect(
-    view.getByRole("button", { name: "Sign in with Unbiased AI" }),
-  ).toBeTruthy();
-  expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
-    "disabled",
-    true,
-  );
-  await new Promise((settle) => setTimeout(settle, 1200));
-  expect(choices).toEqual([]);
-});
-
 test("a chosen provider stands alone, and Change or Escape shows them all again", async () => {
   invokeHandler = async (command) => {
     if (command === "providers") return providers;
@@ -1580,4 +1788,68 @@ test("the Claude plan's caution is said with the plan sign-in, not under the API
     view.getByRole("tab", { name: "Sign in with my plan" }),
   );
   expect(view.getByText(/separate monthly pool/)).toBeTruthy();
+});
+
+/*
+ * What runs behind the AI step is said at the sidebar's foot, not under the form: nothing in the
+ * step moves as it comes and goes. The step's own line about it stays in the page.
+ */
+test("the background install is at the sidebar's foot, and never in the page", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected command ${command}`);
+  };
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <ProviderPicker
+        chosen={null}
+        held={{}}
+        root="/tmp/openbot-provider-root"
+        onBack={() => {}}
+        onChoose={() => {}}
+        status={<p>Setting up OpenBot meanwhile.</p>}
+        background={<p>Installing OpenBot in the background.</p>}
+      />,
+    );
+  });
+  const page = view
+    .getByRole("heading", { name: "Connect your AI" })
+    .closest(".sheet") as HTMLElement;
+  const behind = view.getByText("Installing OpenBot in the background.");
+  expect(behind.closest("aside.rail > .rail-foot")).not.toBeNull();
+  expect(page.contains(behind)).toBe(false);
+  expect(page.previousElementSibling).toBe(behind.closest("aside.rail"));
+  expect(page.contains(view.getByText("Setting up OpenBot meanwhile."))).toBe(
+    true,
+  );
+  // The sections head the sidebar, with AI the step it is on.
+  expect(
+    view
+      .getByRole("list", { name: "Setup" })
+      .querySelector('[aria-current="step"]')?.textContent,
+  ).toBe("AI");
+});
+
+test("refreshing the AI connection has no sections and no foot, with nothing behind it", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected command ${command}`);
+  };
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <ProviderPicker
+        chosen={null}
+        held={{}}
+        root="/tmp/openbot-provider-root"
+        returning
+        onBack={() => {}}
+        onChoose={() => {}}
+      />,
+    );
+  });
+  await view.findByRole("heading", { name: "Refresh your AI connection" });
+  expect(view.queryByRole("list", { name: "Setup" })).toBeNull();
+  expect(view.container.querySelector(".rail-foot")).toBeNull();
 });

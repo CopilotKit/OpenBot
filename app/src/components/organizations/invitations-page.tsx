@@ -12,6 +12,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { failureSaid } from "@/lib/load-failure";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import {
   acceptInvitationMutationOptions,
@@ -123,7 +124,7 @@ export function InvitationRow({
       </Item>
       {failure ? (
         <p className="px-4 pb-3 text-destructive text-sm" role="alert">
-          {failure.message}
+          {failureSaid(failure)}
         </p>
       ) : null}
     </>
@@ -152,7 +153,7 @@ export function InvitationsPage() {
     >
       {invitations.isPending ? null : invitations.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {invitations.error.message}
+          {failureSaid(invitations.error)}
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty icon={IconMail} title="No invitations">
@@ -194,7 +195,7 @@ export function InvitationPage({ invitationId }: { invitationId: string }) {
     >
       {invitation.isPending ? null : invitation.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {invitation.error.message}
+          {failureSaid(invitation.error)}
         </p>
       ) : invitation.data === null ? (
         <PageEmpty icon={IconMailOff} title="Invitation not found">

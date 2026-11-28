@@ -1,5 +1,5 @@
 import type { Message } from "@ag-ui/core";
-import { notRun } from "@openbot/shared/approval-outcomes";
+import { NOT_RUN_UNANSWERED } from "@openbot/shared/approval-outcomes";
 import { newId } from "../new-id";
 import { withoutWaitingPlaceholders } from "./approval-context";
 
@@ -12,9 +12,7 @@ import { withoutWaitingPlaceholders } from "./approval-context";
  * `notRun`). It used to say only "Do not assume it succeeded", and a Bot told that much did nothing
  * with the gap: it neither fetched the thing again nor said in its answer that it was missing.
  */
-export const UNANSWERED = notRun(
-  "no result came back for this call before the conversation moved on.",
-);
+export const UNANSWERED = NOT_RUN_UNANSWERED;
 
 /** A tool result message, which AG-UI models as its own role. */
 type ToolResult = { role: "tool"; toolCallId: string };

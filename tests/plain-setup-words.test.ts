@@ -141,7 +141,15 @@ const LOGGING = /^(console\.\w+|log|logger\.\w+|this\.log|options\.log)$/;
 function* files(directory: string, source: RegExp): Generator<string> {
   for (const name of readdirSync(directory)) {
     if (
-      ["node_modules", "dist", "target", "tests", "gen", "marks"].includes(name)
+      [
+        "node_modules",
+        "dist",
+        "target",
+        "tests",
+        "fakeNative",
+        "gen",
+        "marks",
+      ].includes(name)
     )
       continue;
     const path = join(directory, name);

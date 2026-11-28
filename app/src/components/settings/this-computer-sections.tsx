@@ -48,6 +48,7 @@ import {
   intelligenceReadinessQueryOptions,
   totalMemory,
 } from "@/lib/desktop/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { COMPUTER_SECTION } from "@/lib/settings/computer-sections";
 import { queryClient } from "@/query-client";
 
@@ -376,7 +377,10 @@ export function LogsRow({ folder }: { folder: string }) {
             className="line-clamp-none text-destructive"
             role="alert"
           >
-            Couldn't open the log folder. Find it at the path above.
+            {loadFailure(
+              open.error,
+              "Couldn't open the log folder. Find it at the path above.",
+            )}
           </ItemDescription>
         )}
       </ItemContent>

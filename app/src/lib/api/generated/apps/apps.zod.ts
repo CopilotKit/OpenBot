@@ -150,19 +150,24 @@ export const ListAppsResponse = zod.object({
           ownerGrants: zod
             .enum(["any", "admin"])
             .describe(
-              "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+              "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
             ),
           ownerGrantsChosen: zod
             .union([
               zod
                 .enum(["any", "admin"])
                 .describe(
-                  "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+                  "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
                 ),
               zod.null(),
             ])
             .describe(
-              "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+              "What an administrator chose for ownerGrants, or null where the default applies.",
+            ),
+          everyBot: zod
+            .boolean()
+            .describe(
+              "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
             ),
           addedBy: zod
             .string()
@@ -255,7 +260,7 @@ export const ListAppsResponse = zod.object({
 });
 
 /**
- * Add an app in one of two ways. With from=directory, add an entry of listAppDirectory: a catalogue entry, with the instance host or vault credential it needs, or an app from the wider directory. Only an administrator may. With from=address, add a server by its HTTPS address, and anybody signed in may. OpenBot asks the server how it is reached first. It refuses an address the MCP allowlist doesn't approve, a server that needs a key nobody gave, and an address already added, naming that app in the problem's appId. Only an administrator may give a server a key, because every Bot that uses the server uses it. A server that signs each person in answers with signIn true, and each person then connects their own account. Answers 201 with the app. Adding a directory entry that is already added updates that app with what the request names, and answers it the same way. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Add an app in one of two ways. With from=directory, add an entry of listAppDirectory: a catalogue entry, with the instance host or vault credential it needs, or an app from the wider directory. With from=address, add a server by its HTTPS address. The app is added for everyone in the organization. While the organization's apps are open (getAppsSetting), any member may add one, in the same press that connects it; where they're locked down only an administrator may, and anybody else is answered 403 PERMISSION_DENIED. Either way only an administrator gives a server a key that everyone's Bots use (token), or adds an app that needs what only an administrator can enter. OpenBot asks a server added by its address how it is reached first. It refuses an address the MCP allowlist doesn't approve, a server that needs a key nobody gave, and an address already added, naming that app in the problem's appId. A server that signs each person in answers with signIn true, and each person then connects their own account. Answers 201 with the app. Adding a directory entry that is already added updates that app with what the request names, and answers it the same way. An entry listAppDirectory offers as a sign-in in place of its key (keyVersion) is added as that sign-in; with connectsWith key it is added with its key instead, as its own app, and each person then connects it with their key. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Add an app
  */
 
@@ -312,6 +317,12 @@ export const CreateAppBody = zod
           .max(createAppBodyOneDirectoryEntryIdMax)
           .regex(createAppBodyOneDirectoryEntryIdRegExp)
           .describe("The entry's id, as listAppDirectory answers it."),
+        connectsWith: zod
+          .enum(["key"])
+          .optional()
+          .describe(
+            "Add an app from the wider directory with its key, for an entry listAppDirectory offers as a sign-in in place of its key (keyVersion). Absent adds the entry as listed. Refused for a catalogue entry and for an app that has no key to connect with.",
+          ),
         instanceHost: zod
           .string()
           .min(1)
@@ -468,19 +479,24 @@ export const CreateAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose for ownerGrants, or null where the default applies.",
+      ),
+    everyBot: zod
+      .boolean()
+      .describe(
+        "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
       ),
     addedBy: zod
       .string()
@@ -688,19 +704,24 @@ export const GetAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose for ownerGrants, or null where the default applies.",
+      ),
+    everyBot: zod
+      .boolean()
+      .describe(
+        "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
       ),
     addedBy: zod
       .string()
@@ -968,19 +989,24 @@ export const ReplaceAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose for ownerGrants, or null where the default applies.",
+      ),
+    everyBot: zod
+      .boolean()
+      .describe(
+        "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
       ),
     addedBy: zod
       .string()
@@ -1062,8 +1088,8 @@ export const ReplaceAppResponse = zod
   );
 
 /**
- * Change who may give the app to a Bot: any Bot's owner, for their own Bot (any), only an administrator (admin), or null for the default for the app's account. Recorded on the audit trail. When owners stop deciding, the approvals to use the app's shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. Only an administrator may.
- * @summary Change who may give an app to a Bot
+ * Change who may give the app to a Bot: any Bot's owner, for their own Bot (any), only an administrator (admin), or null for the default (AppOwnerGrants). Recorded on the audit trail. When owners stop deciding, the approvals to use the app's shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.
+ * @summary Change who may give an app to a Bot, or give it to every Bot
  */
 
 export const updateAppPathAppIdMax = 200;
@@ -1106,13 +1132,19 @@ export const UpdateAppBody = zod
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
           ),
         zod.null(),
       ])
       .optional()
       .describe(
-        "Who may give the app to a Bot, or null for the default for its account.",
+        "Who may give the app to a Bot, or null for the default (AppOwnerGrants).",
+      ),
+    everyBot: zod
+      .boolean()
+      .optional()
+      .describe(
+        "True gives the app to every Bot in the organization, and to every Bot made later. False takes back what giving it to every Bot gave. What a Bot was given any other way stays. Routines and OpenBot settings are every Bot's already: true changes nothing, and false is refused.",
       ),
   })
   .describe("The changes to make. At least one.");
@@ -1218,19 +1250,24 @@ export const UpdateAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose for ownerGrants, or null where the default applies.",
+      ),
+    everyBot: zod
+      .boolean()
+      .describe(
+        "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
       ),
     addedBy: zod
       .string()
@@ -1490,19 +1527,24 @@ export const RefreshAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator. Unless an administrator chose, any Bot's owner; where the organization's apps are locked down, an administrator for any app that doesn't run on each person's own account.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose for ownerGrants, or null where the default applies.",
+      ),
+    everyBot: zod
+      .boolean()
+      .describe(
+        "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
       ),
     addedBy: zod
       .string()
@@ -1797,7 +1839,7 @@ export const SetAppOAuthClientBody = zod.object({
 export const SetAppOAuthClientResponse = zod.void();
 
 /**
- * Return one page of what can be added with createApp: the apps in OpenBot's own catalogue (source catalogue) in the catalogue's own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read the catalogue. Only an administrator sees the wider directory, so anybody else's list holds catalogue entries only, and asking for source=directory is refused. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they're already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.
+ * Return one page of what can be added with createApp: the apps in OpenBot's own catalogue (source catalogue) in the catalogue's own order, then apps from the wider directory (source directory), the ones a person signs in to before the ones that take a key, each by title, ignoring case, and then by id. So a screen can show the pages as they arrive, in the order it shows them. appId names the app an entry was added as, or is null. An app that connects with a key but signs in through its vendor is listed once, as the sign-in, with keyVersion naming the same app connected with its key. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read it, the wider directory included. While the organization's apps are open (getAppsSetting), anybody may add what they find (createApp); where they're locked down an administrator adds it, and anybody else asks for it (createAppAccessRequest). Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they're already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.
  * @summary List the apps that can be added
  */
 
@@ -1858,11 +1900,14 @@ export const listAppDirectoryResponseEntriesItemTwoPermissionCountMin = 0;
 
 export const listAppDirectoryResponseEntriesItemTwoScopedActionCountMin = 0;
 
+export const listAppDirectoryResponseEntriesItemTwoKeyVersionActionCountMin = 0;
+
 export const listAppDirectoryResponseNextCursorMax = 4096;
 
 export const listAppDirectoryResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
+export const listAppDirectoryResponseTotalMin = 0;
 
 export const ListAppDirectoryResponse = zod.object({
   entries: zod
@@ -1945,13 +1990,35 @@ export const ListAppDirectoryResponse = zod.object({
               connectsWith: zod
                 .enum(["sign-in", "key", "nothing"])
                 .describe("How a person connects the app once it is added."),
+              keyVersion: zod
+                .object({
+                  appId: zod
+                    .string()
+                    .nullable()
+                    .describe("The app the key version was added as, or null."),
+                  title: zod
+                    .string()
+                    .describe(
+                      "What the key version is called once added, so it reads apart from the sign-in beside it: the app's own name followed by (key), as in PostHog (key).",
+                    ),
+                  actionCount: zod
+                    .int()
+                    .min(
+                      listAppDirectoryResponseEntriesItemTwoKeyVersionActionCountMin,
+                    )
+                    .describe("How many actions the key version offers."),
+                })
+                .optional()
+                .describe(
+                  "The same app connected with a key, for an app the directory offers as a sign-in in place of its key. Add it with createApp and connectsWith key. Absent for any other app.",
+                ),
             })
             .describe("An app from the wider app directory."),
         ])
         .describe("One app that can be added, by where it comes from."),
     )
     .describe(
-      "The catalogue in its own order, then the wider directory by title, ignoring case, and then by id.",
+      "The catalogue in its own order, then the wider directory: apps a person signs in to before apps that take a key (connectsWith key), each by title, ignoring case, and then by id.",
     ),
   nextCursor: zod
     .string()
@@ -1960,6 +2027,13 @@ export const ListAppDirectoryResponse = zod.object({
     .nullable()
     .describe(
       "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
+  total: zod
+    .int()
+    .min(listAppDirectoryResponseTotalMin)
+    .optional()
+    .describe(
+      "How many entries the whole list holds for this search and source, across every page, so a screen can say how many there are while it reads only the first page.",
     ),
 });
 

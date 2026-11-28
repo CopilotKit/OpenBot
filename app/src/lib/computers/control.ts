@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/generated/computers/computers";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import type { Failure } from "@/lib/load-failure";
 
 /**
  * Handing control of a Bot's computer to a person, and back.
@@ -55,6 +56,33 @@ export function botsReason(control: ControlState | null): string | undefined {
   return control?.request && control.request.source !== "manual"
     ? control.reason
     : undefined;
+}
+
+/** What a person holding the wheel is told when the page in front of them asks for a passkey. */
+export const PASSKEY_NOTICE =
+  "This page is asking for a passkey. A passkey on your own device can't be used here, so choose Try another way on the page to sign in with a password or a code.";
+
+/**
+ * The page asked for a passkey while this request was open (`request.passkey`): said to whoever holds the wheel, in
+ * place of the reason, which asked for something the page has moved past. Nothing otherwise.
+ */
+export function passkeyNotice(
+  control: ControlState | null,
+): string | undefined {
+  return control?.request?.passkey ? PASSKEY_NOTICE : undefined;
+}
+
+/**
+ * What the person is asked for while the Bot waits for them to take the wheel: the Bot's reason, and when the page has
+ * since asked for a passkey and the reason doesn't already say so, that too.
+ */
+export function waitingReason(
+  control: ControlState | null,
+): string | undefined {
+  const reason = botsReason(control);
+  if (!control?.request?.passkey || control.request.source === "passkey")
+    return reason;
+  return reason ? `${reason} ${PASSKEY_NOTICE}` : PASSKEY_NOTICE;
 }
 
 export function readControl(
@@ -151,19 +179,20 @@ export function cancelControl(computerId: string, requestId: string) {
 export async function supplySecret(
   computerId: string,
   text: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: Failure }> {
   try {
     await supplyComputerSecret(organizationId(), computerId, { text }, once(), {
       fallback: "Couldn't type that into the page. Try again.",
     });
     return { ok: true };
   } catch (error) {
+    // The server's refusal kept whole, so a hold is drawn calmly (`failureSaid`).
     return {
       ok: false,
       error:
         error instanceof ClientError
-          ? error.message
-          : "Couldn't reach the Bot's computer. Try again.",
+          ? error
+          : { message: "Couldn't reach the Bot's computer. Try again." },
     };
   }
 }

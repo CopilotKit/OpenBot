@@ -12,6 +12,7 @@ import {
 import { useEdition } from "@/components/edition/for-a-team";
 import { deleteChannelMutationOptions } from "@/lib/channels/mutations";
 import { deleteQuestion } from "@/lib/delete-question";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The question, naming the conversation by what the sidebar calls it (`conversationTitle`). A
@@ -94,7 +95,7 @@ export function DeleteConversationDialog({
         </DialogHeader>
         {deleteChannel.error ? (
           <p className="text-destructive text-sm">
-            {deleteChannel.error.message}
+            {failureSaid(deleteChannel.error)}
           </p>
         ) : null}
         <DialogFooter>

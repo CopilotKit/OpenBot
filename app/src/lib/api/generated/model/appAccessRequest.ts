@@ -36,4 +36,6 @@ export interface AppAccessRequest {
    * @nullable
    */
   resolvedBy: string | null;
+  /** The actions asked for, written <app id>/<action name>. Empty for a request that names none, which asks for the app itself. */
+  actions: string[];
 }

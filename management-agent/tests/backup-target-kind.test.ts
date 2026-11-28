@@ -217,6 +217,8 @@ function agentValues(instance: string, host: string, port: number) {
   const [repository, tag] = (env.OPENBOT_AGENT_E2E_IMAGE ?? "").split(":");
   return {
     installId,
+    // The agent's own release, which runs upgrades with Flux beside it.
+    managedUpgrades: true,
     commandPublicKey: service.publicKey,
     cloud: "aws",
     management: {

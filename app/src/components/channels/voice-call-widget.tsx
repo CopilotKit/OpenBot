@@ -20,7 +20,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { LiveWaveform } from "@/components/ui/live-waveform";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { failureSaid } from "@/lib/load-failure";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { cn } from "@/lib/utils";
 import type { useVoiceCall } from "@/lib/voice/use-voice-call";
 import { queryClient } from "@/query-client";
@@ -272,13 +274,17 @@ export function VoiceCallWidget({
           {failed && (
             <div className="mt-3 text-xs">
               <p className="text-destructive" role="alert">
-                {state.error}
+                {failureSaid(state.error)}
               </p>
               <Button
                 variant="ghost"
                 size="sm"
                 className="mt-2"
-                onClick={() => void session.start()}
+                onClick={() => {
+                  // Bots can't run until a card is added: the dialog says why, in place of a call.
+                  if (stopIfNeedsCard()) return;
+                  void session.start();
+                }}
               >
                 Try again
               </Button>

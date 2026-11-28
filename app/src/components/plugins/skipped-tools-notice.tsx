@@ -25,10 +25,7 @@ export function SkippedToolsNotice({
         appToolName(serverId, name.replace(/[^A-Za-z0-9_-]+/g, "_")).label,
     );
     return (
-      <p
-        className="mt-4 text-amber-600 text-sm dark:text-amber-500"
-        role="status"
-      >
+      <p className="mt-4 text-warning text-sm" role="status">
         {names.length === 1
           ? "Your Bots can't use one action this app lists, because of how it's named: "
           : `Your Bots can't use ${names.length} actions this app lists, because of how they're named: `}
@@ -37,10 +34,7 @@ export function SkippedToolsNotice({
     );
   }
   return (
-    <p
-      className="mt-4 text-amber-600 text-sm dark:text-amber-500"
-      role="status"
-    >
+    <p className="mt-4 text-warning text-sm" role="status">
       {names.length === 1
         ? "One action this app lists was left out, because a tool name may only use letters, digits, underscores and hyphens: "
         : `${names.length} actions this app lists were left out, because a tool name may only use letters, digits, underscores and hyphens: `}

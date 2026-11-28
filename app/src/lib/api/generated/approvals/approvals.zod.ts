@@ -1428,7 +1428,7 @@ export const GetApprovalModeResponse = zod
   .describe("How one conversation asks.");
 
 /**
- * Run one computer action a Bot called from the person's open conversation, through the same approval rules every other action goes through. The body names the Bot and carries the conversation with the unanswered call in it. The answer says what came of it: done, with what the computer answered; waiting, when the person must approve it first, and then the decision runs it once and carries the conversation on; or held, when the computer is held for a person, with what to tell them. Only computer tools may be called this way, and the call must match an unanswered one in the conversation. Only the person themselves may take a step.
+ * Run one computer action a Bot called from the person's open conversation, through the same approval rules every other action goes through. The body names the Bot and carries the conversation with the unanswered call in it. The answer says what came of it: done, with what the computer answered; waiting, when the person must approve it first, and then the decision runs it once and carries the conversation on; held, when the computer is held for a person, with what to tell them; or taken, when the server already ran, or is running, this step (the same tool call in the same conversation), so it is not run a second time, with the first run's result once it has one. Only computer tools may be called this way, and the call must match an unanswered one in the conversation. Only the person themselves may take a step.
  * @summary Take a step on a Bot's computer, asking first when it must
  */
 
@@ -1569,5 +1569,245 @@ export const RunComputerStepResponse = zod
       .describe(
         "The computer is held for a person, so nothing ran. The error is what the Bot is told.",
       ),
+    zod
+      .object({
+        outcome: zod.enum(["taken"]),
+        threadId: zod
+          .string()
+          .describe("The conversation's thread the step belongs to."),
+        toolCallId: zod.string().describe("The tool call the step answers."),
+        running: zod
+          .boolean()
+          .describe("True while the first run of the step has not ended."),
+        result: zod
+          .unknown()
+          .optional()
+          .describe(
+            "What the first run answered, as the tool's result, once it has ended. Any JSON value.",
+          ),
+      })
+      .describe(
+        "The server already ran, or is running, this step: the same tool call in the same conversation. It is not run a second time. While the first run goes on, running is true and there is no result yet; ask again for it. Once the first run has ended, result is what it answered. A first run that was cut off before it answered has, as its result, a note that its outcome is unknown, to check before doing it again. Sent only to a request whose OpenBot-Capabilities header names computer-step-taken.",
+      ),
   ])
   .describe("What came of a computer step, by its outcome.");
+
+/**
+ * Return one page of the actions a person's Bots asked them about in one of their conversations, however long ago: the ones still waiting and every one already decided, newest first. Unlike the person's whole list, which keeps only the last hundred, this reaches every approval the conversation has, so an old conversation can still show what the person answered. What an action was called with is cut short for showing, with values that look like secrets masked. Only the person themselves may read them, and only the approvals they were asked: anybody else's conversation, and one that does not exist, reads as an empty list. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List a person's approvals in one conversation
+ */
+
+export const listConversationApprovalsPathPersonIdMax = 200;
+
+export const listConversationApprovalsPathPersonIdRegExp = new RegExp("\\S");
+export const listConversationApprovalsPathConversationIdMax = 200;
+
+export const listConversationApprovalsPathConversationIdRegExp = new RegExp(
+  "\\S",
+);
+
+export const ListConversationApprovalsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(listConversationApprovalsPathPersonIdMax)
+    .regex(listConversationApprovalsPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+  conversationId: zod
+    .string()
+    .min(1)
+    .max(listConversationApprovalsPathConversationIdMax)
+    .regex(listConversationApprovalsPathConversationIdRegExp)
+    .describe(
+      "The conversation, by the thread its messages are in: the threadId an approval's action names.",
+    ),
+});
+
+export const listConversationApprovalsQueryLimitDefault = 50;
+export const listConversationApprovalsQueryLimitMax = 100;
+
+export const listConversationApprovalsQueryCursorMax = 4096;
+
+export const listConversationApprovalsQueryCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+
+export const ListConversationApprovalsQueryParams = zod.object({
+  limit: zod
+    .int()
+    .min(1)
+    .max(listConversationApprovalsQueryLimitMax)
+    .default(listConversationApprovalsQueryLimitDefault)
+    .describe("Most items in one page."),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(listConversationApprovalsQueryCursorMax)
+    .regex(listConversationApprovalsQueryCursorRegExp)
+    .optional()
+    .describe(
+      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+    ),
+});
+
+export const listConversationApprovalsResponseNextCursorMax = 4096;
+
+export const listConversationApprovalsResponseNextCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+
+export const ListConversationApprovalsResponse = zod.object({
+  approvals: zod
+    .array(
+      zod
+        .object({
+          id: zod.string().min(1),
+          status: zod
+            .string()
+            .describe(
+              "Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.",
+            ),
+          decision: zod
+            .union([
+              zod
+                .enum([
+                  "allow_once",
+                  "allow_conversation",
+                  "allow_always",
+                  "deny",
+                  "handled",
+                ])
+                .describe(
+                  "What a person answers an approval with. allow_once runs it this once. allow_conversation runs it and the same action for the rest of the conversation. allow_always runs it and saves a rule of the person's own. deny declines it. handled answers an action handed to the person: they did it themselves, so it is never run for them.",
+                ),
+              zod.null(),
+            ])
+            .describe("What the person answered. Null while it waits."),
+          result: zod
+            .union([
+              zod
+                .object({
+                  error: zod
+                    .string()
+                    .optional()
+                    .describe(
+                      "Why the action was not done. Absent when it was.",
+                    ),
+                })
+                .describe("What came of a decided action."),
+              zod.null(),
+            ])
+            .describe("What came of it. Null until the action has an outcome."),
+          createdAt: zod.iso.datetime({ offset: true }),
+          decidedAt: zod.iso.datetime({ offset: true }).nullable(),
+          consumedAt: zod.iso.datetime({ offset: true }).nullable(),
+          completedAt: zod.iso.datetime({ offset: true }).nullable(),
+          left: zod
+            .object({
+              done: zod.boolean(),
+              message: zod.string(),
+              answer: zod.string(),
+            })
+            .optional()
+            .describe(
+              "Set when the conversation could not be carried on after the approval was decided: whether the action was done, the sentence that says so, and the answer the Bot never received.",
+            ),
+          action: zod
+            .object({
+              botId: zod.string(),
+              toolRef: zod
+                .string()
+                .describe("The tool or app the action calls."),
+              effect: zod
+                .string()
+                .describe(
+                  "What kind of effect the action has, such as read or write.",
+                ),
+              scope: zod.string().describe("What the action is aimed at."),
+              threadId: zod
+                .string()
+                .describe(
+                  "The thread of the conversation the action was asked in.",
+                ),
+              toolCallId: zod
+                .string()
+                .optional()
+                .describe(
+                  "The call in that conversation, so a screen draws the approval where the action was.",
+                ),
+              args: zod
+                .unknown()
+                .optional()
+                .describe(
+                  "What the action was called with, cut short for showing, with values that look like secrets masked. Any JSON value.",
+                ),
+              target: zod
+                .unknown()
+                .optional()
+                .describe(
+                  "What the action was aimed at, cut short for showing. Any JSON value.",
+                ),
+              account: zod
+                .string()
+                .optional()
+                .describe(
+                  "Which of the person's accounts at the app, where they hold several.",
+                ),
+              policy: zod
+                .object({
+                  behaviour: zod.enum(["allow", "ask", "hand_off", "deny"]),
+                  source: zod
+                    .string()
+                    .min(1)
+                    .describe(
+                      "Which layer decided: safety, team_rule, personal_rule, auto_review, default, person_declined, conversation or task.",
+                    ),
+                  reason: zod.string(),
+                  kind: zod
+                    .enum([
+                      "deleting",
+                      "sending",
+                      "sharing",
+                      "publishing",
+                      "payments",
+                      "credentials",
+                      "security_settings",
+                    ])
+                    .optional()
+                    .describe(
+                      "A kind of action OpenBot recognises by name and asks about whatever a person's own switch says.",
+                    ),
+                  closed: zod
+                    .boolean()
+                    .optional()
+                    .describe(
+                      "The organization set this kind to ask every time, so the only answers are allow_once and deny.",
+                    ),
+                })
+                .optional()
+                .describe(
+                  "Why an action asks, as the card that asks about it says.",
+                ),
+            })
+            .describe("The action an approval is about."),
+        })
+        .describe("One action a Bot asked a person about before running it."),
+    )
+    .describe("The newest first."),
+  nextCursor: zod
+    .string()
+    .max(listConversationApprovalsResponseNextCursorMax)
+    .regex(listConversationApprovalsResponseNextCursorRegExp)
+    .nullable()
+    .describe(
+      "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
+});

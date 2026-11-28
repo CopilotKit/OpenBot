@@ -9,6 +9,7 @@ import {
   fileFor,
   isApiCall,
   isClientRoute,
+  servedHeaders,
   upstreamWebSocketHeaders,
 } from "../serve";
 
@@ -145,6 +146,29 @@ describe("what answers a request", () => {
     expect(isClientRoute("/channel/channel_1ed78a89")).toBe(true);
     expect(isClientRoute("/agents")).toBe(true);
     expect(isClientRoute("/")).toBe(true);
+  });
+});
+
+/**
+ * The service worker that shows push notifications. A browser refuses a worker script served with a
+ * type that isn't JavaScript, and one kept in a cache would hold a release's old worker in place.
+ */
+describe("the service worker's script", () => {
+  test("is served as JavaScript, asked for again every time, from the root", () => {
+    expect(fileFor("/sw.js")).toEndWith(join("/dist/sw.js"));
+    expect(isClientRoute("/sw.js")).toBe(false);
+    expect(new Headers(servedHeaders("/sw.js"))).toEqual(
+      new Headers({
+        "content-type": "text/javascript; charset=utf-8",
+        "cache-control": "no-cache",
+      }),
+    );
+  });
+
+  test("every other file keeps the type its extension names", () => {
+    expect(servedHeaders("/assets/index-abc.js")).toBeUndefined();
+    expect(servedHeaders("/manifest.webmanifest")).toBeUndefined();
+    expect(servedHeaders("/assets/sw.js")).toBeUndefined();
   });
 });
 

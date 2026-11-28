@@ -33,6 +33,7 @@ import type {
 import type { RuleRowProblem } from "@/lib/approval-rules/translate";
 import { type ApprovalRuleInput, BEHAVIOUR_LABELS } from "@/lib/approvals";
 import { LabelSelect } from "./rules";
+import { failureSaid } from "@/lib/load-failure";
 
 /** More than this is not one description's worth; the server refuses it too. */
 export const MAX_RULES = 8;
@@ -316,7 +317,7 @@ function replayRowOf(change: BacktestChange): ReplayRow {
       : change.change === "removes_ask"
         ? change.person === "deny"
           ? "text-destructive"
-          : "text-amber-600 dark:text-amber-500"
+          : "text-warning"
         : "text-foreground",
     note: [fixed ? change.reason : null, answer].filter(Boolean).join(" "),
   };
@@ -341,7 +342,7 @@ export function RulesBacktest({
       <FieldLabel id="rules-backtest">On recent activity</FieldLabel>
       {preview.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {preview.error.message}
+          {failureSaid(preview.error)}
         </p>
       ) : preview.data.report.scanned === 0 ? (
         <FieldDescription>

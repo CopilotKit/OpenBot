@@ -20,6 +20,7 @@ import {
 import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
@@ -29,6 +30,7 @@ import {
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
+import { loadFailureText } from "@/lib/load-failure";
 import { cn } from "@/lib/utils";
 import { BotsSheet } from "./bots-sheet";
 import { chooseBot, useChosenBotId } from "./chosen-bot";
@@ -128,12 +130,23 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
   });
 
   return (
-    <FuseContext.Provider value={{ bot, userId, openSheet: setSheet }}>
+    <FuseContext.Provider
+      value={{
+        bot,
+        roster: {
+          pending: agents.isPending,
+          failed: agents.data === undefined ? agents.error : null,
+        },
+        userId,
+        openSheet: setSheet,
+      }}
+    >
       <div
         className="openfuse-frame flex h-svh flex-col overflow-hidden bg-background text-foreground"
         data-openfuse-tab={tab ?? "none"}
       >
         <ConnectionBanner />
+        <MovedAppsBanner />
         <UpdateBanner />
         <SelfHostBanner />
         {/* Beside the header, the column's own margin moves the window too (`data-desktop-drag`). */}
@@ -195,7 +208,17 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
                   className="mb-1.5 max-w-full truncate text-[11px] text-muted-foreground"
                   data-testid="openfuse-status"
                 >
-                  {bot ? status : agents.isPending ? "" : "No Bots yet"}
+                  {/* A read that failed is said, never drawn as having no Bots. */}
+                  {bot
+                    ? status
+                    : agents.isPending
+                      ? ""
+                      : agents.data === undefined
+                        ? loadFailureText(
+                            agents.error,
+                            "Couldn't load your Bots.",
+                          )
+                        : "No Bots yet"}
                 </span>
               </button>
             </div>

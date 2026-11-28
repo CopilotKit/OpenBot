@@ -43,6 +43,7 @@ import type {
   CapabilityChange,
   CapabilityChangeProblem,
 } from "@/lib/capability-changes/translate";
+import { failureSaid } from "@/lib/load-failure";
 import { MISSING_TEAM, teamName } from "@/lib/teams/names";
 import type { TeamSummary } from "@/lib/teams/queries";
 import { cn } from "@/lib/utils";
@@ -84,7 +85,7 @@ function settingWords(change: CapabilityChange): {
       change.scopeKind === "team" || change.scopeKind === "group"
         ? "Grant"
         : "On",
-    className: "text-emerald-600 dark:text-emerald-400",
+    className: "text-success",
   };
 }
 
@@ -132,7 +133,7 @@ export function ChangeRows({
                   <ItemDescription>{scopeWords(change, teams)}</ItemDescription>
                   {wrong.map((problem) => (
                     <p className="text-destructive text-sm" key={problem.field}>
-                      {problem.message}
+                      {failureSaid(problem)}
                     </p>
                   ))}
                 </ItemContent>
@@ -195,7 +196,7 @@ function verdictOf(person: PreviewPerson): { text: string; className: string } {
   if (person.capabilities.some(gains))
     return {
       text: "Gains access",
-      className: "text-emerald-600 dark:text-emerald-400",
+      className: "text-success",
     };
   return { text: "Keeps access", className: "text-muted-foreground" };
 }
@@ -274,7 +275,7 @@ export function PermissionsPreview({
       <Field>
         <FieldLabel>Who it changes</FieldLabel>
         <p className="text-destructive text-sm" role="alert">
-          {preview.error.message}
+          {failureSaid(preview.error)}
         </p>
       </Field>
     );
@@ -325,9 +326,7 @@ export function PermissionsPreview({
           </FieldDescription>
         </div>
         {data.warning ? (
-          <p className="text-amber-600 text-sm dark:text-amber-500">
-            {data.warning}
-          </p>
+          <p className="text-warning text-sm">{data.warning}</p>
         ) : null}
         {data.people.length > 0 ? (
           <PageRows>

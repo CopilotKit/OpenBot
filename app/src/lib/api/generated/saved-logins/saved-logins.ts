@@ -18,14 +18,18 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AdminOnlyResponse,
   DeleteSavedLoginHeaders,
   IdempotencyConflictResponse,
   InvalidRequestResponse,
   ListSavedLoginsParams,
   OrganizationNotFoundResponse,
   OwnOnlyResponse,
+  PurgeSavedLoginsHeaders,
+  SavedLoginCounts,
   SavedLoginNotFoundResponse,
   SavedLoginPage,
+  SavedLoginsPurged,
   ServerErrorResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
@@ -470,3 +474,349 @@ export const useDeleteSavedLogin = <
 > => {
   return useMutation(getDeleteSavedLoginMutationOptions(options), queryClient);
 };
+export const getPurgeSavedLoginsUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/saved-logins/purge`;
+};
+
+/**
+ * Delete, passwords included, the saved logins in the organization that nobody may use any more, in two groups. The first is every current member the Password manager switch is off for. The switch is read for each person as it applies to them, by their role, directory groups and teams, as getPersonCapabilities answers it: a group or team that turns it back on for its members keeps their logins. The second is every person removed from the organization: somebody who is no longer a member of it, or whose address can't sign in to this OpenBot any more. Every other saved login stays. The answer counts what was deleted in each group, 0 where there was nothing to delete, and the purge is recorded on the audit trail. The second group is almost always 0: removing somebody already deletes their saved logins, and a daily sweep deletes any left behind. It is a safety net, so a 0 there is expected. getUnusableSavedLogins reads the same two counts without deleting anything. Only an administrator of the organization may do this. The personal edition has no switches to set and nobody to remove, so it doesn't serve this and answers 404.
+ * @summary Delete the saved logins nobody may use
+ */
+export const purgeSavedLogins = async (
+  organizationId: string,
+  headers: PurgeSavedLoginsHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<SavedLoginsPurged> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<SavedLoginsPurged>(getPurgeSavedLoginsUrl(organizationId), {
+    ...options,
+    method: "POST",
+    headers: { ...headers, ...getHeaders(options?.headers) },
+  });
+};
+
+export const getPurgeSavedLoginsMutationKey = () =>
+  ["purgeSavedLogins"] as const;
+
+export const getPurgeSavedLoginsMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof purgeSavedLogins>>,
+    TError,
+    PurgeSavedLoginsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof purgeSavedLogins>>,
+  TError,
+  PurgeSavedLoginsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getPurgeSavedLoginsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof purgeSavedLogins>>,
+    PurgeSavedLoginsMutationVariables
+  > = (props) => {
+    const { organizationId, headers } = props ?? {};
+
+    return purgeSavedLogins(organizationId, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PurgeSavedLoginsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof purgeSavedLogins>>
+>;
+
+export type PurgeSavedLoginsMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type PurgeSavedLoginsMutationVariables = {
+  organizationId: string;
+  headers: PurgeSavedLoginsHeaders;
+};
+
+/**
+ * @summary Delete the saved logins nobody may use
+ */
+export const usePurgeSavedLogins = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof purgeSavedLogins>>,
+      TError,
+      PurgeSavedLoginsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof purgeSavedLogins>>,
+  TError,
+  PurgeSavedLoginsMutationVariables,
+  TContext
+> => {
+  return useMutation(getPurgeSavedLoginsMutationOptions(options), queryClient);
+};
+export const getGetUnusableSavedLoginsUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/saved-logins/unusable`;
+};
+
+/**
+ * Count, without deleting anything, the saved logins in the organization that nobody may use any more: exactly what purgeSavedLogins would delete at this moment, in the same two groups. The first is every current member the Password manager switch is off for, read for each person by their role, directory groups and teams, as getPersonCapabilities answers it. The second is every person removed from the organization: somebody who is no longer a member of it, or whose address can't sign in to this OpenBot any more. Each count is 0 where there is nothing to delete. The second group is almost always 0: removing somebody already deletes their saved logins, and a daily sweep deletes any left behind. It is a safety net, so a 0 there is expected. A client reads this to say how many a purge will delete before asking for one. Only an administrator of the organization may read it. The personal edition has no switches to set and nobody to remove, so it doesn't serve this and answers 404.
+ * @summary Count the saved logins nobody may use
+ */
+export const getUnusableSavedLogins = async (
+  organizationId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<SavedLoginCounts> => {
+  return apiRequest<SavedLoginCounts>(
+    getGetUnusableSavedLoginsUrl(organizationId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetUnusableSavedLoginsQueryKey = (organizationId: string) => {
+  return [
+    `/api/v2/organizations/${organizationId}/saved-logins/unusable`,
+  ] as const;
+};
+
+export const getGetUnusableSavedLoginsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+  TError =
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetUnusableSavedLoginsQueryKey(organizationId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getUnusableSavedLogins>>
+  > = ({ signal }) =>
+    getUnusableSavedLogins(organizationId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: organizationId !== null && organizationId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetUnusableSavedLoginsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getUnusableSavedLogins>>
+>;
+export type GetUnusableSavedLoginsQueryError =
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetUnusableSavedLogins<
+  TData = Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+  TError =
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+          TError,
+          Awaited<ReturnType<typeof getUnusableSavedLogins>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetUnusableSavedLogins<
+  TData = Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+  TError =
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+          TError,
+          Awaited<ReturnType<typeof getUnusableSavedLogins>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetUnusableSavedLogins<
+  TData = Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+  TError =
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Count the saved logins nobody may use
+ */
+
+export function useGetUnusableSavedLogins<
+  TData = Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+  TError =
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getUnusableSavedLogins>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetUnusableSavedLoginsQueryOptions(
+    organizationId,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}

@@ -9,3 +9,10 @@ build-version.json
 src-tauri/tauri.build-version.conf.json
 src-tauri/build-version.plist
 src-tauri/tauri.signed-pinned.conf.json
+
+# Screenshots and reports from `bun run desktop-workbench:shot`.
+workbench-shots/
+
+# Scenes made by `bun run workbench:import` from troubleshooting files. Those files come from
+# customers: never commit them.
+workbench/scenes/imported/*.json

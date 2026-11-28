@@ -34,6 +34,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -60,19 +62,26 @@ paths:
       description: >-
         Add an app in one of two ways. With from=directory, add an entry of
         listAppDirectory: a catalogue entry, with the instance host or vault
-        credential it needs, or an app from the wider directory. Only an
-        administrator may. With from=address, add a server by its HTTPS
-        address, and anybody signed in may. OpenBot asks the server how it is
-        reached first. It refuses an address the MCP allowlist doesn't
-        approve, a server that needs a key nobody gave, and an address already
-        added, naming that app in the problem's appId. Only an administrator
-        may give a server a key, because every Bot that uses the server uses
-        it. A server that signs each person in answers with signIn true, and
+        credential it needs, or an app from the wider directory. With
+        from=address, add a server by its HTTPS address. The app is added for
+        everyone in the organization. While the organization's apps are open
+        (getAppsSetting), any member may add one, in the same press that
+        connects it; where they're locked down only an administrator may, and
+        anybody else is answered 403 PERMISSION_DENIED. Either way only an
+        administrator gives a server a key that everyone's Bots use (token),
+        or adds an app that needs what only an administrator can enter. OpenBot
+        asks a server added by its address how it is reached first. It refuses
+        an address the MCP allowlist doesn't approve, a server that needs a key
+        nobody gave, and an address already added, naming that app in the
+        problem's appId. A server that signs each person in answers with signIn true, and
         each person then connects their own account. Answers 201 with the app.
         Adding a directory entry that is already added updates that app with
-        what the request names, and answers it the same way. A repeated
-        request with the same Idempotency-Key and body returns the first
-        result.
+        what the request names, and answers it the same way. An entry
+        listAppDirectory offers as a sign-in in place of its key (keyVersion)
+        is added as that sign-in; with connectsWith key it is added with its
+        key instead, as its own app, and each person then connects it with
+        their key. A repeated request with the same Idempotency-Key and body
+        returns the first result.
       security:
         - webSession: []
         - appOAuth: [apps:write]
@@ -97,6 +106,14 @@ paths:
                 value:
                   from: directory
                   directoryEntryId: directory:linear
+              directoryWithKey:
+                summary: >-
+                  An app the directory offers as a sign-in, added with its key
+                  instead.
+                value:
+                  from: directory
+                  directoryEntryId: directory:posthog
+                  connectsWith: key
               address:
                 summary: A server added by its address.
                 value:
@@ -114,6 +131,8 @@ paths:
               schema:
                 type: string
               example: /api/v2/organizations/default/apps/acme-wiki
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -160,6 +179,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -227,6 +248,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -251,14 +274,17 @@ paths:
     patch:
       tags: [Apps]
       operationId: updateApp
-      summary: Change who may give an app to a Bot
+      summary: Change who may give an app to a Bot, or give it to every Bot
       description: >-
         Change who may give the app to a Bot: any Bot's owner, for their own
-        Bot (any), only an administrator (admin), or null for the default for
-        the app's account. Recorded on the audit trail. When owners stop
+        Bot (any), only an administrator (admin), or null for the default
+        (AppOwnerGrants). Recorded on the audit trail. When owners stop
         deciding, the approvals to use the app's shared account that their
         gifts made are withdrawn. What they gave stays, for an administrator
-        to keep or take back. Only an administrator may.
+        to keep or take back. everyBot gives the app to every Bot in the
+        organization, Bots made later included, or takes back what giving it
+        to every Bot gave, with one row on the audit trail for the change.
+        Only an administrator may.
       security:
         - webSession: []
         - appOAuth: [apps:write]
@@ -278,12 +304,17 @@ paths:
               default:
                 value:
                   ownerGrants: null
+              everyBot:
+                value:
+                  everyBot: true
       responses:
         '200':
           description: The changed app.
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -327,6 +358,9 @@ paths:
       responses:
         '204':
           description: The app was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -373,6 +407,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -448,6 +484,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -510,6 +548,9 @@ paths:
       responses:
         '204':
           description: The client was set.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: '#/components/responses/InvalidAppChange'
         '401':
@@ -534,14 +575,19 @@ paths:
       description: >-
         Return one page of what can be added with createApp: the apps in
         OpenBot's own catalogue (source catalogue) in the catalogue's own
-        order, then apps from the wider directory (source directory) by title,
-        ignoring case, and then by id. appId names the app an entry was added
-        as, or is null. search narrows the list to entries whose name or
-        description holds it, ignoring case.
-        source narrows it to one kind. Anybody signed in may read the
-        catalogue. Only an administrator sees the wider directory, so anybody
-        else's list holds catalogue entries only, and asking for
-        source=directory is refused. Where no directory is set up, the list
+        order, then apps from the wider directory (source directory), the ones
+        a person signs in to before the ones that take a key, each by title,
+        ignoring case, and then by id. So a screen can show the pages as they
+        arrive, in the order it shows them. appId names the app an entry was added
+        as, or is null. An app that connects with a key but signs in through
+        its vendor is listed once, as the sign-in, with keyVersion naming the
+        same app connected with its key. search narrows the list to entries
+        whose name or description holds it, ignoring case.
+        source narrows it to one kind. Anybody signed in may read it, the
+        wider directory included. While the organization's apps are open
+        (getAppsSetting), anybody may add what they find (createApp); where
+        they're locked down an administrator adds it, and anybody else asks
+        for it (createAppAccessRequest). Where no directory is set up, the list
         holds the catalogue only and source=directory is unavailable. In the
         personal edition the catalogue leaves out entries meant for a team,
         unless they're already added. A missing cursor starts at the first
@@ -572,6 +618,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -622,6 +670,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -662,6 +712,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -769,7 +821,10 @@ components:
       enum: [any, admin]
       description: >-
         Who may give the app to a Bot: any Bot's owner, for their own Bot, or
-        only an administrator.
+        only an administrator. Unless an administrator chose, any Bot's
+        owner; where the organization's apps are locked down, an
+        administrator for any app that doesn't run on each person's own
+        account.
     AppTool:
       type: object
       description: One action an app offers.
@@ -846,6 +901,7 @@ components:
         - sharedOnly
         - ownerGrants
         - ownerGrantsChosen
+        - everyBot
         - addedBy
         - toolsRefreshedAt
         - lastError
@@ -936,7 +992,15 @@ components:
             - type: 'null'
           description: >-
             What an administrator chose for ownerGrants, or null where the
-            default for the app's account applies.
+            default applies.
+        everyBot:
+          type: boolean
+          description: >-
+            Whether an administrator gave the app to every Bot in the
+            organization, Bots made later included. Every Bot can use all of
+            its actions, with the same approvals as any other Bot's actions.
+            Where each person connects their own account, a Bot uses the
+            account of whoever is asking, never its owner's.
         addedBy:
           type: [string, 'null']
           description: The email address of whoever added the app, where OpenBot knows it.
@@ -997,6 +1061,14 @@ components:
           maxLength: 200
           pattern: ^(catalogue|directory):\S
           description: The entry's id, as listAppDirectory answers it.
+        connectsWith:
+          type: string
+          enum: [key]
+          description: >-
+            Add an app from the wider directory with its key, for an entry
+            listAppDirectory offers as a sign-in in place of its key
+            (keyVersion). Absent adds the entry as listed. Refused for a
+            catalogue entry and for an app that has no key to connect with.
         instanceHost:
           type: string
           minLength: 1
@@ -1100,7 +1172,15 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AppOwnerGrants'
             - type: 'null'
-          description: Who may give the app to a Bot, or null for the default for its account.
+          description: Who may give the app to a Bot, or null for the default (AppOwnerGrants).
+        everyBot:
+          type: boolean
+          description: >-
+            True gives the app to every Bot in the organization, and to every
+            Bot made later. False takes back what giving it to every Bot gave.
+            What a Bot was given any other way stays. Routines and OpenBot
+            settings are every Bot's already: true changes nothing, and false
+            is refused.
     AppAccountMode:
       type: string
       enum: [personal, shared]
@@ -1291,6 +1371,31 @@ components:
           type: string
           enum: [sign-in, key, nothing]
           description: How a person connects the app once it is added.
+        keyVersion:
+          $ref: '#/components/schemas/DirectoryKeyVersion'
+    DirectoryKeyVersion:
+      type: object
+      description: >-
+        The same app connected with a key, for an app the directory offers as
+        a sign-in in place of its key. Add it with createApp and connectsWith
+        key. Absent for any other app.
+      required: [appId, title, actionCount]
+      properties:
+        appId:
+          type:
+            - string
+            - 'null'
+          description: The app the key version was added as, or null.
+        title:
+          type: string
+          description: >-
+            What the key version is called once added, so it reads apart from
+            the sign-in beside it: the app's own name followed by (key), as in
+            PostHog (key).
+        actionCount:
+          type: integer
+          minimum: 0
+          description: How many actions the key version offers.
     AppDirectoryEntry:
       description: One app that can be added, by where it comes from.
       oneOf:
@@ -1307,7 +1412,10 @@ components:
       properties:
         entries:
           type: array
-          description: The catalogue in its own order, then the wider directory by title, ignoring case, and then by id.
+          description: >-
+            The catalogue in its own order, then the wider directory: apps a
+            person signs in to before apps that take a key (connectsWith key),
+            each by title, ignoring case, and then by id.
           items:
             $ref: '#/components/schemas/AppDirectoryEntry'
         nextCursor:
@@ -1317,6 +1425,13 @@ components:
           description: >-
             Pass as cursor for the next page. Null ends the list. Written in
             URL-safe base64, the only form the cursor parameter accepts.
+        total:
+          type: integer
+          minimum: 0
+          description: >-
+            How many entries the whole list holds for this search and source,
+            across every page, so a screen can say how many there are while it
+            reads only the first page.
     AppSetup:
       type: object
       description: How apps are set up on this OpenBot. Never a key.
@@ -1369,6 +1484,9 @@ components:
   responses:
     AppNotFound:
       description: No app has that id here, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1390,6 +1508,9 @@ components:
         This OpenBot can't add or connect apps from the directory: it isn't
         set up here, or what it was asked for can't be used here. Trying
         again won't help until an administrator changes something.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1410,6 +1531,9 @@ components:
       description: >-
         The service behind an app was asked and didn't answer usefully.
         Nothing here broke; trying again later can succeed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1431,6 +1555,9 @@ components:
         A field is missing or out of bounds, the directory entry isn't one that
         can be added, the address is refused, the server needs a key nobody
         gave, or the server couldn't be reached or set up for signing in.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1471,8 +1598,13 @@ components:
                 traceId: trace_example
     AppAddForbidden:
       description: >-
-        Only an administrator may add an app from the directory or give a
-        server a key, or the MCP allowlist doesn't approve the address.
+        Only an administrator may add this app here: the organization's apps
+        are locked down, the server would be given a key everyone's Bots use,
+        or the app needs what only an administrator can enter. Or the MCP
+        allowlist doesn't approve the address.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1516,6 +1648,9 @@ components:
         A server at that address is already here (appId names it), the app
         was added but couldn't be read back, OpenBot's own records of the app
         disagree, or the Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1542,6 +1677,9 @@ components:
         OpenBot's own records of the app disagree, so it can't do this until
         they're corrected, or the Idempotency-Key was used for a different
         request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1555,6 +1693,9 @@ components:
       description: >-
         OpenBot's own records of its apps disagree, so it can't answer until
         they're corrected.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1567,6 +1708,9 @@ components:
         A field is missing or out of bounds, or the change doesn't fit this
         app: an id or address that can't be used, an app that isn't from the
         directory or needs no account, or one that takes no OAuth client.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1609,6 +1753,9 @@ components:
       description: >-
         The caller is not an administrator, or the app is one every Bot always
         has.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1641,6 +1788,9 @@ components:
         This OpenBot can't switch whose account an app acts in: shared
         accounts aren't available here, or the app directory isn't set up.
         Trying again won't help until an administrator changes something.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1691,6 +1841,7 @@ components:
         sharedOnly: false
         ownerGrants: admin
         ownerGrantsChosen: admin
+        everyBot: true
         addedBy: dana.whitfield@acme.com
         toolsRefreshedAt: '2026-11-14T09:00:00.000Z'
         lastError: null
@@ -1726,6 +1877,7 @@ components:
         sharedOnly: false
         ownerGrants: admin
         ownerGrantsChosen: null
+        everyBot: false
         addedBy: sam.okafor@acme.com
         toolsRefreshedAt: '2026-11-14T09:05:00.000Z'
         lastError: null
@@ -1761,6 +1913,7 @@ components:
             sharedOnly: false
             ownerGrants: admin
             ownerGrantsChosen: null
+            everyBot: false
             addedBy: sam.okafor@acme.com
             toolsRefreshedAt: '2026-11-14T09:05:00.000Z'
             lastError: null
@@ -1786,6 +1939,7 @@ components:
             sharedOnly: false
             ownerGrants: admin
             ownerGrantsChosen: admin
+            everyBot: false
             addedBy: dana.whitfield@acme.com
             toolsRefreshedAt: '2026-11-14T09:00:00.000Z'
             lastError: null
@@ -1826,6 +1980,7 @@ components:
             scopedActionCount: 26
             connectsWith: sign-in
         nextCursor: null
+        total: 2
     AppSetupExample:
       summary: An OpenBot with the app directory set up.
       value:

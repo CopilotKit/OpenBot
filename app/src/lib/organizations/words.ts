@@ -44,6 +44,12 @@ export const UNNAMED_PERSON = "Unnamed member";
 export const NOT_OPENED_YET = "Hasn't opened OpenBot yet";
 
 /**
+ * The label beside a member whose account is scheduled to be deleted (`deactivated`, the server's
+ * verdict): they can't use OpenBot, and the membership ends with the account unless they cancel.
+ */
+export const DEACTIVATED = "Deactivated";
+
+/**
  * What somebody is called: their name, or their address until they choose one. Somebody who hasn't
  * opened OpenBot yet may have neither (`notOpenedYet`), and is then a neutral label.
  */
@@ -94,13 +100,16 @@ export function initialsOf(person: {
  * leave their own organization, and so does somebody OpenBot's settings keep as an admin.
  * That holds for somebody who hasn't opened OpenBot yet too: they are offered for removal when the
  * server says they can be removed, and not otherwise.
+ * `removable` says whether the membership can end at all, not who may end it. Only an owner removes
+ * another owner, as the server holds, so an admin is offered no Remove on an owner's row.
  */
 export function memberControl(
-  member: Pick<OrganizationMemberSummary, "id" | "removable">,
+  member: Pick<OrganizationMemberSummary, "id" | "role" | "removable">,
   viewer: { id: string | undefined; role: string },
 ): "leave" | "remove" | null {
   if (!member.removable) return null;
   if (member.id === viewer.id) return "leave";
+  if (member.role === "owner" && viewer.role !== "owner") return null;
   return isOrganizationAdmin(viewer.role) ? "remove" : null;
 }
 

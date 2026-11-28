@@ -10,6 +10,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { consentCopy } from "@/lib/plugins/enablement-notes";
 import { finishOnReturn } from "@/lib/plugins/finish-on-return";
 import {
@@ -62,16 +63,18 @@ export function GrantList({
   const grants = useQuery(grantsQueryOptions(serverId, true, shared));
   const [search, setSearch] = useState("");
   const [choosing, setChoosing] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // The refusal itself, not its words: a hold is drawn calmly (`failureSaid`).
+  const [notice, setNotice] = useState<Failure | null>(null);
   const authorize = useMutation({
     ...authorizeActionMutationOptions(returnTo, shared),
-    onError: (thrown: Error) => setNotice(thrown.message),
+    onError: (thrown: Error) => setNotice(thrown),
     /* A full page navigation: the consent screen is the vendor's own and shown in this browser. */
     onSuccess: (authorizationUrl) => {
       if (authorizationUrl === null) {
-        setNotice(
-          "OpenBot answered without a consent link, so nothing was authorized. Try again, or ask an admin if it keeps happening.",
-        );
+        setNotice({
+          message:
+            "OpenBot answered without a consent link, so nothing was authorized. Try again, or ask an admin if it keeps happening.",
+        });
         return;
       }
       finishOnReturn();
@@ -84,7 +87,10 @@ export function GrantList({
     return (
       <PageSection title="Actions">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't read what this account allows right now.{" "}
+          {loadFailure(
+            grants.error,
+            "Couldn't read what this account allows right now.",
+          )}{" "}
           <Button
             onClick={() => grants.refetch()}
             size="sm"
@@ -151,7 +157,7 @@ export function GrantList({
     >
       {notice ? (
         <p className="text-destructive text-sm" role="alert">
-          {notice}
+          {failureSaid(notice)}
         </p>
       ) : null}
       <Input

@@ -336,3 +336,27 @@ test("each frame is confirmed on arrival, but only once the computer asks", asyn
   });
   expect(socket.sent).toEqual([{ type: "frame-received" }]);
 });
+
+test("the screen's size goes only to a computer that says it takes one, and while only watching too", async () => {
+  // bot-screen-sharp.test.tsx is the real thing, in a browser; this pins the rule, without one.
+  const { container } = render(
+    <LiveScreen computerId="size-test" driving={false} />,
+  );
+  await waitFor(() => expect(SocketDouble.latest).toBeDefined());
+  const socket = SocketDouble.latest as SocketDouble;
+  const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+  canvas.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, width: FRAME.width, height: FRAME.height }) as DOMRect;
+
+  socket.onmessage?.({ data: JSON.stringify({ type: "hello" }) });
+  expect(socket.sent).toEqual([]);
+
+  socket.onmessage?.({
+    data: JSON.stringify({ type: "hello", viewSize: true }),
+  });
+  // Until a frame says otherwise, the page is 1280x800.
+  const width = FRAME.width * window.devicePixelRatio;
+  expect(socket.sent).toEqual([
+    { type: "view-size", width, height: Math.round((width * 800) / 1280) },
+  ]);
+});
