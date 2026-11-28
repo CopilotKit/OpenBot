@@ -91,6 +91,45 @@ class RealBackendReleaseTest : ShellTestBase() {
     }
 
     /**
+     * The self-hosted path on the release-like build (no hooks, release's network rules): the quiet
+     * control, the field, the check, https only with no exception at all (http to a development host
+     * is refused too), and a refused address keeps OpenBot Cloud. Needs no network: the address
+     * checks are local or fail on the device itself.
+     */
+    @Test
+    fun testSelfHostedOnTheReleaseBuild() {
+        launchPlain("https://unreachable.openbot.invalid", "self-hosted-release")
+        check(waitFor("sign_in_button", 15_000) != null, "no Sign in button")
+        check(find("self_hosted_address") == null, "the address field shows before it is asked for")
+        val toggle = waitFor("self_hosted_toggle", 5_000)
+        if (!check(toggle != null, "no quiet self-hosted control on the release build")) return
+        checkEquals(instrumentation.targetContext.getString(ai.openbot.shell.R.string.self_hosted_toggle), toggle!!.text, "the quiet control")
+        toggle.click()
+        val field = waitFor("self_hosted_address", 5_000)
+        if (!check(field != null, "no address field on the release build")) return
+        screenshot("1-field")
+        fun attempt(address: String): String {
+            find("self_hosted_address")?.text = address
+            sleep(300)
+            find("self_hosted_continue")?.click()
+            val error = device.wait(androidx.test.uiautomator.Until.findObject(res("self_hosted_error")), 20_000)
+            sleep(500)
+            return find("self_hosted_error")?.text ?: error?.text ?: ""
+        }
+        val http = instrumentation.targetContext.getString(ai.openbot.shell.R.string.self_hosted_error_http)
+        checkEquals(http, attempt("http://127.0.0.1:3013"), "http to a development host on the release build")
+        checkEquals(http, attempt("http://openbot.example.com"), "http on the release build")
+        val checked = attempt("https://openbot.invalid")
+        note("https to a host that does not exist: '$checked'")
+        check(checked.isNotEmpty() && checked != http, "the release build did not check an https address")
+        dismissKeyboardIfUp()
+        screenshot("2-refused")
+        find("self_hosted_cancel")?.click()
+        sleep(600)
+        check(find("server_host") == null, "a refused address changed the server on the release build")
+    }
+
+    /**
      * The real sign-in a person does on production today, with no hook: fresh install, native
      * sign-in, Sign in, config 404, the real web sign-in in the WebView, OpenBot by CopilotKit's page,
      * Google, email, password, 2-Step, "Try another way", the authenticator code, back on

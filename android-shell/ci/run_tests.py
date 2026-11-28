@@ -49,6 +49,7 @@ SUITE1_RELEASE = [
     "RealBackendReleaseTest#testRealFirstScreenAndWebSignIn",
     "RealBackendReleaseTest#testRealLockScreenWhenBackendUnreachable",
     "RealBackendReleaseTest#testRealGoogleSignInInWebViewAndJourney",
+    "RealBackendReleaseTest#testSelfHostedOnTheReleaseBuild",
 ]
 SUITE1_DEBUG = [
     "RealBackendDebugTest#testLoadsHostedWebApp",
@@ -96,6 +97,9 @@ SUITE2 = [
     "ShellFlowTest#testLoadingSkeleton",
     "ShellFlowTest#testLockLiftsWhenServerComesBack",
     "RenderingTest#testBotsPageRendering",
+]
+# On mock stack A, in the lighter shard ("other") to keep the two shards even.
+HARDENING = [
     "HardeningTest#testLargestFontScale",
     "HardeningTest#testAccessibilityLabels",
     "HardeningTest#testTabletSizeAndRotation",
@@ -442,7 +446,7 @@ def main():
             plan += SUITE2
         if shard in ("", "other"):
             if not REAL_ONLY:
-                plan += PROBE
+                plan += PROBE + HARDENING
             plan += SUITE1_DEBUG + SUITE1_RELEASE
         after_release = -1
     results, logs = [], []

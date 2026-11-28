@@ -215,32 +215,63 @@ class SelfHostedTest : ShellTestBase() {
         }
     }
 
-    // 7. The lock screen names the server; Change address opens the field with the address in it.
+    /** Stops or starts mock stack C's front end through the CI's control server (ci/stack_control.py). */
+    private fun stackC(action: String): Boolean = try {
+        val connection = java.net.URL("http://127.0.0.1:8790/stack-c/$action").openConnection() as java.net.HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.connectTimeout = 5_000
+        connection.readTimeout = 40_000
+        val ok = connection.responseCode == 200
+        connection.disconnect()
+        note("stack C $action: $ok")
+        ok
+    } catch (error: java.io.IOException) {
+        note("stack C $action failed: ${error.javaClass.simpleName}")
+        false
+    }
+
+    // 7. With the self-hosted OpenBot really stopped: the lock screen names its host, Change address
+    // opens the field with the address in it, and once it is back Try again returns to the app.
     @Test
     fun testLockNamesTheServer() {
         launch(MOCK_A, "lock-choose")
         check(waitFor("sign_in_button", 20_000) != null, "no Sign in button")
         if (!chooseSelfHosted("lock")) return
-        launch(MOCK_A, "lock", reset = false, extras = mapOf("openbot.force_offline" to "1"))
-        check(waitFor("offline_lock", 15_000) != null, "no lock screen")
-        checkEquals(string(ai.openbot.shell.R.string.lock_reaching, "127.0.0.1:3013"), find("offline_lock_host")?.text, "the host on the lock screen")
-        val change = find("lock_change_address")
-        if (!check(change != null, "no Change address on the lock screen")) return
-        screenshot("1-lock-self-hosted")
-        change!!.click()
-        val field = waitFor("self_hosted_address", 5_000)
-        checkEquals(MOCK_C, field?.text, "the address field after Change address")
-        dismissKeyboardIfUp()
-        sleep(600)
-        screenshot("2-change-address")
-        find("self_hosted_cancel")?.click()
-        check(waitFor("offline_lock", 5_000) != null, "Cancel did not return to the lock screen")
+        if (!check(signInThroughCustomTab("lock", shots = false), "signing in to the self-hosted server did not reach the tabs")) return
+        check(waitPageText("Start a conversation", 30_000), "no Home on the self-hosted server")
+        try {
+            if (!check(stackC("stop"), "could not stop the self-hosted OpenBot")) return
+            launch(MOCK_A, "lock", reset = false)
+            if (!check(waitFor("offline_lock", 40_000) != null, "no lock screen with the self-hosted OpenBot stopped: ${debugState()}")) return
+            checkEquals(string(ai.openbot.shell.R.string.lock_reaching, "127.0.0.1:3013"), find("offline_lock_host")?.text, "the host on the lock screen")
+            val change = find("lock_change_address")
+            if (!check(change != null, "no Change address on the lock screen")) return
+            screenshot("1-lock-self-hosted")
+            change!!.click()
+            val field = waitFor("self_hosted_address", 5_000)
+            checkEquals(MOCK_C, field?.text, "the address field after Change address")
+            dismissKeyboardIfUp()
+            sleep(600)
+            screenshot("2-change-address")
+            find("self_hosted_cancel")?.click()
+            check(waitFor("offline_lock", 5_000) != null, "Cancel did not return to the lock screen")
+            if (!check(stackC("start"), "could not start the self-hosted OpenBot again")) return
+            find("retry_button")?.click()
+            check(waitGone("offline_lock", 30_000), "Try again did not lift the lock once the self-hosted OpenBot was back")
+            check(waitPageText("Start a conversation", 30_000), "no Home after the self-hosted OpenBot came back")
+            checkEquals(MOCK_C, pageString("location.origin"), "the page's origin after the lock")
+            screenshot("3-back-after-lock")
+        } finally {
+            stackC("start")
+        }
 
-        launch(MOCK_A, "lock-cloud", extras = mapOf("openbot.force_offline" to "1"))
-        check(waitFor("offline_lock", 15_000) != null, "no lock screen on OpenBot Cloud")
-        checkEquals(string(ai.openbot.shell.R.string.lock_reaching, "localhost:3010"), find("offline_lock_host")?.text, "the host on OpenBot Cloud's lock screen")
+        // OpenBot Cloud that does not answer (a closed port as this build's Cloud): no Change address.
+        launch("http://127.0.0.1:8799", "lock-cloud")
+        waitFor("sign_in_button", 20_000)?.click()
+        check(waitFor("offline_lock", 30_000) != null, "no lock screen when OpenBot Cloud does not answer")
+        checkEquals(string(ai.openbot.shell.R.string.lock_reaching, "127.0.0.1:8799"), find("offline_lock_host")?.text, "the host on OpenBot Cloud's lock screen")
         check(find("lock_change_address") == null, "Change address shows on OpenBot Cloud")
-        screenshot("3-lock-cloud")
+        screenshot("4-lock-cloud")
     }
 
     companion object {

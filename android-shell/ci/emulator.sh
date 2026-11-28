@@ -90,7 +90,7 @@ prepare() {
   adb shell am set-debug-app --persistent com.android.chrome || true
   adb shell pm grant com.android.chrome android.permission.POST_NOTIFICATIONS > /dev/null 2>&1 || true
   # The test servers on the host, as localhost on the emulator (after adb root, which drops these).
-  for port in 3010 3011 3012 3013 8765 8766 8797; do adb reverse "tcp:$port" "tcp:$port" > /dev/null; done
+  for port in 3010 3011 3012 3013 8765 8766 8790 8797; do adb reverse "tcp:$port" "tcp:$port" > /dev/null; done
   adb reverse --list
   # SystemUI that started while the runner was busy (the web build, the mock servers) can keep a
   # half-drawn status bar for good: the clock and icons cut off below their first row, on every
