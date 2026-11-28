@@ -41,7 +41,7 @@ final class DemoTourUITests: ShellTestCase {
         let links = [app.webViews.links["Sign in as test person"], app.links["Sign in as test person"],
                      service.webViews.links["Sign in as test person"], service.links["Sign in as test person"]]
         if let first = firstExisting([consent] + links, timeout: 20), first == consent {
-            pause(1.5)
+            pause(1.2)
             consent.tap()
         } else {
             note("demo: no consent alert this time")
@@ -58,14 +58,35 @@ final class DemoTourUITests: ShellTestCase {
         pause(1.2)
         scene("sign-in")
 
-        // The software keyboard: the tab bar hides, the message box sits on it.
+        // The software keyboard: the tab bar hides, the message box and Send sit on it. Send, the
+        // reply (mock stack A runs with MOCK_REPLY=1), then a drag down puts the keyboard away.
         composer.tap()
-        if app.keyboards.firstMatch.waitForExistence(timeout: 6) {
+        let keyboard = app.keyboards.firstMatch
+        if keyboard.waitForExistence(timeout: 6) {
             composer.typeText("What changed in competitor pricing?")
-            pause(1)
+            let send = webElement(app, label: "Send message")
+            if send.waitForExistence(timeout: 5) {
+                XCTAssertLessThanOrEqual(send.frame.maxY, keyboard.frame.minY + 1, "demo: Send is under the keyboard")
+                pause(1)
+                send.tap()
+            } else {
+                XCTFail("demo: no Send button")
+            }
+            let reply = webText(app, "Two of the three cut their entry price")
+            XCTAssertTrue(reply.waitForExistence(timeout: 15), "demo: no reply")
+            pause(1.5)
+            if keyboard.exists {
+                app.webViews.firstMatch.swipeDown()
+                note(keyboard.waitForNonExistence(timeout: 2)
+                     ? "demo: the drag down put the keyboard away"
+                     : "demo: the drag down left the keyboard up")
+            }
             dismissKeyboardIfUp(app)
+            pause(1)
+        } else {
+            XCTFail("demo: no keyboard")
         }
-        scene("keyboard")
+        scene("send")
 
         // Conversations, one conversation.
         tab(app, .conversations).tap()
@@ -75,7 +96,7 @@ final class DemoTourUITests: ShellTestCase {
         row.tap()
         let answer = webText(app, "All three moved to per-seat pricing this year.")
         _ = answer.waitForExistence(timeout: 15)
-        pause(1.5)
+        pause(1.2)
         dismissKeyboardIfUp(app, tapping: answer)
         scene("conversation")
 

@@ -64,6 +64,8 @@ const API = `*/api/v2/organizations/:organizationId`;
 export const MOCK_SESSION_COOKIE = "better-auth.session_token";
 const MOCK_SESSION_VALUE = "mock";
 const HANDOFF = process.env.MOCK_NO_HANDOFF !== "1";
+// MOCK_REPLY=1: a run answers with one canned sentence (the iOS shell's video). Off by default.
+const REPLY = process.env.MOCK_REPLY === "1";
 const TICKET_MS = 60_000;
 
 /** Whether a request with no mock cookie is signed in. */
@@ -315,6 +317,17 @@ function mockDataHandlers(): RequestHandler[] {
       return new Response(
         [
           { type: "RUN_STARTED", threadId, runId },
+          ...(REPLY
+            ? [
+                { type: "TEXT_MESSAGE_START", messageId: `${runId}-reply`, role: "assistant" },
+                {
+                  type: "TEXT_MESSAGE_CONTENT",
+                  messageId: `${runId}-reply`,
+                  delta: "Two of the three cut their entry price; one added a free tier.",
+                },
+                { type: "TEXT_MESSAGE_END", messageId: `${runId}-reply` },
+              ]
+            : []),
           { type: "RUN_FINISHED", threadId, runId },
         ]
           .map((event) => `data: ${JSON.stringify(event)}\n\n`)
