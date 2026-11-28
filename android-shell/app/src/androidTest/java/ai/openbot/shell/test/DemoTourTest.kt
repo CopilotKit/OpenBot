@@ -35,9 +35,9 @@ class DemoTourTest : ShellTestBase() {
         pause(2_000)
 
         // The software keyboard: the bottom bar hides, the message box sits on the keyboard.
-        val box = composer()
+        val box = waitComposerRect(10_000)
         if (box != null) {
-            box.click()
+            tapComposer(box)
             if (waitKeyboard(true, 8_000)) {
                 pause(800)
                 shell("input text What%schanged%sin%scompetitor%spricing?")

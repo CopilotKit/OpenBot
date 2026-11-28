@@ -263,13 +263,40 @@ abstract class ShellTestBase {
             ?: web.findObject(By.textStartsWith("Message ")) ?: web.findObject(By.descStartsWith("Message "))
     }
 
-    fun waitComposer(timeoutMs: Long): UiObject2? {
+    /**
+     * The message box's place on screen: from the accessibility tree, else (debug builds) from the
+     * page itself (the editor's rect times devicePixelRatio, offset by the WebView's place).
+     */
+    fun composerRect(): Rect? {
+        bounds(composer())?.let { return it }
+        if (variant != "debug") return null
+        val raw = pageString(
+            "(function(){var e=document.querySelector('[contenteditable=\"true\"],textarea');" +
+                "if(!e)return 'null';var r=e.getBoundingClientRect();if(r.width<1||r.height<1)return 'null';" +
+                "return JSON.stringify({l:r.left,t:r.top,r:r.right,b:r.bottom,d:window.devicePixelRatio});})()",
+        )
+        if (raw == "null" || raw.isEmpty()) return null
+        val json = try { org.json.JSONObject(raw) } catch (error: Exception) { return null }
+        val web = bounds(find("openbot_webview")) ?: return null
+        val d = json.optDouble("d", 1.0)
+        return Rect(
+            (web.left + json.optDouble("l") * d).toInt(), (web.top + json.optDouble("t") * d).toInt(),
+            (web.left + json.optDouble("r") * d).toInt(), (web.top + json.optDouble("b") * d).toInt(),
+        )
+    }
+
+    fun waitComposerRect(timeoutMs: Long): Rect? {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         do {
-            composer()?.let { return it }
+            composerRect()?.let { return it }
             sleep(500)
         } while (SystemClock.uptimeMillis() < deadline)
         return null
+    }
+
+    /** Taps the message box near its top (where the text line is). */
+    fun tapComposer(rect: Rect) {
+        device.click(rect.centerX(), minOf(rect.top + 40, rect.centerY()))
     }
 
     fun dismissKeyboardIfUp() {

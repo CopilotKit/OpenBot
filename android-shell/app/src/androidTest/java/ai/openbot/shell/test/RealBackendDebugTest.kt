@@ -276,14 +276,14 @@ class RealBackendDebugTest : ShellTestBase() {
             check(false, "production rejected the session cookie (it may be stale or copied wrong)")
             return
         }
-        val box = waitComposer(30_000)
+        val box = waitComposerRect(30_000)
         check(box != null, "no message box on Home")
         sleep(2_000)
         screenshot("j1-home")
         assertWebNavigationNote("home")
 
         // One real message, typed with the software keyboard, and the reply streaming in.
-        box?.click()
+        box?.let { tapComposer(it) }
         val keyboard = waitKeyboard(true, 8_000)
         note("software keyboard shown for the message: $keyboard")
         shell("input text Say%shello%sin%sthree%swords.")
@@ -340,7 +340,7 @@ class RealBackendDebugTest : ShellTestBase() {
         sleep(3_000)
         screenshot("j8-back-from-background")
         tab(Tab.HOME)?.click()
-        check(waitComposer(20_000) != null, "Home did not come back after the background")
+        check(waitComposerRect(20_000) != null, "Home did not come back after the background")
         note("after background: ${debugState()}")
         // Let the cookie store reach the disk before the next test kills the process.
         device.pressHome()

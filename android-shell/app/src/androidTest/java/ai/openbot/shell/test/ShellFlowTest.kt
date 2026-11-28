@@ -164,10 +164,9 @@ class ShellFlowTest : ShellTestBase() {
         check(debugState().contains("tab=conversations"), "opening a conversation moved the tab selection: ${debugState()}")
         sleep(1_000)
         screenshot("3-conversation")
-        val box = composer()
+        val boxBounds = waitComposerRect(10_000)
         val bar = bounds(find("bottom_nav"))
-        check(box != null, "no message box in the conversation")
-        val boxBounds = bounds(box)
+        check(boxBounds != null, "no message box in the conversation")
         if (boxBounds != null && bar != null) {
             check(boxBounds.bottom <= bar.top + 1, "the message box is under the bottom bar (box $boxBounds, bar $bar)")
             check(boxBounds.height() > 20, "the message box is clipped (box $boxBounds)")
@@ -335,13 +334,13 @@ class ShellFlowTest : ShellTestBase() {
     fun testKeyboardHidesTabBar() {
         if (!launchSignedIn()) return
         check(homeRendered(), "Home did not render")
-        val box = waitComposer(15_000)
+        val box = waitComposerRect(15_000)
         if (box == null) {
             screenshot("no-composer")
             check(false, "no composer on Home")
             return
         }
-        box.click()
+        tapComposer(box)
         if (!waitKeyboard(true, 8_000)) {
             screenshot("no-software-keyboard")
             skip("the software keyboard did not show on this emulator; state ${debugState()}")
@@ -349,7 +348,7 @@ class ShellFlowTest : ShellTestBase() {
         check(tabGone(5_000), "the bottom bar stayed up with the keyboard")
         sleep(1_000)
         screenshot("keyboard-up")
-        val boxNow = bounds(composer())
+        val boxNow = composerRect()
         val webNow = bounds(find("openbot_webview"))
         note("keyboard up: ${debugState()}; message box $boxNow; web view $webNow; display height ${device.displayHeight}")
         if (boxNow != null && webNow != null) {

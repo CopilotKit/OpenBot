@@ -170,6 +170,16 @@ class ShellController(
             pageLoading = true
             loadingSince = System.currentTimeMillis()
             main.removeCallbacks(hideSkeleton)
+            diagnostics.log("skeleton", mapOf("shown" to true, "reason" to "web-area-shown"))
+            // A page already up (no load coming) ends it at once; a load in flight ends it itself.
+            if (web.pageReady) {
+                main.postDelayed({ pageShown("already-ready", 200) }, 50)
+            } else if (web.webView.progress >= 100) {
+                // Nothing loading and no bridge: as after a finish without ready (a load starting
+                // right after this cancels it in onFullLoad).
+                main.removeCallbacks(checkContent)
+                main.postDelayed(checkContent, NO_READY_MS)
+            }
         }
         lastWebVisible = visible
         activity.render()
@@ -435,10 +445,11 @@ class ShellController(
     private fun finishSignIn() {
         main.removeCallbacks(enterTimeout)
         renewing = false
+        // Signed in first: the web area never leaves the screen between ENTERING and the tabs.
+        phase = Phase.SIGNED_IN
         signIn = SignInStep.IDLE
         signInMessage = null
         clearLoadFailure()
-        phase = Phase.SIGNED_IN
         CookieManager.getInstance().flush()
     }
 
