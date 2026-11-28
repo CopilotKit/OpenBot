@@ -26,6 +26,7 @@ export const NO_HOOKS: TestHooks = {
   diagnostics: false,
   testName: null,
   forceDark: false,
+  softwareLayer: false,
 };
 
 function loadHooks(): TestHooks {

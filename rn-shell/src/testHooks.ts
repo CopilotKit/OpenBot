@@ -32,6 +32,9 @@ export type TestHooks = {
   testName: string | null;
   /** `openbot.force_dark=1`. */
   forceDark: boolean;
+  /** `openbot.software_layer=1`: Android draws the web view in software (recordings only: the
+   * emulator's GPU ghosts some pages, as it did for the native shell). */
+  softwareLayer: boolean;
 };
 
 function flag(value: string | undefined): boolean {
@@ -64,5 +67,6 @@ export function readTestHooks(): TestHooks {
     diagnostics: true,
     testName: args["openbot.test_name"] ?? null,
     forceDark: flag(args["openbot.force_dark"]),
+    softwareLayer: flag(args["openbot.software_layer"]),
   };
 }

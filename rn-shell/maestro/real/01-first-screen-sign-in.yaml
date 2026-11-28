@@ -27,7 +27,11 @@ appId: ai.openbot.rnshell
       - takeScreenshot: sheet-consent
       - tapOn: "Continue"
       - extendedWaitUntil:
-          visible: "(?i).*(google|github|microsoft|continue with|sign in|log in|email).*"
+          notVisible:
+            id: "sign-in-button"
+          timeout: 20000
+      - extendedWaitUntil:
+          visible: "(?i).*(google|github|microsoft|continue with|password|e-?mail).*"
           timeout: 40000
       - takeScreenshot: real-sign-in-sheet
       - tapOn: "Cancel"
@@ -36,7 +40,11 @@ appId: ai.openbot.rnshell
       platform: Android
     commands:
       - extendedWaitUntil:
-          visible: "(?i).*(google|github|microsoft|continue with|sign in|log in|email).*"
+          notVisible:
+            id: "sign-in-button"
+          timeout: 20000
+      - extendedWaitUntil:
+          visible: "(?i).*(google|github|microsoft|continue with|password|e-?mail).*"
           timeout: 40000
       - takeScreenshot: real-sign-in-custom-tab
       - back

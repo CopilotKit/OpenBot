@@ -32,8 +32,10 @@ appId: ai.openbot.rnshell
     timeout: 10000
 - tapOn:
     id: "tab-bots"
+# "New Bot" is at the top of the Bots page (its list scrolls; the emulator also ghosts this page's
+# drawing, the same as for the native shell).
 - extendedWaitUntil:
-    visible: "Research Bot"
+    visible: "New Bot"
     timeout: 20000
 - assertVisible:
     id: "debug-state"

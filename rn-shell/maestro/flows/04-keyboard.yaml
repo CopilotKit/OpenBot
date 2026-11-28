@@ -3,6 +3,11 @@
 # conversation, sending keeps it up.
 appId: ai.openbot.rnshell
 ---
+- tapOn:
+    id: "tab-home"
+- extendedWaitUntil:
+    visible: "Start a conversation"
+    timeout: 20000
 - tapOn: "(Message|Ask anything)"
 - extendedWaitUntil:
     visible:

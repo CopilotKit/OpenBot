@@ -7,7 +7,7 @@ appId: ai.openbot.rnshell
       text: ".*phase=signedIn.*skeleton=0.*"
     timeout: 45000
 - extendedWaitUntil:
-    visible: "Research Bot"
+    visible: "New Bot"
     timeout: 30000
 - takeScreenshot: after-kill
 - tapOn:

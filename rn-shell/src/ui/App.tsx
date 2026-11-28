@@ -353,6 +353,7 @@ function Shell() {
               mediaCapturePermissionGrantType="grantIfSameHostElsePrompt"
               geolocationEnabled={false}
               pullToRefreshEnabled={false}
+              androidLayerType={hooks.softwareLayer ? "software" : "none"}
               style={{ backgroundColor: chromeBackground }}
               containerStyle={{ backgroundColor: chromeBackground }}
             />

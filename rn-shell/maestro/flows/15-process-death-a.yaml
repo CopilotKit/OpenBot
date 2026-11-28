@@ -12,6 +12,6 @@ appId: ai.openbot.rnshell
 - tapOn:
     id: "tab-bots"
 - extendedWaitUntil:
-    visible: "Research Bot"
+    visible: "New Bot"
     timeout: 20000
 - takeScreenshot: before-kill

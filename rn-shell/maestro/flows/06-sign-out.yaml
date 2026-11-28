@@ -1,6 +1,8 @@
 # Sign out is the web app's own (Account menu); the bridge's signed-out returns to the first screen.
 appId: ai.openbot.rnshell
 ---
+- tapOn:
+    id: "tab-home"
 - extendedWaitUntil:
     visible: "Account"
     timeout: 20000

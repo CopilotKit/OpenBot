@@ -9,6 +9,7 @@ appId: ai.openbot.rnshell
       openbot.base_url: "${BASE_A}"
       openbot.reset: "1"
       openbot.handoff_auto: "1"
+      openbot.software_layer: "1"
       openbot.test_name: "demo"
 - extendedWaitUntil:
     visible:
@@ -59,7 +60,7 @@ appId: ai.openbot.rnshell
 - tapOn:
     id: "tab-bots"
 - extendedWaitUntil:
-    visible: "Research Bot"
+    visible: "New Bot"
     timeout: 20000
 - waitForAnimationToEnd:
     timeout: 2500

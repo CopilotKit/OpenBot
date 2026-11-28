@@ -72,12 +72,19 @@ jobs:
         with:
           bun-version: 1.4.3
 
+      - name: Key the built web app on its sources (git's index: hashFiles over app/ timed out on macOS)
+        id: web-key
+        run: |
+          sum="$(git ls-files -s app/src app/public app/index.html app/package.json shared tokens bun.lock package.json .env.example \
+            'app/vite.config.*' 'app/tsconfig*.json' | sha256sum | cut -c1-40)"
+          echo "key=rn-shell-web-$sum" >> "$GITHUB_OUTPUT"
+
       - name: Look for the built web app in the cache
         id: web-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: app/dist
-          key: rn-shell-web-${{ hashFiles('app/src/**', 'app/public/**', 'app/index.html', 'app/package.json', 'app/vite.config.*', 'app/tsconfig*.json', 'shared/**', 'tokens/**', 'bun.lock', 'package.json', '.env.example') }}
+          key: ${{ steps.web-key.outputs.key }}
 
       - name: Build the web app and start the servers in the background
         run: nohup rn-shell/ci/start_servers.sh "$ARTIFACTS" > /dev/null 2>&1 &
