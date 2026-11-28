@@ -196,8 +196,8 @@ function RouteComponent() {
         <div
           className={cn(
             "min-h-12 border-b border-border sticky top-0 flex flex-row flex-wrap items-center justify-between px-3 py-2 gap-2",
-            // In the phone app the buttons are 40px, easier to hit, and the bar keeps its 48px.
-            nativeShell() && "py-1 [&_[data-slot=button]]:size-10",
+            // In the phone app the buttons are 44px, as Back and Account are, and the bar keeps its 48px.
+            nativeShell() && "py-0.5 [&_[data-slot=button]]:size-11",
           )}
           data-slot="conversation-header"
         >
