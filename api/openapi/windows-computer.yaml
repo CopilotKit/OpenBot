@@ -15,8 +15,8 @@ paths:
       summary: Read the caller's Windows computer
       description: >-
         Say whether the caller's Windows computer is ready, who is using it,
-        the caller or their Bot, and what is being recorded on it. Only the
-        person the Windows computer was set up for may read it.
+        the caller or their Bot, and what is being recorded on it. Each person
+        reads only their own: a person has one in each organization.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -287,8 +287,8 @@ paths:
         expires in fifteen minutes. Because it is a credential the answer is
         not kept: a retry with the same Idempotency-Key is refused as a
         conflict rather than answered with the code again, so make a new code
-        with a new key. Only the person the Windows computer is set up for
-        may make one, and only so many at once.
+        with a new key. A person makes codes only for their own Windows
+        computer, and only so many at once.
       security:
         - webSession: []
         - appOAuth: [computers:write]
@@ -387,17 +387,15 @@ components:
   schemas:
     WindowsComputer:
       type: object
-      description: The caller's Windows computer, who is using it, and what is being recorded on it.
+      description: >-
+        The caller's Windows computer in this organization, who is using it, and
+        what is being recorded on it. Every Bot of theirs set to work on a Windows
+        computer (computer: windows) works on this one.
       required: [available, control, recording]
       properties:
-        botId:
-          type: string
-          description: >-
-            The Bot it is set up for: the one Bot that can be told to work on
-            it (computer: windows).
         available:
           type: boolean
-          description: True when the Windows computer answers, its session is unlocked and the Bot can use it.
+          description: True when the Windows computer answers, its session is unlocked and a Bot can use it.
         connected:
           type: boolean
           description: >-
@@ -629,8 +627,8 @@ components:
                 traceId: trace_example
     WindowsComputerNotFound:
       description: >-
-        There is no Windows computer for the caller: none is set up, or it was set up
-        for somebody else, or the organization does not exist.
+        There is no Windows computer here: Windows computers are not on for this
+        OpenBot, or the organization does not exist.
       headers:
         X-Request-Id:
           $ref: './common.yaml#/components/headers/RequestId'
@@ -644,7 +642,7 @@ components:
                 type: https://open.bot/errors/not-found
                 title: Not found.
                 status: 404
-                detail: There's no Windows computer set up for you.
+                detail: Windows computers aren't on for this OpenBot.
                 code: NOT_FOUND
                 category: not_found
                 retryable: false
@@ -731,7 +729,6 @@ components:
         organizationId: default
     WindowsComputerExample:
       value:
-        botId: general-assistant
         available: true
         control:
           holder: bot

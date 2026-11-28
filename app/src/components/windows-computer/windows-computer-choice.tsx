@@ -17,18 +17,18 @@ import { windowsComputerQueryOptions } from "@/lib/windows-computer/queries";
 import { queryClient } from "@/query-client";
 
 /**
- * Whether this Bot works on the person's Windows computer instead of its browser computer (Bot.computer).
+ * Whether this Bot works on a Windows computer instead of its browser computer (Bot.computer): the Windows computer
+ * of the person it works for, whoever that is.
  *
- * Shown only on the Bot a Windows computer is set up for: every other Bot has its browser computer and nothing
- * to choose. Off by default, and one computer at a time, as Sam put it: most work needs only the browser.
- * The words and the place are placeholders until Guido's UX for choosing a computer.
+ * Shown wherever Windows computers are on (the caller's Windows computer can be read). Off by default, and one
+ * computer at a time, as Sam put it: most work needs only the browser. The words and the place are placeholders until
+ * Guido's UX for choosing a computer.
  */
 export function WindowsComputerChoice({ agentId }: { agentId: string }) {
   const computer = useQuery(windowsComputerQueryOptions());
   const bot = useQuery(agentQueryOptions(agentId));
   const update = useMutation(updateAgentMutationOptions(queryClient));
-  if (!computer.data || computer.data.botId !== agentId || !bot.data)
-    return null;
+  if (!computer.data || !bot.data) return null;
   const profile = bot.data;
   const onWindows = profile.computer === "windows";
   return (

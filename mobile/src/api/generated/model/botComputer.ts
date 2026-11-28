@@ -3,7 +3,7 @@
  */
 
 /**
- * The computer it works on. browser unless set; windows only for the Bot a Windows computer is set up for, and refused for any other. Absent leaves it as it is. Experimental.
+ * The computer it works on. browser unless set; windows, the Windows computer of the person it works for, wherever Windows computers are on. Absent leaves it as it is. Experimental.
  */
 export type BotComputer = (typeof BotComputer)[keyof typeof BotComputer];
 

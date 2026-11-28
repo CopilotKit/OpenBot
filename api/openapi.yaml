@@ -112,7 +112,7 @@ tags:
   - name: Browsers
     description: 'The browsers people work in: the one on a Bot''s computer, which a person drives and records in while they hold control of it, and the one OpenBot runs for each person, with the OpenBot Recorder in it already connected.'
   - name: Windows computer
-    description: 'Experimental. The Windows computer a person and their Bot take turns on, set up for one person: who is using it, and the recordings the person makes on it for OpenBot to learn from.'
+    description: 'Experimental. A person''s own Windows computer, which they and their Bots take turns on, one in each organization: who is using it, and the recordings the person makes on it for OpenBot to learn from.'
   - name: Sign-in requests
     description: A Bot asking the person it works for to sign it in to a website, and the person's answer on a private form. What they type goes to the Bot's browser and nowhere else; the Bot is told only whether the sign-in worked.
   - name: Saved logins
@@ -19590,7 +19590,7 @@ paths:
         - Windows computer
       operationId: getWindowsComputer
       summary: Read the caller's Windows computer
-      description: Say whether the caller's Windows computer is ready, who is using it, the caller or their Bot, and what is being recorded on it. Only the person the Windows computer was set up for may read it.
+      description: 'Say whether the caller''s Windows computer is ready, who is using it, the caller or their Bot, and what is being recorded on it. Each person reads only their own: a person has one in each organization.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -19847,7 +19847,7 @@ paths:
         - Windows computer
       operationId: createWindowsComputerEnrollmentCode
       summary: Make a code that connects a Windows computer
-      description: 'Make a one-time code that connects a Windows computer to the caller: OpenBot''s program on that computer exchanges it (exchangeWindowsComputerEnrollmentCode) and from then on connects to OpenBot by itself, so OpenBot never has to reach into the computer''s network. The code is in this answer and never again, works once and expires in fifteen minutes. Because it is a credential the answer is not kept: a retry with the same Idempotency-Key is refused as a conflict rather than answered with the code again, so make a new code with a new key. Only the person the Windows computer is set up for may make one, and only so many at once.'
+      description: 'Make a one-time code that connects a Windows computer to the caller: OpenBot''s program on that computer exchanges it (exchangeWindowsComputerEnrollmentCode) and from then on connects to OpenBot by itself, so OpenBot never has to reach into the computer''s network. The code is in this answer and never again, works once and expires in fifteen minutes. Because it is a credential the answer is not kept: a retry with the same Idempotency-Key is refused as a conflict rather than answered with the code again, so make a new code with a new key. A person makes codes only for their own Windows computer, and only so many at once.'
       security:
         - webSession: []
         - appOAuth:
@@ -25562,7 +25562,7 @@ components:
           x-extensible-enum:
             - browser
             - windows
-          description: 'The computer it works on: browser, the Bot''s own browser computer, which every Bot has unless told otherwise; or windows, a person''s Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.'
+          description: 'The computer it works on: browser, the Bot''s own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner''s. One at a time. Experimental.'
         instructions:
           type: string
           description: What the starter Bot is told, kept apart from its role description. Only the starter Bot has instructions.
@@ -28565,7 +28565,7 @@ components:
       enum:
         - browser
         - windows
-      description: The computer it works on. browser unless set; windows only for the Bot a Windows computer is set up for, and refused for any other. Absent leaves it as it is. Experimental.
+      description: The computer it works on. browser unless set; windows, the Windows computer of the person it works for, wherever Windows computers are on. Absent leaves it as it is. Experimental.
     ServiceTermsVersionId:
       type: string
       minLength: 1
@@ -40367,18 +40367,15 @@ components:
           description: Why the recording isn't reaching Learning right now, when it isn't.
     WindowsComputer:
       type: object
-      description: The caller's Windows computer, who is using it, and what is being recorded on it.
+      description: 'The caller''s Windows computer in this organization, who is using it, and what is being recorded on it. Every Bot of theirs set to work on a Windows computer (computer: windows) works on this one.'
       required:
         - available
         - control
         - recording
       properties:
-        botId:
-          type: string
-          description: 'The Bot it is set up for: the one Bot that can be told to work on it (computer: windows).'
         available:
           type: boolean
-          description: True when the Windows computer answers, its session is unlocked and the Bot can use it.
+          description: True when the Windows computer answers, its session is unlocked and a Bot can use it.
         connected:
           type: boolean
           description: True when the Windows computer has connected with an enrollment code and its link to OpenBot is open now. False when none is connected yet (make an enrollment code) or it is off, asleep or offline.
@@ -49160,7 +49157,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     WindowsComputerNotFound:
-      description: 'There is no Windows computer for the caller: none is set up, or it was set up for somebody else, or the organization does not exist.'
+      description: 'There is no Windows computer here: Windows computers are not on for this OpenBot, or the organization does not exist.'
       headers:
         X-Request-Id:
           $ref: '#/components/headers/RequestId'
@@ -49174,7 +49171,7 @@ components:
                 type: https://open.bot/errors/not-found
                 title: Not found.
                 status: 404
-                detail: There's no Windows computer set up for you.
+                detail: Windows computers aren't on for this OpenBot.
                 code: NOT_FOUND
                 category: not_found
                 retryable: false
@@ -54946,7 +54943,6 @@ components:
         narration: external
     WindowsComputerExample:
       value:
-        botId: general-assistant
         available: true
         control:
           holder: bot

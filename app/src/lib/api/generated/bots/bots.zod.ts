@@ -124,7 +124,7 @@ export const ListBotsResponse = zod.object({
           .string()
           .optional()
           .describe(
-            "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+            "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner's. One at a time. Experimental.",
           ),
         instructions: zod
           .string()
@@ -410,7 +410,7 @@ export const CreateBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner's. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -577,7 +577,7 @@ export const GetBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner's. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -778,7 +778,7 @@ export const UpdateBotBody = zod
       .enum(["browser", "windows"])
       .optional()
       .describe(
-        "The computer it works on. browser unless set; windows only for the Bot a Windows computer is set up for, and refused for any other. Absent leaves it as it is. Experimental.",
+        "The computer it works on. browser unless set; windows, the Windows computer of the person it works for, wherever Windows computers are on. Absent leaves it as it is. Experimental.",
       ),
     instructions: zod
       .string()
@@ -879,7 +879,7 @@ export const UpdateBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner's. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -1188,7 +1188,7 @@ export const DuplicateBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner's. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -1367,7 +1367,7 @@ export const HideBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner's. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -1546,7 +1546,7 @@ export const UnhideBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner's. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -1725,7 +1725,7 @@ export const PinBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner's. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -1904,7 +1904,7 @@ export const UnpinBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner's. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -2125,7 +2125,7 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, the Windows computer of the person it works for: in a conversation, theirs; in a routine, its owner's. One at a time. Experimental.",
         ),
       instructions: zod
         .string()

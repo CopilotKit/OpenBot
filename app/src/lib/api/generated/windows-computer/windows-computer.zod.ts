@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Say whether the caller's Windows computer is ready, who is using it, the caller or their Bot, and what is being recorded on it. Only the person the Windows computer was set up for may read it.
+ * Say whether the caller's Windows computer is ready, who is using it, the caller or their Bot, and what is being recorded on it. Each person reads only their own: a person has one in each organization.
  * @summary Read the caller's Windows computer
  */
 
@@ -31,16 +31,10 @@ export const getWindowsComputerResponseRecordingBufferedMin = 0;
 
 export const GetWindowsComputerResponse = zod
   .object({
-    botId: zod
-      .string()
-      .optional()
-      .describe(
-        "The Bot it is set up for: the one Bot that can be told to work on it (computer: windows).",
-      ),
     available: zod
       .boolean()
       .describe(
-        "True when the Windows computer answers, its session is unlocked and the Bot can use it.",
+        "True when the Windows computer answers, its session is unlocked and a Bot can use it.",
       ),
     connected: zod
       .boolean()
@@ -144,7 +138,7 @@ export const GetWindowsComputerResponse = zod
       ),
   })
   .describe(
-    "The caller's Windows computer, who is using it, and what is being recorded on it.",
+    "The caller's Windows computer in this organization, who is using it, and what is being recorded on it. Every Bot of theirs set to work on a Windows computer (computer: windows) works on this one.",
   );
 
 /**
@@ -485,7 +479,7 @@ export const StopWindowsComputerRecordingResponse = zod
   );
 
 /**
- * Make a one-time code that connects a Windows computer to the caller: OpenBot's program on that computer exchanges it (exchangeWindowsComputerEnrollmentCode) and from then on connects to OpenBot by itself, so OpenBot never has to reach into the computer's network. The code is in this answer and never again, works once and expires in fifteen minutes. Because it is a credential the answer is not kept: a retry with the same Idempotency-Key is refused as a conflict rather than answered with the code again, so make a new code with a new key. Only the person the Windows computer is set up for may make one, and only so many at once.
+ * Make a one-time code that connects a Windows computer to the caller: OpenBot's program on that computer exchanges it (exchangeWindowsComputerEnrollmentCode) and from then on connects to OpenBot by itself, so OpenBot never has to reach into the computer's network. The code is in this answer and never again, works once and expires in fifteen minutes. Because it is a credential the answer is not kept: a retry with the same Idempotency-Key is refused as a conflict rather than answered with the code again, so make a new code with a new key. A person makes codes only for their own Windows computer, and only so many at once.
  * @summary Make a code that connects a Windows computer
  */
 

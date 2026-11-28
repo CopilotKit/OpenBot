@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * There is no Windows computer for the caller: none is set up, or it was set up for somebody else, or the organization does not exist.
+ * There is no Windows computer here: Windows computers are not on for this OpenBot, or the organization does not exist.
  */
 export type WindowsComputerNotFoundResponse = Problem;
