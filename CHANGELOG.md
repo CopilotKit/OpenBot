@@ -64,6 +64,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   conversation with nothing under it. `listRefusedTurns` gains the code `BOT_ENGINE_UNAVAILABLE`, and
   the run's RUN_ERROR carries the same code.
 
+### OpenBot Desktop
+
+- **Privatemode is on the Connect your AI screen** and in AI settings. Enter a Privatemode API
+  key and OpenBot fills in `https://proxyless-api.privatemode.ai/v1` and `glm-latest`.
+
+### API
+
+- **Privatemode as an AI connection.** `replaceAiConnection` takes `provider: privatemode`
+  with `login: endpoint`, an address and a key.
+
 ## 1.2.1
 
 **Before upgrading.**

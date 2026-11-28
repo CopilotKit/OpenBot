@@ -89,9 +89,19 @@ const trustedRouter = {
   keyLink: "Get a TrustedRouter API key",
 };
 
+/** A hosted endpoint with an API key and no sign-in. */
+const privatemode = {
+  id: "privatemode",
+  name: "Privatemode",
+  baseUrl: "https://proxyless-api.privatemode.ai/v1",
+  model: "glm-latest",
+  keyUrl: "https://portal.privatemode.ai",
+  keyLink: "Get a Privatemode API key",
+};
+
 const allProviders: Provider[] = [
   ...providers,
-  ...[...cloudProviders, unbiased, trustedRouter].map(
+  ...[...cloudProviders, unbiased, trustedRouter, privatemode].map(
     (provider): Provider => ({
       id: provider.id,
       name: provider.name,
@@ -1512,7 +1522,12 @@ test("a saved Google sign-in says it ended and its button opens Gemini's API key
   expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
 });
 
-for (const provider of [...cloudProviders, unbiased, trustedRouter]) {
+for (const provider of [
+  ...cloudProviders,
+  unbiased,
+  trustedRouter,
+  privatemode,
+]) {
   test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers") return allProviders;

@@ -1945,6 +1945,7 @@ const PROVIDERS = [
   "xAI",
   "Unbiased AI",
   "TrustedRouter",
+  "Privatemode",
   "Any OpenAI-compatible endpoint",
 ];
 
@@ -2254,6 +2255,7 @@ describe.skipIf(!asked)(
               tile: tile && { left: tile.left, width: tile.width },
             };
           });
+        await settled(page);
         const listing = await where();
         expect(listing.scrolls).toBe(true);
         expect(listing.scrollbar).toBe(true);
@@ -2263,7 +2265,7 @@ describe.skipIf(!asked)(
         await page
           .getByRole("button", { name: "Choose a different provider" })
           .waitFor();
-        await page.waitForTimeout(400);
+        await settled(page);
         const chosen = await where();
         expect(chosen.scrolls).toBe(false);
         expect(chosen.row).toEqual(listing.row);

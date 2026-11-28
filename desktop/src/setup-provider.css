@@ -36,12 +36,18 @@ main
   + .sheet.setup-layout.provider-layout
   > .setup-body:has(> fieldset.picker.providers) {
   justify-content: flex-start;
+  padding-block: 18px;
 }
 
 .setup-layout.provider-layout .setup-body > fieldset.picker.providers {
   flex: none;
   margin-top: 0;
   overflow: visible;
+}
+
+/* Fit the whole provider list at the default window height. */
+.setup-layout.provider-layout .setup-body > fieldset.picker.providers .tile {
+  padding-block: 5px;
 }
 
 /* The selected identity stays with the heading; only the authentication body scrolls. */

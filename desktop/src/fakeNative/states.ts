@@ -567,6 +567,15 @@ function createStates(where: Where): States {
             caution: null,
           },
           {
+            id: "privatemode",
+            name: "Privatemode",
+            summary:
+              "Use a Privatemode API key for models run in confidential computing.",
+            logins: ["endpoint"],
+            mark: "privatemode",
+            caution: null,
+          },
+          {
             id: "openai-compatible",
             name: "Any OpenAI-compatible endpoint",
             summary:

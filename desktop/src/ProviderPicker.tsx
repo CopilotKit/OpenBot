@@ -111,6 +111,14 @@ const endpointPresets: Record<
     keyUrl: "https://trustedrouter.com/console/api-keys",
     keyLink: "Get a TrustedRouter API key",
   },
+  // Privatemode's hosted, OpenAI-compatible address and recommended default model.
+  // https://docs.privatemode.ai/api/proxyless-api/
+  privatemode: {
+    baseUrl: "https://proxyless-api.privatemode.ai/v1",
+    model: "glm-latest",
+    keyUrl: "https://portal.privatemode.ai",
+    keyLink: "Get a Privatemode API key",
+  },
 };
 
 /** What approving in the browser does, for each provider that signs in that way. */
