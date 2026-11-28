@@ -32,7 +32,6 @@
   --border: rgb(24 24 27 / 9%);
   --input: rgb(24 24 27 / 12%);
   --ring: #6430ab;
-  --radius: 0.875rem;
   --sidebar: #f6f6f8;
   --sidebar-foreground: #18181b;
   --sidebar-primary: #111114;
@@ -107,7 +106,6 @@
   --border: rgb(255 255 255 / 10%);
   --input: rgb(255 255 255 / 14%);
   --ring: #b49ae8;
-  --radius: 0.875rem;
   --sidebar: #111113;
   --sidebar-foreground: #f4f4f5;
   --sidebar-primary: #f4f4f5;

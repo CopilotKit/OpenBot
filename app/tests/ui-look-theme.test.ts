@@ -12,9 +12,10 @@ const theme = readFileSync(THEME, "utf8");
 const withoutComments = theme.replace(/\/\*[\s\S]*?\*\//g, "");
 
 describe("the look's theme values", () => {
-  test(":root's --radius is 0.5rem", () => {
+  // The design's radius base (Figma, Primitives > radius > base): 10px, so sm to 4xl are 6 to 26.
+  test(":root's --radius is 0.625rem", () => {
     const root = withoutComments.match(/(?:^|[};])\s*:root\s*\{([^}]*)\}/);
-    expect(root?.[1]).toMatch(/--radius:\s*0\.5rem;/);
+    expect(root?.[1]).toMatch(/--radius:\s*0\.625rem;/);
   });
 
   test("the default icon stroke is 1.75, and only the default", () => {

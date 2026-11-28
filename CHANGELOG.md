@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **Rounder corners, the same in every skin.** Corners are a touch rounder: 10px on cards, 8px on
+  buttons and fields, 14px on menus and dialogs, as OpenBot Desktop's setup window already had.
+  OpenDuet, OpenFuse and OpenDots take the same corners instead of their own.
+
 ## 1.2.2
 
 **Before upgrading.**
