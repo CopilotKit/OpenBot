@@ -272,12 +272,14 @@ final class ShellFlowUITests: ShellTestCase {
             XCTFail("the Account menu has no Sign out")
             return
         }
+        // Every sign-in clears the site's data before `enter` too: count from here.
+        let clearedBefore = Int(stateValue(app, "cleared") ?? "0") ?? 0
         signOut.tap()
         XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 20),
                       "Sign out did not bring back the native sign-in; state \(debugState(app))")
         XCTAssertTrue(tab(app, .home).waitForNonExistence(timeout: 5), "the tab bar stayed after Sign out")
         // Review item H: the site's data went with the session, so the next person starts clean.
-        XCTAssertTrue(waitForState(app, "cleared=1", timeout: 10), "sign-out did not clear the site's data: \(debugState(app))")
+        XCTAssertTrue(waitForState(app, "cleared=\(clearedBefore + 1)", timeout: 10), "sign-out did not clear the site's data: \(debugState(app))")
         sleep(1)
         screenshot("2-after-sign-out")
         sleep(3)
