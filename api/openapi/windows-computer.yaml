@@ -271,6 +271,118 @@ paths:
           $ref: '#/components/responses/WindowsComputerUnavailable'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/windows-computer/enrollment-codes:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Windows computer]
+      operationId: createWindowsComputerEnrollmentCode
+      summary: Make a code that connects a Windows computer
+      description: >-
+        Make a one-time code that connects a Windows computer to the caller:
+        OpenBot's program on that computer exchanges it
+        (exchangeWindowsComputerEnrollmentCode) and from then on connects to
+        OpenBot by itself, so OpenBot never has to reach into the computer's
+        network. The code is in this answer and never again, works once and
+        expires in fifteen minutes. Because it is a credential the answer is
+        not kept: a retry with the same Idempotency-Key is refused as a
+        conflict rather than answered with the code again, so make a new code
+        with a new key. Only the person the Windows computer is set up for
+        may make one, and only so many at once.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: The code, shown this once.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WindowsComputerEnrollmentCode'
+              examples:
+                answer:
+                  $ref: '#/components/examples/WindowsComputerEnrollmentCodeExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WindowsComputerNotFound'
+        '409':
+          $ref: '#/components/responses/WindowsComputerConflict'
+        '429':
+          $ref: '#/components/responses/TooManyWindowsComputerEnrollmentCodes'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/windows-computer/connections:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Windows computer]
+      operationId: exchangeWindowsComputerEnrollmentCode
+      summary: Connect a Windows computer with a code
+      description: >-
+        Exchange an enrollment code (createWindowsComputerEnrollmentCode) for
+        the Windows computer's own credential, shown this once, which it opens
+        its link to OpenBot with from now on (the windowsComputerLink socket).
+        Nobody is signed in here: the code in the body is the credential and
+        works once. organizationId is `default` or the code's own
+        organization, and either way the Windows computer is connected in the
+        organization the code was made in. A Windows computer connected
+        before, for the same person, is disconnected: a person has one. Every
+        refusal is written to the audit trail. The answer is never kept,
+        because it holds the credential.
+      security: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowsComputerEnrollmentExchange'
+            examples:
+              exchange:
+                value:
+                  code: obwe_3q2-7wEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE0
+                  name: DESKTOP-4F2K9QA
+      responses:
+        '201':
+          description: The Windows computer's credential, shown this once.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WindowsComputerConnectionGrant'
+              examples:
+                answer:
+                  $ref: '#/components/examples/WindowsComputerConnectionGrantExample'
+        '400':
+          $ref: '#/components/responses/InvalidWindowsComputerEnrollmentCode'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   schemas:
     WindowsComputer:
@@ -286,11 +398,22 @@ components:
         available:
           type: boolean
           description: True when the Windows computer answers, its session is unlocked and the Bot can use it.
+        connected:
+          type: boolean
+          description: >-
+            True when the Windows computer has connected with an enrollment
+            code and its link to OpenBot is open now. False when none is
+            connected yet (make an enrollment code) or it is off, asleep or
+            offline.
+        enrolled:
+          type: boolean
+          description: True when a Windows computer was connected with an enrollment code and not disconnected since.
         unavailableReason:
           type: string
           description: >-
-            Why it isn't available, when it isn't: locked, secure_desktop,
-            driver_down, stopped, unavailable or unreachable.
+            Why it isn't available, when it isn't: not_enrolled,
+            not_connected, locked, secure_desktop, driver_down, stopped,
+            unavailable or unreachable.
         control:
           description: Who is using it. Null when the Windows computer did not answer.
           oneOf:
@@ -417,7 +540,93 @@ components:
           type: string
           maxLength: 500
           description: What went wrong, when it failed.
+    WindowsComputerEnrollmentCode:
+      type: object
+      required: [code, expiresAt]
+      properties:
+        code:
+          type: string
+          description: The one-time code. A credential, shown this once.
+        expiresAt:
+          type: string
+          format: date-time
+    WindowsComputerEnrollmentExchange:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: The enrollment code.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: \S
+          description: The Windows computer's name, as it calls itself.
+    WindowsComputerConnectionGrant:
+      type: object
+      required: [credential, computerId, organizationId]
+      properties:
+        credential:
+          type: string
+          description: >-
+            The Windows computer's credential (windowsComputerCredential). A
+            credential, shown this once: keep it where only the Windows
+            account that runs OpenBot's program can read it.
+        computerId:
+          type: string
+          description: The Windows computer, as OpenBot knows it.
+        organizationId:
+          type: string
+          description: The organization it is connected in, the one the code was made in.
   responses:
+    TooManyWindowsComputerEnrollmentCodes:
+      description: Too many enrollment codes are live for this person at once.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            codes:
+              value:
+                type: https://open.bot/errors/rate-limited
+                title: Too many requests.
+                status: 429
+                detail: Too many codes were asked for at once. Wait a few minutes and try again.
+                code: RATE_LIMITED
+                category: rate_limit
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    InvalidWindowsComputerEnrollmentCode:
+      description: >-
+        The request was not complete, the Idempotency-Key is missing, or the
+        code is unknown, expired or already used, which all read the same.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            code:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: This code has expired or was already used. Make a new one in OpenBot.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     WindowsComputerNotFound:
       description: >-
         There is no Windows computer for the caller: none is set up, or it was set up
@@ -511,6 +720,15 @@ components:
                 requestId: req_example
                 traceId: trace_example
   examples:
+    WindowsComputerEnrollmentCodeExample:
+      value:
+        code: obwe_3q2-7wEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE0
+        expiresAt: '2026-11-23T10:15:00.000Z'
+    WindowsComputerConnectionGrantExample:
+      value:
+        credential: obwc_Zk1-EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEX0
+        computerId: 6f1d2c3b-4a5e-4f60-8b7a-9c0d1e2f3a4b
+        organizationId: default
     WindowsComputerExample:
       value:
         botId: general-assistant

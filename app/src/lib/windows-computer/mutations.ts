@@ -1,11 +1,13 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import type {
   WindowsComputerControl,
+  WindowsComputerEnrollmentCode,
   WindowsComputerRecording,
   WindowsComputerRecordingStart,
   WindowsComputerRecordingStop,
 } from "@/lib/api/generated/model";
 import {
+  createWindowsComputerEnrollmentCode,
   releaseWindowsComputerControl,
   startWindowsComputerRecording,
   stopWindowsComputerRecording,
@@ -80,5 +82,20 @@ export function stopWindowsComputerRecordingMutationOptions(
         { fallback: "Couldn't stop recording. Try again." },
       ),
     onSuccess: () => invalidateWindowsComputer(queryClient),
+  });
+}
+
+/**
+ * A one-time code that connects a Windows computer to the person: shown once, works once, for fifteen minutes. Nothing
+ * to read again: the page notices the computer connect on its own next read.
+ */
+export function createWindowsComputerEnrollmentCodeMutationOptions() {
+  return mutationOptions({
+    mutationFn: async (): Promise<WindowsComputerEnrollmentCode> =>
+      createWindowsComputerEnrollmentCode(
+        organizationId(),
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't make a code. Try again." },
+      ),
   });
 }

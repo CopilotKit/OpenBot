@@ -488,6 +488,8 @@ paths:
   /api/v2/organizations/{organizationId}/windows-computer/control/release: { $ref: './windows-computer.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1windows-computer~1control~1release' }
   /api/v2/organizations/{organizationId}/windows-computer/recording/start: { $ref: './windows-computer.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1windows-computer~1recording~1start' }
   /api/v2/organizations/{organizationId}/windows-computer/recording/stop: { $ref: './windows-computer.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1windows-computer~1recording~1stop' }
+  /api/v2/organizations/{organizationId}/windows-computer/enrollment-codes: { $ref: './windows-computer.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1windows-computer~1enrollment-codes' }
+  /api/v2/organizations/{organizationId}/windows-computer/connections: { $ref: './windows-computer.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1windows-computer~1connections' }
   /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests' }
   /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}/submit: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}~1submit' }

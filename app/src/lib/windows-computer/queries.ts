@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getWindowsComputer } from "@/lib/api/generated/windows-computer/windows-computer";
 import type { WindowsComputer } from "@/lib/api/generated/model";
+import { getWindowsComputer } from "@/lib/api/generated/windows-computer/windows-computer";
 import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 

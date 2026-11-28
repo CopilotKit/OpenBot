@@ -10,6 +10,7 @@ import {
   programsFrom,
   unavailableWords,
   WindowsComputerPage,
+  WindowsComputerView,
 } from "@/components/windows-computer/windows-computer-page";
 import {
   getGetWindowsComputerResponseMock,
@@ -17,6 +18,7 @@ import {
   getTakeWindowsComputerControlMockHandler,
   getWindowsComputerMock,
 } from "@/lib/api/generated/windows-computer/windows-computer.msw";
+import type { WindowsComputer } from "@/lib/windows-computer/queries";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
@@ -55,6 +57,14 @@ class FakeSocket {
 
 const requests: string[] = [];
 const server = setupServer(
+  // Connected, whatever the generated mock draws: the connect panel has tests of its own below.
+  http.get("*/api/v2/organizations/:organizationId/windows-computer", () =>
+    HttpResponse.json({
+      ...getGetWindowsComputerResponseMock(),
+      connected: true,
+      enrolled: true,
+    }),
+  ),
   ...getWindowsComputerMock(),
   http.all("*", () => new HttpResponse(null, { status: 404 })),
 );
@@ -101,6 +111,8 @@ function heldBy(holder: "bot" | "human") {
       HttpResponse.json({
         ...getGetWindowsComputerResponseMock(),
         available: true,
+        connected: true,
+        enrolled: true,
         unavailableReason: undefined,
         control: {
           holder,
@@ -211,6 +223,8 @@ test("taking it over and handing it back are writes at the API's address, each w
       HttpResponse.json({
         ...getGetWindowsComputerResponseMock(),
         available: true,
+        connected: true,
+        enrolled: true,
         control: {
           holder: "human",
           since: "2026-11-20T09:13:41.000Z",
@@ -283,4 +297,166 @@ test("the words for who is using it and why it can't be used", () => {
     "excel.exe",
     "mspaint.exe",
   ]);
+});
+
+/** A Windows computer that is not connected now, set up before or never. */
+function notConnected(enrolled: boolean) {
+  return http.get(
+    "*/api/v2/organizations/:organizationId/windows-computer",
+    () =>
+      HttpResponse.json({
+        ...getGetWindowsComputerResponseMock(),
+        available: false,
+        connected: false,
+        enrolled,
+        unavailableReason: enrolled ? "not_connected" : "not_enrolled",
+        control: null,
+      }),
+  );
+}
+
+test("with no Windows computer connected yet, the page makes a code, shows it once, and opens no screen", async () => {
+  const keys: string[] = [];
+  server.use(
+    notConnected(false),
+    http.post(
+      "*/api/v2/organizations/:organizationId/windows-computer/enrollment-codes",
+      ({ request }) => {
+        keys.push(request.headers.get("idempotency-key") ?? "");
+        return HttpResponse.json(
+          {
+            code: `obwe_code-${keys.length}`,
+            expiresAt: "2026-11-23T10:15:00.000Z",
+          },
+          { status: 201 },
+        );
+      },
+    ),
+  );
+  const view = draw();
+  expect(await view.findByText("Connect your Windows computer")).toBeTruthy();
+  expect(view.queryByText(NOT_MASKED)).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Make a code" }));
+  const field = (await view.findByLabelText("Code")) as HTMLInputElement;
+  expect(field.value).toBe("obwe_code-1");
+  expect(field.readOnly).toBe(true);
+  fireEvent.click(view.getByRole("button", { name: "Make a new code" }));
+  await waitFor(() =>
+    expect((view.getByLabelText("Code") as HTMLInputElement).value).toBe(
+      "obwe_code-2",
+    ),
+  );
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).not.toBe(keys[1]);
+  expect(sockets).toEqual([]);
+});
+
+test("a Windows computer set up before and not connected now says it connects by itself", async () => {
+  server.use(notConnected(true));
+  const view = draw();
+  expect(
+    await view.findByText("Your Windows computer isn't connected"),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Make a code" })).toBeTruthy();
+  expect(unavailableWords("not_connected")).toContain("connects by itself");
+});
+
+test("a code that can't be made says so", async () => {
+  server.use(
+    notConnected(false),
+    http.post(
+      "*/api/v2/organizations/:organizationId/windows-computer/enrollment-codes",
+      () =>
+        HttpResponse.json(
+          {
+            type: "https://open.bot/errors/rate-limited",
+            title: "Too many requests.",
+            status: 429,
+            detail:
+              "Too many codes were asked for at once. Wait a few minutes and try again.",
+          },
+          {
+            status: 429,
+            headers: { "content-type": "application/problem+json" },
+          },
+        ),
+    ),
+  );
+  const view = draw();
+  fireEvent.click(await view.findByRole("button", { name: "Make a code" }));
+  expect((await view.findByRole("alert")).textContent).toContain(
+    "Too many codes",
+  );
+});
+
+/** The conversation panel's view of the Windows computer (computer-panel.tsx), held by `holder`. */
+function drawPanel(holder: "bot" | "human") {
+  const computer = {
+    ...getGetWindowsComputerResponseMock(),
+    available: true,
+    connected: true,
+    enrolled: true,
+    unavailableReason: undefined,
+    control: {
+      holder,
+      since: "2026-11-20T09:13:41.000Z",
+      snapshotRequired: holder === "human",
+    },
+  } as WindowsComputer;
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <WindowsComputerView compact computer={computer} />
+    </QueryClientProvider>,
+  );
+}
+
+/** The screen sockets still open: a closed one is a viewer that let go. */
+const openSockets = () =>
+  sockets.filter((entry) => entry.socket.readyState !== FakeSocket.CLOSED);
+
+test("in the conversation panel the screen is a tile that opens full size, and only one of the two watches it at a time", async () => {
+  const view = drawPanel("bot");
+  const tile = await view.findByRole("button", {
+    name: "Open your Windows computer's screen full size",
+  });
+  await waitFor(() => expect(openSockets()).toHaveLength(1));
+
+  fireEvent.click(tile);
+  const full = await view.findByRole("dialog", {
+    name: "Your Windows computer's screen",
+  });
+  expect(full).toBeTruthy();
+  expect(view.getByText("Showing full size.")).toBeTruthy();
+  await waitFor(() => expect(sockets).toHaveLength(2));
+  // The tile let go: the Windows computer shows its screen to one viewer, and a newer one replaces the older.
+  await waitFor(() => expect(openSockets()).toHaveLength(1));
+  expect(full.querySelector("canvas")).toBeTruthy();
+
+  fireEvent.click(
+    view.getByRole("button", { name: "Close your Windows computer's screen" }),
+  );
+  await waitFor(() =>
+    expect(
+      view.queryByRole("dialog", { name: "Your Windows computer's screen" }),
+    ).toBeNull(),
+  );
+  expect(
+    await view.findByRole("button", {
+      name: "Open your Windows computer's screen full size",
+    }),
+  ).toBeTruthy();
+  await waitFor(() => expect(openSockets()).toHaveLength(1));
+});
+
+test("Take over in the conversation panel takes it and opens the screen full size to work in", async () => {
+  const view = drawPanel("bot");
+  fireEvent.click(await view.findByRole("button", { name: "Take over" }));
+  expect(
+    await view.findByRole("dialog", { name: "Your Windows computer's screen" }),
+  ).toBeTruthy();
+  await waitFor(() =>
+    expect(requests).toContain(
+      "POST /api/v2/organizations/default/windows-computer/control/take",
+    ),
+  );
 });

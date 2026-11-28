@@ -12,7 +12,11 @@ export interface WindowsComputer {
   botId?: string;
   /** True when the Windows computer answers, its session is unlocked and the Bot can use it. */
   available: boolean;
-  /** Why it isn't available, when it isn't: locked, secure_desktop, driver_down, stopped, unavailable or unreachable. */
+  /** True when the Windows computer has connected with an enrollment code and its link to OpenBot is open now. False when none is connected yet (make an enrollment code) or it is off, asleep or offline. */
+  connected?: boolean;
+  /** True when a Windows computer was connected with an enrollment code and not disconnected since. */
+  enrolled?: boolean;
+  /** Why it isn't available, when it isn't: not_enrolled, not_connected, locked, secure_desktop, driver_down, stopped, unavailable or unreachable. */
   unavailableReason?: string;
   /** Who is using it. Null when the Windows computer did not answer. */
   control: WindowsComputerControl | null;

@@ -1,12 +1,14 @@
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import {
   IconDeviceDesktop,
   IconPlayerRecord,
   IconPlayerStop,
   IconPointer,
   IconRobot,
+  IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { LiveScreen } from "@/components/computer/live-screen";
 import {
   PageEmpty,
@@ -36,6 +38,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { ConnectWindowsComputer } from "@/components/windows-computer/connect-windows-computer";
 import type { WindowsComputerRecording } from "@/lib/api/generated/model";
 import {
   releaseWindowsComputerMutationOptions,
@@ -65,6 +68,10 @@ export function unavailableWords(reason: string | undefined): string {
       return "Your Windows computer is locked. Unlock it to keep going.";
     case "secure_desktop":
       return "Windows is asking for permission. Answer it on your Windows computer.";
+    case "not_enrolled":
+      return "No Windows computer is connected to OpenBot yet. Connect one on the Windows computer page.";
+    case "not_connected":
+      return "Your Windows computer isn't connected. It connects by itself when it's on and you're signed in to it.";
     default:
       return "Your Windows computer isn't answering right now. It shows here again once it does.";
   }
@@ -147,7 +154,11 @@ export function WindowsComputerPage() {
     );
   return (
     <PageShell description={DESCRIPTION} title={TITLE}>
-      <WindowsComputerView computer={computer.data} />
+      {computer.data.connected === false ? (
+        <ConnectWindowsComputer computer={computer.data} />
+      ) : (
+        <WindowsComputerView computer={computer.data} />
+      )}
     </PageShell>
   );
 }
@@ -155,15 +166,238 @@ export function WindowsComputerPage() {
 /**
  * The Windows computer's screen, who is using it and its recording, without a page around it: the
  * page above, and a conversation's computer panel for a Bot that works on it (computer-panel.tsx).
+ *
+ * In the panel (`compact`) the screen is a tile, as a Bot's browser is (computer-view.tsx): too small
+ * to work in, so pressing it, or Take over, opens it full size over the window. The Windows computer
+ * shows its screen to one viewer at a time and a newer one replaces the older, so the tile lets go of
+ * its stream while the full-size view has it, and takes it back when that closes.
  */
 export function WindowsComputerView({
   computer,
+  compact = false,
 }: {
   computer: WindowsComputer;
+  compact?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const opener = useRef<HTMLElement | null>(null);
+  const tile = useRef<HTMLButtonElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const control = controlWords(computer);
+  const openExpanded = () => {
+    opener.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setExpanded(true);
+  };
+  /** Back to what opened it, or to the tile that opens it when that has gone. */
+  const focusAfterClose = () =>
+    opener.current?.isConnected
+      ? opener.current
+      : tile.current?.isConnected
+        ? tile.current
+        : true;
+
+  if (!compact)
+    return (
+      <>
+        <div className="flex flex-col gap-3">
+          <p className="text-muted-foreground text-sm">{NOT_MASKED}</p>
+          <WindowsScreen driving={control.human} />
+        </div>
+        <PageSection title="Who's using it">
+          <PageRows>
+            <ControlRow computer={computer} />
+          </PageRows>
+        </PageSection>
+        <PageSection title="Recording">
+          <RecordingRow computer={computer} />
+        </PageSection>
+      </>
+    );
+
+  return (
+    <>
+      <div className="flex flex-col gap-3">
+        <p className="text-muted-foreground text-sm">{NOT_MASKED}</p>
+        {expanded ? (
+          <div className="flex min-h-32 items-center justify-center rounded-lg border border-border bg-muted p-4 text-center text-muted-foreground text-sm">
+            Showing full size.
+          </div>
+        ) : (
+          <WindowsScreen
+            driving={false}
+            frame={(screen) => (
+              <button
+                aria-label="Open your Windows computer's screen full size"
+                className="relative block w-full cursor-zoom-in overflow-hidden rounded-lg border border-border bg-muted"
+                onClick={openExpanded}
+                ref={tile}
+                type="button"
+              >
+                {screen}
+              </button>
+            )}
+          />
+        )}
+      </div>
+
+      <PageSection title="Who's using it">
+        <PageRows>
+          <ControlRow computer={computer} onTakeOver={openExpanded} />
+        </PageRows>
+      </PageSection>
+
+      <PageSection title="Recording">
+        <RecordingRow computer={computer} />
+      </PageSection>
+
+      {/*
+        As a Bot's browser opens full size (computer-view.tsx): portalled to the body, so it covers the window and not
+        the panel; Escape and Close close it and never hand control back; the backdrop closes it only while the person
+        is not driving, so a click beside the screen does not throw them out of it.
+      */}
+      <DialogPrimitive.Root
+        onOpenChange={(next) => {
+          if (!next) setExpanded(false);
+        }}
+        open={expanded}
+      >
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Popup
+            aria-label="Your Windows computer's screen"
+            className="fixed inset-0 z-50 flex flex-col overflow-y-auto p-2 outline-none sm:p-4"
+            finalFocus={focusAfterClose}
+            initialFocus={closeButton}
+          >
+            <button
+              aria-hidden
+              className={`fixed inset-0 bg-black/80 ${control.human ? "cursor-default" : "cursor-zoom-out"}`}
+              onClick={() => !control.human && setExpanded(false)}
+              tabIndex={-1}
+              type="button"
+            />
+            {/*
+              The screen takes everything but a column beside it for who is using it (under it in a narrow window),
+              as large as the window allows at a desktop's shape; in a short window the card grows and scrolls.
+            */}
+            <div className="relative m-auto flex min-h-[calc(100svh-1rem)] w-full min-w-0 shrink-0 flex-col gap-4 rounded-2xl bg-background p-3 shadow-2xl ring-1 ring-black/5 sm:min-h-[calc(100svh-2rem)] lg:h-[calc(100svh-2rem)] lg:flex-row dark:ring-white/10">
+              <div className="flex justify-end lg:absolute lg:top-3 lg:right-3 lg:z-10">
+                <button
+                  aria-label="Close your Windows computer's screen"
+                  className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => setExpanded(false)}
+                  ref={closeButton}
+                  title="Close (Esc)"
+                  type="button"
+                >
+                  <IconX aria-hidden className="size-5" />
+                </button>
+              </div>
+              {/* A height of its own, so the screen fits it both ways whatever the desktop's shape. */}
+              <div className="flex h-[calc(100svh-14rem)] min-h-64 min-w-0 flex-1 lg:h-auto lg:min-h-0">
+                <WindowsScreen
+                  autoFocus={control.human}
+                  driving={control.human}
+                  fill
+                />
+              </div>
+              <div className="flex w-full shrink-0 flex-col gap-4 lg:w-80 lg:pt-10">
+                <p className="text-muted-foreground text-sm">{NOT_MASKED}</p>
+                <PageRows>
+                  <ControlRow computer={computer} />
+                </PageRows>
+              </div>
+            </div>
+          </DialogPrimitive.Popup>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+    </>
+  );
+}
+
+/**
+ * The Windows computer's live screen and what is wrong with it, with Retry. `frame` wraps the screen alone, for the
+ * panel's tile, whose button cannot hold the Retry button.
+ */
+function WindowsScreen({
+  driving,
+  autoFocus,
+  frame,
+  fill = false,
+}: {
+  driving: boolean;
+  autoFocus?: boolean;
+  frame?: (screen: ReactNode) => ReactNode;
+  /** As large as its container both ways, at the screen's own shape: the full-size view. */
+  fill?: boolean;
 }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const screen = (
+    <LiveScreen
+      autoFocus={autoFocus}
+      computerId="windows-computer"
+      fit={fill ? "contain" : "width"}
+      driving={driving}
+      label="Your Windows computer's screen. You have control. Click and type here."
+      onProblem={setProblem}
+      onReconnecting={setReconnecting}
+      ownership={holdsWindowsComputer}
+      retryKey={retryKey}
+      socketPath="/windows-computer/screen"
+    />
+  );
+  return (
+    <div
+      className={`flex flex-col gap-3 ${fill ? "h-full min-h-0 w-full" : ""}`}
+    >
+      {frame ? (
+        frame(screen)
+      ) : fill ? (
+        <div className="relative flex min-h-0 flex-1 items-center justify-center">
+          {screen}
+        </div>
+      ) : (
+        <div className="relative min-h-48 w-full overflow-hidden rounded-lg border border-border bg-muted">
+          {screen}
+        </div>
+      )}
+      {problem ? (
+        <div className="flex items-center gap-3">
+          <p className="text-muted-foreground text-sm" role="status">
+            {problem}
+          </p>
+          <Button
+            onClick={() => {
+              setProblem(null);
+              setRetryKey((key) => key + 1);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            Retry
+          </Button>
+        </div>
+      ) : reconnecting ? (
+        <p className="text-muted-foreground text-sm" role="status">
+          Reconnecting to the screen.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Who is using the Windows computer, with Take over or Hand back. `onTakeOver` also runs when it is taken. */
+function ControlRow({
+  computer,
+  onTakeOver,
+}: {
+  computer: WindowsComputer;
+  onTakeOver?: () => void;
+}) {
   const take = useMutation(takeWindowsComputerMutationOptions(queryClient));
   const release = useMutation(
     releaseWindowsComputerMutationOptions(queryClient),
@@ -171,88 +405,43 @@ export function WindowsComputerView({
   const control = controlWords(computer);
   const changing = take.isPending || release.isPending;
   const changeError = take.error ?? release.error;
-
   return (
-    <>
-      <div className="flex flex-col gap-3">
-        <p className="text-muted-foreground text-sm">{NOT_MASKED}</p>
-        <div className="relative min-h-48 w-full overflow-hidden rounded-lg border border-border bg-muted">
-          <LiveScreen
-            computerId="windows-computer"
-            driving={control.human}
-            label="Your Windows computer's screen. You have control. Click and type here."
-            onProblem={setProblem}
-            onReconnecting={setReconnecting}
-            ownership={holdsWindowsComputer}
-            retryKey={retryKey}
-            socketPath="/windows-computer/screen"
-          />
-        </div>
-        {problem ? (
-          <div className="flex items-center gap-3">
-            <p className="text-muted-foreground text-sm" role="status">
-              {problem}
-            </p>
+    <Item size="sm">
+      <ItemMedia variant="icon">
+        {control.human ? <IconPointer /> : <IconRobot />}
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>{control.title}</ItemTitle>
+        <ItemDescription className="line-clamp-none">
+          {changeError ? changeError.message : control.description}
+        </ItemDescription>
+      </ItemContent>
+      {computer.control ? (
+        <ItemActions>
+          {control.human ? (
             <Button
-              onClick={() => {
-                setProblem(null);
-                setRetryKey((key) => key + 1);
-              }}
+              disabled={changing}
+              onClick={() => release.mutate()}
               size="sm"
               variant="outline"
             >
-              Retry
+              {release.isPending ? "Handing back…" : "Hand back"}
             </Button>
-          </div>
-        ) : reconnecting ? (
-          <p className="text-muted-foreground text-sm" role="status">
-            Reconnecting to the screen.
-          </p>
-        ) : null}
-      </div>
-
-      <PageSection title="Who's using it">
-        <PageRows>
-          <Item size="sm">
-            <ItemMedia variant="icon">
-              {control.human ? <IconPointer /> : <IconRobot />}
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>{control.title}</ItemTitle>
-              <ItemDescription className="line-clamp-none">
-                {changeError ? changeError.message : control.description}
-              </ItemDescription>
-            </ItemContent>
-            {computer.control ? (
-              <ItemActions>
-                {control.human ? (
-                  <Button
-                    disabled={changing}
-                    onClick={() => release.mutate()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {release.isPending ? "Handing back…" : "Hand back"}
-                  </Button>
-                ) : (
-                  <Button
-                    disabled={changing || !computer.available}
-                    onClick={() => take.mutate()}
-                    size="sm"
-                  >
-                    {take.isPending ? "Taking over…" : "Take over"}
-                  </Button>
-                )}
-              </ItemActions>
-            ) : null}
-          </Item>
-        </PageRows>
-      </PageSection>
-
-      <PageSection title="Recording">
-        <RecordingRow computer={computer} />
-      </PageSection>
-    </>
+          ) : (
+            <Button
+              disabled={changing || !computer.available}
+              onClick={() => {
+                take.mutate();
+                onTakeOver?.();
+              }}
+              size="sm"
+            >
+              {take.isPending ? "Taking over…" : "Take over"}
+            </Button>
+          )}
+        </ItemActions>
+      ) : null}
+    </Item>
   );
 }
 
