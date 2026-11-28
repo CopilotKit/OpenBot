@@ -117,18 +117,34 @@ test("a shell sign-in resumes the same challenge in its system browser", async (
   const challenge = "A".repeat(43);
   const query = `challenge=${challenge}&platform=android&callback=https`;
   const path = `/api/auth/shell/handoff?${query}`;
-  const result = await redirectFrom({ shell_handoff: query });
+  const fields = {
+    shell_challenge: challenge,
+    shell_platform: "android",
+    shell_callback: "https",
+  };
+  const result = await redirectFrom(fields);
   expect(result.options.href).toBe(path);
   expect(result.options.reloadDocument).toBe(true);
-  expect(resumeUrlFor("https://app.example", undefined, query)).toBe(
+  expect(resumeUrlFor("https://app.example", undefined, fields)).toBe(
     `https://app.example${path}`,
   );
   expect(
-    resumeUrlFor("https://app.example", undefined, "challenge=short"),
+    resumeUrlFor("https://app.example", undefined, {
+      shell_challenge: "short",
+    }),
   ).toBe("https://app.example");
-  expect(resumeUrlFor("https://app.example", "h1", query)).toBe(
-    "https://app.example/api/plugins/arcade/verify?flow_id=h1",
+  expect(resumeUrlFor("https://app.example", "h1", fields)).toBe(
+    `https://app.example${path}`,
   );
+  for (const invalid of [
+    { shell_platform: "web" },
+    { shell_callback: "arbitrary" },
+    { shell_callback: "" },
+  ]) {
+    expect(
+      resumeUrlFor("https://app.example", "h1", { ...fields, ...invalid }),
+    ).toBe("https://app.example/api/plugins/arcade/verify?flow_id=h1");
+  }
 });
 
 function signedInContext() {
@@ -139,7 +155,9 @@ function signedInContext() {
 
 async function redirectFrom(search: {
   flow_id?: string;
-  shell_handoff?: string;
+  shell_challenge?: string;
+  shell_platform?: string;
+  shell_callback?: string;
 }) {
   const beforeLoad = Route.options.beforeLoad as (a: unknown) => Promise<void>;
   try {
@@ -229,7 +247,7 @@ test("the first provider sign-in returns to the pending native confirmation", as
   };
   const { view, user } = renderSignScreen(
     { providers: ["google"], sso: false, ssoRequired: false },
-    `/sign?${new URLSearchParams({ shell_handoff: shellHandoff })}`,
+    `/sign?${new URLSearchParams({ shell_challenge: challenge, shell_platform: "ios" })}`,
   );
   await user.click(await view.findByText(/Continue with Google/));
   await waitFor(() =>

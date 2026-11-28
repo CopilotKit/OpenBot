@@ -41,21 +41,33 @@ export function verifierPathFor(flowId: string | undefined): string | null {
     : null;
 }
 
-/** Resume the shell's first sign-in in the same system browser that opened the hand-off. */
+export type ShellSignInSearch = {
+  shell_challenge?: string;
+  shell_platform?: string;
+  shell_callback?: string;
+};
+
+/** Resume the native confirmation in the browser that opened it. */
 export function signInResumePath(
   flowId?: string,
-  shellHandoff?: string,
+  shell: ShellSignInSearch = {},
 ): string | null {
-  const verifier = verifierPathFor(flowId);
-  if (verifier || !shellHandoff || shellHandoff.length > 256) return verifier;
-  const input = new URLSearchParams(shellHandoff);
-  const challenge = input.get("challenge") ?? "";
-  if (!/^[A-Za-z0-9_-]{43}$/.test(challenge)) return null;
+  const {
+    shell_challenge: challenge,
+    shell_platform: platform,
+    shell_callback: callback,
+  } = shell;
+  if (
+    !challenge ||
+    !/^[A-Za-z0-9_-]{43}$/.test(challenge) ||
+    (platform !== undefined && platform !== "ios" && platform !== "android") ||
+    (callback !== undefined && callback !== "https")
+  )
+    return verifierPathFor(flowId);
+
   const query = new URLSearchParams({ challenge });
-  const platform = input.get("platform");
-  if (platform === "ios" || platform === "android")
-    query.set("platform", platform);
-  if (input.get("callback") === "https") query.set("callback", "https");
+  if (platform) query.set("platform", platform);
+  if (callback) query.set("callback", callback);
   return `/api/auth/shell/handoff?${query}`;
 }
 
@@ -66,8 +78,8 @@ export function signInResumePath(
 export function resumeUrlFor(
   origin: string,
   flowId: string | undefined,
-  shellHandoff?: string,
+  shell?: ShellSignInSearch,
 ): string {
-  const path = signInResumePath(flowId, shellHandoff);
+  const path = signInResumePath(flowId, shell);
   return path === null ? origin : `${origin}${path}`;
 }

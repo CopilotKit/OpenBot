@@ -496,11 +496,12 @@ ${auto ? `<script>setTimeout(function () { window.location.href = document.getEl
   });
 }
 
-function enter(url: URL): Response {
+function enter(url: URL, platform: string | null): Response {
   const failed = new Response(null, {
     status: 303,
     headers: { location: "/sign?native-sign-in=failed" },
   });
+  if (platform !== "ios" && platform !== "android") return failed;
   const ticket = tickets.get(url.searchParams.get("ticket") ?? "");
   const verifier = url.searchParams.get("verifier") ?? "";
   if (!ticket || ticket.used || ticket.expires < Date.now() || !verifier)
@@ -585,7 +586,9 @@ async function start() {
         path === "/api/auth/shell/enter"
       ) {
         if (!HANDOFF) return new Response("Not found", { status: 404 });
-        return path.endsWith("/handoff") ? handoffPage(url) : enter(url);
+        return path.endsWith("/handoff")
+          ? handoffPage(url)
+          : enter(url, incoming.headers.get("OpenBot-Shell"));
       }
 
       if (incoming.headers.get("upgrade")?.toLowerCase() === "websocket") {
