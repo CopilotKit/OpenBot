@@ -10,8 +10,23 @@ import { invokeDesktop } from "@/lib/desktop/queries";
  * sign-in's credential stays with Desktop, which renews it: these commands never hand one to the
  * page.
  *
- * Each rejects with Desktop's own sentence, a string or a problem carrying `said`.
+ * Each rejects with Desktop's own sentence, a string or a problem carrying `said` (and `detail`
+ * when Desktop kept the technical output beside it).
  */
+
+/**
+ * A refused Desktop command, in both registers when Desktop sent them: `message` is `said` for the
+ * person; `detail` is the verbatim output for whoever is debugging (shown behind a disclosure).
+ */
+export class DesktopProblem extends Error {
+  readonly detail: string | null;
+
+  constructor(said: string, detail?: string | null) {
+    super(said);
+    this.name = "DesktopProblem";
+    this.detail = detail?.trim() ? detail : null;
+  }
+}
 
 /** The sentence a refused Desktop command gave, or the fallback when it gave none. */
 export function desktopSentence(error: unknown, fallback: string): string {
@@ -25,6 +40,28 @@ export function desktopSentence(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/** The technical output beside Desktop's sentence, when the refusal carried one. */
+export function desktopDetail(error: unknown): string | null {
+  if (error instanceof DesktopProblem) return error.detail;
+  if (error && typeof error === "object") {
+    const detail = (error as { detail?: unknown }).detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+  }
+  return null;
+}
+
+/** A refusal kept whole: sentence plus detail when Desktop sent both. */
+export function asDesktopProblem(
+  error: unknown,
+  fallback: string,
+): DesktopProblem {
+  if (error instanceof DesktopProblem) return error;
+  return new DesktopProblem(
+    desktopSentence(error, fallback),
+    desktopDetail(error),
+  );
+}
+
 async function desktop<T>(
   command: string,
   args: Record<string, unknown> | undefined,
@@ -33,7 +70,7 @@ async function desktop<T>(
   try {
     return await invokeDesktop<T>(command, args);
   } catch (error) {
-    throw new Error(desktopSentence(error, fallback));
+    throw asDesktopProblem(error, fallback);
   }
 }
 

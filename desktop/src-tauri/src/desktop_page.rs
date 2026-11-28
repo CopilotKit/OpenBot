@@ -489,12 +489,15 @@ struct Prepared {
 
 /// Start the one plan engine the connection needs, alone, and wait until it answers. Nothing else
 /// is started, stopped or restarted. Ready at once for a connection with no engine of its own.
+///
+/// Refuses with the full `Problem` (`said` and `detail`), so the page can show the technical
+/// details the setup sentence points at.
 #[tauri::command]
 async fn prepare_ai_connection(
     app: tauri::AppHandle,
     provider: String,
     login: String,
-) -> Result<Prepared, String> {
+) -> Result<Prepared, crate::Problem> {
     crate::prepare_ai_connection_now(app, provider, login).await?;
     Ok(Prepared { ready: true })
 }
