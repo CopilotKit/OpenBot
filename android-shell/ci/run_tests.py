@@ -292,9 +292,15 @@ def not_run(test_id, results, why):
 def run_one(test_id, results, logs):
     short = test_id.split("#")[-1]
     extra = []
-    for key, value in SECRET_ARGS.items():
-        if value:
-            extra += ["-e", key, shlex.quote(value)]
+    if short.startswith("testRealSignedInJourneyWithSessionCookie"):
+        needed = ("openbot_test_session",)
+    elif GOOGLE and short in ("testRealGoogleSignInInCustomTab", "testRealGoogleSignInInWebViewAndJourney"):
+        needed = ("openbot_google_email", "openbot_google_password", "openbot_google_totp_secret")
+    else:
+        needed = ()
+    for key in needed:
+        if SECRET_ARGS[key]:
+            extra += ["-e", key, shlex.quote(SECRET_ARGS[key])]
     extra += ["-e", "google_sign_in", "true" if GOOGLE else "false"]
     if MODE == "video":
         extra += ["-e", "video", "1"]
@@ -358,9 +364,17 @@ def run_one(test_id, results, logs):
     with open(os.path.join(target, "instrument.log"), "a") as f:
         f.write(f"===== {test_id} ({seconds} s) =====\n{out}\n")
     variant = "releaseTest" if test_id.startswith("RealBackendReleaseTest") else "debug"
+    if is_private(test_id) and message:
+        # The full private instrument log is saved locally; assertion messages can include page text.
+        categories = (("refused", "refused: Google declined the WebView"),
+                      ("cloudflare", "Cloudflare verification"),
+                      ("challenged", "Google verification"),
+                      ("not set", "test credential unavailable"),
+                      ("runs only", "manual sign-in disabled"))
+        message = next((safe for word, safe in categories if word in message.lower()), "See the private test log")
     results.append({"id": test_id, "test": short, "class": test_id.split("#")[0], "status": status,
                     "message": message[:600], "variant": variant, "seconds": seconds,
-                    "private": is_private(test_id), "notes": [] if is_private(test_id) else notes, "probe": probe})
+                    "private": is_private(test_id), "notes": [] if is_private(test_id) else notes, "probe": [] if is_private(test_id) else probe})
     logs.append(out)
     print(f"  {status:8} {test_id} ({seconds} s) {message[:200]}", flush=True)
     return status

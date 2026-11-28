@@ -155,6 +155,8 @@ Chrome's first-run screens off through its command-line file), reaches the serve
 demo, real, both; `real_google_sign_in`), each trimmed to the test's own marks with a 600-px copy:
 `android-shell-video-<run id>` (`video/demo-tour.mp4`) and `android-shell-video-private-<run id>`.
 
+Real-account screenshots and recordings upload only in private repositories. On a public repository, run the journey locally to retain that evidence.
+
 The tests: `ShellFlowTest` (suite 2, mock stacks), `RealBackendReleaseTest` (suite 1 on the
 releaseTest build, driven from the debug build's process through UiAutomator only),
 `RealBackendDebugTest` (suite 1 with debug hooks), `ProbeTest` (web view basics), `DemoTourTest`
