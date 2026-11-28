@@ -5,6 +5,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import {
   IconArrowUp,
+  IconLoader2,
   IconPlayerStopFilled,
   IconPlus,
 } from "@tabler/icons-react";
@@ -19,6 +20,7 @@ import {
   type ChangeEvent,
   type DragEvent,
   type FormEvent,
+  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -29,6 +31,7 @@ import {
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { IconWaveform } from "@/components/icons/waveform";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
+import { useTouchTyping } from "@/hooks/use-touch-typing";
 import {
   attachmentAddress,
   classifyAttachment,
@@ -40,6 +43,7 @@ import {
 } from "@/lib/channels/attachments";
 import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
 import { newId } from "@/lib/new-id";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { cn } from "@/lib/utils";
 import { Button } from "../../ui/button";
 import { AttachmentStrip } from "./attachment-strip";
@@ -50,6 +54,7 @@ import {
   heldAttachmentsConfig,
   heldFileOf,
   previewUrlOf,
+  restoringFile,
   stagedRowId,
 } from "./attachments";
 import {
@@ -66,8 +71,19 @@ import {
   enforceSingleAgent,
   toDraft,
 } from "./draft";
+import { MESSAGE_BOX_FRAME } from "./frame";
 import { screenPickedFiles } from "./picked-files";
 import { type RejectedFile, RejectedFiles } from "./rejected-files";
+import {
+  loadHeldFiles,
+  readSavedDraft,
+  type SavedStagedFile,
+  savedDraftKey,
+  saveHeldFiles,
+  stillHeld,
+  toSavedStagedFile,
+  writeSavedDraft,
+} from "./saved-draft";
 import { type AgentOption, buildTriggers } from "./triggers";
 import { useDictation } from "./use-dictation";
 
@@ -144,10 +160,14 @@ function stagedMimeType(attachment: Attachment): string {
 
 const MAX_HEIGHT_PX = 220;
 /**
- * Two `text-sm` lines: the compact composer's message box sits on its own row above the controls,
- * so it opens two lines tall and grows from there.
+ * Two 24px lines: the compact composer's message box opens two lines tall and grows from there.
  */
-const COMPACT_MIN_HEIGHT_PX = 38;
+const COMPACT_MIN_HEIGHT_PX = 48;
+/**
+ * One 24px line: a one-line box opens at this height. Given to PromptArea itself, whose own
+ * minimum (80px) is an inline style no class can beat.
+ */
+const ONE_LINE_HEIGHT_PX = 24;
 const COMPACT_MAX_HEIGHT_PX = 160;
 
 export type ComposerProps = {
@@ -311,6 +331,27 @@ export type ComposerProps = {
    * routine to post. Drawn by the compact layout, the one a conversation uses.
    */
   routine?: { agentId: string; channelId: string };
+  /**
+   * Which conversation's unsent message this box holds, so it is kept in this browser and put back
+   * when the box opens again (`saved-draft.ts`): after switching conversations and back, or a
+   * reload. A conversation's id, or a name for a screen with no conversation yet. Absent keeps
+   * nothing, as before.
+   */
+  draftKey?: string;
+  /** What the empty box says. "Ask anything" unless a screen asks something else of it. */
+  placeholder?: string;
+  /** False leaves the microphone out, for a box whose words are not a message (Routines). */
+  dictates?: boolean;
+  /**
+   * True turns the send arrow into a spinner while `onSubmit` is out, for a box with no Stop to
+   * show that it is working (Routines). A conversation has Stop, so it leaves this off.
+   */
+  spinsWhileSending?: boolean;
+  /**
+   * True draws the words and the controls in one row, so the empty box is one line tall and grows
+   * as the words wrap (Routines). Only the full-size box has it; a compact box keeps its two rows.
+   */
+  oneLine?: boolean;
 };
 
 /**
@@ -384,7 +425,15 @@ const UNACCEPTED_DROP_REASON = {
 const UNREADABLE_DROP_REASON =
   "couldn't be attached. Attach it with + instead.";
 
+/** A file a saved draft had staged more than a day ago: OpenBot holds an unsent file for a day. */
+const LAPSED_REASON =
+  "was removed after a day without being sent. Attach it again.";
+
 export function Composer({
+  placeholder: emptyPlaceholder = "Ask anything",
+  dictates = true,
+  spinsWhileSending = false,
+  oneLine = false,
   className,
   editorClassName,
   compact = false,
@@ -409,9 +458,25 @@ export function Composer({
   // Nothing parked is the right answer for every caller without a queue, which is most of them.
   queuedAttachmentCount = 0,
   routine,
+  draftKey,
 }: ComposerProps) {
-  const [value, setValue] = useState<Segment[]>(
-    initialValue ? [{ type: "text", text: initialValue }] : [],
+  /*
+   * Where this composer keeps its unsent message, and what it had kept, read once as it mounts.
+   * Words handed in by the caller (`initialValue`, `initialFiles`) are a message being put back on
+   * purpose, so they take the place of a saved one, and become the saved one from then on.
+   */
+  const [savedKey] = useState(() =>
+    draftKey ? savedDraftKey(draftKey) : undefined,
+  );
+  const [saved] = useState(() =>
+    savedKey && !initialValue && !initialFiles?.length
+      ? readSavedDraft(savedKey)
+      : undefined,
+  );
+  const [value, setValue] = useState<Segment[]>(() =>
+    initialValue
+      ? [{ type: "text", text: initialValue }]
+      : (saved?.segments ?? []),
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submitInFlight = useRef(false);
@@ -509,9 +574,9 @@ export function Composer({
    * channel until the sweeper's 24-hour window expired. Grouping the rows by the composer that
    * staged them is what makes both sides count the same set.
    *
-   * NOT A DRAFT ID. Nothing about the message is saved anywhere by this, and nothing survives a
-   * reload: a remount mints a new key and the rows the old one staged become somebody else's
-   * problem, which is to say the sweeper's.
+   * NOT A DRAFT ID, but kept with the draft (`saved-draft.ts`): a composer putting back the files a
+   * saved draft staged goes on in the group they were staged in, so the server still counts the set
+   * this composer can see. A composer with nothing to put back mints a new one.
    *
    * `newId()` rather than `crypto.randomUUID()`, which does not exist outside a secure context —
    * on a deployment reached at plain `http://<address>` the call is not merely wrong, it throws,
@@ -522,7 +587,7 @@ export function Composer({
    * render to be thrown away — cheap, but it would also mean the id nobody keeps is minted
    * hundreds of times per composer.
    */
-  const [uploadGroup] = useState(newId);
+  const [uploadGroup] = useState(() => saved?.uploadGroup ?? newId());
 
   /**
    * EVERY SERVER ROW THIS COMPOSER HAS CREATED AND NOT YET ACCOUNTED FOR.
@@ -536,8 +601,16 @@ export function Composer({
    */
   const uploadedRows = useRef<Set<string>>(new Set());
 
+  /** When each row was uploaded, kept with a saved draft so a stale one is not put back. */
+  const stagedAt = useRef<Map<string, number>>(
+    new Map(saved?.staged.map((file) => [file.attachmentId, file.stagedAt])),
+  );
+
   const recordUpload = useCallback((attachmentId: string) => {
     uploadedRows.current.add(attachmentId);
+    if (!stagedAt.current.has(attachmentId)) {
+      stagedAt.current.set(attachmentId, Date.now());
+    }
   }, []);
 
   /**
@@ -896,6 +969,145 @@ export function Composer({
     restoredFiles.current = true;
     void stageFiles(initialFiles);
   }, [canAttach, initialFiles, stageFiles]);
+
+  /*
+   * THE SAVED DRAFT'S FILES, PUT BACK ON THE STRIP ONCE THE STRIP CAN TAKE THEM.
+   *
+   * Until they are back, the draft that is written below still lists them, so a composer that
+   * cannot take files right now (a conversation whose Bot was deleted) does not forget them by
+   * saving an empty strip over them.
+   */
+  const pendingStaged = useRef<SavedStagedFile[]>(saved?.staged ?? []);
+  const pendingHeld = useRef(Boolean(saved && saved.heldFiles > 0 && savedKey));
+  const [draftRestored, setDraftRestored] = useState(false);
+  const restoringDraft = useRef(false);
+  useEffect(() => {
+    if (restoringDraft.current || !savedKey || !canAttach) {
+      return;
+    }
+    restoringDraft.current = true;
+    const now = Date.now();
+    // A file staged on a conversation is put back only there, and only while the server holds it.
+    const restorable = channelId
+      ? pendingStaged.current.filter((file) => stillHeld(file, now))
+      : [];
+    const lapsed = channelId
+      ? pendingStaged.current.filter((file) => !stillHeld(file, now))
+      : [];
+    if (lapsed.length > 0) {
+      setRejected((current) => [
+        ...current,
+        ...lapsed.map((file) => ({
+          id: newId(),
+          name: file.filename ?? "Attachment",
+          reason: LAPSED_REASON,
+        })),
+      ]);
+    }
+    const heldWanted = pendingHeld.current && !channelId && holdsFilesUntilSent;
+    void (async () => {
+      try {
+        if (restorable.length > 0) {
+          // Counted as a pick is, so a file dropped while these come back is screened against them.
+          stagedCount.current += restorable.length;
+          staging.current += restorable.length;
+          try {
+            await processFiles(restorable.map(restoringFile));
+          } finally {
+            staging.current -= restorable.length;
+          }
+        }
+        if (heldWanted) {
+          const files = await loadHeldFiles(savedKey);
+          if (files.length > 0) await stageFiles(files);
+        }
+      } finally {
+        pendingStaged.current = [];
+        pendingHeld.current = false;
+        setDraftRestored(true);
+      }
+    })();
+  }, [
+    canAttach,
+    channelId,
+    holdsFilesUntilSent,
+    processFiles,
+    savedKey,
+    stageFiles,
+  ]);
+
+  /*
+   * KEEP THE MESSAGE AS IT STANDS, on every change: the words, and every file on the strip that has
+   * finished uploading. What a send in flight is carrying is not on `staged`, so pressing Send is
+   * what clears it, and a send that fails puts the words and the files back, which saves them again.
+   * A parked message leaves the strip the same way, and the queue owns it from then on.
+   */
+  // Undefined until the first save, which so forgets any files a draft no longer lists.
+  const savedHeld = useRef<readonly File[] | undefined>(undefined);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `draftRestored` is the trigger to save once the saved files are back.
+  useEffect(() => {
+    if (!savedKey) {
+      return;
+    }
+    /*
+     * ON A SCREEN WHOSE SEND STARTS A CONVERSATION, THE MESSAGE IS KEPT UNTIL THE CONVERSATION HAS
+     * IT. Cleared at Send, a page closed while the conversation was still being made lost the words.
+     * So the draft stays as it was sent until the start keeps the message with its conversation and
+     * forgets this one (`useStartChannel`), or a failed send puts the words back.
+     */
+    if (holdsFilesUntilSent && !channelId && isSubmitting) {
+      return;
+    }
+    const current = staged.flatMap((attachment) => {
+      const rowId = stagedRowId(attachment);
+      if (rowId === undefined) return [];
+      const file = toSavedStagedFile(
+        attachment,
+        stagedAt.current.get(rowId) ?? Date.now(),
+      );
+      return file ? [file] : [];
+    });
+    const shown = new Set(current.map((file) => file.attachmentId));
+    const held = staged
+      .filter((attachment) => attachment.status === "ready")
+      .map(heldFileOf)
+      .filter((file): file is File => file !== undefined);
+    writeSavedDraft(savedKey, {
+      segments: value,
+      uploadGroup,
+      staged: [
+        ...pendingStaged.current.filter(
+          (file) => !shown.has(file.attachmentId),
+        ),
+        ...current,
+      ],
+      heldFiles: pendingHeld.current
+        ? Math.max(saved?.heldFiles ?? 0, held.length)
+        : held.length,
+      savedAt: Date.now(),
+    });
+    const before = savedHeld.current;
+    if (
+      holdsFilesUntilSent &&
+      !channelId &&
+      !pendingHeld.current &&
+      (before === undefined ||
+        held.length !== before.length ||
+        held.some((file, index) => file !== before[index]))
+    ) {
+      savedHeld.current = held;
+      saveHeldFiles(savedKey, held);
+    }
+  }, [
+    savedKey,
+    value,
+    staged,
+    uploadGroup,
+    draftRestored,
+    holdsFilesUntilSent,
+    channelId,
+    isSubmitting,
+  ]);
 
   /**
    * The image half of a paste that our own listener let through.
@@ -1331,6 +1543,10 @@ export function Composer({
         return;
       }
 
+      // Bots can't run until a card is added: the dialog says why, and every word stays where it
+      // was typed, so the message goes with one press once the card is there.
+      if (stopIfNeedsCard()) return;
+
       // Before anything is cleared or parked: a held send keeps every word where it was typed.
       if (onSendHeld) {
         onSendHeld();
@@ -1516,6 +1732,38 @@ export function Composer({
   };
 
   /**
+   * RETURN ON A TOUCH KEYBOARD STARTS A NEW LINE, AND ONLY THE SEND BUTTON SENDS.
+   *
+   * On a phone, Return sits under Backspace and is pressed for a new line as often as for anything
+   * else, so a message went half-written. On a touch keyboard `submitOnEnter` is off, so Return
+   * types a line break and Send is the one way to send. A computer keeps Enter to send and
+   * Shift+Enter for a new line.
+   */
+  const touchTyping = useTouchTyping();
+
+  /**
+   * Runs before prompt-area's own keys, which skip any key this prevents.
+   *
+   * On a touch keyboard: Cmd or Ctrl+Enter still sends, for an iPad with a keyboard attached, and
+   * Return while live dictation listens still stops it, as Enter does on a computer.
+   *
+   * On a computer: the Enter that confirms a character an input method is composing never sends.
+   * prompt-area skips an Enter marked `isComposing`, which is how Chromium sends it. WebKit sends
+   * it after `compositionend`, unmarked and with the key code 229, and that one sent the message.
+   */
+  const handleEditorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    if (touchTyping) {
+      if (event.metaKey || event.ctrlKey || dictation.live.session.active) {
+        event.preventDefault();
+        void submitDraft(value);
+      }
+      return;
+    }
+    if (event.keyCode === 229) event.preventDefault();
+  };
+
+  /**
    * There is a turn in flight and somewhere to park what is being typed.
    *
    * Not the same question as "is anything typed" — an empty composer mid-turn can queue nothing,
@@ -1545,7 +1793,9 @@ export function Composer({
     promptAreaRef.current?.setCursorToEnd();
   }, []);
   const placeholder =
-    dictation.live.state.phase === "listening" ? "Listening…" : "Ask anything";
+    dictation.live.state.phase === "listening"
+      ? "Listening…"
+      : emptyPlaceholder;
   const canSendRecording =
     !disabled &&
     !tooManyStaged &&
@@ -1619,7 +1869,14 @@ export function Composer({
       size="icon"
       type="submit"
     >
-      <IconArrowUp className="size-3.5" />
+      {spinsWhileSending && isSubmitting ? (
+        <IconLoader2
+          className="size-3.5 animate-spin motion-reduce:animate-none"
+          data-testid="composer-sending"
+        />
+      ) : (
+        <IconArrowUp className="size-3.5" />
+      )}
     </Button>
   );
 
@@ -1701,6 +1958,13 @@ export function Composer({
     </p>
   ) : null;
 
+  // Match the transcript. At fractional zoom, WebKit can report a pixel of horizontal overflow
+  // even when the text wraps. Keep PromptArea's vertical scrolling for long drafts.
+  const inputClassName = cn(
+    "w-full border-0 bg-transparent p-0 text-(length:--text-conversation)/(--text-conversation--line-height) shadow-none [&_.prompt-area-editor]:overflow-x-hidden",
+    editorClassName,
+  );
+
   if (compact) {
     return (
       /*
@@ -1722,6 +1986,7 @@ export function Composer({
         <form
           aria-busy={isBusy}
           data-slot="composer"
+          data-typing={draft.isEmpty ? undefined : ""}
           className={cn(
             /*
              * The padding goes on the form rather than on the editor because the editor scrolls
@@ -1731,7 +1996,8 @@ export function Composer({
              * A column: the attachment strip across the top, the message box under it, and the
              * controls row at the bottom.
              */
-            "flex flex-col rounded-2xl border border-border bg-card px-3 py-3",
+            "flex flex-col px-3 py-3",
+            MESSAGE_BOX_FRAME,
             className,
           )}
           onSubmit={handleFormSubmit}
@@ -1751,18 +2017,17 @@ export function Composer({
             <div className="min-w-0" data-slot="composer-input">
               <PromptArea
                 aria-label="Message"
-                className={cn(
-                  "w-full border-0 bg-transparent p-0 text-sm shadow-none",
-                  editorClassName,
-                )}
+                className={inputClassName}
                 disabled={disabled}
                 maxHeight={COMPACT_MAX_HEIGHT_PX}
                 minHeight={COMPACT_MIN_HEIGHT_PX}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
+                onKeyDown={handleEditorKeyDown}
                 onSubmit={submitDraft}
                 placeholder={placeholder}
                 ref={promptAreaRef}
+                submitOnEnter={!touchTyping}
                 triggers={triggers}
                 value={value}
               />
@@ -1790,11 +2055,13 @@ export function Composer({
                 {modelPicker}
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <DictationButton
-                  dictation={dictation}
-                  disabled={disabled || voiceCall?.active === true}
-                  onStarted={focusForDictation}
-                />
+                {dictates ? (
+                  <DictationButton
+                    dictation={dictation}
+                    disabled={disabled || voiceCall?.active === true}
+                    onStarted={focusForDictation}
+                  />
+                ) : null}
                 {primaryAction}
               </div>
             </div>
@@ -1825,8 +2092,9 @@ export function Composer({
       <LiveDictationNotice dictation={dictation} />
       <form
         aria-busy={isBusy}
-        className="overflow-hidden rounded-2xl border border-border bg-card"
+        className={cn("overflow-hidden", MESSAGE_BOX_FRAME)}
         data-slot="composer"
+        data-typing={draft.isEmpty ? undefined : ""}
         onSubmit={handleFormSubmit}
       >
         <DictationSurface
@@ -1836,58 +2104,64 @@ export function Composer({
         >
           {filePicker}
 
-          <div className="grow pb-2">
-            <AttachmentStrip
-              files={files}
-              images={images}
-              onRemove={discardAttachment}
-            />
-            <div data-slot="composer-input">
-              <PromptArea
-                aria-label="Message"
-                autoGrow
-                className={cn(
-                  "w-full border-0 bg-transparent p-0 text-sm shadow-none",
-                  editorClassName,
-                )}
-                disabled={disabled}
-                maxHeight={MAX_HEIGHT_PX}
-                onChange={handleChange}
-                onImagePaste={canAttach ? stagePastedImage : undefined}
-                onSubmit={submitDraft}
-                placeholder={placeholder}
-                ref={promptAreaRef}
-                triggers={triggers}
-                value={value}
+          {/* One row for a one-line box: the words grow to the left of the controls. Otherwise
+              this wrapper draws nothing, and the controls sit in their own row under the words. */}
+          <div className={oneLine ? "flex items-end gap-2" : "contents"}>
+            <div className={oneLine ? "min-w-0 grow py-0.5" : "grow pb-2"}>
+              <AttachmentStrip
+                files={files}
+                images={images}
+                onRemove={discardAttachment}
               />
+              <div data-slot="composer-input">
+                <PromptArea
+                  aria-label="Message"
+                  autoGrow
+                  className={inputClassName}
+                  disabled={disabled}
+                  maxHeight={MAX_HEIGHT_PX}
+                  minHeight={oneLine ? ONE_LINE_HEIGHT_PX : undefined}
+                  onChange={handleChange}
+                  onImagePaste={canAttach ? stagePastedImage : undefined}
+                  onKeyDown={handleEditorKeyDown}
+                  onSubmit={submitDraft}
+                  placeholder={placeholder}
+                  ref={promptAreaRef}
+                  submitOnEnter={!touchTyping}
+                  triggers={triggers}
+                  value={value}
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center justify-between">
-            {attachmentsEnabled ? (
-              <Button
-                aria-label="Attach a file"
-                className="size-7 rounded-full p-0"
-                data-slot="composer-attach"
-                disabled={disabled}
-                onClick={() => fileInputRef.current?.click()}
-                type="button"
-                variant="ghost"
-              >
-                <IconPlus className="size-4" />
-              </Button>
-            ) : (
-              <div />
-            )}
+            <div className="flex items-center justify-between">
+              {attachmentsEnabled ? (
+                <Button
+                  aria-label="Attach a file"
+                  className="size-7 rounded-full p-0"
+                  data-slot="composer-attach"
+                  disabled={disabled}
+                  onClick={() => fileInputRef.current?.click()}
+                  type="button"
+                  variant="ghost"
+                >
+                  <IconPlus className="size-4" />
+                </Button>
+              ) : (
+                <div />
+              )}
 
-            <div className="flex items-center gap-1">
-              {modelPicker}
-              <DictationButton
-                dictation={dictation}
-                disabled={disabled || voiceCall?.active === true}
-                onStarted={focusForDictation}
-              />
-              {primaryAction}
+              <div className="flex items-center gap-1">
+                {modelPicker}
+                {dictates ? (
+                  <DictationButton
+                    dictation={dictation}
+                    disabled={disabled || voiceCall?.active === true}
+                    onStarted={focusForDictation}
+                  />
+                ) : null}
+                {primaryAction}
+              </div>
             </div>
           </div>
         </DictationSurface>

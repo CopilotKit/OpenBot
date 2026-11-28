@@ -156,6 +156,9 @@ function GrantedTool({
       // Asked for in the same step as another kind of call: not drawn. See `shared/tool-steps.ts`.
       if (drawnTooEarlyIn(context?.agent?.messages, context?.toolCall?.id))
         return drawnTooEarlyAnswer(spec.name);
+      // Arguments it doesn't take: the Bot is told which, and nothing is drawn. See `wrongArguments`.
+      const wrong = wrongArguments(spec, args);
+      if (wrong) return wrong;
       /*
        * Asked about the Bot that drew it, which is not always the one on screen: a turn carries on
        * after its person leaves the conversation. See `botOfCall`.
@@ -246,6 +249,16 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
         />
       );
     }
+    /*
+     * Arguments it doesn't take, whole and about to be answered as the mistake they are: drawn as
+     * the failure the answer will say, never as the component drawn from them for that moment.
+     */
+    if (
+      props.status === "executing" &&
+      argumentsFit(spec, props.args) === false
+    ) {
+      return <FailedCard reason={UNREADABLE} title={spec.title} />;
+    }
     // From the polled grants, so a revocation shows before a new call starts. Unknown draws.
     const state = cardState(snapshot, spec.name, spec.title, props.toolCallId);
     if (typeof state === "object") {
@@ -270,15 +283,115 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
 
 /**
  * Whether a call's arguments are what the component takes, or `undefined` when its schema can't say
- * at once. Asked only of a call that is over, to say why it drew nothing.
+ * at once. Asked of a call whose arguments are whole, to say why it drew nothing.
  */
 function argumentsFit(
   spec: GalleryComponent,
   args: unknown,
 ): boolean | undefined {
-  const verdict = spec.parameters?.["~standard"]?.validate(args ?? {});
-  if (!verdict || verdict instanceof Promise) return undefined;
-  return !verdict.issues;
+  const issues = issuesWith(spec, args);
+  return issues === undefined ? undefined : issues.length === 0;
+}
+
+/** One thing wrong with a call's arguments, as a Standard Schema reports it. */
+type ArgumentIssue = {
+  readonly message: string;
+  readonly path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }>;
+};
+
+/**
+ * What is wrong with a call's arguments, read against the schema the tool advertised: none when they
+ * fit, or `undefined` when its schema can't say at once.
+ *
+ * A NULL WHERE A FIELD MAY BE LEFT OUT IS READ AS LEFT OUT. A model can send `null` for an optional
+ * field it leaves empty, and the components have always drawn those as absent, so a call like that
+ * is still one the component takes and is answered as it always was.
+ */
+function issuesWith(
+  spec: GalleryComponent,
+  args: unknown,
+): readonly ArgumentIssue[] | undefined {
+  const validate = spec.parameters?.["~standard"]?.validate;
+  if (!validate) return undefined;
+  const verdict = validate(args ?? {});
+  if (verdict instanceof Promise) return undefined;
+  if (!verdict.issues) return [];
+  const withoutNulls = validate(nullsLeftOut(args ?? {}));
+  if (!(withoutNulls instanceof Promise) && !withoutNulls.issues) return [];
+  return verdict.issues;
+}
+
+/** The value with every object field that is `null` left out, all the way down. */
+function nullsLeftOut(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(nullsLeftOut);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, field]) => field !== null)
+      .map(([key, field]) => [key, nullsLeftOut(field)]),
+  );
+}
+
+/** A field's place in the arguments, as `points[0].value`. */
+function fieldPath(issue: ArgumentIssue): string {
+  return (issue.path ?? []).reduce<string>((path, segment) => {
+    const key =
+      typeof segment === "object" && segment !== null ? segment.key : segment;
+    if (typeof key === "number") return `${path}[${key}]`;
+    return path ? `${path}.${String(key)}` : String(key);
+  }, "");
+}
+
+/** The fields a component takes, when its schema is an object that lists them. */
+function fieldsOf(spec: GalleryComponent): string[] | undefined {
+  const shape = (spec.parameters as { shape?: unknown } | undefined)?.shape;
+  return shape && typeof shape === "object" ? Object.keys(shape) : undefined;
+}
+
+/** Issues past this many are left out of the answer: the first few are enough to fix the call. */
+const ISSUES_TOLD = 8;
+
+/**
+ * The answer for a call whose arguments are not what the component takes, written for the model, or
+ * `undefined` when they are.
+ *
+ * FOUND BY THE AG-UI CONFORMANCE SUITE. A stock agent called `showBarChart` with `labels` and
+ * `series`, a line chart's arguments, where it takes `points`. Every call was answered with the
+ * component's confirmation, so the model was told the chart was on screen and never learned its call
+ * was wrong, and the person saw an empty chart. Now the call is read against the schema the tool
+ * advertised, and a call that doesn't fit is answered with what was wrong, field by field, and the
+ * fields it does take, so the model can call it again.
+ *
+ * Starts with `Error: `, as CopilotKit answers a call it couldn't run, so the card and a reloaded
+ * conversation draw it as a failure (`browserCallFailed`). Returned, not thrown: a thrown call ends
+ * the turn there, and the model would never read why.
+ */
+export function wrongArguments(
+  spec: GalleryComponent,
+  args: unknown,
+): string | undefined {
+  const issues = issuesWith(spec, args);
+  if (!issues || issues.length === 0) return undefined;
+  const told = issues
+    .slice(0, ISSUES_TOLD)
+    .map((issue) => `${fieldPath(issue) || "arguments"}: ${issue.message}`);
+  if (issues.length > ISSUES_TOLD)
+    told.push(`and ${issues.length - ISSUES_TOLD} more`);
+  const fields = fieldsOf(spec);
+  const given =
+    args && typeof args === "object" && !Array.isArray(args)
+      ? Object.keys(args)
+      : [];
+  const unknown = fields ? given.filter((key) => !fields.includes(key)) : [];
+  return [
+    `Error: ${spec.name} was not shown, because its arguments don't match its schema.`,
+    `${told.join("; ")}.`,
+    unknown.length > 0 ? `It doesn't take ${unknown.join(" or ")}.` : undefined,
+    fields ? `Its fields are ${fields.join(", ")}.` : undefined,
+    `Nothing is on screen for the person. Call ${spec.name} again with arguments that match its schema.`,
+  ]
+    .filter((sentence) => sentence !== undefined)
+    .join(" ");
 }
 
 function GrantedDecision({
@@ -358,7 +471,7 @@ export function useDecisionTool(
   }, []);
 
   const handler = useCallback(
-    async (_args: unknown, context: ToolCallContext = {}) =>
+    async (args: unknown, context: ToolCallContext = {}) =>
       new Promise<unknown>((resolve, reject) => {
         /*
          * Asked for in the same step as another kind of call: the person is not asked, and the Bot
@@ -366,6 +479,15 @@ export function useDecisionTool(
          */
         if (drawnTooEarlyIn(context.agent?.messages, context.toolCall?.id)) {
           resolve(drawnTooEarlyAnswer(spec.name));
+          return;
+        }
+        /*
+         * Arguments it doesn't take: the person is not asked a question that can't be drawn, and
+         * the Bot is told what was wrong. See `wrongArguments`.
+         */
+        const wrong = wrongArguments(spec, args);
+        if (wrong) {
+          resolve(wrong);
           return;
         }
         const signal = context.signal;
@@ -385,7 +507,7 @@ export function useDecisionTool(
           stop: () => signal?.removeEventListener("abort", onAbort),
         });
       }),
-    [spec.name],
+    [spec],
   );
 
   // Created once, for the same reason as `makeGalleryRender`.
@@ -437,10 +559,12 @@ export function makeDecisionRender(
      * drawn from arguments that were fine, is still what the person was asked.
      */
     if (
-      props.status === "complete" &&
-      browserCallFailed(
-        typeof props.result === "string" ? props.result : undefined,
-      ) &&
+      ((props.status === "complete" &&
+        browserCallFailed(
+          typeof props.result === "string" ? props.result : undefined,
+        )) ||
+        // About to be answered as the mistake it is (see `wrongArguments`): never asked.
+        props.status === "executing") &&
       argumentsFit(spec, props.args) === false
     ) {
       return <FailedCard reason={UNREADABLE} title={spec.title} />;

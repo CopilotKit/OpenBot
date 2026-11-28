@@ -53,6 +53,7 @@ import type {
   ListGoalsParams,
   OrganizationNotFoundResponse,
   PauseGoalHeaders,
+  PlanRequiredResponse,
   ReplaceGoalTriggerSecretHeaders,
   ReplaceGoalTriggerSecretRequest,
   ResumeGoalHeaders,
@@ -1201,6 +1202,7 @@ export const getRunGoalMutationOptions = <
   TError =
     | InvalidGoalResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | GoalNotFoundResponse
     | IdempotencyConflictResponse
@@ -1249,6 +1251,7 @@ export type RunGoalMutationResult = NonNullable<
 export type RunGoalMutationError =
   | InvalidGoalResponse
   | UnauthenticatedResponse
+  | PlanRequiredResponse
   | ForbiddenResponse
   | GoalNotFoundResponse
   | IdempotencyConflictResponse
@@ -1267,6 +1270,7 @@ export const useRunGoal = <
   TError =
     | InvalidGoalResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | GoalNotFoundResponse
     | IdempotencyConflictResponse

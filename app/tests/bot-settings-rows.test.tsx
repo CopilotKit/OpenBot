@@ -182,8 +182,10 @@ test("the owner sees Sharing, and each row opens its own page", async () => {
   expect(view.getByText("Setup").closest("a")?.getAttribute("href")).toBe(
     "/bots/expenses/setup",
   );
-  // Public and unpublished: everyone can already use it.
-  expect(await view.findByText("Everyone (public)")).toBeTruthy();
+  // Public and unpublished: everyone in the organization can already use it.
+  expect(
+    await view.findByText("Everyone in the organization (public)"),
+  ).toBeTruthy();
 });
 
 test("someone who neither owns the Bot nor administers the deployment does not see Sharing", async () => {
@@ -268,8 +270,8 @@ test("the rows for routines, reach, memory and approvals say what this Bot has a
 });
 
 /*
- * Agents are hidden for now: a Bot's page has no Agents row, and its Agents address leads back to
- * the Bot (routes/_authed/_app/bots.$agentId.agents.tsx).
+ * A person has Bots, and nothing called an agent: a Bot's page has no Agents row, and its old Agents
+ * address leads back to the Bot (agents-addresses.test.ts).
  */
 test("a Bot's page has no Agents row, whatever the Bot is set to", async () => {
   delegationMode = "orchestrate";

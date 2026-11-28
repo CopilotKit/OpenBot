@@ -51,10 +51,13 @@ export type Progress = {
    */
   elsewhere?: boolean;
   /**
-   * The step waits on the person in this window: they closed the system's password prompt, and
-   * Install asks again by itself or on Try again (`install::GoAhead`). See `goAheadNow`.
+   * The step waits on the person in this window (`install::GoAhead`): for Continue before the
+   * system's password prompt comes up (`beforePrompt`), or after they closed that prompt, when
+   * Install asks again by itself or on Try again. See `goAheadNow`.
    */
   asks?: boolean;
+  /** With `asks`: the wait is for Continue, before the password prompt. See `goAheadNow`. */
+  beforePrompt?: boolean;
   /**
    * The engine itself is being updated (`engine::StepLine::updating`). Nothing is asked of it
    * until the update is done: an engine being updated refuses what is asked.
@@ -133,12 +136,27 @@ export function engineNow(steps: Progress[]): string | null {
  */
 export const PAUSE_PODMAN_STEP = "pause-podman";
 
+/** What Install waits on the person for before or after macOS's password prompt. */
+export type GoAhead = {
+  /** Install's line ("OpenBot needs to install the software it runs on. Choose Continue…"). */
+  line: string;
+  /**
+   * The password prompt has not come up yet: it comes only on Continue. Otherwise the person
+   * closed it, and Install asks again by itself or on Try again.
+   */
+  beforePrompt: boolean;
+};
+
 /**
- * The line of a step that waits on the person after they closed macOS's password prompt ("OpenBot
- * needs your password to install what it needs to run…"), or null. The screens say it in a card
- * with Try again (`PodmanGoAhead`). Nothing waits on the person before a prompt.
+ * A step that waits on the person in this window around macOS's password prompt, or null: for
+ * Continue before the prompt comes up, or after they closed it. The screens say it in a card with
+ * its one button (`PodmanGoAhead`).
+ *
+ * The prompt comes from the system and comes up over every window. On the 1.2.0 Mac run it covered
+ * the browser's sign-in page a moment after OpenBot's line about it went on a window behind the
+ * browser. So the first prompt waits for Continue here.
  */
-export function goAheadNow(steps: Progress[]): string | null {
+export function goAheadNow(steps: Progress[]): GoAhead | null {
   const asking = [...steps]
     .reverse()
     .find(
@@ -148,7 +166,9 @@ export function goAheadNow(steps: Progress[]): string | null {
         step.detail &&
         step.step !== PAUSE_PODMAN_STEP,
     );
-  return asking?.detail ?? null;
+  return asking
+    ? { line: asking.detail, beforePrompt: asking.beforePrompt === true }
+    : null;
 }
 
 /**
@@ -175,23 +195,67 @@ export function trayPlace(userAgent = navigator.userAgent): string {
     : "the system tray";
 }
 
+/**
+ * The row shows a spinner (unless its list is `quiet`): it runs, and is not paused or waiting on
+ * the person. A screen that shows such a row keeps every other wait on it still.
+ */
+export function spins(step: Progress): boolean {
+  return (
+    !step.pending && !step.waiting && !step.paused && (step.running ?? false)
+  );
+}
+
 export function SetupProgress({
   steps,
   label = "Setup progress",
   showElapsed = true,
+  quiet = false,
+  presentation = "list",
 }: {
   steps: Progress[];
   label?: string;
   showElapsed?: boolean;
+  presentation?: "list" | "focus" | "milestones";
+  /**
+   * A running row is marked without a spinner: something else on the screen is already the one
+   * thing that spins (the step's own wait, or the Start's journey), and two read as two waits.
+   */
+  quiet?: boolean;
 }) {
   if (steps.length === 0) return null;
+  const current =
+    presentation === "focus"
+      ? steps.findIndex(
+          (step) =>
+            !step.pending &&
+            (step.running ||
+              step.waiting ||
+              step.paused ||
+              (!step.ok && !step.note)),
+        )
+      : -1;
+  const rows =
+    current > 0
+      ? [
+          steps[current],
+          ...steps.slice(0, current),
+          ...steps.slice(current + 1),
+        ]
+      : steps;
+  const className =
+    presentation === "focus"
+      ? "steps setup-progress-focus"
+      : presentation === "milestones"
+        ? "steps setup-milestones"
+        : "steps";
   return (
-    <ol className="steps" aria-label={label} aria-live="polite">
-      {steps.map((step) => (
+    <ol className={className} aria-label={label} aria-live="polite">
+      {rows.map((step, index) => (
         <SetupProgressRow
           key={step.step}
           step={step}
           showElapsed={showElapsed}
+          quiet={quiet || (presentation === "focus" && index > 0)}
         />
       ))}
     </ol>
@@ -335,9 +399,11 @@ export function plainInstallSteps(
 function SetupProgressRow({
   step,
   showElapsed,
+  quiet,
 }: {
   step: Progress;
   showElapsed: boolean;
+  quiet: boolean;
 }) {
   if (step.pending)
     return (
@@ -346,15 +412,17 @@ function SetupProgressRow({
         <span className="step-label">{label(step.step)}</span>
       </li>
     );
-  return <StartedRow step={step} showElapsed={showElapsed} />;
+  return <StartedRow step={step} showElapsed={showElapsed} quiet={quiet} />;
 }
 
 function StartedRow({
   step,
   showElapsed,
+  quiet = false,
 }: {
   step: Progress;
   showElapsed: boolean;
+  quiet?: boolean;
 }) {
   const waiting = step.waiting ?? false;
   const paused = !waiting && (step.paused ?? false);
@@ -393,7 +461,7 @@ function StartedRow({
         {waiting || paused ? (
           <span className="step-waiting" />
         ) : running ? (
-          <span className="step-spinner" />
+          <span className={quiet ? "step-current" : "step-spinner"} />
         ) : note ? (
           "–"
         ) : step.ok ? (
@@ -681,15 +749,17 @@ export function installingBehind({
       now?.downloads && showsDownload(now.downloads) ? now.downloads : null;
     const meanwhile = early && showsDownload(early) ? early : null;
     if (preparing) {
-      // A closed password prompt has its own card, with Try again, and so does the offer to
-      // pause the person's Podman: the row says only what it waits for.
+      // The password prompt's Continue and a closed prompt's Try again have their own card, and so
+      // does the offer to pause the person's Podman: the row says only what it waits for.
       const waiting = now?.asks === true;
       if (waiting)
         return row(
           1,
           now?.step === PAUSE_PODMAN_STEP
             ? "Waiting for you to pause your Podman."
-            : "Waiting for your password.",
+            : now?.beforePrompt
+              ? "Waiting for you to choose Continue."
+              : "Waiting for your password.",
           {
             waiting,
             startedAt: since ?? undefined,
@@ -885,6 +955,8 @@ export function formatDownloadBytes(bytes: number): string {
 
 function label(step: string): string {
   switch (step) {
+    case INSTALLING_BEHIND:
+      return "Preparing OpenBot";
     case "engine":
     case "install-engine":
       return "Software OpenBot runs on";

@@ -91,21 +91,37 @@ function json(status: number, body: unknown) {
 let writeAnswer: { status: number; body: unknown } | null;
 /** The edition getDeployment says: the team edition unless a test says otherwise. */
 let edition: "team" | "personal" = "team";
-/** Every getManagementEnrollment the app made. */
+/** Whether getDeployment says people sign in through the hosted sign-in (OpenBot Cloud). */
+let hostedSignIn = false;
+/** Every getManagementEnrollment the app made, in any organization. */
 let reads = 0;
-const DEPLOYMENT = "/api/v2/organizations/default/deployment";
+/** getDeployment, answered in whichever organization the app asks it in. */
+const DEPLOYMENT = /^\/api\/v2\/organizations\/[^/]+\/deployment$/;
+/** getManagementEnrollment in any organization: only `default` is ever answered with a state. */
+const ANY_MANAGEMENT = /^\/api\/v2\/organizations\/[^/]+\/management$/;
 
 function serving() {
   writes.length = 0;
   writeAnswer = null;
   edition = "team";
+  hostedSignIn = false;
   reads = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? "GET";
-    if (path === DEPLOYMENT && method === "GET") return json(200, { edition });
-    if (path === MANAGEMENT && method === "GET") {
+    if (DEPLOYMENT.test(path) && method === "GET")
+      return json(200, { edition, hostedSignIn });
+    if (ANY_MANAGEMENT.test(path) && method === "GET") {
       reads += 1;
+      if (path !== MANAGEMENT)
+        return json(
+          404,
+          problem(
+            404,
+            "MANAGEMENT_UNAVAILABLE",
+            "Managed updates aren't available for this OpenBot.",
+          ).body,
+        );
       return json(answer.status, answer.body);
     }
     if (path === ENROLLMENT && (method === "POST" || method === "DELETE")) {
@@ -631,6 +647,51 @@ test("Disconnect of the chart's agent asks first, says Connect turns them back o
   expect(await view.findByText("Turned off")).toBeTruthy();
 });
 
+/*
+ * Management turned off with Helm (`management.enabled=false`) after the chart's agent connected:
+ * that upgrade removed the agent along with OpenBot's own release, so there is no `openbot-agent`
+ * release, and `helm uninstall openbot-agent` would fail. The server says so with
+ * agentRemovedWithChart, and Disconnect finishes on its own.
+ */
+const REMOVED_WITH_CHART = {
+  ...CHART_CONNECTED,
+  agentInstalledByChart: false,
+  agentRemovedWithChart: true,
+};
+
+test("after management is turned off with Helm, the chart's agent is gone with OpenBot's release: no uninstall command, Disconnect finishes", async () => {
+  answer = { status: 200, body: REMOVED_WITH_CHART };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Upgrades")).toBeTruthy();
+  // Never a command that fails: there is no openbot-agent release to uninstall.
+  expect(view.queryByText(/helm uninstall/)).toBeNull();
+  expect(
+    view.queryByRole("button", { name: "Copy the uninstall command" }),
+  ).toBeNull();
+  expect(
+    view.getByText(/Turning management off with Helm removed/).textContent,
+  ).toBe(
+    "Turning management off with Helm removed the management agent along with OpenBot's own release, so there is nothing to uninstall. Choose Disconnect to finish. OpenBot keeps running as it is, and you upgrade it yourself from then on.",
+  );
+  fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  expect(await view.findByText("Disconnect managed updates?")).toBeTruthy();
+  // The chart no longer installs the agent, so coming back is the approval flow.
+  expect(
+    view.getByText(/OpenBot stops getting managed updates/).textContent,
+  ).toBe(
+    "OpenBot stops getting managed updates, and you upgrade it yourself. Connecting again needs a new code and a new approval.",
+  );
+  answer = { status: 200, body: { state: "not-connected" } };
+  fireEvent.click(
+    within(view.getByRole("dialog")).getByRole("button", {
+      name: "Disconnect",
+    }),
+  );
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
+  expect(await view.findByText("Not connected")).toBeTruthy();
+});
+
 test("turned off offers Connect, which turns managed updates back on", async () => {
   answer = {
     status: 200,
@@ -689,6 +750,56 @@ test("on the personal edition Admin never asks for managed updates, so no reques
   cleanup();
   const page = await draw(ManagementPage);
   expect(await page.findByText("Not available here")).toBeTruthy();
+  expect(reads).toBe(0);
+});
+
+/*
+ * Found on OpenBot Cloud (1.2.0-rc.5): every Admin page asked for managed updates and was answered
+ * 404, in every organization. Management is never an organization admin's there, and it is answered
+ * only in `default` anywhere, so Admin asks nowhere else.
+ */
+test("on OpenBot Cloud Admin never asks for managed updates, so no Admin page gets a 404", async () => {
+  hostedSignIn = true;
+  setCurrentOrganization("01a2117e-8fe4-7a8c-b7ae-62d649749aaa");
+  const rail = await draw(Rail);
+  expect(await rail.findByText("AI providers")).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      queryClient.getQueryState(["deployment", "capabilities"])?.status,
+    ).toBe("success"),
+  );
+  await settleReactWork();
+  expect(rail.queryByText("Managed updates")).toBeNull();
+  cleanup();
+  const page = await draw(ManagementPage);
+  expect(await page.findByText("Not available here")).toBeTruthy();
+  expect(reads).toBe(0);
+});
+
+test("on a hosted OpenBot Admin doesn't ask even in default", async () => {
+  hostedSignIn = true;
+  const rail = await draw(Rail);
+  expect(await rail.findByText("AI providers")).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      queryClient.getQueryState(["deployment", "capabilities"])?.status,
+    ).toBe("success"),
+  );
+  await settleReactWork();
+  expect(reads).toBe(0);
+});
+
+test("a team OpenBot's other organizations don't ask either: only default is answered", async () => {
+  setCurrentOrganization("acme");
+  const rail = await draw(Rail);
+  expect(await rail.findByText("Identity providers")).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      queryClient.getQueryState(["deployment", "capabilities"])?.status,
+    ).toBe("success"),
+  );
+  await settleReactWork();
+  expect(rail.queryByText("Managed updates")).toBeNull();
   expect(reads).toBe(0);
 });
 

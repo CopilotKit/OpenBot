@@ -7,10 +7,12 @@ import {
   invokeDesktop,
 } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { forgetThisBrowser } from "@/lib/web-push/mutations";
 import { clearSkin } from "@/skins/store";
 import { authClient } from "./client";
 import { hostedSignOutAddress } from "./hosted";
 import { authKeys } from "./queries";
+import { forgetSignedIn } from "./was-signed-in";
 
 const SIGN_OUT_UNFINISHED = "Signing out did not finish. Try again.";
 
@@ -72,6 +74,9 @@ export type SignedOut = { leaving: boolean };
 /**
  * Every way out of OpenBot signs out through here, the skins' own menus included.
  *
+ * Push notifications in this browser end with the sign-out (`forgetThisBrowser`), so the next
+ * person to sign in here is not sent the last one's.
+ *
  * The skin is the account's, and this browser only caches it to paint before the preferences load.
  * Clearing it here means the next person on a shared machine starts from the default rather than
  * from the last person's skin.
@@ -84,12 +89,18 @@ export type SignedOut = { leaving: boolean };
 export function signOutMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (): Promise<SignedOut> => {
+      // Forgotten before any branch, so the desktop and hosted paths forget too and the next visit shows no app frame to a visitor.
+      forgetSignedIn();
       if (await connectedThroughDesktop(queryClient)) {
         await signOutThroughDesktop();
         return { leaving: true };
       }
       const hosted = await hostedHere(queryClient);
+      // While still signed in, so the server can be told. Never holds the sign-out up for long.
+      await forgetThisBrowser();
       await signOut();
+      // Forgotten again: a gate that passed while the request was out has remembered them since.
+      forgetSignedIn();
       if (!hosted) return { leaving: false };
       window.location.assign(
         hostedSignOutAddress(`${window.location.origin}/sign`),
@@ -98,6 +109,7 @@ export function signOutMutationOptions(queryClient: QueryClient) {
     },
     onSuccess: () => {
       clearSkin();
+      forgetSignedIn();
       queryClient.removeQueries({ queryKey: authKeys.all });
     },
   });

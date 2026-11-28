@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import {
   INTERACTIVE_STARTER,
@@ -45,7 +46,7 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
 
   const choose = async (index: number) => {
     if (disabled || sendingRef.current) return;
@@ -56,11 +57,11 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
       suggestion === INTERACTIVE_STARTER &&
       capabilities.data?.generativeUi !== true
     ) {
-      setError(
-        capabilities.isPending
+      setError({
+        message: capabilities.isPending
           ? "Still checking whether interactive answers are available. Try again in a moment."
           : "Interactive answers are disabled for this installation. Try another starter task.",
-      );
+      });
       return;
     }
     sendingRef.current = true;
@@ -68,11 +69,7 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
     try {
       await onSelect(suggestion.message);
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Couldn't start that task. Try again.",
-      );
+      setError(failureOf(caught, "Couldn't start that task. Try again."));
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -104,7 +101,7 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
       />
       {error ? (
         <p role="alert" className="mt-2 text-sm text-destructive">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
     </section>

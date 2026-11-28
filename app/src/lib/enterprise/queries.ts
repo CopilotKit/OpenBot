@@ -5,6 +5,7 @@ import {
 } from "@/lib/api/generated/capabilities/capabilities";
 import { getCheckInUsage } from "@/lib/api/generated/check-ins/check-ins";
 import type {
+  AppsSetting,
   NetworkPolicy as ApiNetworkPolicy,
   BotCheckInUsage,
   Capability,
@@ -20,6 +21,7 @@ import {
   replayNetworkPolicy,
 } from "@/lib/api/generated/network-policies/network-policies";
 import {
+  getAppsSetting,
   getModelUsage,
   getOrganizationSettings,
   listComputerActions,
@@ -171,7 +173,24 @@ export const enterpriseKeys = {
   networkReplay: (candidate: NetworkCandidate) =>
     ["enterprise", "network-replay", candidate] as const,
   computerMode: () => ["enterprise", "computer-mode"] as const,
+  appsSetting: () => ["enterprise", "apps-setting"] as const,
 };
+
+/**
+ * Whether the organization's apps are open (the default) or locked down. Its own resource, which
+ * every member may read: locked down, an admin approves each request, one press gives an app's
+ * read-only actions, and an app is open to Bot owners only once an admin opens it.
+ */
+export function appsSettingQueryOptions() {
+  return queryOptions({
+    queryKey: enterpriseKeys.appsSetting(),
+    queryFn: ({ signal }): Promise<AppsSetting> =>
+      getAppsSetting(organizationId(), {
+        signal,
+        fallback: "Couldn't load how apps are given.",
+      }),
+  });
+}
 
 /**
  * How Bots get computers here: the settings' read-only `computerMode`. Null from a server that

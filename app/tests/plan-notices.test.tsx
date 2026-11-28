@@ -16,14 +16,13 @@ import { settleReactWork } from "./settle-react-work";
  * Where an organization's plan reaches the person, read through the client generated from
  * api/openapi.yaml at the API's own address and answered by the spec's own mock handler.
  *
- * The bar over every page says how long the free trial has left, and while Bots can't run it says so
- * in words its reader can act on: an owner or an admin gets the link to add a card, a member is told
- * to ask an admin. An OpenBot that needs no plan, and one from before plans that has no such
- * address, draw nothing.
+ * The bar over every page says nothing while runs are left on the free trial, and while Bots can't
+ * run it says so in words its reader can act on: an owner or an admin gets the link to add a card,
+ * a member is told to ask an admin. An OpenBot that needs no plan, and one from before plans that
+ * has no such address, draw nothing.
  */
 
 const ADD_CARD = "/api/auth/hosted/checkout?organizationId=default";
-const DAY = 24 * 60 * 60 * 1000;
 const requests: string[] = [];
 const server = setupServer(
   http.all("*", () => new HttpResponse(null, { status: 404 })),
@@ -71,6 +70,8 @@ function draw() {
 const none = (addCardUrl: string | null): OrganizationPlan => ({
   required: true,
   status: "none",
+  freeRunsUsedPercent: 100,
+  freeRunsAllowance: 500,
   trialEndsAt: null,
   renewsAt: null,
   addCardUrl,
@@ -82,7 +83,7 @@ test("an admin of an organization with no card is told Bots can't run, and given
 
   const bar = await view.findByRole("complementary", { name: "Plan" });
   expect(bar.textContent).toContain(
-    "Add a card to start your 30-day free trial. Bots can't run until you do.",
+    "You've used your free trial. Add a card to keep your Bots running.",
   );
   const links = view.getAllByRole("link", { name: "Add a card" });
   // The bar's link, and the one beside a refused run: both leave for the same page.
@@ -99,7 +100,7 @@ test("a member of an organization with no card is told to ask an admin, with not
 
   const bar = await view.findByRole("complementary", { name: "Plan" });
   expect(bar.textContent).toBe(
-    "Bots can't run until an admin adds a card to this organization.",
+    "You've used your free trial. Ask an admin to add a card to keep your Bots running.",
   );
   expect(view.queryAllByRole("link")).toHaveLength(0);
 });
@@ -113,19 +114,21 @@ test("a failed payment asks an admin to update the card", async () => {
   expect(view.getAllByRole("link", { name: "Update card" })).toHaveLength(2);
 });
 
-test("during the free trial the bar says how long is left, and Bots run", async () => {
+test("while runs are left on the free trial nothing shows over the page, and Bots run", async () => {
   answer({
     required: true,
-    status: "trialing",
-    trialEndsAt: new Date(Date.now() + 23 * DAY - 60_000).toISOString(),
+    status: "free",
+    freeRunsUsedPercent: 42,
+    trialEndsAt: null,
     renewsAt: null,
-    addCardUrl: ADD_CARD,
+    addCardUrl: null,
   });
   const view = draw();
-
-  const bar = await view.findByRole("complementary", { name: "Plan" });
-  expect(bar.textContent).toBe("Free trial, 23 days left");
-  expect(view.queryAllByRole("link")).toHaveLength(0);
+  await waitFor(() =>
+    expect(requests).toContain("GET /api/v2/organizations/default/plan"),
+  );
+  await settleReactWork();
+  expect(view.container.textContent).toBe("");
 });
 
 test("an OpenBot that needs no plan, or one from before plans, draws nothing", async () => {

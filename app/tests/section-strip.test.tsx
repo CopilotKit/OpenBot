@@ -22,7 +22,10 @@ import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { channelKeys } from "@/lib/channels/queries";
-import { deploymentKeys } from "@/lib/deployment/queries";
+import {
+  type DeploymentCapabilities,
+  deploymentKeys,
+} from "@/lib/deployment/queries";
 import {
   CONVERSATIONS,
   SectionProvider,
@@ -96,7 +99,16 @@ function Frame() {
   );
 }
 
-function renderApp(path: string) {
+function renderApp(
+  path: string,
+  {
+    deployment = {},
+    openbotVersion,
+  }: {
+    deployment?: Partial<DeploymentCapabilities>;
+    openbotVersion?: string;
+  } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
@@ -106,6 +118,7 @@ function renderApp(path: string) {
     selfHostBanner: false,
     localEvaluation: false,
     edition: "team",
+    ...deployment,
   });
   queryClient.setQueryData(authKeys.currentUser(), {
     id: "maya",
@@ -113,6 +126,7 @@ function renderApp(path: string) {
     email: "maya@example.com",
     role: "user",
     onboarding: null,
+    openbotVersion,
   });
   queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
     messageListEmphasis: "thread",
@@ -170,13 +184,11 @@ test("on a page whose section has no panel, that section is current and the pane
 
 test("Conversations brings its panel back without leaving the page", async () => {
   const { view, router, user } = renderApp("/routines");
-  await user.click(await view.findByRole("button", { name: "Conversations" }));
+  await user.click(await view.findByRole("button", { name: "Chats" }));
   expect(sidebarState(view)).toBe("expanded");
   expect(router.state.location.pathname).toBe("/routines");
   expect(
-    view
-      .getByRole("button", { name: "Conversations" })
-      .getAttribute("aria-pressed"),
+    view.getByRole("button", { name: "Chats" }).getAttribute("aria-pressed"),
   ).toBe("true");
 });
 
@@ -186,9 +198,7 @@ test("⌘B on a page with no panel opens Conversations' panel", async () => {
   await user.keyboard("{Meta>}b{/Meta}");
   expect(sidebarState(view)).toBe("expanded");
   expect(
-    view
-      .getByRole("button", { name: "Conversations" })
-      .getAttribute("aria-pressed"),
+    view.getByRole("button", { name: "Chats" }).getAttribute("aria-pressed"),
   ).toBe("true");
 });
 
@@ -214,13 +224,11 @@ test("a page no section owns keeps the section that was open", async () => {
 test("a page no section owns keeps a panel opened from the strip", async () => {
   const { view, router, user } = renderApp("/bots");
   await view.findByRole("heading", { level: 2, name: "Bots" });
-  await user.click(view.getByRole("button", { name: "Conversations" }));
+  await user.click(view.getByRole("button", { name: "Chats" }));
   await view.findByRole("heading", { level: 2, name: "Conversations" });
   await act(() => router.navigate({ to: "/teams" }));
   expect(
-    view
-      .getByRole("button", { name: "Conversations" })
-      .getAttribute("aria-pressed"),
+    view.getByRole("button", { name: "Chats" }).getAttribute("aria-pressed"),
   ).toBe("true");
   expect(
     view.getByRole("heading", { level: 2, name: "Conversations" }),
@@ -242,7 +250,7 @@ test("going to the Bots panel and back finds the Conversations panel as it was l
   expect(
     view.queryByRole("heading", { level: 2, name: "Conversations" }),
   ).toBeNull();
-  await user.click(view.getByRole("button", { name: "Conversations" }));
+  await user.click(view.getByRole("button", { name: "Chats" }));
   await view.findByRole("heading", { level: 2, name: "Conversations" });
   expect(view.queryByRole("heading", { level: 2, name: "Bots" })).toBeNull();
   expect(
@@ -257,7 +265,7 @@ test("going to the Bots panel and back finds the Conversations panel as it was l
 test("a panel the person closed stays closed, in storage too, after a page with no panel", async () => {
   window.localStorage.setItem(SIDEBAR_STORAGE_KEY, "collapsed");
   const { view, router } = renderApp("/");
-  await view.findByRole("button", { name: "Conversations" });
+  await view.findByRole("button", { name: "Chats" });
   expect(sidebarState(view)).toBe("collapsed");
   await act(() => router.navigate({ to: "/bots" }));
   await act(() => router.navigate({ to: "/" }));
@@ -267,14 +275,58 @@ test("a panel the person closed stays closed, in storage too, after a page with 
 
 test("clicking the open Conversations icon hides its panel, and clicking it again shows it", async () => {
   const { view, user } = renderApp("/");
-  const conversations = await view.findByRole("button", {
-    name: "Conversations",
-  });
+  const conversations = await view.findByRole("button", { name: "Chats" });
   expect(sidebarState(view)).toBe("expanded");
   await user.click(conversations);
   expect(sidebarState(view)).toBe("collapsed");
   await user.click(conversations);
   expect(sidebarState(view)).toBe("expanded");
+});
+
+/*
+ * Found in dogfooding: on Routines, the Routines icon could not be chosen. Bots on the strip opened
+ * Conversations' panel instead (opening the panel on a page with none asked for Conversations, and
+ * that came last), and once Bots was open, Routines' own icon did nothing: its link went to the page
+ * already open, so the page never took the strip back. Bots stayed lit beside Routines.
+ */
+test("on Routines, Bots and then Routines lights Routines and folds the panel away", async () => {
+  const { view, router, user } = renderApp("/routines");
+  await user.click(await view.findByRole("button", { name: "Bots" }));
+  await view.findByRole("heading", { level: 2, name: "Bots" });
+  expect(
+    view.getByRole("button", { name: "Bots" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(sidebarState(view)).toBe("expanded");
+  await user.click(view.getByRole("link", { name: "Routines" }));
+  expect(router.state.location.pathname).toBe("/routines");
+  const routines = view.getByRole("link", { name: "Routines" });
+  expect(routines.hasAttribute("data-active")).toBe(true);
+  expect(routines.getAttribute("aria-current")).toBe("page");
+  expect(
+    view.getByRole("button", { name: "Bots" }).getAttribute("aria-pressed"),
+  ).toBe("false");
+  expect(sidebarState(view)).toBe("collapsed");
+  // And back again: Bots lights and shows its panel once more.
+  await user.click(view.getByRole("button", { name: "Bots" }));
+  expect(
+    view.getByRole("button", { name: "Bots" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(sidebarState(view)).toBe("expanded");
+});
+
+test("on Routines, with Bots opened by way of Conversations, Routines lights Routines again", async () => {
+  const { view, user } = renderApp("/routines");
+  await user.click(await view.findByRole("button", { name: "Chats" }));
+  await user.click(view.getByRole("button", { name: "Bots" }));
+  await view.findByRole("heading", { level: 2, name: "Bots" });
+  await user.click(view.getByRole("link", { name: "Routines" }));
+  expect(
+    view.getByRole("link", { name: "Routines" }).hasAttribute("data-active"),
+  ).toBe(true);
+  expect(
+    view.getByRole("button", { name: "Bots" }).getAttribute("aria-pressed"),
+  ).toBe("false");
+  expect(sidebarState(view)).toBe("collapsed");
 });
 
 test("Bots on the strip shows the Bots panel and stays on the page", async () => {
@@ -288,4 +340,66 @@ test("Bots on the strip shows the Bots panel and stays on the page", async () =>
   // Pressed again with its panel showing, it folds the panel away, as Conversations does.
   await user.click(view.getByRole("button", { name: "Bots" }));
   expect(sidebarState(view)).toBe("collapsed");
+});
+
+/** The version as the strip draws it, outside any menu: what a screenshot of the page shows. */
+function stripVersion(view: ReturnType<typeof render>) {
+  return (
+    view.container.querySelector(
+      '[data-slot="strip"] [data-slot="openbot-version"]',
+    )?.textContent ?? null
+  );
+}
+
+/*
+ * Reported from OpenBot Cloud: screenshots sent with a bug report never said which release they were
+ * taken on. Since the strip, the version was only inside the account menu, and the strip's foot
+ * showed the person's initials and nothing else. On Cloud it now sits under them, on every page.
+ */
+test("on OpenBot Cloud the strip shows the release the server runs, with no menu open", async () => {
+  const { view, user } = renderApp("/", {
+    deployment: { hostedSignIn: true },
+    openbotVersion: "main-20261113-9",
+  });
+  await view.findByRole("button", { name: "Chats" });
+  await waitFor(() => expect(stripVersion(view)).toBe("main-20261113-9"));
+  expect(view.queryByRole("menu")).toBeNull();
+  // The account menu still says it too, at the top of its account row.
+  await user.click(view.getByRole("button", { name: "Maya Chen" }));
+  await view.findByRole("menu");
+  expect(
+    document.querySelector(
+      '[data-slot="account-row"] [data-slot="openbot-version"]',
+    )?.textContent,
+  ).toBe("main-20261113-9");
+});
+
+test("on OpenBot Cloud a release's number reads with its v, on a page with no panel too", async () => {
+  const { view } = renderApp("/routines", {
+    deployment: { hostedSignIn: true },
+    openbotVersion: "1.2.0",
+  });
+  await view.findByRole("link", { name: "Routines" });
+  await waitFor(() => expect(stripVersion(view)).toBe("v1.2.0"));
+});
+
+test("an OpenBot a company runs itself, and the personal edition, keep the version in the account menu only", async () => {
+  for (const deployment of [
+    { hostedSignIn: false },
+    { hostedSignIn: false, edition: "personal" as const },
+  ]) {
+    const { view } = renderApp("/", {
+      deployment,
+      openbotVersion: "1.2.0",
+    });
+    await view.findByRole("button", { name: "Chats" });
+    expect(stripVersion(view)).toBeNull();
+    cleanup();
+  }
+});
+
+test("on OpenBot Cloud, a server with no version to give shows none on the strip", async () => {
+  const { view } = renderApp("/", { deployment: { hostedSignIn: true } });
+  await view.findByRole("button", { name: "Chats" });
+  expect(stripVersion(view)).toBeNull();
 });

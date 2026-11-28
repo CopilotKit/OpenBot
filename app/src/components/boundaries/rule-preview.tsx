@@ -2,6 +2,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import { DryRunChanges } from "@/components/boundaries/dry-run-changes";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import type { DryRunReport } from "@/lib/computers/queries";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * What the rule would have stopped, worked out as it is written: a Bot's computer actions and its
@@ -21,7 +22,7 @@ export function RulePreview({
       <FieldLabel id="rule-preview">On recent activity</FieldLabel>
       {preview.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {preview.error.message}
+          {failureSaid(preview.error)}
         </p>
       ) : preview.data.scanned === 0 ? (
         <FieldDescription>

@@ -35,3 +35,12 @@ export type Skin = {
    */
   screens?: Record<string, ComponentType>;
 };
+
+/**
+ * Whether a skin draws its own frame around the pages, as `Skin.Frame` says. The app's frame
+ * skeleton asks this instead of reading the skins, whose frames would otherwise be pulled into the
+ * main script. It must agree with which skins define a `Frame`; skins.test.ts checks that.
+ */
+export function skinDrawsOwnFrame(id: SkinId): boolean {
+  return id !== "openbot";
+}

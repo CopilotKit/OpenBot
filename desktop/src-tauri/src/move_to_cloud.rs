@@ -20,8 +20,12 @@ computer exactly as it was; running the move again starts a new import, which Cl
 repeat (an import of the same OpenBot adds only what isn't there yet). A failure while removing,
 after the move was kept, is said in plain words (`Moved::left_behind`) and is not a failed move.
 
-App connections never move: their sign-ins stay on this computer. The export lists them
-(`ReconnectApp`), and the person connects each one again on Cloud.
+An app connected with a key this OpenBot holds moves connected: the export always gets the
+import's key (`recipientKey`), the app's key travels sealed to it, and Cloud connects the app with
+it (`CarriedApp`, in `carried`). The model key travels only when the person brings it. An app the
+person signed in to never moves: that sign-in stays with the service it was made through. The
+export lists it (`ReconnectApp`), and the person signs in to it again on Cloud. So does a carried
+app Cloud couldn't connect, with its `reason`.
 */
 
 use std::io::Read;
@@ -38,32 +42,104 @@ pub const FILE: &str = "move-to-cloud.json";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Answer {
-    /// "Keep OpenBot (Self-Contained)": never offered again at launch. Settings still offers it.
+    /// "Keep OpenBot (Self-Contained)": not offered again at launch, unless it followed a move
+    /// that failed (`Recorded::kept_after_failed_move_in`). Settings still offers it.
     Kept,
     /// Moved, and checked on Cloud. Never offered again anywhere.
     Moved,
 }
 
-#[derive(Serialize, Deserialize)]
-struct Recorded {
-    answer: Answer,
+/**
+What `FILE` keeps. Every field is optional, so a file an older release wrote (`{"answer":"kept"}`)
+reads as it did, and an older release reads this one's answer and passes over the rest.
+
+FOUND ON 1.2.0-rc.2: a person tried the move five times and each failed its last check. They quit,
+the offer came back at the next launch, and they chose Keep to get back to work. Keep was the end of
+the offer at launch, so the release that fixed the move (rc.3) never offered it again, and they
+couldn't find it. A Keep chosen after a failed move is "not like this", not "not now": the move is
+offered once more after the next update.
+*/
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recorded {
+    /// What the person answered, if anything yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<Answer>,
+    /// A move was tried and didn't finish since the person last answered.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub failed_move: bool,
+    /// Keep was chosen while a failed move was on record, in this release of the app: the move is
+    /// offered again at a launch of any other release, once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_after_failed_move_in: Option<String>,
+}
+
+/// What is on record in `config_dir`. A file that can't be read is nothing on record.
+pub fn on_record(config_dir: &Path) -> Recorded {
+    std::fs::read(config_dir.join(FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Recorded>(&bytes).ok())
+        .unwrap_or_default()
 }
 
 /// The answer on record in `config_dir`, if any. A file that can't be read is no answer.
 pub fn answered(config_dir: &Path) -> Option<Answer> {
-    let bytes = std::fs::read(config_dir.join(FILE)).ok()?;
-    serde_json::from_slice::<Recorded>(&bytes)
-        .ok()
-        .map(|recorded| recorded.answer)
+    on_record(config_dir).answer
 }
 
-/// Keep `answer` in `config_dir`, written whole or not at all.
-pub fn record(config_dir: &Path, answer: Answer) -> std::io::Result<()> {
+/// Keep `recorded` in `config_dir`, written whole or not at all.
+fn write(config_dir: &Path, recorded: &Recorded) -> std::io::Result<()> {
     std::fs::create_dir_all(config_dir)?;
     let path = config_dir.join(FILE);
     let partial = config_dir.join(format!("{FILE}.partial"));
-    std::fs::write(&partial, serde_json::to_vec(&Recorded { answer })?)?;
+    std::fs::write(&partial, serde_json::to_vec(recorded)?)?;
     std::fs::rename(&partial, &path)
+}
+
+/// A move that was tried and didn't finish: kept beside whatever the person answered before, until
+/// they answer again. After a finished move there is nothing to add.
+pub fn record_failed_move(config_dir: &Path) -> std::io::Result<()> {
+    let mut recorded = on_record(config_dir);
+    if recorded.answer == Some(Answer::Moved) {
+        return Ok(());
+    }
+    recorded.failed_move = true;
+    write(config_dir, &recorded)
+}
+
+/**
+"Keep OpenBot (Self-Contained)", chosen in `release` of this app. Returns what is now on record.
+
+- After a failed move: offered again once, at the first launch of another release.
+- Answering that offer again with Keep: final, like a Keep with no failed move before it. A move
+  that failed again meanwhile doesn't bring another offer.
+- Chosen again in the same release, before any update: still offered again once.
+*/
+pub fn record_kept(config_dir: &Path, release: &str) -> std::io::Result<Recorded> {
+    let before = on_record(config_dir);
+    let pending = before
+        .kept_after_failed_move_in
+        .filter(|_| before.answer == Some(Answer::Kept));
+    let offered_again = pending.as_deref().is_some_and(|kept_in| kept_in != release);
+    let recorded = Recorded {
+        answer: Some(Answer::Kept),
+        failed_move: false,
+        kept_after_failed_move_in: (!offered_again && (before.failed_move || pending.is_some()))
+            .then(|| release.to_owned()),
+    };
+    write(config_dir, &recorded)?;
+    Ok(recorded)
+}
+
+/// Moved, and checked on Cloud: the end of every offer, and of any failed move on record.
+pub fn record_moved(config_dir: &Path) -> std::io::Result<()> {
+    write(
+        config_dir,
+        &Recorded {
+            answer: Some(Answer::Moved),
+            ..Recorded::default()
+        },
+    )
 }
 
 /**
@@ -74,10 +150,30 @@ the update, for OpenBot (Self-Contained) only.
 - `connected`: the app is connected to an OpenBot that runs elsewhere (OpenBot Cloud, or a
   company's): there is nothing here to move.
 - `installed_here`: an OpenBot is set up on this computer.
-- `answer`: what the person said before. Any answer ends the offer at launch.
+- `recorded`: what the person said before. Any answer ends the offer at launch, except a Keep that
+  followed a failed move, which is offered again in a release other than the one it was chosen in.
+- `release`: this app's own version.
 */
-pub fn due(cloud: bool, connected: bool, installed_here: bool, answer: Option<Answer>) -> bool {
-    cloud && !connected && installed_here && answer.is_none()
+pub fn due(
+    cloud: bool,
+    connected: bool,
+    installed_here: bool,
+    recorded: &Recorded,
+    release: &str,
+) -> bool {
+    cloud && !connected && installed_here && offer_stands(recorded, release)
+}
+
+/// Whether what is on record leaves the offer at launch standing, in `release`.
+fn offer_stands(recorded: &Recorded, release: &str) -> bool {
+    match recorded.answer {
+        None => true,
+        Some(Answer::Moved) => false,
+        Some(Answer::Kept) => recorded
+            .kept_after_failed_move_in
+            .as_deref()
+            .is_some_and(|kept_in| kept_in != release),
+    }
 }
 
 /// Whether Settings may offer the move: as `due`, but a person who kept Self-Contained may still.
@@ -107,6 +203,39 @@ pub struct ReconnectApp {
     pub icon_url: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bot_names: Vec<String>,
+    /// Why an app meant to move connected still needs connecting on Cloud, in Cloud's own sentence
+    /// (the organization there doesn't allow it, say). None for an app the person signs in to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/**
+A connection to an app made with a key this OpenBot holds, which moves connected: its key travels
+sealed to the import's key, and Cloud connects the app with it. Never the key itself.
+*/
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CarriedApp {
+    pub app_id: String,
+    pub app_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bot_names: Vec<String>,
+}
+
+impl CarriedApp {
+    /// The same app, to connect again on Cloud: what an older Cloud that didn't connect it leaves.
+    fn to_reconnect(&self) -> ReconnectApp {
+        ReconnectApp {
+            app_id: self.app_id.clone(),
+            app_name: self.app_name.clone(),
+            account_label: None,
+            icon_url: self.icon_url.clone(),
+            bot_names: self.bot_names.clone(),
+            reason: None,
+        }
+    }
 }
 
 /// `getExportEstimate`: what an export would hold, read before the person decides.
@@ -118,6 +247,9 @@ pub struct Estimate {
     pub stored_bytes: u64,
     #[serde(default)]
     pub reconnect: Vec<ReconnectApp>,
+    /// The apps that move connected. An OpenBot from before keys moved names none.
+    #[serde(default)]
+    pub carried: Vec<CarriedApp>,
     #[serde(default)]
     pub model_keys_available: bool,
 }
@@ -140,6 +272,9 @@ pub struct Export {
     pub counts: Vec<Count>,
     #[serde(default)]
     pub reconnect: Vec<ReconnectApp>,
+    /// The apps whose keys the bundle carries sealed.
+    #[serde(default)]
+    pub carried: Vec<CarriedApp>,
     #[serde(default)]
     pub progress: Option<f64>,
     #[serde(default)]
@@ -161,6 +296,9 @@ pub struct Import {
     pub recipient_key: Option<serde_json::Value>,
     #[serde(default)]
     pub received_parts: Vec<u32>,
+    /// Once imported, the apps that came across connected.
+    #[serde(default)]
+    pub carried: Vec<CarriedApp>,
     #[serde(default)]
     pub error: Option<String>,
 }
@@ -184,6 +322,9 @@ pub struct Verification {
     pub notes: Vec<Note>,
     #[serde(default)]
     pub reconnect: Vec<ReconnectApp>,
+    /// The apps that came across connected.
+    #[serde(default)]
+    pub carried: Vec<CarriedApp>,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -192,10 +333,12 @@ pub struct Verification {
 /// The OpenBot on this computer: where the export is made.
 pub trait Local {
     fn estimate(&mut self) -> Result<Estimate, String>;
-    /// `createExport`. `recipient_key` is Cloud's, when the model key comes along.
+    /// `createExport`. `recipient_key` is the import's, which the keys of apps connected with a key
+    /// are sealed to; `include_model_keys` brings the model key too, sealed to the same key.
     fn create_export(
         &mut self,
         recipient_key: Option<&serde_json::Value>,
+        include_model_keys: bool,
     ) -> Result<Export, String>;
     fn export(&mut self, id: &str) -> Result<Export, String>;
     /// `downloadExportPart`, from `from` bytes on: the bytes that came, which may be fewer than
@@ -205,7 +348,11 @@ pub trait Local {
 
 /// OpenBot Cloud: where the import is made and checked.
 pub trait Cloud {
-    fn create_import(&mut self, source_name: &str) -> Result<Import, String>;
+    /**
+    `createImport`. A refusal Cloud says in a sentence for the person (403: the organization doesn't
+    let them use Bots) is `Failure::Stopped` with that sentence; anything else is a failure to send.
+    */
+    fn create_import(&mut self, source_name: &str) -> Result<Import, Failure>;
     fn upload(&mut self, id: &str, part: u32, bytes: &[u8]) -> Result<Import, String>;
     fn apply(&mut self, id: &str) -> Result<Import, String>;
     fn import(&mut self, id: &str) -> Result<Import, String>;
@@ -214,7 +361,8 @@ pub trait Cloud {
 
 /// This computer, once the move has arrived and been checked.
 pub trait Here {
-    /// What OpenBot takes on this computer now, in bytes, when it can be measured.
+    /// What OpenBot takes on this computer now, in bytes, when it can be measured: by the rule the
+    /// move screens' estimate uses, over the same paths before and after (`Footprint`).
     fn footprint(&mut self) -> Option<u64>;
     /// The move is kept: the answer recorded and the app pointed at Cloud, before anything goes,
     /// so a removal cut short never offers the move again.
@@ -228,27 +376,52 @@ pub trait Here {
 }
 
 /**
-What removing OpenBot freed: what it measured of its own files before and after, but never more
-than the disk itself gained when the disk says. On two Windows boxes the files measured 12.2 and
-12.0 GB while the disk gained 11.4 and 10.8 GB (Podman's own helper stays, and a deleted disk
-image does not hand back every byte its length claims), and the person reads the claim against
-the disk.
+What the move removed of OpenBot's files: what they took before the removal, less what is still
+there after, measured by the rule the move screens' estimate uses (`footprint`, over the same
+paths: `Footprint`). So the result counts what the estimate counted.
 */
-pub fn freed(
-    footprint: (Option<u64>, Option<u64>),
-    free_space: (Option<u64>, Option<u64>),
-) -> Option<u64> {
-    let measured = footprint
-        .0
-        .map(|before| before.saturating_sub(footprint.1.unwrap_or(0)));
-    let gained = match free_space {
+pub fn removed(before: Option<u64>, after: Option<u64>) -> Option<u64> {
+    before.map(|before| before.saturating_sub(after.unwrap_or(0)))
+}
+
+/**
+How much more space the disk says is free after the removal than before, when it says, and when
+that grew at all (another program writing meanwhile can shrink it).
+
+This is not the same figure as `removed`, and is never put in its place. On a Mac with Apple
+silicon (1.2.0-rc.1, Podman 6.1.4, OpenBot's machine on a 60 GB sparse disk) the move screen said
+"Frees about 20.2 GB" and the result, then the smaller of the two, said "4.5 GB freed": the files
+were all gone, and the disk gained 4.5 GB at once. That is about what OpenBot wrote in the minutes
+before the move (the log's free-space lines), which is what deleting frees when a local snapshot
+of the disk was taken just before: the snapshot keeps the older blocks until the system lets it
+go. On two Windows boxes the files measured 12.2 and 12.0 GB while the disk gained 11.4 and
+10.8 GB.
+*/
+pub fn disk_gained(before: Option<u64>, after: Option<u64>) -> Option<u64> {
+    match (before, after) {
         (Some(before), Some(after)) if after > before => Some(after - before),
         _ => None,
-    };
-    match (measured, gained) {
-        (Some(measured), Some(gained)) => Some(measured.min(gained)),
-        (measured, None) => measured,
-        (None, gained) => gained,
+    }
+}
+
+/**
+OpenBot's footprint on this computer, measured over the same paths each time: the paths are found
+once, at the first measure, and the measure after the removal reads those same paths. Found again,
+a machine whose removal failed would no longer be found (its engine no longer names it), and its
+disk would count as removed while it is still there.
+*/
+#[derive(Default)]
+pub struct Footprint {
+    parts: Option<Vec<PathBuf>>,
+}
+
+impl Footprint {
+    /// What the parts take now, finding them with `find` the first time. None when nothing is there
+    /// to measure the first time.
+    pub fn measure(&mut self, find: impl FnOnce() -> Vec<PathBuf>) -> Option<u64> {
+        let parts = self.parts.get_or_insert_with(find);
+        let total = footprint(parts);
+        (total > 0 || !parts.is_empty()).then_some(total)
     }
 }
 
@@ -275,14 +448,38 @@ pub trait Progress {
 pub enum Failure {
     /// Packing up, sending, or importing stopped. `detail` is for the log.
     Failed { stage: Stage, detail: String },
+    /**
+    Cloud stopped the import and said why, in a sentence the person reads (`Import.error`): a
+    conversation carried on in OpenBot Cloud that it won't overwrite, or one a Bot is answering
+    there now. The window shows that sentence as it is. Trying again in a moment doesn't get past
+    it, so the window doesn't say to.
+    */
+    Stopped { said: String },
     /// Cloud has the import, but not everything in it: what was short, for the log.
     Mismatch { detail: String },
+    /**
+    The organization the person chose doesn't let them use Bots (`Organization.canMoveIn` is
+    false), so the move was refused before anything was packed up or sent. `said` names it.
+    */
+    NotAllowed { said: String },
+}
+
+/**
+The reason in a failed import's own sentence, when it gives one. None when there is no sentence,
+or when it only asks to apply again: the import stopped part way, the move applied it again
+already, and Desktop's own line (try again in a moment) is the right one.
+*/
+pub fn reason_of(error: Option<&str>) -> Option<&str> {
+    error
+        .map(str::trim)
+        .filter(|said| !said.is_empty() && !said.contains("Apply again"))
 }
 
 impl Failure {
     /// The sentence the setup window shows. Nothing was removed, which the window says too.
-    pub fn said(&self) -> &'static str {
+    pub fn said(&self) -> &str {
         match self {
+            Failure::Stopped { said } | Failure::NotAllowed { said } => said,
             Failure::Failed {
                 stage: Stage::Export,
                 ..
@@ -300,13 +497,17 @@ impl Failure {
     pub fn kind(&self) -> &'static str {
         match self {
             Failure::Failed { .. } => "move-failed",
+            Failure::Stopped { .. } => "move-stopped",
             Failure::Mismatch { .. } => "move-mismatch",
+            Failure::NotAllowed { .. } => "move-not-allowed",
         }
     }
 
+    /// For the log. Cloud's own sentence is the whole of what it said.
     pub fn detail(&self) -> &str {
         match self {
             Failure::Failed { detail, .. } | Failure::Mismatch { detail } => detail,
+            Failure::Stopped { said } | Failure::NotAllowed { said } => said,
         }
     }
 }
@@ -315,14 +516,37 @@ impl Failure {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Moved {
-    /// What removing OpenBot freed on this computer, when it could be measured.
-    pub freed_bytes: Option<u64>,
+    /// What the move removed of OpenBot's files, counted as the move screens' estimate counts them
+    /// (`removed`), when it could be measured.
+    pub removed_bytes: Option<u64>,
+    /// How much more free space the disk showed right after (`disk_gained`). Less than
+    /// `removed_bytes` when the system holds on to deleted files for a while.
+    pub disk_gained_bytes: Option<u64>,
     /// The apps to connect again on Cloud.
     pub apps: Vec<ReconnectApp>,
+    /// The apps that came across connected.
+    pub carried: Vec<CarriedApp>,
     /// What Cloud brought in differently, in its own sentences.
     pub notes: Vec<String>,
     /// What of OpenBot couldn't be removed from this computer.
     pub left_behind: Vec<String>,
+    /// Whether OpenBot Cloud still needs the person's AI before their Bots can run
+    /// (`Api::needs_ai_connection`), asked once the move is done. None when it couldn't be asked.
+    pub connect_ai: Option<bool>,
+    /// The OpenBot Cloud account the move went into (`Api::account`), asked once the move is done,
+    /// so the result can say where everything is and as whom to sign in there. None when it
+    /// couldn't be asked.
+    pub account: Option<CloudAccount>,
+}
+
+/// The OpenBot Cloud account and organization a move went into, as the result says them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudAccount {
+    /// The email address the person signed in with, which is how they sign in there again.
+    pub email: String,
+    /// The organization the move went into, by its name, when Cloud names it.
+    pub organization: Option<String>,
 }
 
 /// How long the move waits on each side, and how often it asks.
@@ -366,19 +590,15 @@ pub fn run(
 ) -> Result<Moved, Failure> {
     let failed = |stage: Stage| move |detail: String| Failure::Failed { stage, detail };
 
-    // 1. The import on Cloud first: its key seals the model key in the export.
+    // 1. The import on Cloud first: its key seals the keys in the export. Always given, so apps
+    //    connected with a key move connected; the model key only when the person brings it.
     progress.running(Stage::Export, Some(0.0));
-    let import = cloud
-        .create_import(asked.source_name)
-        .map_err(failed(Stage::Upload))?;
-    let recipient_key = asked
-        .include_model_keys
-        .then_some(import.recipient_key.as_ref())
-        .flatten();
+    let import = cloud.create_import(asked.source_name)?;
+    let recipient_key = import.recipient_key.as_ref();
 
     // 2. The export here, until it is ready.
     let started = local
-        .create_export(recipient_key)
+        .create_export(recipient_key, asked.include_model_keys)
         .map_err(failed(Stage::Export))?;
     let export = wait_for_export(local, &started.id, asked.limits, progress)?;
     progress.done(Stage::Export);
@@ -404,7 +624,7 @@ pub fn run(
 
     // 4. Cloud imports it.
     progress.running(Stage::Import, None);
-    wait_for_import(cloud, &import.id, asked.limits)?;
+    let imported = wait_for_import(cloud, &import.id, asked.limits)?;
     progress.done(Stage::Import);
 
     // 5. Checked against what Cloud now holds, and against the export's own counts.
@@ -427,21 +647,66 @@ pub fn run(
     let free_after = here.free_space();
     progress.done(Stage::Remove);
 
-    let apps = if verification.reconnect.is_empty() {
-        export.reconnect
-    } else {
-        verification.reconnect
-    };
+    let (apps, carried) = arrived(
+        export.reconnect,
+        export.carried,
+        verification.reconnect,
+        verification.carried,
+        imported.carried,
+    );
     Ok(Moved {
-        freed_bytes: freed((before, after), (free_before, free_after)),
+        removed_bytes: removed(before, after),
+        disk_gained_bytes: disk_gained(free_before, free_after),
         apps,
+        carried,
         notes: verification
             .notes
             .into_iter()
             .map(|note| note.message)
             .collect(),
         left_behind,
+        connect_ai: None,
+        account: None,
     })
+}
+
+/**
+The apps to connect again on Cloud, and the apps that came across connected, as the result says
+them.
+
+- Connected: what Cloud's check says came across connected, else what the finished import says.
+- To connect again: what Cloud's check lists, else what the export listed. Cloud lists a carried app
+  it couldn't connect there, with its reason.
+- An app the export carried that Cloud names in neither list is to connect again. An older Cloud
+  answers no `carried` at all and doesn't connect it: absent reads as none, and the person still
+  sees the app, to connect again.
+*/
+pub fn arrived(
+    exported: Vec<ReconnectApp>,
+    exported_carried: Vec<CarriedApp>,
+    verified: Vec<ReconnectApp>,
+    verified_carried: Vec<CarriedApp>,
+    imported_carried: Vec<CarriedApp>,
+) -> (Vec<ReconnectApp>, Vec<CarriedApp>) {
+    let carried = if verified_carried.is_empty() {
+        imported_carried
+    } else {
+        verified_carried
+    };
+    let mut apps = if verified.is_empty() {
+        exported
+    } else {
+        verified
+    };
+    for app in exported_carried {
+        let named = |id: &str| id == app.app_id;
+        if !carried.iter().any(|there| named(&there.app_id))
+            && !apps.iter().any(|there| named(&there.app_id))
+        {
+            apps.push(app.to_reconnect());
+        }
+    }
+    (apps, carried)
 }
 
 /**
@@ -567,7 +832,8 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn wait_for_import(cloud: &mut dyn Cloud, id: &str, limits: Limits) -> Result<(), Failure> {
+/// The import, once Cloud has imported it: its `carried` names the apps connected there.
+fn wait_for_import(cloud: &mut dyn Cloud, id: &str, limits: Limits) -> Result<Import, Failure> {
     let failed = |detail: String| Failure::Failed {
         stage: Stage::Import,
         detail,
@@ -578,11 +844,16 @@ fn wait_for_import(cloud: &mut dyn Cloud, id: &str, limits: Limits) -> Result<()
     let mut import = cloud.apply(id).map_err(failed)?;
     loop {
         match import.status.as_str() {
-            "imported" => return Ok(()),
+            "imported" => return Ok(import),
             "failed" if applies >= 1 => {
+                if let Some(said) = reason_of(import.error.as_deref()) {
+                    return Err(Failure::Stopped {
+                        said: said.to_owned(),
+                    });
+                }
                 return Err(failed(
                     import.error.unwrap_or_else(|| "the import failed".into()),
-                ))
+                ));
             }
             "failed" => {
                 applies += 1;
@@ -617,6 +888,8 @@ pub trait Credentials: Send + Sync {
 pub struct Api {
     base: String,
     organization: String,
+    /// The organization's name, from the caller's list, when the API was opened by it (`open`).
+    organization_name: Option<String>,
     credentials: Box<dyn Credentials>,
     client: reqwest::blocking::Client,
 }
@@ -650,6 +923,7 @@ impl Api {
         Ok(Api {
             base: base.trim_end_matches('/').to_owned(),
             organization: organization.to_owned(),
+            organization_name: None,
             credentials,
             client,
         })
@@ -661,14 +935,38 @@ impl Api {
         credentials: Box<dyn Credentials>,
         pick: fn(&[Organization]) -> Option<String>,
     ) -> Result<Api, String> {
-        let mut api = Api::at(base, credentials, "")?;
-        let page: OrganizationPage = api.json(
-            reqwest::Method::GET,
-            "/api/v2/people/me/organizations",
-            None,
-        )?;
-        api.organization = pick(&page.organizations)
-            .ok_or_else(|| "the caller belongs to no organization there".to_owned())?;
+        Api::open_in(base, credentials, |list| {
+            pick(list).ok_or_else(|| Failure::Failed {
+                stage: Stage::SignIn,
+                detail: "the caller belongs to no organization there".to_owned(),
+            })
+        })
+        .map_err(|failure| failure.detail().to_owned())
+    }
+
+    /**
+    The API at `base`, in the organization `choose` takes from the caller's own list, read once
+    here: the list the person chose from is the list the move goes by. `choose` refusing, as
+    `destination` refuses an organization that won't take the person's Bots, is the answer.
+    */
+    pub fn open_in(
+        base: &str,
+        credentials: Box<dyn Credentials>,
+        choose: impl FnOnce(&[Organization]) -> Result<String, Failure>,
+    ) -> Result<Api, Failure> {
+        let failed = |detail: String| Failure::Failed {
+            stage: Stage::SignIn,
+            detail,
+        };
+        let mut api = Api::at(base, credentials, "").map_err(failed)?;
+        let organizations = api.organizations().map_err(failed)?;
+        api.organization = choose(&organizations)?;
+        api.organization_name = organizations
+            .iter()
+            .find(|organization| organization.id == api.organization)
+            .and_then(|organization| organization.name.clone())
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty());
         Ok(api)
     }
 
@@ -676,8 +974,58 @@ impl Api {
         &self.organization
     }
 
+    /// The caller's own organizations (`listMyOrganizations`), as the API lists them.
+    pub fn organizations(&self) -> Result<Vec<Organization>, String> {
+        let page: OrganizationPage = self.json(
+            reqwest::Method::GET,
+            "/api/v2/people/me/organizations",
+            None,
+        )?;
+        Ok(page.organizations)
+    }
+
+    /**
+    The account the person signed in with, in the organization this API works in: their email
+    (`getPerson`, `me`) and the organization's name from their list. The move's
+    result says it, so the person knows where everything went and as whom to sign in there.
+    */
+    pub fn account(&self) -> Result<CloudAccount, String> {
+        #[derive(Deserialize)]
+        struct Answer {
+            person: Person,
+        }
+        #[derive(Deserialize)]
+        struct Person {
+            email: String,
+        }
+        let answer: Answer = self.json(
+            reqwest::Method::GET,
+            &self.in_organization("/people/me"),
+            None,
+        )?;
+        let email = answer.person.email.trim().to_owned();
+        if email.is_empty() {
+            return Err("OpenBot Cloud named no email address for the person".to_owned());
+        }
+        Ok(CloudAccount {
+            email,
+            organization: self.organization_name.clone(),
+        })
+    }
+
     fn in_organization(&self, path: &str) -> String {
         format!("/api/v2/organizations/{}{path}", self.organization)
+    }
+
+    /// Whether the person still has to connect their AI here before their Bots can run
+    /// (`getPersonalAiConnection`, read as `PersonalAi::needs_connecting` reads it).
+    pub fn needs_ai_connection(&self) -> Result<bool, String> {
+        let personal: PersonalAi = self.json(
+            reqwest::Method::GET,
+            &self.in_organization("/people/me/ai-connection"),
+            None,
+        )?;
+        Ok(personal.needs_connecting())
     }
 
     fn send(
@@ -791,20 +1139,73 @@ fn refusal(method: &reqwest::Method, path: &str, answered: &Answered) -> String 
     .to_owned()
 }
 
+/// A problem's own sentence for the person (`detail`), when it has one.
+fn problem_detail(body: &[u8]) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Problem {
+        detail: Option<String>,
+    }
+    serde_json::from_slice::<Problem>(body)
+        .ok()?
+        .detail
+        .map(|detail| detail.trim().to_owned())
+        .filter(|detail| !detail.is_empty())
+}
+
 fn idempotency_key() -> String {
     use rand::Rng;
     let bytes: [u8; 16] = rand::rng().random();
     hex(&bytes)
 }
 
+/// The person's own AI connection, as far as the move reads it (`PersonalAiConnection`).
+#[derive(Clone, Debug, Deserialize)]
+pub struct PersonalAi {
+    /// The AI their next run uses: `personal`, `organization`, or `none`.
+    pub uses: String,
+    /// Whether they must have an AI before they use OpenBot (true on OpenBot Cloud).
+    pub required: bool,
+}
+
+impl PersonalAi {
+    /// The server's two verdicts, never recomputed: required, and nothing to run on yet. The same
+    /// rule as the web app's `needsAiConnection`.
+    pub fn needs_connecting(&self) -> bool {
+        self.required && self.uses == "none"
+    }
+}
+
 /// One organization in the caller's list.
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Organization {
     pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(default)]
     pub active: bool,
     #[serde(default)]
     pub personal: bool,
+    /// Whether the caller may move their Bots into it: the organization's own rule, as OpenBot
+    /// Cloud says it. Absent from an older Cloud, which is read as allowed.
+    #[serde(default)]
+    pub can_move_in: Option<bool>,
+}
+
+impl Organization {
+    /// Whether the caller may move their Bots into it. An older Cloud doesn't say: allowed.
+    pub fn takes_moves(&self) -> bool {
+        self.can_move_in != Some(false)
+    }
+
+    /// Its name, as a sentence says it, or its id when Cloud gives none.
+    pub fn said(&self) -> &str {
+        self.name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(&self.id)
+    }
 }
 
 #[derive(Deserialize)]
@@ -821,6 +1222,42 @@ pub fn their_own_organization(list: &[Organization]) -> Option<String> {
         .map(|organization| organization.id.clone())
 }
 
+/**
+The organization a move goes into, from the caller's own list: `chosen` when the person chose one
+in the window, which must be in that list, otherwise their only one or their own
+(`their_own_organization`), as before they could choose. One that doesn't let them use Bots is
+refused here, before anything is packed up or sent, in a sentence that names it.
+*/
+pub fn destination(list: &[Organization], chosen: Option<&str>) -> Result<String, Failure> {
+    let id = match chosen {
+        Some(chosen) => list
+            .iter()
+            .find(|organization| organization.id == chosen)
+            .map(|organization| organization.id.clone())
+            .ok_or_else(|| Failure::Failed {
+                stage: Stage::SignIn,
+                detail: format!("{chosen} isn't one of the caller's organizations there"),
+            })?,
+        None => their_own_organization(list).ok_or_else(|| Failure::Failed {
+            stage: Stage::SignIn,
+            detail: "the caller belongs to no organization there".to_owned(),
+        })?,
+    };
+    match list.iter().find(|organization| organization.id == id) {
+        Some(organization) if !organization.takes_moves() => Err(Failure::NotAllowed {
+            said: not_allowed_in(organization.said()),
+        }),
+        _ => Ok(id),
+    }
+}
+
+/// Said when an organization doesn't let the person use Bots, so their Bots can't move into it.
+pub fn not_allowed_in(organization: &str) -> String {
+    format!(
+        "An admin of {organization} hasn't let you use Bots there. Ask them to let you, or choose another organization."
+    )
+}
+
 impl Local for Api {
     fn estimate(&mut self) -> Result<Estimate, String> {
         self.json(
@@ -833,9 +1270,14 @@ impl Local for Api {
     fn create_export(
         &mut self,
         recipient_key: Option<&serde_json::Value>,
+        include_model_keys: bool,
     ) -> Result<Export, String> {
+        // A model key travels only sealed, so never asked for without the key to seal it to.
         let body = match recipient_key {
-            Some(key) => serde_json::json!({ "includeModelKeys": true, "recipientKey": key }),
+            Some(key) => serde_json::json!({
+                "includeModelKeys": include_model_keys,
+                "recipientKey": key,
+            }),
             None => serde_json::json!({ "includeModelKeys": false }),
         };
         self.json(
@@ -877,14 +1319,35 @@ impl Local for Api {
 }
 
 impl Cloud for Api {
-    fn create_import(&mut self, source_name: &str) -> Result<Import, String> {
+    fn create_import(&mut self, source_name: &str) -> Result<Import, Failure> {
         let name: String = source_name.chars().take(200).collect();
-        let body = (!name.trim().is_empty()).then(|| serde_json::json!({ "sourceName": name }));
-        self.json(
-            reqwest::Method::POST,
-            &self.in_organization("/imports"),
-            Some(body.unwrap_or_else(|| serde_json::json!({}))),
-        )
+        let body = if name.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({ "sourceName": name })
+        };
+        let path = self.in_organization("/imports");
+        let key = idempotency_key();
+        let answered = self
+            .send(reqwest::Method::POST, &path, &|request| {
+                request.header("Idempotency-Key", &key).json(&body)
+            })
+            .map_err(|detail| Failure::Failed {
+                stage: Stage::Upload,
+                detail,
+            })?;
+        // The organization doesn't let the person use Bots (MOVE_NOT_ALLOWED), or they can't
+        // reach it as they signed in: Cloud's own sentence is what they read.
+        if answered.status == 403 {
+            if let Some(said) = problem_detail(&answered.body) {
+                log::warn!("{}", refusal(&reqwest::Method::POST, &path, &answered));
+                return Err(Failure::Stopped { said });
+            }
+        }
+        parse(&reqwest::Method::POST, &path, answered).map_err(|detail| Failure::Failed {
+            stage: Stage::Upload,
+            detail,
+        })
     }
 
     fn upload(&mut self, id: &str, part: u32, bytes: &[u8]) -> Result<Import, String> {

@@ -170,9 +170,10 @@ export function groupQueryOptions(channelId: string) {
 
 /**
  * The last line is still a person's: the server has queued it but no Bot has started yet. Bounded,
- * so a turn the server gave up on before any Bot started does not poll for ever.
+ * so a turn the server gave up on before any Bot started does not poll for ever. The transcript
+ * draws "Thinking" under that line for as long as this holds (`group-chat.tsx`).
  */
-function awaitingFirstReply(data: GroupConversation | undefined) {
+export function awaitingFirstReply(data: GroupConversation | undefined) {
   const last = data?.messages.at(-1);
   return (
     last !== undefined &&

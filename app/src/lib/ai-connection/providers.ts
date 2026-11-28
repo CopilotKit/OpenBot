@@ -1,6 +1,7 @@
 import type {
   AiConnectionLogin,
   AiConnectionProvider,
+  AiConnectionProviderAnswer,
 } from "@/lib/api/generated/model";
 
 /**
@@ -45,9 +46,10 @@ export const AI_PROVIDERS: AiProvider[] = [
   {
     id: "google",
     name: "Google Gemini",
-    summary: "Use a Google AI Studio key or sign in for Gemini API access.",
+    summary: "Use a Google AI Studio key for the Gemini API.",
     keySummary: "Use a Google AI Studio key for the Gemini API.",
-    logins: ["endpoint", "oauth"],
+    // An API key only: a Google sign-in saved before reads `sign-in-retired` (GOOGLE_SIGN_IN_ENDED).
+    logins: ["endpoint"],
     mark: "google-color",
   },
   {
@@ -59,12 +61,12 @@ export const AI_PROVIDERS: AiProvider[] = [
     mark: "xai",
   },
   {
-    id: "unbiased",
-    name: "Unbiased AI",
-    summary: "Sign in with Unbiased AI to use Pareto, or use an API key.",
-    keySummary: "Use an Unbiased AI API key for Pareto.",
-    logins: ["oauth", "endpoint"],
-    mark: "unbiased",
+    id: "trustedrouter",
+    name: "TrustedRouter",
+    summary: "Use a TrustedRouter API key for models from many providers.",
+    keySummary: "Use a TrustedRouter API key for models from many providers.",
+    logins: ["endpoint"],
+    mark: "trustedrouter",
   },
   {
     id: "openai-compatible",
@@ -98,11 +100,11 @@ export const ENDPOINT_PRESETS: Partial<
     keyUrl: "https://console.x.ai/",
     keyLink: "Get an xAI API key",
   },
-  unbiased: {
-    baseUrl: "https://api.unbiased.ai/v1",
-    model: "pareto",
-    keyUrl: "https://platform.unbiased.ai/dashboard/keys",
-    keyLink: "Get an Unbiased AI API key",
+  trustedrouter: {
+    baseUrl: "https://api.trustedrouter.com/v1",
+    model: "anthropic/claude-sonnet-5.5",
+    keyUrl: "https://trustedrouter.com/console/api-keys",
+    keyLink: "Get a TrustedRouter API key",
   },
 };
 
@@ -122,13 +124,14 @@ export function loginsHere(
 /**
  * The ways in for a person's own AI: the provider's sign-in first where the server runs it itself
  * (`signIns`), then the provider's key or address. The sign-in is the one the setup window offers
- * for that provider: a ChatGPT or Claude plan (`plan`), or a Google, xAI or Unbiased AI sign-in
- * (`oauth`). The server keeps it for the person and renews it, so it is never one OpenBot Desktop
+ * for that provider: a ChatGPT or Claude plan (`plan`), or an xAI sign-in
+ * (`oauth`). A provider with no sign-in here (Google Gemini) is offered its key alone, whatever
+ * an older server lists. The server keeps it for the person and renews it, so it is never one OpenBot Desktop
  * holds, even inside Desktop: the server runs the person's Bots.
  */
 export function personalLogins(
   provider: AiProvider,
-  signIns: readonly AiConnectionProvider[],
+  signIns: readonly AiConnectionProviderAnswer[],
 ): AiConnectionLogin[] {
   const signIn = signIns.includes(provider.id)
     ? provider.logins.find((login) => login === "plan" || login === "oauth")
@@ -138,15 +141,30 @@ export function personalLogins(
 
 /**
  * The providers whose sign-in an admin on OpenBot Cloud may share as the organization's AI: a
- * ChatGPT or Claude plan, or a Google or xAI sign-in (replaceAiConnection with `plan` or `oauth`).
- * Unbiased AI's sign-in ends in a key kept for the person alone, so it is never shared.
+ * ChatGPT or Claude plan, or an xAI sign-in (replaceAiConnection with `plan` or `oauth`).
  */
 const SHAREABLE: readonly AiConnectionProvider[] = [
   "openai",
   "anthropic",
-  "google",
   "xai",
 ];
+
+/**
+ * A Google sign-in for Gemini saved before Gemini took an API key only: listed with its problem
+ * `sign-in-retired`, and fixed by saving a Gemini API key on the same connection.
+ */
+export const GOOGLE_SIGN_IN_ENDED = {
+  title: "Google sign-in for Gemini has ended",
+  body: "Add a Gemini API key to keep your Bots running on Gemini.",
+  action: "Add a Gemini API key",
+} as const;
+
+/** Whether a connection's problem is a retired Google sign-in (GOOGLE_SIGN_IN_ENDED). */
+export function signInRetired(
+  connection: { problem?: { code: string } | null } | null | undefined,
+): boolean {
+  return connection?.problem?.code === "sign-in-retired";
+}
 
 /**
  * The ways in for the organization's AI on OpenBot Cloud in a plain browser: the admin's own
@@ -155,7 +173,7 @@ const SHAREABLE: readonly AiConnectionProvider[] = [
  */
 export function sharedLogins(
   provider: AiProvider,
-  signIns: readonly AiConnectionProvider[],
+  signIns: readonly AiConnectionProviderAnswer[],
 ): AiConnectionLogin[] {
   return SHAREABLE.includes(provider.id)
     ? personalLogins(provider, signIns)
@@ -164,7 +182,7 @@ export function sharedLogins(
 
 /** What a person calls a provider's sign-in: "Claude plan", "ChatGPT plan", "Google sign-in". */
 export function signInWords(
-  provider: AiConnectionProvider,
+  provider: AiConnectionProviderAnswer,
   login: AiConnectionLogin,
 ): string {
   if (login === "plan")
@@ -177,8 +195,12 @@ export function isSignIn(login: AiConnectionLogin | null): boolean {
   return login === "plan" || login === "oauth";
 }
 
+/**
+ * The row for a provider, by its id. The server's answer can name a provider this app doesn't know
+ * (the list grows, api/README.md "Enums that grow"): that one has no row, and is shown by its id.
+ */
 export function providerById(
-  id: AiConnectionProvider | null | undefined,
+  id: AiConnectionProviderAnswer | null | undefined,
 ): AiProvider | undefined {
   return AI_PROVIDERS.find((provider) => provider.id === id);
 }

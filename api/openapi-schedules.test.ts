@@ -75,8 +75,8 @@ function answered(operation: Operation): string[] {
     );
 }
 
-test("the area has its 39 operations", () => {
-  expect(operations).toHaveLength(39);
+test("the area has its 40 operations", () => {
+  expect(operations).toHaveLength(40);
 });
 
 test("only the operations that make, replace or read a trigger's secret answer one", () => {

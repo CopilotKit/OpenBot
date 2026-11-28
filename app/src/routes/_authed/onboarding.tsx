@@ -9,6 +9,7 @@ import {
 import { motion, useReducedMotion } from "motion/react";
 import * as React from "react";
 import { ALWAYS_ASKS_SHORT } from "@/components/approvals/ask-first-copy";
+import { useAiStep } from "@/components/onboarding/ai-step";
 import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
 import { BookingCalendar } from "@/components/onboarding/booking-calendar";
 import { IntroReel } from "@/components/onboarding/demos/intro-reel";
@@ -20,7 +21,6 @@ import {
   OnboardingWizard,
 } from "@/components/onboarding/onboarding-wizard";
 import { Button } from "@/components/ui/button";
-import { useAiStep } from "@/components/onboarding/ai-step";
 import {
   aiConnectionRequired,
   needsAiConnection,
@@ -29,6 +29,11 @@ import {
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import { loadFailure } from "@/lib/load-failure";
+import {
+  afterOnboarding,
+  onboardingDestination,
+} from "@/lib/onboarding/destination";
 import {
   advanceOnboardingMutationOptions,
   completeOnboardingMutationOptions,
@@ -78,12 +83,19 @@ export const Route = createFileRoute("/_authed/onboarding")({
    * WHERE SOMEBODY IS LIVES IN THE ADDRESS. `?step=<id>` is the step on screen, so a reload stays
    * on it, and browser Back and Forward walk the steps. Anything else is ignored.
    */
-  validateSearch: (search: Record<string, unknown>): { step?: StepId } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { step?: StepId; next?: string } => ({
     // Named even when absent: the router lays this over the raw search, so a key left out would
     // keep whatever was typed into the address.
     step: isStepId(search.step) ? search.step : undefined,
+    /*
+     * Where the gate found the person headed (`routes/_authed.tsx`), kept on every step's address
+     * and followed by the last step's button. Only a page of this app.
+     */
+    next: onboardingDestination(search.next),
   }),
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, search }) => {
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
     );
@@ -96,7 +108,7 @@ export const Route = createFileRoute("/_authed/onboarding")({
     // Asked every time, not only for somebody who finished: the step list reads it from the cache.
     const aiRequired = await aiConnectionRequired(context.queryClient);
     if (!needsOnboarding(user) && !aiRequired) {
-      throw redirect({ to: "/" });
+      throw redirect({ href: afterOnboarding(search.next) });
     }
   },
   component: RouteComponent,
@@ -228,7 +240,9 @@ function useBookDemoStep(): OnboardingStep {
         <p>Pick a time to see a demo or scope a proof of concept with us.</p>
       </StepIntro>
     ),
-    demo: () => <BookingCalendar onBooked={book} onFailed={fail} />,
+    demo: () => (
+      <BookingCalendar onBooked={book} onFailed={fail} place="onboarding" />
+    ),
     primaryLabel: undefined,
     onPrimary: undefined,
     primaryHidden: !booked,
@@ -236,12 +250,27 @@ function useBookDemoStep(): OnboardingStep {
   };
 }
 
+/**
+ * DECIDED FROM THE ORGANIZATION'S ANSWERS, NEVER FROM NONE. The steps decide once, on arrival,
+ * from the person and their AI connection, which `beforeLoad` puts in the cache first. Working in
+ * another organization (Connect your AI's way out, the account menu) drops both and builds the
+ * page again for the new one (OrganizationBoundary) before it has answered. Decided from nothing,
+ * Connect your AI fell out of the list in an organization with no AI, the name step came in for a
+ * name that was known, and its Get started faded the page out while the gate sent it straight
+ * back: a blank page (reported on 1.2.0-rc.2). So the steps wait for both answers.
+ */
 function RouteComponent() {
+  const me = useQuery(currentUserQueryOptions());
+  const personal = useQuery(personalAiConnectionQueryOptions());
+  if (me.isPending || personal.isPending) return null;
+  return <OnboardingSteps />;
+}
+
+function OnboardingSteps() {
   const navigate = useNavigate();
   const router = useRouter();
   const location = useLocation();
   const search = Route.useSearch();
-  const complete = useMutation(completeOnboardingMutationOptions(queryClient));
   const advance = useMutation(advanceOnboardingMutationOptions(queryClient));
   const me = useQuery(currentUserQueryOptions());
 
@@ -329,17 +358,60 @@ function RouteComponent() {
   const saved = reachable(stepForNumber(me.data?.onboarding?.step));
   const asked = reachable(isStepId(search.step) ? search.step : undefined);
   const current: StepId = asked ?? saved ?? ids[0] ?? "welcome";
+  // Where the gate found them headed, kept on every step's address so a reload keeps it too.
+  const next = search.next;
+  const keepNext = next ? { next } : {};
+
+  /*
+   * PAST CONNECT YOUR AI WITH NOTHING LEFT TO DO, ONBOARDING IS DONE. Somebody who reached Connect
+   * your AI and arrives with an AI they no longer have to connect (they chose to work in another
+   * organization that has one for everyone, or an admin set one up) goes on to their next step.
+   * With none after it, onboarding finishes on arrival and the app opens, in the organization they
+   * are now working in. Decided once, on arrival, like the steps. A completion that fails shows the
+   * last step, with Get started to try again.
+   */
+  const complete = useMutation(completeOnboardingMutationOptions(queryClient));
+  const [arrivedPastAi] = React.useState(
+    () =>
+      !onboarded &&
+      !aiNeeded &&
+      (isStepId(search.step)
+        ? search.step
+        : stepForNumber(me.data?.onboarding?.step)) === "ai",
+  );
+  const nothingAfterAi =
+    capabilities !== undefined &&
+    !ids.some((id) => ORDER.indexOf(id) > ORDER.indexOf("ai"));
+  const finishingEarly = arrivedPastAi && nothingAfterAi && !complete.isError;
+  const startedEarly = React.useRef(false);
+  const { mutate: completeNow } = complete;
   React.useEffect(() => {
+    if (!finishingEarly || startedEarly.current) return;
+    startedEarly.current = true;
+    completeNow(undefined, {
+      onSuccess: () =>
+        void navigate({ href: afterOnboarding(next), replace: true }),
+    });
+  }, [finishingEarly, completeNow, navigate, next]);
+  // Nothing is drawn while that is decided and done: the app opens next.
+  const holding = arrivedPastAi && (askingCapabilities || finishingEarly);
+
+  React.useEffect(() => {
+    if (holding) return;
     if (asked !== undefined && asked === search.step) return;
-    navigate({ to: "/onboarding", search: { step: current }, replace: true });
-  }, [navigate, current, asked, search.step]);
+    navigate({
+      to: "/onboarding",
+      search: next ? { step: current, next } : { step: current },
+      replace: true,
+    });
+  }, [navigate, current, asked, search.step, next, holding]);
 
   // Saved wherever the person goes, by Continue, Back or the browser.
   const savedStep = me.data?.onboarding?.step;
   const { mutate: save } = advance;
   React.useEffect(() => {
-    // Somebody who finished onboarding has no place in it to keep.
-    if (onboarded) return;
+    // Somebody who finished onboarding, or is finishing it on arrival, has no place in it to keep.
+    if (onboarded || holding) return;
     if (savedStep === undefined || savedStep === STEP_NUMBER[current]) return;
     // OpenBot for Business waits for the answer that says whether this person has one.
     if (current === "selfhost" && !capabilities) return;
@@ -352,7 +424,7 @@ function RouteComponent() {
       onError: (error) =>
         console.warn("Your place in onboarding was not saved.", error),
     });
-  }, [current, savedStep, save, capabilities, onboarded]);
+  }, [current, savedStep, save, capabilities, onboarded, holding]);
 
   /*
    * CONTINUE PUSHES, AND BACK RETURNS THROUGH HISTORY WHEN IT CAN. Continue adds an entry carrying
@@ -371,7 +443,7 @@ function RouteComponent() {
       way === "forward" ? { onboardingFrom: current } : {};
     navigate({
       to: "/onboarding",
-      search: { step: to },
+      search: { step: to, ...keepNext },
       replace: way === "back",
       state,
     });
@@ -397,9 +469,13 @@ function RouteComponent() {
   React.useEffect(() => {
     if (!leaving) return;
     // Navigation must also complete in a background tab, where animation frames may pause.
-    const timer = setTimeout(() => navigate({ to: "/" }), reduced ? 0 : 300);
+    // On to where the gate found them headed, else home.
+    const timer = setTimeout(
+      () => navigate({ href: afterOnboarding(next) }),
+      reduced ? 0 : 300,
+    );
     return () => clearTimeout(timer);
-  }, [leaving, navigate, reduced]);
+  }, [leaving, navigate, reduced, next]);
 
   const name = useNameStep({ finish, finished });
   const selfhost = useBookDemoStep();
@@ -420,7 +496,10 @@ function RouteComponent() {
           className="text-sm text-center text-destructive lg:text-left"
           role="alert"
         >
-          Couldn't load your setup. Try again to continue.
+          {loadFailure(
+            capabilitiesError,
+            "Couldn't load your setup. Try again to continue.",
+          )}
         </p>
         <Button
           disabled={loadingCapabilities}
@@ -491,7 +570,7 @@ function RouteComponent() {
       initial={false}
       transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
     >
-      {waiting ? null : (
+      {waiting || holding ? null : (
         <OnboardingWizard
           onMove={(to, way) => move(to, way)}
           stepId={current}

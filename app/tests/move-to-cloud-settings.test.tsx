@@ -1,9 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { personBody } from "./accounts-api";
+import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * Settings → Computer offers the move to OpenBot Cloud inside OpenBot Desktop, with OpenBot on this
@@ -251,7 +253,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(page: Page, step: string, engine: string, theme: Theme) {

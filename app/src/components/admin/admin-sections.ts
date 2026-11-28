@@ -14,6 +14,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import type { LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
+import { AI_PROVIDERS_TITLE } from "@/lib/ai-connection/paths";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { managePaths } from "@/lib/manage-paths";
 import { MANAGEMENT_SENTENCE } from "@/lib/management/format";
@@ -84,7 +85,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
       {
         title: team.pluginsLabel,
         description:
-          "Connect services, choose which Bots can use them, and approve MCP servers.",
+          "Connect services, choose which Bots can use them, and approve connectors.",
         icon: primitive("apps").icon,
         linkOptions: team.plugins(),
       },
@@ -197,7 +198,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
         linkOptions: { to: IDENTITY_PROVIDERS_PATH },
       },
       {
-        title: "Providers",
+        title: AI_PROVIDERS_TITLE,
         description:
           "See which provider serves your Bots' models, and choose which models they may use.",
         icon: IconBrain,

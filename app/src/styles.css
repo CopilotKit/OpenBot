@@ -74,28 +74,59 @@
 }
 
 /*
- * A tool line that is still running.
+ * A tool line that is still running: a soft band of light sweeps across its words, left to right,
+ * as an assistant's "Thinking…" does, and the line goes still once the step is over.
  *
- * The words breathe: they ease down to a little over half strength and back once every 2.4 seconds,
- * a pace that reads as calm progress. A light band used to sweep across them every 1.6 seconds,
- * crossing the words in under half a second and then holding still, so on screen the text seemed to
- * blink on and off. The words are drawn in the line's own colour throughout and never fade further
- * than 0.6, so a running step can be read at any moment of the cycle. Only `opacity` animates, which
- * the compositor handles without painting the text again on every frame.
+ * DRAWN WITH A MASK, NOT A GRADIENT FILL. The words keep their own colours (a label, its dimmer
+ * detail, an icon or a badge beside them, in either theme), and the mask holds them at a little over
+ * half strength except where the band passes, where they are drawn in full. An earlier sweep painted
+ * a gradient through the glyphs with a transparent fill, and with animation off that fill stayed
+ * transparent and the words vanished; a mask leaves the fill alone, so turning it off can only ever
+ * leave the words as they are.
+ *
+ * NOT A BLINK. An earlier band crossed the words in under half a second every 1.6 seconds and then
+ * held still, so the text seemed to flash. This one is wide and soft and travels at an even pace the
+ * whole cycle, 2.4 seconds end to end, and the words never drop below 0.55, so a running step can be
+ * read at any moment.
  */
 .tool-line-running {
-  animation: tool-line-pulse 2.4s ease-in-out infinite;
+  --tool-line-dim: rgb(0 0 0 / 0.55);
+  -webkit-mask-image: linear-gradient(
+    100deg,
+    var(--tool-line-dim) 30%,
+    #000 50%,
+    var(--tool-line-dim) 70%
+  );
+  mask-image: linear-gradient(
+    100deg,
+    var(--tool-line-dim) 30%,
+    #000 50%,
+    var(--tool-line-dim) 70%
+  );
+  -webkit-mask-size: 250% 100%;
+  mask-size: 250% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  animation: tool-line-shimmer 2.4s linear infinite;
 }
 
-@keyframes tool-line-pulse {
-  50% {
-    opacity: 0.6;
+/* The band starts beyond the left edge and leaves beyond the right. */
+@keyframes tool-line-shimmer {
+  from {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+  }
+  to {
+    -webkit-mask-position: 0% 0;
+    mask-position: 0% 0;
   }
 }
 
 /* Reduced motion keeps the words at full strength and still. */
 @media (prefers-reduced-motion: reduce) {
   .tool-line-running {
+    -webkit-mask-image: none;
+    mask-image: none;
     animation: none;
   }
 }
@@ -350,12 +381,14 @@
  * The live orb's disc: the same sphere as its ground, on the light page's `--background` in both
  * themes, so it reads the same on either page (the mesh is clear in places, and on the dark page its
  * own `--background` made a dark hole in the bottom of the sphere, with the halo's pattern showing
- * through). Written here rather than as a token, since theme.css holds only shadcn's tokens. The
+ * through). The scheme's light value, written here rather than as a token of its own. The
  * sheen and the rim are AgentOrb's own, and its halftone is kept faint, since at full strength it
  * washes light colors out to white.
  */
 .bot-orb-live .agent-orb {
-  --background: oklch(0.983 0.003 286.4);
+  /* tokens/src/scheme.ts, light: background (bun run tokens:generate) */
+  --background: oklch(0.983 0.003 247.9);
+  /* end of tokens/src/scheme.ts */
   background-color: var(--background);
   background-image: radial-gradient(
     circle at 38% 34%,
@@ -413,6 +446,74 @@
 }
 
 /*
+ * Home's first view of a visit (`useHomeIntro` in components/home/home-field.tsx): the heading, the
+ * message box and Explore Bots rise in from a slight blur, one after another, while the orb's field
+ * draws itself behind them. Not at all with less motion asked for.
+ */
+@keyframes home-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+.home-intro [data-intro] {
+  animation: home-rise 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.home-intro [data-intro="heading"] {
+  animation-delay: 150ms;
+}
+.home-intro [data-intro="box"] {
+  animation-delay: 300ms;
+  animation-duration: 850ms;
+}
+.home-intro [data-intro="hint"] {
+  animation-delay: 300ms;
+  animation-duration: 850ms;
+}
+.home-intro [data-intro="explore"] {
+  animation-delay: 560ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-intro [data-intro] {
+    animation: none;
+  }
+}
+/*
+ * Home's greeting when it waited for the conversation list (`Greeting` in routes/_authed/_app/index.tsx):
+ * the words fade in on the line kept for them rather than appear at once. Only opacity, so nothing
+ * moves, and only when motion is allowed.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .home-said {
+    animation: page-arrive 200ms ease-out both;
+  }
+}
+
+/*
+ * A page arriving (`PageArrival` in components/layout/page-arrival.tsx): a short fade, so a switch
+ * between pages reads as a change and not a flash. Only opacity, and only when motion is allowed.
+ */
+@keyframes page-arrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .page-arrival {
+    animation: page-arrive 150ms ease-out both;
+  }
+}
+
+/*
  * Teach a Bot's three steps sit on one soft gradient, the way an app's introduction does in other products. The
  * colours are fixed tints rather than tokens, with a darker set for the dark theme, so the stage reads as a showcase
  * while the cards on it keep the app's own colours.
@@ -446,5 +547,25 @@
   from {
     opacity: 0;
     transform: translateY(3px);
+  }
+}
+
+/*
+ * Opened by OpenBot Desktop's setup (lib/desktop/from-setup.ts): setup faded out to the window's
+ * ground, the sidebar's colour, and the first paint fades up from that same ground, so the switch
+ * reads as one dissolve. From the first thing the app draws, not from the empty page. Only opacity,
+ * and only without reduced motion (index.html does not mark the page then).
+ */
+html[data-from-setup] body {
+  background: var(--sidebar);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html[data-from-setup] #root:not(:empty) {
+    animation: from-setup 320ms ease-out both;
+  }
+}
+@keyframes from-setup {
+  from {
+    opacity: 0;
   }
 }

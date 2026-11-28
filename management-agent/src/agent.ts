@@ -5,6 +5,11 @@
  * only along the release policy's upgrade paths, with a verified backup first whenever the
  * database changes), and runs the few signed commands it knows.
  *
+ * What it moves to comes only from the reply's signed desired state (readDesiredState): signed with
+ * the command key, for this install, not expired, not replayed. The reply's unsigned desired, window
+ * and paused fields are never read. It never moves to a release older than the one it accepted: going
+ * back is the signed rollback command, to the release it accepted before.
+ *
  * It never rolls back by itself. A promotion that stops after the database may have changed ends
  * in `recovery-required`, which blocks every further upgrade until a person clears it.
  */
@@ -24,11 +29,12 @@ import {
   type Command,
   type CommandResult,
   type DesiredState,
-  type HeartbeatReply,
   type MaintenanceWindow,
   ROLLBACK_REFUSED_REASON,
   readCommands,
+  readDesiredState,
   releaseManifestDigest,
+  type SignedDesiredState,
   type UpgradeState,
 } from "../../shared/management-contract";
 import {
@@ -39,7 +45,7 @@ import {
 import { BackupTargetRefused, confirmBackupTarget } from "./backup-target";
 import type { ManagementClient } from "./client";
 import { heartbeatIntervalMs, type ReadyAgent, upgradesOn } from "./config";
-import { Flux } from "./flux";
+import { ChartRefused, Flux } from "./flux";
 import { operationId, runJob } from "./jobs";
 import { CommandFailed, type Kube, run } from "./kube";
 import { internalStatusPins } from "./pins";
@@ -74,6 +80,19 @@ export const UPGRADES_NOT_SET_UP =
 
 export type Log = (message: string, fields?: Record<string, unknown>) => void;
 
+const RELEASE_VERSION =
+  /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/**
+ * Whether release `to` is older than release `from`, by semantic version (a leading v allowed), as
+ * every published release is named. A build named otherwise (a main build, main-<date>-<run>) has no
+ * version to order by: then the signed release manifest's upgrade path decides, as for any move.
+ */
+export function olderRelease(to: string, from: string) {
+  if (!RELEASE_VERSION.test(to) || !RELEASE_VERSION.test(from)) return false;
+  return Bun.semver.order(to, from) < 0;
+}
+
 interface StatefulSet {
   metadata: { name: string; generation?: number };
   spec: { selector?: { matchLabels?: Record<string, string> } };
@@ -102,9 +121,14 @@ export class ManagementAgent {
   private serviceWindow: MaintenanceWindow | null = null;
   private servicePaused = false;
   private message: string | null = null;
+  /** Why the last reply's desired state was refused, if it was; logged when it changes. */
+  private refusal: string | null = null;
   private stateLock: Promise<unknown> = Promise.resolve();
   /** The release whose last attempt was undone, and when. */
   private lastFailure: { digest: string; at: number; error: string } | null =
+    null;
+  /** The chart Flux last refused for its signature, and when: not checked again at once. */
+  private refusedChart: { digest: string; at: number; message: string } | null =
     null;
 
   constructor(
@@ -205,10 +229,46 @@ export class ManagementAgent {
       acceptedVersion: state.accepted?.version ?? null,
     });
     const reply = await this.client.heartbeat(heartbeat);
-    this.serviceWindow = reply.window;
-    this.servicePaused = reply.paused;
+    // The window and the pause come from the signed desired state too; with none, nothing moves.
+    const signed = await this.signedDesired(reply.commands);
+    this.serviceWindow = signed?.window ?? null;
+    this.servicePaused = signed?.paused ?? false;
     await this.handleCommands(reply.commands);
-    await this.reconcile(reply);
+    await this.reconcile(signed);
+  }
+
+  /**
+   * The reply's signed desired state when the agent may act on it (readDesiredState), keeping its
+   * counter when it is newer; null, logged and reported in the heartbeat, when it is refused.
+   */
+  private async signedDesired(
+    commands: unknown[],
+  ): Promise<SignedDesiredState | null> {
+    let reason: string;
+    try {
+      const reading = await readDesiredState(commands, {
+        publicKey: this.config.commandPublicKey,
+        installId: this.config.installId,
+        last: await this.store.readDesired(),
+        now: this.clock(),
+      });
+      if (reading.ok) {
+        if (reading.newer)
+          await this.store.saveDesired({
+            installId: reading.signed.installId,
+            counter: reading.signed.counter,
+            signature: reading.signed.signature,
+          });
+        this.refusal = null;
+        return reading.signed;
+      }
+      reason = reading.reason;
+    } catch (error) {
+      reason = `the last one accepted could not be read or kept: ${error instanceof Error ? error.message : error}`;
+    }
+    if (reason !== this.refusal) this.log("desired state refused", { reason });
+    this.refusal = reason;
+    return null;
   }
 
   /** Runs forever: a heartbeat every interval (a minute unless the config says otherwise) with up
@@ -262,22 +322,25 @@ export class ManagementAgent {
     );
   }
 
-  async reconcile(
-    reply: Pick<HeartbeatReply, "desired" | "paused" | "window">,
-  ) {
+  /** Moves towards the signed desired state; `signed` is null when the reply's was refused. */
+  async reconcile(signed: SignedDesiredState | null) {
     this.waitingWindow = false;
     if (this.operation) return;
+    if (!signed) {
+      this.message = `desired state refused: ${this.refusal ?? "none was signed"}`;
+      return;
+    }
     // Upgrades are not set up: a desired version waits for a person to set them up.
     if (!upgradesOn(this.config)) {
-      this.message = reply.desired
-        ? `upgrades are not set up, so ${reply.desired.version} waits: ${UPGRADES_NOT_SET_UP}`
+      this.message = signed.desired
+        ? `upgrades are not set up, so ${signed.desired.version} waits: ${UPGRADES_NOT_SET_UP}`
         : null;
       return;
     }
     const { state, journal } = await this.store.read();
-    if (journalBlocks(journal) || state.paused || reply.paused) return;
+    if (journalBlocks(journal) || state.paused || signed.paused) return;
     if (await this.suspendedByPerson(state)) return;
-    const desired = reply.desired;
+    const desired = signed.desired;
     if (!desired) {
       this.message = null;
       return;
@@ -290,6 +353,22 @@ export class ManagementAgent {
       return;
     }
     if (state.rolledBackFrom === desired.version) return;
+    // Never back to an older release on a desired state, signed or not: going back is the signed
+    // rollback command, to the release accepted before, and only where its policy allows.
+    if (
+      state.accepted &&
+      olderRelease(desired.version, state.accepted.version)
+    ) {
+      const message = `downgrade to ${desired.version} refused: ${state.accepted.version} is installed; going back to an earlier release is the signed rollback command`;
+      if (message !== this.message)
+        this.log("downgrade refused", {
+          to: desired.version,
+          installed: state.accepted.version,
+        });
+      this.message = message;
+      return;
+    }
+    if (this.chartRefused(candidate.digest)) return;
     if (state.accepted?.digest === candidate.digest) {
       await this.converge(state.accepted, candidate.manifest);
       return;
@@ -370,6 +449,7 @@ export class ManagementAgent {
     if (this.retryLater(accepted)) return;
     this.start(accepted.version, () =>
       this.remembering(accepted, async () => {
+        await this.checkChart(accepted);
         const target = {
           ...productTarget(this.config),
           timeoutSeconds: PROMOTION_TIMEOUT_SECONDS,
@@ -487,6 +567,44 @@ export class ManagementAgent {
           { once: true },
         );
       });
+    }
+  }
+
+  /** After Flux refused `digest`'s signature, says so and waits before checking it again. */
+  private chartRefused(digest: string) {
+    const refused = this.refusedChart;
+    if (
+      refused?.digest !== digest ||
+      this.clock().getTime() - refused.at >= RETRY_AFTER_FAILURE_MS
+    )
+      return false;
+    this.message = refused.message;
+    return true;
+  }
+
+  /**
+   * Before anything is touched for `release`: Flux checks its chart's signature (Flux.checkSignature).
+   * A refused chart is remembered, so the status keeps saying why and the next heartbeats do not
+   * pull it again at once.
+   */
+  private async checkChart(release: AcceptedRelease) {
+    try {
+      await this.flux.checkSignature(release.digest);
+    } catch (error) {
+      if (error instanceof ChartRefused) {
+        this.refusedChart = {
+          digest: release.digest,
+          at: this.clock().getTime(),
+          message: `${release.version} refused, nothing was changed: ${error.message}`,
+        };
+        this.log("chart refused", {
+          version: release.version,
+          digest: release.digest,
+          reason: error.reason,
+        });
+        throw new Error(this.refusedChart.message);
+      }
+      throw error;
     }
   }
 
@@ -671,6 +789,8 @@ export class ManagementAgent {
     manifest: ReleaseManifest,
     mode: "install" | "adopt",
   ) {
+    // Before the first install is recorded or Flux moved: a refused chart leaves no trace.
+    await this.checkChart(release);
     const journal = this.newJournal(
       mode === "adopt" ? release.version : "none",
       release.version,
@@ -737,6 +857,8 @@ export class ManagementAgent {
     release: AcceptedRelease,
     candidate: ReleaseManifest,
   ) {
+    // Before anything is quiesced or backed up: a refused chart changes nothing.
+    await this.checkChart(release);
     const target = {
       ...productTarget(this.config),
       timeoutSeconds: PROMOTION_TIMEOUT_SECONDS,

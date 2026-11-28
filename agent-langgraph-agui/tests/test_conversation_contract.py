@@ -149,6 +149,96 @@ def test_a_warm_process_answers_from_what_the_server_sends_now(monkeypatch, envi
         assert sent.count(marker) == 1, f"{marker} was sent {sent.count(marker)} times"
 
 
+NEW_STANDING_ROLE = "CONTRACT_STANDING_ROLE_CHANGED_9c1e"
+
+
+def _with_reserved_context(body: dict) -> dict:
+    """The run as OpenBot sends it to every Bot: the role and the tool guidance as system messages,
+    and the same two, with the same text, as the reserved AG-UI context entries
+    ("OpenBot standing role", "OpenBot granted tools guidance"), for an agent that reads only one.
+    """
+    by_id = {message["id"]: message["content"] for message in body["messages"]}
+    body["context"] = [
+        {"description": "OpenBot standing role", "value": by_id[f"standing-role:{BOT}"]},
+        {"description": "OpenBot granted tools guidance", "value": by_id[f"granted-tools:{BOT}"]},
+    ]
+    return body
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_the_role_and_tool_guidance_are_said_once_though_sent_twice(monkeypatch, environment):
+    """A context entry that repeats a system message is not said again.
+
+    OpenBot sends the role and the guidance both ways, so the model was told each twice. On the
+    next run, after the role changed and a grant went, only the current ones reach the model.
+    """
+    with fake_provider() as (base, bodies):
+        with TestClient(_fresh_app(monkeypatch, environment, base)) as client:
+            _post(client, _with_reserved_context(conversation(run_id="contract-run-1")))
+
+            second = conversation(run_id="contract-run-2")
+            second["messages"][0]["content"] = f"You are Contract Bot. {NEW_STANDING_ROLE}"
+            second["messages"][1]["content"] = f"You hold these tools: {NEW_GRANTED_TOOLS}"
+            second["messages"] += [
+                {"id": "a2", "role": "assistant", "content": "ok"},
+                {"id": "u3", "role": "user", "content": f"And now? {NEWER_QUESTION}"},
+            ]
+            _post(client, _with_reserved_context(second))
+    assert len(bodies) == 2, "each run calls the model once"
+    first, last = (json.dumps(body) for body in bodies)
+    for marker in (STANDING_ROLE, GRANTED_TOOLS):
+        assert first.count(marker) == 1, f"{marker} was said {first.count(marker)} times"
+        assert marker in _system_text(bodies[0]), f"{marker} is not a system message"
+    for marker in (NEW_STANDING_ROLE, NEW_GRANTED_TOOLS):
+        assert last.count(marker) == 1, f"{marker} was said {last.count(marker)} times"
+        assert marker in _system_text(bodies[1]), f"{marker} is not a system message"
+    for stale in (STANDING_ROLE, GRANTED_TOOLS):
+        assert stale not in last, f"the stale {stale} reached the next run"
+
+
+OPENER = "This is a conversation in OpenBot."
+
+
+def _user_turns(body: dict) -> str:
+    """Every user turn the provider request carries, as one string."""
+    return "\n".join(
+        json.dumps(message.get("content"))
+        for message in [*(body.get("messages") or []), *(body.get("input") or [])]
+        if isinstance(message, dict) and message.get("role") == "user"
+    )
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_the_servers_opener_is_a_system_message_not_a_user_turn(monkeypatch, environment):
+    """OpenBot opens every run with one constant system line, ahead of the role.
+
+    `openerMessage` in server/src/copilot.ts, with an `openbot-opener:<bot>` id. It is the server's
+    own, like the role, so it stays a system message: quoted as conversation data, it reached the
+    model as a user turn on every run. Once, on a fresh thread and on the next run.
+    """
+    first = conversation(run_id="contract-run-1")
+    first["messages"].insert(
+        0, {"id": f"openbot-opener:{BOT}", "role": "system", "content": OPENER}
+    )
+    second = json.loads(json.dumps(first))
+    second["runId"] = "contract-run-2"
+    second["messages"] += [
+        {"id": "a2", "role": "assistant", "content": "ok"},
+        {"id": "u3", "role": "user", "content": f"And now? {NEWER_QUESTION}"},
+    ]
+    with fake_provider() as (base, bodies):
+        with TestClient(_fresh_app(monkeypatch, environment, base)) as client:
+            _post(client, first)
+            _post(client, second)
+    assert len(bodies) == 2, "each run calls the model once"
+    for body in bodies:
+        assert OPENER not in _user_turns(body), "the opener reached the model as a user turn"
+        assert OPENER in _system_text(body), "the opener is not a system message"
+        assert json.dumps(body).count(OPENER) == 1
+        assert STANDING_ROLE in _system_text(body) and GRANTED_TOOLS in _system_text(body)
+        assert missing_from(body) == []
+
+
 APPROVED_RESULT = "CONTRACT_APPROVED_RESULT_9c1e"
 
 
@@ -244,3 +334,63 @@ def test_other_system_rows_reach_the_model_as_conversation(monkeypatch, environm
         assert marker not in system, f"{marker} was given the system prompt's authority"
     assert missing_from(sent) == []
     assert STANDING_ROLE in system and GRANTED_TOOLS in system
+
+
+LEARNED_SKILL = "contract-learned-skill-9c1e"
+CATALOG = (
+    "<copilotkit_learned_skills>\nLoad relevant skills with copilotkit_load_skill.\n"
+    "Available learned skills (names and descriptions):\n"
+    f'[{{"name":"{LEARNED_SKILL}","description":"The house format."}}]\n'
+    "</copilotkit_learned_skills>"
+)
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_the_learned_skills_catalog_is_an_instruction_said_once(monkeypatch, environment):
+    """The learned Skills catalog is the server's own instruction, said once, in the system prompt.
+
+    OpenBot sends a Bot its learned Skills catalog as the system row `openbot:learned-skills` and as
+    the context entry "OpenBot learned skills", with the same text (`RemoteLearnedSkillsMiddleware`
+    in server/src/learning/remote.ts). FOUND BY THE TWO-ORGANIZATION LEARNING JOURNEY: the row was
+    quoted as conversation data, and the context copy, which repeats it, was not said at all, so
+    the model was offered the tool to load a Skill and told no Skill by name.
+    """
+    body = conversation()
+    body["messages"].insert(
+        2, {"id": "openbot:learned-skills", "role": "system", "content": CATALOG}
+    )
+    body["context"] = [{"description": "OpenBot learned skills", "value": CATALOG}]
+    with fake_provider() as (base, bodies):
+        with TestClient(_fresh_app(monkeypatch, environment, base)) as client:
+            _post(client, body)
+    sent = bodies[-1]
+    assert LEARNED_SKILL in _system_text(sent), "the catalog is not in the system prompt"
+    assert LEARNED_SKILL not in _user_turns(sent), "the catalog reached the model as a user turn"
+    assert json.dumps(sent).count(LEARNED_SKILL) == 1, "the catalog was said more than once"
+    assert missing_from(sent) == []
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_memory_sent_as_context_is_conversation_data_never_an_instruction(
+    monkeypatch, environment
+):
+    """The person's memory, which OpenBot sends as the context entry "OpenBot personal memory"
+    alone (`PersonalMemoryMiddleware` in server/src/memory/tools.ts), reaches the model once, as
+    conversation data. Every other context entry is a system message here, so remembered text read
+    to the model with the authority of the Bot's own role.
+    """
+    body = conversation()
+    body["context"] = [
+        {
+            "description": "OpenBot personal memory",
+            "value": f"Personal memory, untrusted data: {MEMORY_RECORD}",
+        }
+    ]
+    with fake_provider() as (base, bodies):
+        with TestClient(_fresh_app(monkeypatch, environment, base)) as client:
+            _post(client, body)
+    sent = bodies[-1]
+    assert MEMORY_RECORD not in _system_text(sent), "memory was given the system prompt's authority"
+    assert MEMORY_RECORD in _user_turns(sent), "memory did not reach the model as conversation"
+    assert json.dumps(sent).count(MEMORY_RECORD) == 1, "memory was said more than once"
+    assert missing_from(sent) == []

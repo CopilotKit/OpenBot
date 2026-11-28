@@ -312,11 +312,17 @@ export interface Problem {
   /** On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below was raised because of a security problem in older releases. */
   security?: boolean;
   /**
-   * On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card and start the organization's free trial, or to update the card. Null for a member, who asks an admin.
+   * On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card, or to update it after a failed payment. Null for a member, who asks an admin.
    * @maxLength 2048
    * @nullable
    */
   addCardUrl?: string | null;
+  /**
+   * On SEAT_REQUIRED, where an owner or an admin goes in the browser to add one more seat to the organization's plan. It comes back to OpenBot once the seat is added, and the invitation can be sent then. Null for anyone who can't add a seat.
+   * @maxLength 2048
+   * @nullable
+   */
+  addSeatUrl?: string | null;
 }
 
 /**
@@ -420,7 +426,7 @@ export type RecorderOriginRefusedResponse = Problem;
 export type RecorderSignedOutResponse = RecorderProblem;
 
 /**
- * The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
+ * The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED). Or the caller's account is scheduled to be deleted (ACCOUNT_PENDING_DELETION), which every operation but getAccountDeletion and cancelAccountDeletion answers until the deletion is cancelled.
  */
 export type ForbiddenResponse = Problem;
 

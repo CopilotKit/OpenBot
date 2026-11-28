@@ -15,6 +15,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { CopyButton } from "@/components/copy-button";
 import {
   PageCard,
   PageEmpty,
@@ -22,7 +23,6 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { copyText } from "@/components/settings/linked-accounts";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import {
   helmLines,
   MANAGEMENT_SENTENCE,
@@ -118,17 +119,23 @@ export function ManagementPage() {
   // Disconnect, and Stop once the code is approved or while connecting by itself, all ask first.
   const [confirming, setConfirming] = useState<Confirming | null>(null);
 
-  // The personal edition has nothing to manage: said without asking the server.
-  const personal = !capabilities.isPending && !asks;
-  if (!personal && management.isPending)
+  // Where the server would answer 404 (the personal edition, OpenBot Cloud, another organization):
+  // said without asking it.
+  const notHere = !capabilities.isPending && !asks;
+  if (!notHere && management.isPending)
     return <PageShell title={TITLE}>{null}</PageShell>;
-  if (!personal && management.error)
+  if (!notHere && management.error)
     return (
       <PageShell description={DESCRIPTION} title={TITLE}>
-        <Notice>Couldn't load managed updates. Try again in a moment.</Notice>
+        <Notice>
+          {loadFailure(
+            management.error,
+            "Couldn't load managed updates. Try again in a moment.",
+          )}
+        </Notice>
       </PageShell>
     );
-  if (personal || !management.data?.applies)
+  if (notHere || !management.data?.applies)
     return (
       <PageShell title={TITLE}>
         <PageEmpty icon={IconCloudCog} title="Not available here">
@@ -161,8 +168,13 @@ export function ManagementPage() {
       {cancel.isPending ? "Cancelling…" : "Cancel"}
     </Button>
   );
-  // The not-entitled refusal is the state itself below, so it isn't said twice.
-  const notice = notEntitled ? null : (failure?.message ?? status.lastError);
+  // The not-entitled refusal is the state itself below, so it isn't said twice. A refused press is
+  // drawn through the shared rule, so a hold is said calmly.
+  const notice = notEntitled
+    ? null
+    : failure
+      ? failureSaid(failure)
+      : status.lastError;
 
   return (
     <PageShell description={DESCRIPTION} title={TITLE}>
@@ -309,30 +321,6 @@ function Notice({ children }: { children: React.ReactNode }) {
     <p className="text-destructive text-sm" role="alert">
       {children}
     </p>
-  );
-}
-
-/** A Copy button that says whether the text landed on the clipboard. */
-function CopyButton({ label, text }: { label: string; text: string }) {
-  const [copied, setCopied] = useState<boolean | null>(null);
-  return (
-    <div className="flex shrink-0 flex-col items-end gap-1">
-      <Button
-        aria-label={label}
-        onClick={async () =>
-          setCopied(await copyText(text, navigator.clipboard))
-        }
-        size="sm"
-        variant="outline"
-      >
-        {copied ? "Copied" : "Copy"}
-      </Button>
-      {copied === false ? (
-        <span className="text-destructive text-xs" role="alert">
-          Couldn't copy. Select it and copy it yourself.
-        </span>
-      ) : null}
-    </div>
   );
 }
 
@@ -551,6 +539,14 @@ function Connected({
           description="Managed updates stop, and you upgrade OpenBot yourself. Connect turns them back on."
           title="Turn off managed updates"
         />
+      ) : status.agentRemovedWithChart === true ? (
+        // The chart's agent, removed with OpenBot's release when management was turned off with
+        // Helm: there is no openbot-agent release, so no uninstall command. Disconnect finishes.
+        <PageSection
+          action={disconnectButton}
+          description={REMOVED_WITH_CHART}
+          title="Disconnect"
+        />
       ) : (
         <PageSection
           description="Uninstall the management agent with Helm, then choose Disconnect. OpenBot keeps running as it is, and you upgrade it yourself from then on."
@@ -570,4 +566,7 @@ function Connected({
   );
 }
 
+/** For an agent installed as its own Helm release (the Helm command, or the release that runs upgrades). */
 const UNINSTALL = "helm uninstall openbot-agent --namespace openbot-system";
+const REMOVED_WITH_CHART =
+  "Turning management off with Helm removed the management agent along with OpenBot's own release, so there is nothing to uninstall. Choose Disconnect to finish. OpenBot keeps running as it is, and you upgrade it yourself from then on.";

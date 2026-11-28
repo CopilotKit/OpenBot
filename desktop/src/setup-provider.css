@@ -1,0 +1,158 @@
+/* The anchored identity reserves the same native scrollbar room as the catalogue below it. */
+main > .rail + .sheet.setup-layout.provider-layout > .setup-body {
+  scrollbar-gutter: stable;
+}
+
+.setup-layout.provider-layout fieldset.picker.providers {
+  min-width: 0;
+  margin-bottom: 0;
+  gap: 6px;
+}
+
+.setup-layout.provider-layout .providers .tile {
+  min-width: 0;
+  grid-template-columns: 36px minmax(0, 1fr);
+  padding-block: 8px;
+}
+
+main
+  > .rail
+  + .sheet.setup-layout.provider-layout
+  > .setup-provider-identity
+  .tile.chosen {
+  padding-block: 16px;
+  border-color: var(--ring);
+  background: var(--card);
+}
+
+.setup-layout.provider-layout .providers :is(.tile-name, .tile-summary) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Read the catalogue from the top; the selected provider's form uses safe centering. */
+main
+  > .rail
+  + .sheet.setup-layout.provider-layout
+  > .setup-body:has(> fieldset.picker.providers) {
+  justify-content: flex-start;
+}
+
+.setup-layout.provider-layout .setup-body > fieldset.picker.providers {
+  flex: none;
+  margin-top: 0;
+  overflow: visible;
+}
+
+/* The selected identity stays with the heading; only the authentication body scrolls. */
+main > .rail + .sheet.setup-layout.provider-layout > .setup-provider-identity {
+  flex: none;
+  margin: 24px 0 0;
+  min-width: 0;
+  overflow: hidden;
+  scrollbar-gutter: stable;
+}
+
+.setup-layout.provider-layout
+  .setup-provider-identity
+  > fieldset.picker.providers {
+  margin: 0;
+}
+
+.setup-layout.provider-layout .setup-panel.chosen-provider {
+  margin-top: 0;
+}
+
+.setup-layout.provider-layout .setup-panel.chosen-provider > .lede {
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.setup-layout.provider-layout .chosen-provider > .segmented {
+  align-self: flex-start;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+/* The panel gap owns spacing around status feedback, including its div wrapper. */
+.setup-layout.provider-layout .chosen-provider > .status-line {
+  margin: 0;
+}
+
+.setup-layout.provider-layout .chosen-provider > .segmented button {
+  min-width: 0;
+  white-space: normal;
+  padding-inline: 11px;
+}
+
+.setup-layout.provider-layout .chosen-provider .field {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.setup-layout.provider-layout .chosen-provider .field input {
+  min-width: 0;
+}
+
+.setup-layout.provider-layout .setup-panel.chosen-provider > button {
+  align-self: flex-start;
+  max-width: 100%;
+  white-space: normal;
+  margin-bottom: 0;
+}
+
+.setup-layout.provider-layout
+  .chosen-provider
+  .provider-sign-in-actions
+  > button {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.setup-layout.provider-layout .chosen-provider :is(p, a, summary) {
+  overflow-wrap: anywhere;
+}
+
+.setup-layout.provider-layout .chosen-provider > .caution {
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  margin-top: 6px;
+}
+
+.setup-layout.provider-layout .chosen-provider details.field > label {
+  margin-top: 12px;
+}
+
+@media (max-width: 860px) {
+  .setup-layout.provider-layout .setup-panel.chosen-provider {
+    gap: 12px;
+  }
+
+  main
+    > .rail
+    + .sheet.setup-layout.provider-layout
+    > .setup-provider-identity
+    .tile.chosen {
+    padding: 12px 12px 42px;
+  }
+
+  .setup-layout.provider-layout .providers .tile-summary {
+    font-size: var(--text-xs);
+    line-height: 1.55;
+  }
+
+  .setup-layout.provider-layout .providers button.change-provider {
+    top: auto;
+    right: auto;
+    bottom: 12px;
+    left: 60px;
+    transform: none;
+  }
+
+  .setup-layout.provider-layout .chosen-provider > .segmented button {
+    padding-inline: 9px;
+  }
+}

@@ -198,6 +198,38 @@ export const getRunComputerStepResponseMock = (): ComputerStepOutcome => ({
   result: { ok: true },
 });
 
+export const getListConversationApprovalsResponseMock = (): ApprovalPage => ({
+  approvals: [
+    {
+      id: "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+      status: "completed",
+      decision: "allow_once",
+      result: null,
+      createdAt: "2026-08-03T09:12:44.501Z",
+      decidedAt: "2026-08-03T09:13:02.118Z",
+      consumedAt: "2026-08-03T09:13:02.640Z",
+      completedAt: "2026-08-03T09:13:09.902Z",
+      action: {
+        botId: "research-assistant",
+        toolRef: "mcp/gmail/send_email",
+        effect: "write",
+        scope: "gmail",
+        threadId: "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
+        toolCallId: "call_8c1f",
+        args: { to: "sam.okafor@acme.com", subject: "Q4 numbers" },
+        target: { app: "gmail" },
+        policy: {
+          behaviour: "ask",
+          source: "safety",
+          reason: "Sending a message asks first.",
+          kind: "sending",
+        },
+      },
+    },
+  ],
+  nextCursor: null,
+});
+
 export const getListApprovalsMockHandler = (
   overrideResponse?:
     | ApprovalPage
@@ -744,6 +776,48 @@ export const getRunComputerStepMockHandler = (
     options,
   );
 };
+
+export const getListConversationApprovalsMockHandler = (
+  overrideResponse?:
+    | ApprovalPage
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{
+            organizationId: string;
+            personId: string;
+            conversationId: string;
+          }>
+        >[0],
+      ) => Promise<ApprovalPage> | ApprovalPage),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{
+    organizationId: string;
+    personId: string;
+    conversationId: string;
+  }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/conversations/:conversationId/approvals",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{
+          organizationId: string;
+          personId: string;
+          conversationId: string;
+        }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getListConversationApprovalsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getApprovalsMock = () => [
   getListApprovalsMockHandler(),
   getDecideApprovalMockHandler(),
@@ -760,4 +834,5 @@ export const getApprovalsMock = () => [
   getDeleteConversationGrantMockHandler(),
   getGetApprovalModeMockHandler(),
   getRunComputerStepMockHandler(),
+  getListConversationApprovalsMockHandler(),
 ];

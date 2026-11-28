@@ -7,7 +7,8 @@
 # The move, as OpenBot Desktop runs it:
 #   1. Cloud: createImport. The answer carries recipientKey, the public key model keys are sealed to.
 #   2. Here: getExportEstimate, to show what moves and how much space the move frees.
-#   3. Here: createExport (with recipientKey when the person chose to bring their model keys), then
+#   3. Here: createExport (with recipientKey, so apps connected with a key move connected, and
+#      includeModelKeys when the person chose to bring their model key too), then
 #      getExport until it is ready. The answer lists the bundle's parts, their sizes and digests,
 #      and the counts of everything in it.
 #   4. Desktop: downloadExportPart for each part (resumable with Range), and on Cloud
@@ -44,6 +45,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -72,12 +75,17 @@ paths:
         instructions and skills), conversations with every message,
         memories, routines, goals and check-ins, files, standing
         instructions and preferences, and, when the caller is an
-        administrator, the organization's own skills. Connections to apps
-        travel as their app and account name only: no token or password ever
-        leaves, and each one is listed in reconnect so the person connects
-        it again on Cloud. A model key travels only when includeModelKeys is
-        true, and then only sealed to recipientKey, the key the import on
-        Cloud gave (createImport), so the bundle never holds it readable.
+        administrator, the organization's own skills. A connection to an app
+        the person signed in to travels as its app and account name only: no
+        token or password ever leaves, and it is listed in reconnect so the
+        person signs in again on Cloud. A connection made with a key this
+        OpenBot holds travels connected when recipientKey is given: its key
+        is sealed to recipientKey, the app is listed in carried, and the
+        import connects it on Cloud with that key. Without recipientKey it is
+        listed in reconnect like any other. A model key travels only when
+        includeModelKeys is true, and then only sealed to recipientKey, the
+        key the import on Cloud gave (createImport). The bundle never holds a
+        key readable.
 
 
         The bundle is written in the background; read getExport until status
@@ -108,6 +116,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -153,6 +163,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -186,6 +198,9 @@ paths:
       responses:
         '204':
           description: The export is gone.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '404':
@@ -236,6 +251,8 @@ paths:
               $ref: '#/components/headers/PartETag'
             Accept-Ranges:
               $ref: '#/components/headers/AcceptRanges'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/octet-stream:
               schema:
@@ -253,6 +270,8 @@ paths:
               schema:
                 type: string
               example: bytes 1048576-33554431/33554432
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/octet-stream:
               schema:
@@ -293,6 +312,18 @@ paths:
         dropped one) adds only what isn't here yet and duplicates nothing.
         Served only by OpenBot Cloud; elsewhere it answers 404 with the code
         MOVE_UNAVAILABLE. A person starts at most 10 imports a day.
+
+
+        With fromOrganizationId, the import moves what the caller has in
+        another of their organizations into this one, and OpenBot Cloud packs
+        it up there itself: no part is uploaded, the import answers ready, and
+        applyImport starts it. See ImportInput.
+
+
+        Moving in follows this organization's own rules: a caller it doesn't
+        let use Bots is answered 403 with the code MOVE_NOT_ALLOWED before
+        anything moves. The caller's list of organizations says this ahead of
+        time (Organization.canMoveIn).
       security:
         - webSession: []
         - appOAuth: [imports:write]
@@ -311,6 +342,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -322,6 +355,8 @@ paths:
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MoveNotAllowed'
         '404':
           $ref: '#/components/responses/MoveUnavailable'
         '409':
@@ -353,6 +388,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -394,6 +431,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -450,6 +489,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -503,6 +544,15 @@ paths:
         organization that isn't on it, is left out. A model key in the bundle
         becomes the caller's own AI connection, unless they have one here
         already, which is kept.
+
+
+        For a move from another organization (fromOrganizationId), applying
+        packs up what the caller has there, imports it here and checks it
+        here as getImportVerification does. Only once that check says
+        everything arrived is it removed from the other organization, and
+        only then is the import imported. A check that doesn't match leaves
+        the other organization as it was, and the import failed: applying
+        again goes on from there and adds nothing twice.
       security:
         - webSession: []
         - appOAuth: [imports:write]
@@ -515,6 +565,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -558,6 +610,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -688,6 +742,40 @@ components:
           description: The Bots that used it, so the person knows which to check.
           items:
             type: string
+        reason:
+          type: string
+          minLength: 1
+          description: >-
+            Why an app that was meant to come across connected (carried) still
+            needs connecting here, in a sentence a person reads: for example,
+            the organization doesn't allow it. Absent for an app the person
+            signs in to again.
+    CarriedApp:
+      type: object
+      description: >-
+        A connection to an app made with a key, which moves connected: the key
+        travels sealed to the import's recipientKey, and the import connects
+        the app with it on OpenBot Cloud and gives it back to the Bots that
+        used it. Never carries the key itself.
+      required: [appId, appName]
+      properties:
+        appId:
+          type: string
+          minLength: 1
+          description: The app's id in the app directory, or the id it had on the person's computer.
+        appName:
+          type: string
+          minLength: 1
+          description: The app's name as a person reads it.
+        iconUrl:
+          type: string
+          format: uri
+          description: The app's icon, when the directory has one.
+        botNames:
+          type: array
+          description: The Bots that use it.
+          items:
+            type: string
     MoveNote:
       type: object
       description: >-
@@ -747,8 +835,18 @@ components:
             engine itself takes.
         reconnect:
           type: array
+          description: >-
+            The apps the person will sign in to again on OpenBot Cloud. The
+            apps in carried are not listed here.
           items:
             $ref: '#/components/schemas/ReconnectApp'
+        carried:
+          type: array
+          description: >-
+            The apps connected with a key this OpenBot holds, which move
+            connected when the export is given recipientKey.
+          items:
+            $ref: '#/components/schemas/CarriedApp'
         modelKeysAvailable:
           type: boolean
           description: True when there is a model key the person could choose to bring.
@@ -764,6 +862,11 @@ components:
             recipientKey this is refused.
         recipientKey:
           $ref: '#/components/schemas/MoveRecipientKey'
+          description: >-
+            The import's public key. Given, the keys of the apps connected
+            with a key travel sealed to it and those apps move connected
+            (carried), and the model key does too when includeModelKeys is
+            true.
     MoveRecipientKey:
       type: object
       description: >-
@@ -850,6 +953,13 @@ components:
           description: The apps to connect again on OpenBot Cloud.
           items:
             $ref: '#/components/schemas/ReconnectApp'
+        carried:
+          type: array
+          description: >-
+            The apps whose keys the bundle carries sealed, once ready, so they
+            move connected.
+          items:
+            $ref: '#/components/schemas/CarriedApp'
         includesModelKeys:
           type: boolean
         progress:
@@ -869,7 +979,29 @@ components:
           type: string
           minLength: 1
           maxLength: 200
-          description: A name for where the bundle comes from, such as the computer's name, shown in the list of imports.
+          description: >-
+            A name for where the bundle comes from, such as the computer's
+            name, shown in the list of imports. For a move from another
+            organization, that organization's name when absent.
+        fromOrganizationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Move what the caller has in another of their organizations (its
+            id or slug) into this one, instead of a bundle from their own
+            computer: their own Bots, each with its conversations and their
+            history, routines, goals, check-ins, memories, skills and files,
+            by the same rules and the same verification as a move from their
+            computer. A starter Bot lands on this organization's own. Apps
+            are connected again here (reconnect). Routines, goals and
+            check-ins don't run in either organization until the move is
+            checked. Once getImportVerification here says everything arrived,
+            all of it is removed from the other organization, apart from a
+            conversation other people are in, which stays there for them. Any
+            organization the caller belongs to other than this one; another
+            is refused with 400.
     Import:
       type: object
       required: [id, status, createdAt, recipientKey, maxBundleBytes, maxPartBytes, receivedParts]
@@ -889,6 +1021,11 @@ components:
             status; read one you don't know as importing.
         sourceName:
           type: string
+        fromOrganizationId:
+          type: string
+          description: >-
+            For a move from another of the caller's organizations
+            (ImportInput.fromOrganizationId), that organization's id.
         createdAt:
           type: string
           format: date-time
@@ -933,9 +1070,19 @@ components:
             $ref: '#/components/schemas/MoveNote'
         reconnect:
           type: array
-          description: The apps to connect again here, once part 1 arrived.
+          description: >-
+            The apps to connect again here, once part 1 arrived. Once imported,
+            an app the bundle carried that couldn't be connected here is listed
+            too, with its reason.
           items:
             $ref: '#/components/schemas/ReconnectApp'
+        carried:
+          type: array
+          description: >-
+            The apps that came across connected, with their Bots given them
+            again, once imported. Before that, the apps the bundle carries.
+          items:
+            $ref: '#/components/schemas/CarriedApp'
         error:
           type: string
           minLength: 1
@@ -1002,11 +1149,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ReconnectApp'
+        carried:
+          type: array
+          description: The apps that came across connected.
+          items:
+            $ref: '#/components/schemas/CarriedApp'
   responses:
+    MoveNotAllowed:
+      description: >-
+        This organization doesn't let the caller use Bots, so nothing can
+        move into it (MOVE_NOT_ALLOWED). Or the caller holds no role in it,
+        or it requires signing in through the company's identity provider
+        and the caller hasn't (SSO_REQUIRED).
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAllowed:
+              value:
+                type: https://open.bot/errors/move-not-allowed
+                title: You can't move Bots into this organization.
+                status: 403
+                detail: An admin of Acme hasn't let you use Bots there, so your Bots can't move in. Ask an admin of Acme to turn on Use Bots for you.
+                code: MOVE_NOT_ALLOWED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     MoveUnavailable:
       description: >-
         Moving isn't served here: exports only by an OpenBot on the person's
         own computer, imports only by OpenBot Cloud.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1025,6 +1205,9 @@ components:
                 traceId: trace_example
     ExportNotFound:
       description: The export doesn't exist, has been removed, or isn't the caller's.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1043,6 +1226,9 @@ components:
                 traceId: trace_example
     ExportNotReady:
       description: The export is still being written, or failed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1061,6 +1247,9 @@ components:
                 traceId: trace_example
     RangeNotSatisfiable:
       description: The Range asked for lies outside the part.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1079,6 +1268,9 @@ components:
                 traceId: trace_example
     ImportNotFound:
       description: The import doesn't exist, or isn't the caller's.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1102,6 +1294,9 @@ components:
         (IMPORT_MANIFEST_MISSING), a part is missing (IMPORT_INCOMPLETE), the
         import hasn't finished (IMPORT_NOT_FINISHED), or the Idempotency-Key
         was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1134,6 +1329,9 @@ components:
         Part 1 isn't a bundle this OpenBot reads: not a bundle at all, a
         format newer than it reads (IMPORT_FORMAT_UNSUPPORTED), larger than
         maxBundleBytes, or a model key sealed to another import's key.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1158,6 +1356,8 @@ components:
           schema:
             type: integer
             minimum: 1
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1193,6 +1393,8 @@ components:
         reconnect:
           - { appId: gmail, appName: Gmail, accountLabel: sam@example.com, botNames: [Inbox helper] }
           - { appId: slack, appName: Slack, accountLabel: Example workspace, botNames: [Inbox helper, Standup] }
+        carried:
+          - { appId: fireflies, appName: Fireflies, botNames: [Standup] }
         modelKeysAvailable: true
     ExportInputExample:
       value:
@@ -1339,6 +1541,9 @@ components:
             items: [Research]
         reconnect:
           - { appId: gmail, appName: Gmail, accountLabel: sam@example.com }
+          - { appId: team-wiki, appName: Team wiki, reason: "Your organization doesn't allow Team wiki yet. Ask an admin to approve it, then connect it here." }
+        carried:
+          - { appId: fireflies, appName: Fireflies, botNames: [Standup] }
     ImportVerificationExample:
       value:
         importId: imp_0e1f2a3b4c5d6f1d

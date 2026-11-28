@@ -24,6 +24,7 @@ import catalogue from "./harnesses.json";
 export type Credential =
   | "any-provider"
   | "anthropic"
+  | "chatgpt-plan"
   | "google"
   | "their-endpoint";
 export type Maintainer = "first-party" | "partnership" | "community";

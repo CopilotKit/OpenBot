@@ -1,10 +1,14 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
+import { PageArrival } from "@/components/layout/page-arrival";
 import { PlanBanner } from "@/components/layout/plan-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
+import { MovedElsewhereBanner } from "@/components/moves/moved-elsewhere-banner";
+import { LeftOrganizationBanner } from "@/components/organizations/left-organization-banner";
 import { SidebarInset } from "@/components/ui/sidebar";
 import {
   CONVERSATIONS,
@@ -24,7 +28,9 @@ function RouteComponent() {
   if (Frame) {
     return (
       <Frame>
-        <Outlet />
+        <PageArrival>
+          <Outlet />
+        </PageArrival>
       </Frame>
     );
   }
@@ -62,10 +68,15 @@ function AppFrame() {
       <AppSidebar />
       <SidebarInset className="min-h-0 overflow-hidden">
         <ConnectionBanner />
+        <LeftOrganizationBanner />
         <PlanBanner />
+        <MovedElsewhereBanner />
+        <MovedAppsBanner />
         <UpdateBanner />
         <SelfHostBanner />
-        <Outlet />
+        <PageArrival>
+          <Outlet />
+        </PageArrival>
       </SidebarInset>
     </SidebarShell>
   );

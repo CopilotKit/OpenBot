@@ -12,18 +12,28 @@ import { createRoot } from "react-dom/client";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { OrganizationBoundary } from "@/components/organizations/organization-boundary";
 import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
+import {
+  ChangeProviderPage,
+  ConnectProviderPage,
+  ProviderPage,
+} from "@/components/settings/provider-pages";
 import { SettingsSidebar } from "@/components/settings/settings-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarInset } from "@/components/ui/sidebar";
-import { setCurrentOrganization } from "@/lib/organizations/current";
+import { providerSearch, scopeOf } from "@/lib/ai-connection/paths";
+import { aiConnectionKeys } from "@/lib/ai-connection/queries";
+import {
+  setCurrentOrganization,
+  useCurrentOrganizationId,
+} from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as AuthedRoute } from "@/routes/_authed";
 import { Route as OnboardingRoute } from "@/routes/_authed/onboarding";
-import { Route as GeneralRoute } from "@/routes/_authed/settings/index";
+import { Route as SettingsProvidersRoute } from "@/routes/_authed/settings/providers";
 
 /**
- * The signed-in gate, onboarding and Settings → General, for connect-your-ai.test.tsx to bundle and
+ * The signed-in gate, onboarding and Settings → AI providers, for connect-your-ai.test.tsx to bundle and
  * load in a browser. The gate is `_authed`'s own `beforeLoad`, and onboarding is its own route, so
  * where a person is sent is what the app does. The app behind the gate is a page that says Home:
  * this is about getting there. What the server answers comes from the test's routes.
@@ -31,6 +41,13 @@ import { Route as GeneralRoute } from "@/routes/_authed/settings/index";
  * Started in `default`, the organization those routes answer for, as every test does.
  */
 setCurrentOrganization("default");
+
+window.addEventListener("refresh-ai-connections", async () => {
+  await queryClient.invalidateQueries({
+    queryKey: aiConnectionKeys.list("personal"),
+  });
+  window.dispatchEvent(new Event("ai-connections-refreshed"));
+});
 
 const component = (route: { options: { component?: unknown } }) =>
   route.options.component as () => ReactNode;
@@ -64,15 +81,32 @@ const authedRoute = createRoute({
  */
 function Home() {
   const switching = useSwitchOrganization();
+  // Which organization's home this is: the one the app works in.
+  const organization = useCurrentOrganizationId();
   return (
     <main>
-      <h1 data-app-home="">Home</h1>
+      <h1 data-app-home="" data-organization={organization}>
+        Home
+      </h1>
       <button onClick={() => switching.run("acme")} type="button">
         Work in Acme
       </button>
     </main>
   );
 }
+
+/**
+ * An app's page, as the move's Reconnect opens it (`/connections/<app>`): a stand-in that says which
+ * app it is. What matters here is that the gate gets the person to it.
+ */
+const appRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/connections/$key",
+  component: function AppPage() {
+    const { key } = appRoute.useParams();
+    return <h1 data-app-connect={key}>{key}</h1>;
+  },
+});
 
 const onboardingRoute = (
   OnboardingRoute as unknown as {
@@ -97,18 +131,68 @@ const settingsRoute = createRoute({
   ),
 });
 
+/**
+ * Settings → AI providers' own screens (provider-pages.tsx): Connect another AI, a provider's page and
+ * its Change, at the addresses the app gives them, reading `owner=personal` as the app does.
+ */
+const connectRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/settings/providers/new",
+  validateSearch: providerSearch,
+  component: function Connect() {
+    return <ConnectProviderPage scope={scopeOf(connectRoute.useSearch())} />;
+  },
+});
+const providerRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/settings/providers/$provider",
+  validateSearch: providerSearch,
+  component: function Provider() {
+    const { provider } = providerRoute.useParams();
+    // This router isn't the app's registered one: read the search as the app's does.
+    const search = providerSearch(
+      providerRoute.useSearch() as Record<string, unknown>,
+    );
+    return (
+      <ProviderPage
+        connected={search.connected}
+        id={provider}
+        scope={scopeOf(search)}
+      />
+    );
+  },
+});
+const changeRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/settings/providers/$provider/change",
+  validateSearch: providerSearch,
+  component: function Change() {
+    const { provider } = changeRoute.useParams();
+    return (
+      <ChangeProviderPage
+        id={provider}
+        scope={scopeOf(changeRoute.useSearch())}
+      />
+    );
+  },
+});
+
 const router = createRouter({
   history: createBrowserHistory(),
   context: { queryClient },
   routeTree: rootRoute.addChildren([
     authedRoute.addChildren([
       onboardingRoute as never,
+      appRoute,
       settingsRoute.addChildren([
         createRoute({
           getParentRoute: () => settingsRoute,
-          path: "/settings",
-          component: component(GeneralRoute),
+          path: "/settings/providers",
+          component: component(SettingsProvidersRoute),
         }),
+        connectRoute,
+        providerRoute,
+        changeRoute,
       ]),
       createRoute({
         getParentRoute: () => authedRoute,

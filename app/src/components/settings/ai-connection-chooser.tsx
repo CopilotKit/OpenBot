@@ -1,4 +1,5 @@
 import {
+  IconAlertTriangleFilled,
   IconChevronRight,
   IconCircleCheckFilled,
   IconCloud,
@@ -11,10 +12,20 @@ import {
   type ReactNode,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
+import { CopyButton } from "@/components/copy-button";
+import {
+  CHATGPT_DEAD_PAGE,
+  ChatGptCodeSteps,
+  ChatGptPaste,
+  ChatGptSettingsLink,
+  ChatGptSteps,
+  wrongPage,
+} from "@/components/settings/chatgpt-browser-sign-in";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -44,6 +55,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   type AiConnectionOwner,
+  type DescribedConnection,
   describeConnection,
 } from "@/lib/ai-connection/describe";
 import {
@@ -51,23 +63,25 @@ import {
   beginProviderSignIn,
   cancelPlanSignIn,
   cancelProviderSignIn,
+  finishesInDesktop,
   finishPlanSignIn,
   finishProviderSignIn,
   type Plan,
 } from "@/lib/ai-connection/desktop";
 import {
+  addAiConnectionMutationOptions,
   type Connected as ConnectedResult,
   type ConnectPhase,
   connectAiMutationOptions,
   connectPersonalAiMutationOptions,
-  finishPersonalSignIn,
-  readPersonalSignIn,
-  startPersonalSignIn,
+  personalSignInSteps,
+  signInStepsFor,
 } from "@/lib/ai-connection/mutations";
 import {
   AI_PROVIDERS,
   type AiProvider,
   ENDPOINT_PRESETS,
+  GOOGLE_SIGN_IN_ENDED,
   hostOf,
   isEndpointAddress,
   isSignIn,
@@ -75,16 +89,34 @@ import {
   personalLogins,
   providerById,
   sharedLogins,
+  signInRetired,
   signInWords,
 } from "@/lib/ai-connection/providers";
+import type {
+  AiConnectionEntry,
+  ConnectionScope,
+} from "@/lib/ai-connection/queries";
+import {
+  awaitSignInRedirect,
+  beginSignInRedirect,
+  cancelSignInRedirect,
+  fallbackMethod,
+  signInThroughDesktop,
+  takesRedirect,
+} from "@/lib/ai-connection/sign-in-redirect";
 import type {
   AiConnection,
   AiConnectionInput,
   AiConnectionLogin,
   AiConnectionProvider,
+  AiConnectionProviderAnswer,
+  AiSignIn,
   AiSignInInputMethod,
 } from "@/lib/api/generated/model";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { ClientError } from "@/lib/client";
+import { desktopShell } from "@/lib/desktop/shell";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { markFor } from "@/lib/marks";
 import { queryClient } from "@/query-client";
 
@@ -97,10 +129,12 @@ import { queryClient } from "@/query-client";
  * TWO KINDS OF CONNECTION. `organization` is the AI every Bot in the organization runs on, which an
  * admin changes in Settings; inside OpenBot Desktop it may be a plan or a provider sign-in Desktop
  * holds. `personal` is a person's own AI on OpenBot Cloud: a key or an address for every provider,
- * and first the setup window's sign-in (a ChatGPT or Claude plan, a Google, xAI or Unbiased AI
- * sign-in) wherever the server runs it itself (`signIns`). The server keeps that sign-in for the
+ * and first the setup window's sign-in (a ChatGPT or Claude plan, or an xAI sign-in) wherever the
+ * server runs it itself (`signIns`). The server keeps that sign-in for the
  * person and renews it, so never a Desktop-held one there, even inside Desktop: the server runs
- * the person's Bots.
+ * the person's Bots. Inside Desktop, Desktop only listens for a Claude or ChatGPT plan's redirect,
+ * so the person pastes nothing (lib/ai-connection/sign-in-redirect.ts); the sign-in stays the
+ * server's.
  *
  * TWO SURFACES. In a dialog (Settings) it draws the dialog's header, body and footer. On a page
  * (onboarding) it draws the same body and buttons inside a card, under the page's own heading.
@@ -121,11 +155,37 @@ export type ChooserMode =
        * for them and can use now, which they can share without signing in again.
        */
       share?: {
-        signIns: readonly AiConnectionProvider[];
+        signIns: readonly AiConnectionProviderAnswer[];
         mine: AiConnection | null;
       };
+      /**
+       * Open on this provider's first way in, to fix the connection in use: a Google sign-in
+       * OpenBot no longer offers opens on Google Gemini's API key.
+       */
+      provider?: AiConnectionProviderAnswer;
     }
-  | { kind: "personal"; signIns: readonly AiConnectionProvider[] };
+  | { kind: "personal"; signIns: readonly AiConnectionProviderAnswer[] }
+  /**
+   * One more connection beside the others, in a list of several (connectAiConnection or
+   * connectPersonalAiConnection). Like `personal`, the server runs each sign-in it names in
+   * `signIns` (for the organization: startAiSignIn), and every other provider connects with a key
+   * or an address. `connected`: the connections already made, one per provider, which choosing
+   * replaces. Each reads as connected in the list: what it is, a check, and Default once there are
+   * two or more; one that can't run says why and offers Reconnect.
+   */
+  | {
+      kind: "adding";
+      scope: ConnectionScope;
+      signIns: readonly AiConnectionProviderAnswer[];
+      connected: readonly AiConnectionEntry[];
+      /** Whose the connected ones are, in their rows' words. The reader's when absent. */
+      owner?: AiConnectionOwner;
+      /** Open on this provider, to fix its connection: `reconnecting` names it in the title. */
+      provider?: AiConnectionProviderAnswer;
+      /** And on the connection's own way in, where the provider offers it: a key asks for the key. */
+      login?: AiConnectionLogin | null;
+      reconnecting?: string;
+    };
 
 export type ChooserSurface = "dialog" | "card";
 
@@ -247,7 +307,8 @@ function loginLabel(login: AiConnectionLogin): string {
 
 /** The ways in this chooser offers for a provider. */
 function loginsFor(provider: AiProvider, mode: ChooserMode) {
-  if (mode.kind === "personal") return personalLogins(provider, mode.signIns);
+  if (mode.kind === "personal" || mode.kind === "adding")
+    return personalLogins(provider, mode.signIns);
   if (mode.share && !mode.inDesktop)
     return sharedLogins(provider, mode.share.signIns);
   return loginsHere(provider, mode.inDesktop);
@@ -294,6 +355,7 @@ function shareNote(provider: AiConnectionProvider, login: AiConnectionLogin) {
  * person then pastes what the provider gave them here (the code Claude's page shows, or the address
  * ChatGPT sends their browser to). `signInId`: the server's own sign-in, for a person's own AI.
  * `method`: the way in it was started with, where the provider has more than one (ChatGPT).
+ * `redirect`: OpenBot Desktop is listening for the provider's redirect, so nothing is pasted.
  */
 type Waiting = {
   url: string;
@@ -302,24 +364,52 @@ type Waiting = {
   signInId?: string;
   codeBack?: boolean;
   method?: AiSignInInputMethod;
+  redirect?: boolean;
 };
+
+/**
+ * How a ChatGPT plan signs in where the server runs it. In a browser, `code` first: a code to enter
+ * at ChatGPT, which never lands on a page that won't load. `browser`, the other way: the browser
+ * sign-in whose last page won't load, and whose address the person pastes back. Inside OpenBot
+ * Desktop, `browser` first: Desktop takes that last page itself, so it loads and nothing is pasted.
+ */
+type ChatGptWay = "code" | "browser";
 
 const wait = (seconds: number) =>
   new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 
 export function ChooseConnection({
   connection,
+  connectedHere = false,
+  initialFocusProvider,
   mode,
   onBack,
   onConnected,
 }: {
-  connection: AiConnection;
+  /** The connection in use, for its kept keys. Absent when adding one more beside it. */
+  connection?: AiConnection;
+  /** Restore focus to this provider when the list remounts after a connection. */
+  initialFocusProvider?: AiConnectionProviderAnswer;
   mode: ChooserMode;
   /** Back from a chosen provider, or Cancel from the list. Absent: the list has no way back. */
   onBack?: () => void;
+  /**
+   * Something was connected from this list already, and the list is drawn again with it checked:
+   * leaving it is Done, since there is nothing to cancel.
+   */
+  connectedHere?: boolean;
   onConnected: (connected: ConnectedResult) => void;
 }) {
+  const initialFocusRow = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    initialFocusRow.current?.focus();
+  }, []);
+
   const personal = mode.kind === "personal";
+  const adding = mode.kind === "adding" ? mode : null;
+  // A person's own, or one more in a list: the server runs sign-ins, keys elsewhere, Back to the list.
+  const serverOwned = personal || adding !== null;
+  const steps = adding ? signInStepsFor(adding.scope) : personalSignInSteps;
   const inDesktop = mode.kind === "organization" && mode.inDesktop;
   const organizationWide =
     mode.kind === "organization" && mode.organizationWide === true;
@@ -329,7 +419,12 @@ export function ChooseConnection({
       ? mode.share
       : null;
   // The server runs the sign-in (Connect your AI's), never OpenBot Desktop.
-  const serverRun = personal || share !== null;
+  const serverRun = serverOwned || share !== null;
+  // Inside OpenBot Desktop, which can take a plan's redirect for the server's sign-in.
+  const inDesktopWindow = desktopShell() !== null;
+  // ChatGPT's first way: its browser sign-in where Desktop takes the redirect, a code elsewhere.
+  const firstChatGptWay: ChatGptWay =
+    serverRun && inDesktopWindow ? "browser" : "code";
   const [providerId, setProviderId] = useState<AiProvider["id"] | null>(null);
   const provider = providerById(providerId);
   const logins = provider ? loginsFor(provider, mode) : [];
@@ -355,16 +450,26 @@ export function ChooseConnection({
   const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [signInCode, setSignInCode] = useState("");
   const [signedIn, setSignedIn] = useState(false);
-  const [signInFailure, setSignInFailure] = useState<string | null>(null);
+  const [signInFailure, setSignInFailure] = useState<Failure | null>(null);
   const [signingIn, setSigningIn] = useState(false);
-  // The key an Unbiased AI sign-in in Desktop mints: held for the one request that sends it, never drawn.
-  const minted = useRef<string | null>(null);
-  const attempt = useRef<{ plan?: Plan; attemptId?: string } | null>(null);
+  const [chatGptWay, setChatGptWay] = useState<ChatGptWay>(firstChatGptWay);
+  /*
+   * Desktop couldn't take this provider's redirect (an older Desktop, a busy port, a server from
+   * before it took the port): its sign-in is finished by paste, as in a browser.
+   */
+  const [pasteBack, setPasteBack] = useState(false);
+  const attempt = useRef<{
+    plan?: Plan;
+    attemptId?: string;
+    redirectId?: string;
+  } | null>(null);
   const run = useRef(0);
   const connect = useMutation(
-    personal
-      ? connectPersonalAiMutationOptions(queryClient)
-      : connectAiMutationOptions(queryClient),
+    adding
+      ? addAiConnectionMutationOptions(queryClient, adding.scope)
+      : personal
+        ? connectPersonalAiMutationOptions(queryClient)
+        : connectAiMutationOptions(queryClient),
   );
 
   /** Stop a sign-in still waiting in the browser, so its tab can't finish into a closed chooser. */
@@ -375,21 +480,44 @@ export function ChooseConnection({
     if (pending?.plan) void cancelPlanSignIn(pending.plan).catch(() => {});
     if (pending?.attemptId)
       void cancelProviderSignIn(pending.attemptId).catch(() => {});
+    if (pending?.redirectId) cancelSignInRedirect(pending.redirectId);
     setWaiting(null);
     setSigningIn(false);
   }
   const stopLatest = useRef(stopSignIn);
   stopLatest.current = stopSignIn;
   useEffect(() => () => stopLatest.current(), []);
+  // Reconnecting one connection: open on its provider, ready to sign in or take its key.
+  const opening = useRef(
+    adding?.provider ??
+      (mode.kind === "organization" ? mode.provider : undefined),
+  );
+  const chooseLatest = useRef<(next: AiProvider | null) => void>(() => {});
+  useEffect(() => {
+    const id = opening.current;
+    opening.current = undefined;
+    if (id) chooseLatest.current(providerById(id) ?? null);
+  }, []);
 
   function choose(next: AiProvider | null) {
     stopSignIn();
     connect.reset();
     setProviderId(next?.id ?? null);
     const nextLogins = next ? loginsFor(next, mode) : [];
-    setLogin(nextLogins[0] ?? null);
+    /*
+     * Fixing one connection opens on its own way in, and so does choosing a connected one in the
+     * list, which replaces it; anything else on the provider's first.
+     */
+    const own =
+      adding?.provider && adding.provider === next?.id
+        ? adding.login
+        : (adding?.connected.find((entry) => entry.provider === next?.id)
+            ?.login ?? null);
+    const nextLogin =
+      own && nextLogins.includes(own) ? own : (nextLogins[0] ?? null);
+    setLogin(nextLogin);
     const nextPreset = next ? ENDPOINT_PRESETS[next.id] : undefined;
-    const nextKept = keptSignIn(mode, next ?? undefined, nextLogins[0] ?? null);
+    const nextKept = keptSignIn(mode, next ?? undefined, nextLogin);
     setApiKey("");
     setBaseUrl(nextPreset?.baseUrl ?? "");
     setModel(nextKept?.model ?? nextPreset?.model ?? "");
@@ -397,7 +525,17 @@ export function ChooseConnection({
     setSignedIn(nextKept !== null);
     setSignInFailure(null);
     setSignInCode("");
-    minted.current = null;
+    setChatGptWay(firstChatGptWay);
+    setPasteBack(false);
+  }
+  chooseLatest.current = choose;
+
+  /** Switch ChatGPT's way in, before a sign-in starts: what failed the other way no longer applies. */
+  function chooseChatGptWay(next: ChatGptWay) {
+    stopSignIn();
+    setSignInFailure(null);
+    setSignInCode("");
+    setChatGptWay(next);
   }
 
   function chooseLogin(next: AiConnectionLogin) {
@@ -414,7 +552,7 @@ export function ChooseConnection({
   const savedKey =
     provider &&
     (login === "api-key" || login === "endpoint") &&
-    connection.saved.some(
+    (connection?.saved ?? []).some(
       (saved) =>
         saved.provider === provider.id &&
         saved.login === login &&
@@ -423,6 +561,18 @@ export function ChooseConnection({
   const usingSaved = Boolean(savedKey && useSaved);
   const typedKey = apiKey.trim();
   const typedModel = model.trim();
+  /*
+   * A sign-in asks for no model, as a key or a plan doesn't: once connected, the conversation's
+   * model picker offers every model the provider lists for it. The connection still names one, the
+   * model a run uses when nobody picked: the one this sign-in already names where it is being
+   * signed in again, so an upgrade changes nothing, and otherwise the provider's usual one.
+   */
+  const signInModel = (
+    (provider && login === "oauth" ? ownModel(provider.id) : null) ??
+    kept?.model ??
+    preset?.model ??
+    ""
+  ).trim();
 
   const ready =
     !!provider &&
@@ -434,8 +584,21 @@ export function ChooseConnection({
           typedModel.length > 0 &&
           (!preset || usingSaved || typedKey.length > 0)
         : login === "oauth"
-          ? signedIn && typedModel.length > 0
+          ? signedIn && signInModel.length > 0
           : signedIn);
+
+  /**
+   * The model this provider's sign-in already names, in the list or as the connection in use.
+   */
+  function ownModel(id: AiProvider["id"]): string | null {
+    const listed = adding?.connected.find(
+      (entry) => entry.provider === id && entry.login === "oauth",
+    );
+    if (listed) return listed.model;
+    return connection?.provider === id && connection.login === "oauth"
+      ? connection.model
+      : null;
+  }
 
   function input(): AiConnectionInput | null {
     if (!provider || !login) return null;
@@ -455,31 +618,8 @@ export function ChooseConnection({
             ? { apiKey: typedKey }
             : {}),
       };
-    /*
-     * Unbiased AI's sign-in, run by the server: its key is kept for the person, for the provider's
-     * own address. A plan or a Google or xAI sign-in the server ran connects as itself, below.
-     */
-    if (login === "oauth" && personal && provider.id === "unbiased" && preset)
-      return {
-        provider: provider.id,
-        login: "endpoint",
-        baseUrl: preset.baseUrl,
-        model: typedModel,
-        useSavedKey: true,
-      };
-    // Unbiased AI's sign-in ends in a key for its own address, sent exactly as a typed one is.
-    if (login === "oauth" && provider.id === "unbiased" && preset) {
-      if (!minted.current) return null;
-      return {
-        provider: provider.id,
-        login: "endpoint",
-        apiKey: minted.current,
-        baseUrl: preset.baseUrl,
-        model: typedModel,
-      };
-    }
     if (login === "oauth")
-      return { provider: provider.id, login, model: typedModel };
+      return { provider: provider.id, login, model: signInModel };
     return { provider: provider.id, login };
   }
 
@@ -488,13 +628,75 @@ export function ChooseConnection({
    * it stands every `interval` seconds until it is approved, failed or expired. With `finish` code,
    * stop and wait for the person to paste what the provider gave them (`finishCode`). What the
    * provider hands back stays on the server.
+   *
+   * Inside OpenBot Desktop, a Claude plan and ChatGPT's browser sign-in finish through Desktop's
+   * listener instead, with nothing pasted. Where that can't work, the paste, as in a browser.
    */
   async function serverSignIn(
     chosen: AiProvider,
     current: () => boolean,
     method: AiSignInInputMethod | undefined,
   ): Promise<"approved" | "code" | false> {
-    const begun = await startPersonalSignIn(chosen.id, method);
+    let started: AiSignIn | null = null;
+    const redirectProvider = chosen.id;
+    if (
+      (redirectProvider === "anthropic" || redirectProvider === "openai") &&
+      takesRedirect({
+        inDesktop: inDesktopWindow,
+        serverRun,
+        provider: redirectProvider,
+        login,
+        method,
+        pasteBack,
+      })
+    ) {
+      const through = await signInThroughDesktop(redirectProvider, {
+        begin: beginSignInRedirect,
+        start: (loopbackPort) =>
+          redirectProvider === "anthropic"
+            ? steps.start(redirectProvider, method, { loopbackPort })
+            : steps.start(redirectProvider, "browser"),
+        wait: awaitSignInRedirect,
+        cancel: cancelSignInRedirect,
+        finish: steps.finish,
+        hold: (redirectId) => {
+          attempt.current = redirectId ? { redirectId } : null;
+        },
+        opened: (signIn) => {
+          setWaiting({
+            url: signIn.url,
+            signInId: signIn.id,
+            method: signIn.provider === "openai" ? "browser" : method,
+            redirect: true,
+          });
+          window.open(signIn.url, "_blank", "noopener");
+        },
+        current,
+      });
+      if (through.outcome === "stopped") return false;
+      if (through.outcome === "approved") return "approved";
+      // Desktop can't take it here: from now on this provider signs in as it does today.
+      setPasteBack(true);
+      const instead = fallbackMethod(redirectProvider);
+      if (instead === "device") {
+        // ChatGPT: today's first way, its code sign-in, started now; the address stays the other way.
+        setChatGptWay("code");
+        return serverSignIn(chosen, current, instead);
+      }
+      started = through.begun;
+    }
+    const begun =
+      started ??
+      (await steps.start(chosen.id, method).catch((error: unknown) => {
+        // OpenAI gave no code (the server's 422): most often, device code sign-in is off. Said so.
+        if (
+          method === "device" &&
+          error instanceof ClientError &&
+          error.status === 422
+        )
+          throw new Error(CHATGPT_NO_CODE);
+        throw error;
+      }));
     if (!current()) return false;
     const codeBack = begun.finish === "code";
     setWaiting({
@@ -510,7 +712,7 @@ export function ChooseConnection({
     for (;;) {
       await wait(interval);
       if (!current()) return false;
-      const status = await readPersonalSignIn(begun.id);
+      const status = await steps.read(begun.id);
       if (!current()) return false;
       if (status.status === "approved") return "approved";
       if (status.status === "failed" || status.status === "expired")
@@ -519,7 +721,7 @@ export function ChooseConnection({
     }
   }
 
-  /** `method`: ChatGPT's code sign-in (`device`) in place of its browser sign-in, the default. */
+  /** `method`: ChatGPT's code sign-in (`device`) in place of its browser sign-in, the server's default. */
   async function signIn(method?: AiSignInInputMethod) {
     if (!provider || !login) return;
     stopSignIn();
@@ -542,18 +744,18 @@ export function ChooseConnection({
         attempt.current = { plan };
         const { url } = await beginPlanSignIn(plan);
         if (!current()) return;
-        setWaiting({ url, codeBack: plan === "claude" });
+        // A Desktop older than Claude's loopback sign-in sends Claude's code page: paste it here.
+        const codeBack = plan === "claude" && !finishesInDesktop(url);
+        setWaiting({ url, codeBack });
         window.open(url, "_blank", "noopener");
-        // Claude's sign-in hands back a code to paste here; ChatGPT's finishes in the browser.
-        if (plan === "claude") {
+        if (codeBack) {
           setSigningIn(false);
           return;
         }
+        // Otherwise the browser comes back to Desktop, and it finishes on its own.
         await finishPlanSignIn(plan);
       } else {
-        const begun = await beginProviderSignIn(
-          provider.id as "google" | "xai" | "unbiased",
-        );
+        const begun = await beginProviderSignIn();
         if (!current()) {
           void cancelProviderSignIn(begun.attemptId).catch(() => {});
           return;
@@ -565,52 +767,66 @@ export function ChooseConnection({
           attemptId: begun.attemptId,
         });
         window.open(begun.url, "_blank", "noopener");
-        const finished = await finishProviderSignIn(begun.attemptId);
-        if (!current()) return;
-        minted.current = finished?.apiKey ?? null;
+        await finishProviderSignIn(begun.attemptId);
       }
       if (!current()) return;
       attempt.current = null;
       setWaiting(null);
       setSignedIn(true);
       setSigningIn(false);
+      connectSignedIn();
     } catch (error) {
       if (!current()) return;
       attempt.current = null;
       setWaiting(null);
       setSigningIn(false);
-      setSignInFailure(
-        error instanceof Error ? error.message : "Couldn't sign in. Try again.",
-      );
+      setSignInFailure(failureOf(error, "Couldn't sign in. Try again."));
     }
   }
 
-  /** Send the code the provider's page gave the person: to the server, or to Desktop's Claude plan. */
-  async function finishCode() {
+  /**
+   * Send the code the provider's page gave the person (`given`, when it came straight from a paste,
+   * or what is in the box): to the server, or to Desktop's Claude plan.
+   */
+  async function finishCode(given?: string) {
     const mine = run.current;
     const signInId = waiting?.signInId;
-    setSigningIn(true);
+    const pasted = (given ?? signInCode).trim();
+    if (!pasted) return;
     setSignInFailure(null);
+    // OpenAI's own sign-in page, pasted in place of the page it lands on: said here, nothing sent.
+    const wrong =
+      signInId && provider?.id === "openai" ? wrongPage(pasted) : null;
+    if (wrong) {
+      setSignInFailure({ message: wrong });
+      return;
+    }
+    setSigningIn(true);
     try {
       if (signInId) {
-        const status = await finishPersonalSignIn(signInId, signInCode.trim());
+        const status = await steps.finish(signInId, pasted);
         if (run.current !== mine) return;
         if (status.status !== "approved")
           throw new Error(status.detail ?? SIGN_IN_DIDNT_FINISH);
-      } else await finishPlanSignIn("claude", signInCode.trim());
+      } else await finishPlanSignIn("claude", pasted);
       if (run.current !== mine) return;
       attempt.current = null;
       setWaiting(null);
       setSignInCode("");
       setSignedIn(true);
+      connectSignedIn();
     } catch (error) {
       if (run.current !== mine) return;
-      // A refused code ends the attempt: the sign-in starts again.
+      setSignInFailure(failureOf(error, "Couldn't sign in. Try again."));
+      /*
+       * The server refused what was pasted (400: from another sign-in, or with no code in it) and
+       * the sign-in waits on: the box stays open for the right one. Anything else, a sign-in that
+       * failed or expired, ends the attempt and it starts again.
+       */
+      if (signInId && error instanceof ClientError && error.status === 400)
+        return;
       attempt.current = null;
       setWaiting(null);
-      setSignInFailure(
-        error instanceof Error ? error.message : "Couldn't sign in. Try again.",
-      );
     } finally {
       if (run.current === mine) setSigningIn(false);
     }
@@ -623,18 +839,32 @@ export function ChooseConnection({
   }
 
   /**
-   * Share the admin's own sign-in as it is, from the list: no sign-in again. A Google or xAI
+   * A sign-in that just succeeded connects at once, with the call Connect makes: a sign-in looked
+   * finished, and a person who left the page then lost it, since nothing is saved until the
+   * connection is. A connect that fails says why under the sign-in, and Connect tries it again.
+   * Sharing the admin's own sign-in with everyone still waits for its own button, which says so.
+   */
+  function connectSignedIn() {
+    if (share) return;
+    const body = input();
+    if (!body || (login === "oauth" && signInModel.length === 0)) return;
+    send(body);
+  }
+
+  /**
+   * Share the admin's own sign-in as it is, from the list: no sign-in again. An xAI
    * sign-in runs on the model their own AI names, or the provider's usual one.
    */
   function shareMine(mine: AiConnection) {
-    if (!mine.provider || (mine.login !== "plan" && mine.login !== "oauth"))
-      return;
-    const named = mine.model ?? ENDPOINT_PRESETS[mine.provider]?.model;
+    // The server's answer can name a provider this app doesn't know: that one isn't offered.
+    const known = providerById(mine.provider)?.id;
+    if (!known || (mine.login !== "plan" && mine.login !== "oauth")) return;
+    const named = mine.model ?? ENDPOINT_PRESETS[known]?.model;
     if (mine.login === "oauth" && !named) return;
     send(
       mine.login === "oauth" && named
-        ? { provider: mine.provider, login: mine.login, model: named }
-        : { provider: mine.provider, login: mine.login },
+        ? { provider: known, login: mine.login, model: named }
+        : { provider: known, login: mine.login },
     );
   }
 
@@ -644,7 +874,6 @@ export function ChooseConnection({
       { input: body, desktop: inDesktop, onPhase: setPhase },
       {
         onSuccess: (connected) => {
-          minted.current = null;
           setApiKey("");
           onConnected(connected);
         },
@@ -666,7 +895,9 @@ export function ChooseConnection({
    * Back from a chosen provider: to the dialog's previous screen for the organization's AI, as it
    * always was; to the list for a person's own, which has no screen before it on a page.
    */
-  const back = personal && provider ? () => choose(null) : onBack;
+  // Reconnecting one connection has no list to go back to: Back is the dialog's.
+  const back =
+    serverOwned && provider && !adding?.provider ? () => choose(null) : onBack;
 
   return (
     <form
@@ -679,21 +910,29 @@ export function ChooseConnection({
       <ChooserHeader
         description={
           provider
-            ? "OpenBot checks the connection before it switches. Nothing changes if the check fails."
-            : personal
-              ? "Choose the AI your Bots use when they work for you. It's yours alone."
-              : organizationWide
-                ? "Choose an AI for everyone in your organization. Bots use it for anyone who hasn't connected their own."
-                : "Choose the AI your Bots use. OpenBot keeps running while it switches."
+            ? adding
+              ? "OpenBot checks the connection before it saves it. Nothing changes if the check fails."
+              : "OpenBot checks the connection before it switches. Nothing changes if the check fails."
+            : adding
+              ? "Choose another AI your Bots can use. The ones already connected keep working."
+              : personal
+                ? "Choose the AI your Bots use when they work for you. It's yours alone."
+                : organizationWide
+                  ? "Choose an AI for everyone in your organization. Bots use it for anyone who hasn't connected their own."
+                  : "Choose the AI your Bots use. OpenBot keeps running while it switches."
         }
         title={
-          personal
-            ? "Connect your AI"
-            : organizationWide
-              ? describeConnection(connection)
-                ? "Change your organization's AI"
-                : "Set up your organization's AI"
-              : "Change AI connection"
+          adding
+            ? adding.reconnecting
+              ? `Reconnect ${adding.reconnecting}`
+              : "Connect another AI"
+            : personal
+              ? "Connect your AI"
+              : organizationWide
+                ? connection && describeConnection(connection)
+                  ? "Change your organization's AI"
+                  : "Set up your organization's AI"
+                : "Change AI connection"
         }
       />
       <ChooserBody className="flex flex-col gap-4">
@@ -709,35 +948,93 @@ export function ChooseConnection({
           aria-label="AI provider"
           className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0"
         >
-          {(provider ? [provider] : AI_PROVIDERS).map((row) => (
-            <Item
-              key={row.id}
-              render={
-                <button
-                  disabled={busy}
-                  onClick={() => choose(provider ? null : row)}
-                  type="button"
-                />
-              }
-              // A button centres its text; a row reads from the left like every other.
-              className="text-left"
-              size="sm"
-              variant="muted"
-            >
-              <ProviderTile provider={row} />
-              <ItemContent>
-                <ItemTitle>{row.name}</ItemTitle>
-                <ItemDescription>{providerSummary(row, mode)}</ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                {provider ? (
-                  <span className="text-muted-foreground text-xs">Change</span>
-                ) : (
-                  <IconChevronRight className="size-4 text-muted-foreground" />
-                )}
-              </ItemActions>
-            </Item>
-          ))}
+          {(provider ? [provider] : AI_PROVIDERS).map((row) => {
+            // In the list, one already connected reads as connected (adding several).
+            const entry = provider
+              ? undefined
+              : adding?.connected.find((one) => one.provider === row.id);
+            return (
+              <Item
+                key={row.id}
+                render={
+                  /*
+                   * Changing one connection keeps to its provider: picking another here would connect
+                   * that one beside it instead of changing this one.
+                   */
+                  provider && adding?.provider ? (
+                    <div />
+                  ) : (
+                    <button
+                      disabled={busy}
+                      onClick={() => choose(provider ? null : row)}
+                      ref={
+                        row.id === initialFocusProvider
+                          ? initialFocusRow
+                          : undefined
+                      }
+                      type="button"
+                    />
+                  )
+                }
+                // A button centres its text; a row reads from the left like every other.
+                className="text-left"
+                size="sm"
+                variant="muted"
+              >
+                <ProviderTile provider={row} />
+                <ItemContent>
+                  <ItemTitle>
+                    {row.name}
+                    {entry?.isDefault &&
+                    adding &&
+                    adding.connected.length > 1 ? (
+                      <span className="font-normal text-muted-foreground text-xs">
+                        Default
+                      </span>
+                    ) : null}
+                  </ItemTitle>
+                  <ItemDescription>
+                    {!entry ? (
+                      providerSummary(row, mode)
+                    ) : entry.ready ? (
+                      describeConnection(entry, adding?.owner)?.summary
+                    ) : (
+                      <span className="text-destructive">
+                        {entry.problem?.detail}
+                      </span>
+                    )}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  {provider && adding?.provider ? null : provider ? (
+                    <span className="text-muted-foreground text-xs">
+                      Change
+                    </span>
+                  ) : entry && !entry.ready ? (
+                    <>
+                      <IconAlertTriangleFilled
+                        aria-hidden
+                        className="size-4 text-destructive"
+                      />
+                      <span className="text-muted-foreground text-xs">
+                        {signInRetired(entry)
+                          ? GOOGLE_SIGN_IN_ENDED.action
+                          : "Reconnect"}
+                      </span>
+                    </>
+                  ) : entry ? (
+                    <IconCircleCheckFilled
+                      aria-label="Connected"
+                      className="size-5 text-success"
+                      role="img"
+                    />
+                  ) : (
+                    <IconChevronRight className="size-4 text-muted-foreground" />
+                  )}
+                </ItemActions>
+              </Item>
+            );
+          })}
         </fieldset>
 
         {provider && login ? (
@@ -767,14 +1064,39 @@ export function ChooseConnection({
                 kept={kept !== null && signedIn}
                 login={login}
                 onCancel={stopSignIn}
-                onCode={setSignInCode}
+                onCode={(value) => {
+                  // A new paste or edit: what was wrong with the last one no longer applies.
+                  setSignInCode(value);
+                  setSignInFailure(null);
+                }}
                 onFinishCode={finishCode}
                 serverRun={serverRun}
-                onSignIn={() => signIn()}
-                onSignInWithCode={
-                  serverRun && provider.id === "openai"
-                    ? () => signIn("device")
-                    : undefined
+                desktopListens={serverRun && inDesktopWindow && !pasteBack}
+                noPaste={
+                  waiting
+                    ? waiting.redirect === true
+                    : takesRedirect({
+                        inDesktop: inDesktopWindow,
+                        serverRun,
+                        provider: provider.id,
+                        login,
+                        method:
+                          provider.id === "openai" && chatGptWay === "code"
+                            ? "device"
+                            : undefined,
+                        pasteBack,
+                      })
+                }
+                chatGptWay={chatGptWay}
+                onChatGptWay={chooseChatGptWay}
+                onSignIn={() =>
+                  // ChatGPT's plan where the server runs it: the way chosen, a code or the browser.
+                  serverRun &&
+                  provider.id === "openai" &&
+                  login === "plan" &&
+                  chatGptWay === "code"
+                    ? signIn("device")
+                    : signIn()
                 }
                 provider={provider}
                 signedIn={signedIn}
@@ -812,7 +1134,7 @@ export function ChooseConnection({
               </Field>
             ) : null}
 
-            {login === "endpoint" || login === "oauth" ? (
+            {login === "endpoint" ? (
               <Field>
                 <FieldLabel htmlFor="ai-connection-model">
                   Model name
@@ -869,7 +1191,7 @@ export function ChooseConnection({
 
         {connect.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {connect.error.message}
+            {failureSaid(connect.error)}
           </p>
         ) : null}
       </ChooserBody>
@@ -886,7 +1208,7 @@ export function ChooseConnection({
               type="button"
               variant="ghost"
             >
-              {provider ? "Back" : "Cancel"}
+              {provider ? "Back" : connectedHere ? "Done" : "Cancel"}
             </Button>
           ) : null}
           {provider ? (
@@ -969,21 +1291,18 @@ const SIGN_IN_SAYS: Record<string, string> = {
     "Anthropic opens in your browser. Approve the request there, then paste the code it shows you.",
   openai:
     "OpenAI opens in your browser. It finishes on its own once you approve.",
-  google:
-    "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
   xai: "Authorize OpenBot to use models available to your xAI account.",
-  unbiased:
-    "Sign in or create an Unbiased AI account in your browser and approve the code shown here.",
 };
 
 /**
- * Where the server runs the sign-in for a person's own AI, the words that differ. ChatGPT's sign-in
- * in the browser ends on an address that doesn't load (Codex's own sign-in waits there), which the
- * person pastes here.
+ * A Claude or ChatGPT plan inside OpenBot Desktop, which takes the provider's redirect: nothing to
+ * paste, and the page it lands on loads. The same words where Desktop runs Claude's sign-in itself;
+ * a Desktop older than that hands back a code to paste instead, and `SIGN_IN_SAYS` says so.
  */
-const PERSONAL_SIGN_IN_SAYS: Record<string, string> = {
-  openai:
-    "OpenAI opens in your browser. After you approve, your browser lands on a page that doesn't load. Copy that page's address and paste it here.",
+const NO_PASTE_SAYS: Record<string, string> = {
+  anthropic:
+    "Anthropic opens in your browser. It finishes on its own once you approve.",
+  openai: SIGN_IN_SAYS.openai ?? "",
 };
 
 /** ChatGPT's sign-in with a code (`device`): its page asks for the code shown here. */
@@ -992,68 +1311,129 @@ const CODE_SIGN_IN_SAYS =
 
 const SIGN_IN_DIDNT_FINISH = "The sign-in didn't finish. Try again.";
 
+/** ChatGPT gave no code for its code sign-in: most often, device code sign-in is off. */
+const CHATGPT_NO_CODE =
+  "ChatGPT didn't give OpenBot a code. Device code sign-in is probably turned off. Turn it on in ChatGPT's security settings, then try again.";
+
 function SignInFields({
   busy,
+  chatGptWay,
   code,
+  desktopListens,
   failure,
   kept,
   login,
+  noPaste,
   onCancel,
+  onChatGptWay,
   onCode,
   onFinishCode,
   onSignIn,
-  onSignInWithCode,
   serverRun,
   provider,
   signedIn,
   waiting,
 }: {
   busy: boolean;
+  /** How a ChatGPT plan the server runs signs in: a code, or the browser. */
+  chatGptWay: ChatGptWay;
+  /** Inside OpenBot Desktop, which can take a plan's redirect for the server's sign-in. */
+  desktopListens: boolean;
+  /** This sign-in finishes through Desktop's listener: no paste box, and no page that won't load. */
+  noPaste: boolean;
   code: string;
-  failure: string | null;
+  failure: Failure | null;
   /** Signed in already: the admin's own sign-in, kept for them, to share as it is. */
   kept: boolean;
   login: AiConnectionLogin;
   onCancel: () => void;
+  onChatGptWay: (way: ChatGptWay) => void;
   onCode: (code: string) => void;
-  onFinishCode: () => void;
+  /** Send `text` when it came straight from a paste, or what is in the box. */
+  onFinishCode: (text?: string) => void;
+  /** Start the sign-in, or start it again: for ChatGPT, in the way chosen. */
   onSignIn: () => void;
-  /** The quieter second way in, where the provider has one: ChatGPT's sign-in with a code. */
-  onSignInWithCode?: () => void;
   /** The server runs the sign-in (a person's own AI, or an admin's shared one), not Desktop. */
   serverRun: boolean;
   provider: AiProvider;
   signedIn: boolean;
   waiting: Waiting | null;
 }) {
-  const signInName = provider.id === "google" ? "Google" : provider.name;
+  /*
+   * ChatGPT's plan where the server runs it has two ways in. First, a code to enter at ChatGPT
+   * (`chatGptCode`), which never shows a page that won't load but needs device code sign-in turned
+   * on in ChatGPT: the setting and its link come first. The other way, the browser sign-in
+   * (`chatGptInBrowser`), lands on a page that can't load, whose address the person brings back:
+   * its own steps first, and its own paste box. A sign-in under way keeps the way it started with.
+   * Inside OpenBot Desktop the browser sign-in comes first and is neither: Desktop takes its last
+   * page, so it loads and nothing is pasted (`noPaste`).
+   */
+  const chatGptServer =
+    serverRun && provider.id === "openai" && login === "plan";
+  const chatGptInBrowser =
+    chatGptServer &&
+    (waiting ? waiting.method !== "device" : chatGptWay === "browser");
+  const chatGptCode = chatGptServer && !chatGptInBrowser;
+  const signInName = chatGptServer ? "ChatGPT" : provider.name;
   if (kept)
     return (
       <p className="flex items-center gap-2 text-sm">
-        <IconCircleCheckFilled className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <IconCircleCheckFilled className="size-4 shrink-0 text-success" />
         You're signed in with your {signInWords(provider.id, login)}.
       </p>
     );
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground text-sm">
-        {waiting?.method === "device"
-          ? CODE_SIGN_IN_SAYS
-          : (serverRun && PERSONAL_SIGN_IN_SAYS[provider.id]) ||
-            SIGN_IN_SAYS[provider.id]}
-      </p>
+      {chatGptInBrowser ? (
+        signedIn ? null : noPaste ? (
+          <p className="text-muted-foreground text-sm">
+            {NO_PASTE_SAYS.openai}
+          </p>
+        ) : waiting ? (
+          <p className="text-muted-foreground text-sm">
+            Approve the request in OpenAI's tab. When it says “
+            {CHATGPT_DEAD_PAGE}”, copy its address and paste it below.
+          </p>
+        ) : (
+          <ChatGptSteps />
+        )
+      ) : chatGptCode ? (
+        signedIn ? null : waiting ? (
+          <p className="text-muted-foreground text-sm">{CODE_SIGN_IN_SAYS}</p>
+        ) : (
+          <ChatGptCodeSteps />
+        )
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          {waiting?.method === "device"
+            ? CODE_SIGN_IN_SAYS
+            : noPaste
+              ? NO_PASTE_SAYS[provider.id]
+              : provider.id === "anthropic" && !serverRun && !waiting?.codeBack
+                ? NO_PASTE_SAYS.anthropic
+                : SIGN_IN_SAYS[provider.id]}
+        </p>
+      )}
       {signedIn ? (
         <p className="flex items-center gap-2 text-sm">
-          <IconCircleCheckFilled className="size-4 text-emerald-600 dark:text-emerald-400" />
+          <IconCircleCheckFilled className="size-4 text-success" />
           Signed in to {provider.name}.
         </p>
       ) : waiting ? (
         <div className="flex flex-col gap-3">
+          {/* The code to enter on the provider's page, with a button that copies it to paste there. */}
           {waiting.code ? (
-            <p className="text-sm">
-              Verification code:{" "}
-              <strong className="font-mono">{waiting.code}</strong>
-            </p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <p className="text-sm">
+                Verification code:{" "}
+                <strong className="font-mono">{waiting.code}</strong>
+              </p>
+              <CopyButton
+                key={waiting.code}
+                label="Copy the code"
+                text={waiting.code}
+              />
+            </div>
           ) : null}
           <p className="text-muted-foreground text-sm">
             Didn't open?{" "}
@@ -1067,13 +1447,18 @@ function SignInFields({
               <IconExternalLink className="ml-0.5 inline size-3.5" />
             </a>
           </p>
-          {waiting.codeBack ? (
+          {waiting.codeBack && chatGptInBrowser ? (
+            <ChatGptPaste
+              busy={busy}
+              code={code}
+              failure={failure}
+              onCode={onCode}
+              onFinish={onFinishCode}
+            />
+          ) : waiting.codeBack ? (
             <Field>
-              {/* ChatGPT's sign-in ends on an address to paste; Claude's on a code. */}
               <FieldLabel htmlFor="ai-connection-code">
-                {provider.id === "openai"
-                  ? "Address from your browser"
-                  : "Code from your browser"}
+                Code from your browser
               </FieldLabel>
               <div className="flex gap-2">
                 <Input
@@ -1085,7 +1470,7 @@ function SignInFields({
                 />
                 <Button
                   disabled={busy || code.trim().length === 0}
-                  onClick={onFinishCode}
+                  onClick={() => onFinishCode()}
                   size="sm"
                   type="button"
                   variant="outline"
@@ -1099,10 +1484,33 @@ function SignInFields({
               Waiting for you to approve it in your browser…
             </p>
           )}
-          <div>
+          {/*
+           * With the setting off, OpenAI takes the code and says so only on its own page, and the
+           * code can't be used after. Turned on, a new code is one press away.
+           */}
+          {chatGptCode ? (
+            <p className="text-muted-foreground text-sm">
+              Does OpenAI say device code sign-in is off? Turn it on in{" "}
+              <ChatGptSettingsLink>
+                ChatGPT's security settings
+              </ChatGptSettingsLink>
+              , then get a new code.
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {chatGptCode ? (
+              <Button
+                onClick={onSignIn}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Get a new code
+              </Button>
+            ) : null}
             {/* Its words line up with the lines above; the ghost button's padding hangs outside. */}
             <Button
-              className="-ml-2.5"
+              className={chatGptCode ? undefined : "-ml-2.5"}
               onClick={onCancel}
               size="sm"
               type="button"
@@ -1111,6 +1519,20 @@ function SignInFields({
               Cancel sign-in
             </Button>
           </div>
+        </div>
+      ) : null}
+      {/* A sign-in that failed or expired: why, just above the button that starts it again. */}
+      {failure && !waiting && !signedIn ? (
+        <div className="flex flex-col gap-1 text-sm">
+          <p className="text-destructive" role="alert">
+            {failureSaid(failure)}
+          </p>
+          {/* A code that didn't work: the setting it needs is the likeliest reason. */}
+          {chatGptCode ? (
+            <p>
+              <ChatGptSettingsLink />
+            </p>
+          ) : null}
         </div>
       ) : null}
       {signedIn || waiting ? null : (
@@ -1133,28 +1555,41 @@ function SignInFields({
           </Button>
         </div>
       )}
-      {signedIn || waiting || !onSignInWithCode ? null : (
-        <div className="flex flex-col items-start">
+      {/* ChatGPT's other way in, below the one chosen, before a sign-in starts. */}
+      {signedIn || waiting || !chatGptServer ? null : (
+        <div className="flex flex-col items-start gap-1 border-border border-t pt-3">
+          <p className="text-muted-foreground text-xs">
+            {desktopListens
+              ? chatGptWay === "code"
+                ? "Your browser can sign in instead. It finishes on its own once you approve."
+                : "You can also sign in with a code. It needs device code sign-in turned on in ChatGPT."
+              : chatGptWay === "code"
+                ? "Can't turn on device code sign-in? Your browser can sign in instead. Its last page won't load, and you paste that page's address here."
+                : "A code never shows a page that won't load. It needs device code sign-in turned on in ChatGPT."}
+          </p>
           {/* Its words line up with the lines above; the ghost button's padding hangs outside. */}
           <Button
-            className="-ml-2.5 text-muted-foreground"
+            className="-ml-2.5"
             disabled={busy}
-            onClick={onSignInWithCode}
+            onClick={() =>
+              onChatGptWay(chatGptWay === "code" ? "browser" : "code")
+            }
             size="sm"
             type="button"
             variant="ghost"
           >
-            Sign in with a code instead
+            {chatGptWay === "code"
+              ? desktopListens
+                ? "Sign in with your browser instead"
+                : "Copy an address instead"
+              : "Sign in with a code instead"}
           </Button>
-          <p className="text-muted-foreground text-xs">
-            This needs device code sign-in turned on in ChatGPT's security
-            settings.
-          </p>
         </div>
       )}
-      {failure ? (
+      {/* A code the server refused while the sign-in waits on; ChatGPT's paste box says it itself. */}
+      {failure && waiting && !chatGptInBrowser ? (
         <p className="text-destructive text-sm" role="alert">
-          {failure}
+          {failureSaid(failure)}
         </p>
       ) : null}
     </div>
@@ -1203,7 +1638,7 @@ export function ConnectedRow({
   connection,
   owner = "you",
 }: {
-  connection: AiConnection;
+  connection: DescribedConnection;
   owner?: AiConnectionOwner;
 }) {
   // Who is reading, only to say "your" of a sign-in they shared themselves.
@@ -1222,7 +1657,7 @@ export function ConnectedRow({
       <ItemActions>
         <IconCircleCheckFilled
           aria-label="Connected"
-          className="size-5 text-emerald-600 dark:text-emerald-400"
+          className="size-5 text-success"
         />
       </ItemActions>
     </Item>
@@ -1235,11 +1670,14 @@ export function Connected({
   desktopProblem,
   onClose,
   owner = "you",
+  added = false,
 }: {
-  connection: AiConnection;
+  connection: DescribedConnection;
   desktopProblem: string | null;
   onClose: () => void;
   owner?: AiConnectionOwner;
+  /** Connected beside the others, not as the default: it runs when one of its models is picked. */
+  added?: boolean;
 }) {
   const described = describeConnection(connection);
   return (
@@ -1249,9 +1687,11 @@ export function Connected({
           Connected to {described?.provider ?? "your AI"}
         </DialogTitle>
         <DialogDescription>
-          {owner === "organization"
-            ? "Bots use it for anyone in your organization who hasn't connected their own AI."
-            : "Your next message runs on it. Anything already running finishes on the connection it started with."}
+          {added
+            ? "Pick one of its models in a conversation to use it. The AI connected before stays the default."
+            : owner === "organization"
+              ? "Bots use it for anyone in your organization who hasn't connected their own AI."
+              : "Your next message runs on it. Anything already running finishes on the connection it started with."}
         </DialogDescription>
       </DialogHeader>
       <DialogBody className="mt-4 flex flex-col gap-3 text-sm">

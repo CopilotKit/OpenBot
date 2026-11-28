@@ -1,15 +1,30 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
+import { COMPUTER_START_WAIT_MS } from "@openbot/shared/computer-start";
 import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useFittedWidth } from "@/components/browser/fitted-window";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  useFittedWidth,
+  useFullWidthHeight,
+} from "@/components/browser/fitted-window";
 import {
   botBrowserKeys,
   botBrowserStateQueryOptions,
 } from "@/lib/bot-browser/queries";
 import type { ClientError } from "@/lib/client";
-import { botsReason, supplySecret } from "@/lib/computers/control";
+import {
+  botsReason,
+  passkeyNotice,
+  supplySecret,
+  waitingReason,
+} from "@/lib/computers/control";
 import {
   type ComputerState,
   computerStatusQueryOptions,
@@ -21,6 +36,7 @@ import {
   startComputer,
 } from "@/lib/computers/screen";
 import { useComputerControl } from "@/lib/computers/use-control";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 import { ChannelAvatar } from "../channels/avatar";
 import { BotBrowserBar, BotRecordPanel } from "./bot-browser";
@@ -130,9 +146,10 @@ function capitalise(text: string): string {
  * GENEROUS ON PURPOSE. A first start pulls an image, schedules a pod and launches a browser, and a
  * minute is ordinary. The panel used to call the first frameless poll a problem, so every cold start
  * opened on "Can't show the screen right now… ask an admin", in front of a person whose computer was
- * doing exactly what it should. Past the server's own wait for a cold start, with room to spare.
+ * doing exactly what it should. Past the wait a Bot's call gives a cold start (COMPUTER_START_WAIT_MS),
+ * with room to spare: until that wait is over, the Bot's step is still waiting, and so is the panel.
  */
-const STARTUP_GRACE_MS = 150_000;
+const STARTUP_GRACE_MS = COMPUTER_START_WAIT_MS + 30_000;
 
 /** How often a computer that has not drawn a frame yet is asked where it is. */
 const STATUS_POLL_MS = 2_000;
@@ -283,6 +300,9 @@ function BrowserWindow({
   const space = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLDivElement>(null);
   const width = useFittedWidth(space, frame, aspectRatio, { shown: live });
+  const tallest = useFullWidthHeight(space, frame, aspectRatio, {
+    shown: live,
+  });
   if (!live) return children;
   return (
     // Never less than a screen a person can work in: in a short window the card grows past it and the view scrolls.
@@ -292,9 +312,20 @@ function BrowserWindow({
     // window too, where they are under it. `flex-1` alone starts from 0%, which in a card as tall as its content is
     // the page's own height at the window's full width: the page took the window and Record was below the fold,
     // where a person scrolling over the Bot's page (which scrolls that page) never found it.
+    //
+    // NO TALLER THAN THE WINDOW AT FULL WIDTH, under a narrow window's wheel (`--page-room`, `useFullWidthHeight`).
+    // On a phone the window takes the full width and is still shorter than what the card has left, and the rest of
+    // the space, the floor's included, was a blank band between the Bot's page and Hand back. Held to the window's
+    // tallest, the wheel sits right under it and what is left is at the card's foot. Beside the wheel, in a wide
+    // window, the space is the column's height as before.
     <div
       ref={space}
-      className="flex min-h-80 min-w-0 flex-1 basis-0 items-start justify-center"
+      className="flex min-w-0 flex-1 basis-0 items-start justify-center max-lg:max-h-(--page-room) max-lg:min-h-[min(var(--page-room,100svh),calc(var(--spacing)*80))] lg:min-h-80"
+      style={
+        tallest === undefined
+          ? undefined
+          : ({ "--page-room": `${tallest}px` } as CSSProperties)
+      }
     >
       {/* Clipped rather than hidden: a hidden overflow would let this shrink below the screen's own floor. */}
       <div
@@ -441,7 +472,8 @@ export function ComputerView({
   } = useComputerControl(computerId, !settled);
   /** Held only until it is sent. Never lifted into a URL, a log, or anything that outlives this form. */
   const [secret, setSecret] = useState("");
-  const [secretProblem, setSecretProblem] = useState<string | null>(null);
+  // The refusal kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const [secretProblem, setSecretProblem] = useState<Failure | null>(null);
   const [sendingSecret, setSendingSecret] = useState(false);
   const pageVisible = usePageVisible();
   const [previewRef, previewIntersecting] = useElementVisible<HTMLElement>();
@@ -789,8 +821,12 @@ export function ComputerView({
    * believed somebody was driving it.
    */
   const wheelHere = driving && !settled;
-  /** What the Bot asked for the wheel for, when it asked. Never the person's own take. */
-  const reason = botsReason(control);
+  /** What the Bot asked for the wheel for, when it asked, and that the page wants a passkey once it does. */
+  const reason = waitingReason(control);
+  /** The page in front of the person holding the wheel asked for a passkey: the way through, said where they are. */
+  const passkey = passkeyNotice(control);
+  /** Said to the person holding the wheel: the passkey's way through when there is one, else the Bot's reason. */
+  const drivingReason = passkey ?? botsReason(control);
 
   const polledScreen = showScreen ? (
     <img
@@ -961,7 +997,7 @@ export function ComputerView({
 
         {/* The request reason appears above the always-available ownership controls. */}
         {!driving && !settled && control?.requested ? (
-          <div className="flex items-start justify-between gap-3 border-t bg-amber-500/10 px-3 py-2 text-sm">
+          <div className="flex items-start justify-between gap-3 border-t bg-warning/10 px-3 py-2 text-sm">
             <span>
               <strong className="font-medium">The Bot needs you.</strong>{" "}
               {reason}
@@ -1053,7 +1089,7 @@ export function ComputerView({
             </p>
             {secretProblem ? (
               <p className="mt-1 text-xs text-destructive" role="alert">
-                {secretProblem}
+                {failureSaid(secretProblem)}
               </p>
             ) : null}
           </form>
@@ -1067,7 +1103,7 @@ export function ComputerView({
             className="border-t bg-muted/40 px-3 py-2 text-sm text-destructive"
             role="alert"
           >
-            {secretProblem}
+            {failureSaid(secretProblem)}
           </p>
         ) : null}
 
@@ -1078,10 +1114,12 @@ export function ComputerView({
           quietly waiting on them.
         */}
         {!settled && driving && !control?.transitioning ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-amber-500/10 px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-warning/10 px-3 py-2">
             <span className="text-sm">
-              <strong className="font-medium">You have control.</strong> The Bot
-              waits until you hand it back. Open the screen to click and type.
+              <strong className="font-medium">You have control.</strong>{" "}
+              {passkey
+                ? `${passkey} Open the screen to click and type.`
+                : "The Bot waits until you hand it back. Open the screen to click and type."}
             </span>
             <ComputerControlButton
               computerId={computerId}
@@ -1288,17 +1326,22 @@ export function ComputerView({
                           {name}
                         </span>
                       ) : null}
+                      {/*
+                        Wrapped, never cut short: under the screen on a phone the sentence was "Click and type
+                        on t…", and the reason after it, the one thing the person was handed the wheel to do,
+                        was not shown at all.
+                      */}
                       {driving ? (
-                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                        <span className="text-muted-foreground">
                           You have control. Click and type on the page.
-                          {reason ? ` ${reason}` : null}
+                          {drivingReason ? ` ${drivingReason}` : null}
                         </span>
                       ) : someoneElse ? (
-                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                        <span className="text-muted-foreground">
                           Someone else has control.
                         </span>
                       ) : control?.requested ? (
-                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                        <span className="text-muted-foreground">
                           <strong className="font-medium text-foreground">
                             The Bot needs you.
                           </strong>{" "}
@@ -1320,8 +1363,10 @@ export function ComputerView({
                   <BotRecordPanel botId={computerId} state={botBrowser.data} />
                 ) : botBrowser.error ? (
                   <p className="text-destructive text-sm" role="alert">
-                    Couldn't load the Bot's browser. Close this and open it
-                    again.
+                    {loadFailure(
+                      botBrowser.error,
+                      "Couldn't load the Bot's browser. Close this and open it again.",
+                    )}
                   </p>
                 ) : null}
               </WheelColumn>

@@ -4,7 +4,6 @@ import {
   IconPlug,
   IconSettings,
   IconShieldLock,
-  IconSitemap,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -27,8 +26,7 @@ import { primitive } from "@/lib/primitives";
  * `section` says where OpenBot's sidebar puts each entry: `primary` destinations sit in its footer,
  * `account` ones in the menu under the person's name. A skin may group them its own way.
  *
- * The primary entries are what a person makes and comes back to: their Bots and the agents they
- * hand work to, then the every-Bot
+ * The primary entries are what a person makes and comes back to: their Bots, then the every-Bot
  * pages of Routines, Memory, Skills and Apps (Connections: the apps a Bot reaches as you), in the
  * order of `lib/primitives.ts`. Each is somebody's own, so none is inside Admin. What is set once
  * for every Bot (the computer, approvals, activity) is in Settings, and a Bot's own is on its page
@@ -39,7 +37,6 @@ export type NavigationItem =
       kind?: undefined;
       id:
         | "bots"
-        | "agents"
         | "routines"
         | "memory"
         | "skills"
@@ -50,7 +47,6 @@ export type NavigationItem =
       label: string;
       to:
         | "/bots"
-        | "/agents"
         | "/routines"
         | "/memory"
         | "/skills"
@@ -66,13 +62,12 @@ export type NavigationItem =
       teamOnly?: boolean;
       /** Shown only where OpenBot offers memory (see `offersMemory`). */
       memoryOnly?: boolean;
-      /** Kept in the list but shown to nobody, for now. Its page sends people home. */
-      hidden?: boolean;
     }
   | {
       /**
-       * Not a page: the personal edition's list of team features, opened as a dialog beside Admin.
-       * See `components/edition/team-features-dialog.tsx`, which every frame draws it through.
+       * Not a page: OpenBot for Business, opened as a dialog before Settings, in the personal
+       * edition and on OpenBot Cloud. See `components/edition/team-features-dialog.tsx`, which every
+       * frame draws it through.
        */
       kind: "dialog";
       id: "team-features";
@@ -103,17 +98,6 @@ export const NAVIGATION: readonly NavigationItem[] = [
     to: "/bots",
     icon: IconBolt,
     section: "primary",
-  },
-  {
-    // The agents Bots hand work to: the organization's, and a person's own private ones.
-    // Hidden for now: most people never hand work out, and "Agents" beside "Bots" reads as another
-    // name for a Bot. A Bot's own Agents page is hidden with it (routes/_authed/_app/bots.$agentId.agents.tsx).
-    id: "agents",
-    label: "Agents",
-    to: "/agents",
-    icon: IconSitemap,
-    section: "primary",
-    hidden: true,
   },
   {
     id: "routines",
@@ -181,18 +165,20 @@ export const NAVIGATION: readonly NavigationItem[] = [
  * personal edition that is the one person, whom single-user mode makes the admin. The personal
  * edition also lists what the team edition adds, right after Admin, and has no Memory (see
  * `offersMemory`) and no Teams.
+ *
+ * `cloud` is OpenBot Cloud (`hostedSignIn`): the team edition, run by OpenBot by CopilotKit, which
+ * offers OpenBot for Business in the same place. An OpenBot a company runs itself already is
+ * OpenBot for Business, so it never does.
  */
 export function navigationFor(
   role: string | undefined,
   edition: "team" | "personal" = "team",
+  cloud = false,
 ): readonly NavigationItem[] {
   const offered = NAVIGATION.filter(
-    (item) => item.kind === "dialog" || !item.hidden,
+    (item) =>
+      item.kind === "dialog" || !item.memoryOnly || offersMemory({ edition }),
   )
-    .filter(
-      (item) =>
-        item.kind === "dialog" || !item.memoryOnly || offersMemory({ edition }),
-    )
     .filter(
       (item) =>
         item.kind === "dialog" || !item.adminOnly || isOrganizationAdmin(role),
@@ -200,7 +186,7 @@ export function navigationFor(
     .filter(
       (item) => item.kind === "dialog" || !item.teamOnly || edition === "team",
     );
-  if (edition !== "personal") return offered;
+  if (edition !== "personal" && !cloud) return offered;
   const settings = offered.findIndex((item) => item.id === "settings");
   return [
     ...offered.slice(0, settings),
@@ -216,10 +202,23 @@ export function navigationFor(
 export function useNavigationItems(): readonly NavigationItem[] {
   const { data: user } = useQuery(currentUserQueryOptions());
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
-  const items = navigationFor(user?.role, capabilities?.edition ?? "team");
-  return capabilities
-    ? items
-    : items.filter(
-        (item) => item.kind === "dialog" || !(item.memoryOnly || item.teamOnly),
-      );
+  const items = navigationFor(
+    user?.role,
+    capabilities?.edition ?? "team",
+    capabilities?.hostedSignIn === true,
+  );
+  return capabilities ? items : beforeCapabilities(items);
+}
+
+/**
+ * What the main menu lists before the edition is known: without the destinations that wait for it
+ * (Memory, Teams). The frame drawn during the sign-in checks lists the same, so its strip has the
+ * rows the real one starts with.
+ */
+export function beforeCapabilities(
+  items: readonly NavigationItem[],
+): readonly NavigationItem[] {
+  return items.filter(
+    (item) => item.kind === "dialog" || !(item.memoryOnly || item.teamOnly),
+  );
 }

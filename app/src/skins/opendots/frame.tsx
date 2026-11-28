@@ -18,12 +18,15 @@ import {
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { DesktopAppMenuItem } from "@/components/app-sidebar/desktop-app-item";
+import { TroubleshootingLogsMenuItem } from "@/components/app-sidebar/troubleshooting-logs-item";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
 import {
   COMMAND_MENU_KEYS,
   openCommandMenu,
@@ -116,22 +119,22 @@ function RailUserMenu() {
           {/* The rail draws only the avatar, so the version sits under the name here. */}
           <OpenBotVersion className="-mt-1 max-w-56 px-1.5 pb-1 text-[10px] leading-3 text-muted-foreground" />
         </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DesktopAppMenuItem className="gap-2 px-2 py-1.5" />
+        <TroubleshootingLogsMenuItem className="gap-2 px-2 py-1.5" />
         {signOutOffered ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="gap-2 px-2 py-1.5"
-              disabled={signOut.isPending}
-              onClick={async () => {
-                const { leaving } = await signOut.mutateAsync();
-                if (!leaving) await navigate({ to: "/sign" });
-              }}
-              variant="destructive"
-            >
-              <IconLogout />
-              Sign out
-            </DropdownMenuItem>
-          </>
+          <DropdownMenuItem
+            className="gap-2 px-2 py-1.5"
+            disabled={signOut.isPending}
+            onClick={async () => {
+              const { leaving } = await signOut.mutateAsync();
+              if (!leaving) await navigate({ to: "/sign" });
+            }}
+            variant="destructive"
+          >
+            <IconLogout />
+            Sign out
+          </DropdownMenuItem>
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -517,6 +520,7 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
           place={place}
         />
         <ConnectionBanner />
+        <MovedAppsBanner />
         <UpdateBanner />
         <SelfHostBanner />
         <div className="relative flex min-h-0 flex-1">

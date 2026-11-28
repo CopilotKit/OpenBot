@@ -2961,6 +2961,12 @@
           "markdownDescription": "Enables the appearance command without any pre-configured scope."
         },
         {
+          "description": "Enables the await_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-await-sign-in-redirect",
+          "markdownDescription": "Enables the await_sign_in_redirect command without any pre-configured scope."
+        },
+        {
           "description": "Enables the begin_plan_sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-begin-plan-sign-in",
@@ -2973,6 +2979,12 @@
           "markdownDescription": "Enables the begin_provider_sign_in command without any pre-configured scope."
         },
         {
+          "description": "Enables the begin_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-begin-sign-in-redirect",
+          "markdownDescription": "Enables the begin_sign_in_redirect command without any pre-configured scope."
+        },
+        {
           "description": "Enables the cancel_plan_sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-cancel-plan-sign-in",
@@ -2983,6 +2995,12 @@
           "type": "string",
           "const": "openbot-desktop:allow-cancel-provider-sign-in",
           "markdownDescription": "Enables the cancel_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-cancel-sign-in-redirect",
+          "markdownDescription": "Enables the cancel_sign_in_redirect command without any pre-configured scope."
         },
         {
           "description": "Enables the change_ai_connection command without any pre-configured scope.",
@@ -3069,10 +3087,22 @@
           "markdownDescription": "Enables the quit command without any pre-configured scope."
         },
         {
+          "description": "Enables the record_problem command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-record-problem",
+          "markdownDescription": "Enables the record_problem command without any pre-configured scope."
+        },
+        {
           "description": "Enables the restart command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-restart",
           "markdownDescription": "Enables the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-save-logs",
+          "markdownDescription": "Enables the save_logs command without any pre-configured scope."
         },
         {
           "description": "Enables the set_organization command without any pre-configured scope.",
@@ -3171,6 +3201,12 @@
           "markdownDescription": "Denies the appearance command without any pre-configured scope."
         },
         {
+          "description": "Denies the await_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-await-sign-in-redirect",
+          "markdownDescription": "Denies the await_sign_in_redirect command without any pre-configured scope."
+        },
+        {
           "description": "Denies the begin_plan_sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-begin-plan-sign-in",
@@ -3183,6 +3219,12 @@
           "markdownDescription": "Denies the begin_provider_sign_in command without any pre-configured scope."
         },
         {
+          "description": "Denies the begin_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-begin-sign-in-redirect",
+          "markdownDescription": "Denies the begin_sign_in_redirect command without any pre-configured scope."
+        },
+        {
           "description": "Denies the cancel_plan_sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-cancel-plan-sign-in",
@@ -3193,6 +3235,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-cancel-provider-sign-in",
           "markdownDescription": "Denies the cancel_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-cancel-sign-in-redirect",
+          "markdownDescription": "Denies the cancel_sign_in_redirect command without any pre-configured scope."
         },
         {
           "description": "Denies the change_ai_connection command without any pre-configured scope.",
@@ -3279,10 +3327,22 @@
           "markdownDescription": "Denies the quit command without any pre-configured scope."
         },
         {
+          "description": "Denies the record_problem command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-record-problem",
+          "markdownDescription": "Denies the record_problem command without any pre-configured scope."
+        },
+        {
           "description": "Denies the restart command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-restart",
           "markdownDescription": "Denies the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-save-logs",
+          "markdownDescription": "Denies the save_logs command without any pre-configured scope."
         },
         {
           "description": "Denies the set_organization command without any pre-configured scope.",

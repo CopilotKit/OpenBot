@@ -84,6 +84,27 @@ test("a routine firing is not a turn the person took", () => {
   expect(turns.map((turn) => turn.id)).toEqual(["u1"]);
 });
 
+test("an answer to the Bot's question is part of the turn it was asked in", () => {
+  const turns = turnsOf([
+    said("u1", "user", "How many seed packets?"),
+    said("a1", "assistant", "Which variety?"),
+    said("person-response:q1", "user", "Moonglow tomato"),
+    said("a2", "assistant", "42 packets."),
+    said("u2", "user", "And the price?"),
+    said("a3", "assistant", "3.20 each."),
+  ]);
+
+  expect(turns).toEqual([
+    {
+      id: "u1",
+      index: 0,
+      prompt: "How many seed packets?",
+      reply: "Which variety?",
+    },
+    { id: "u2", index: 4, prompt: "And the price?", reply: "3.20 each." },
+  ]);
+});
+
 test("a turn still waiting for its reply has none", () => {
   expect(turnsOf([said("u1", "user", "Hello")])).toEqual([
     { id: "u1", index: 0, prompt: "Hello", reply: "" },

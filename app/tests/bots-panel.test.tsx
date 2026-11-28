@@ -18,7 +18,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
@@ -526,7 +526,9 @@ test("a Bot's pinned conversations stay first under it, whatever moved since", a
     .getByRole("heading", { level: 2, name: "Bots" })
     .closest("[data-slot=section-panel]");
   const titles = [
-    ...(panel?.querySelectorAll<HTMLElement>("a[href^='/channel/']") ?? []),
+    ...(panel?.querySelectorAll<HTMLElement>(
+      "[data-slot=bot-conversation-row]",
+    ) ?? []),
   ].map((link) => link.textContent);
   expect(titles[0]).toContain("Pinned one");
   expect(titles[1]).toContain("Just now");
@@ -546,7 +548,7 @@ test("after switching to Conversations, a conversation opened there keeps Conver
   await waitFor(() =>
     expect(router.state.location.pathname).toBe("/channel/i1"),
   );
-  await user.click(view.getByRole("button", { name: "Conversations" }));
+  await user.click(view.getByRole("button", { name: "Chats" }));
   await view.findByRole("heading", { level: 2, name: "Conversations" });
   await router.navigate({
     to: "/channel/$channelId",
@@ -560,6 +562,41 @@ test("after switching to Conversations, a conversation opened there keeps Conver
   ).toBeTruthy();
 });
 
+test("a conversation with a Bot starts under it: Start one with none, New conversation first with some", async () => {
+  served.invoice = () =>
+    Response.json(
+      conversationPage([conversation("i1", ["invoice"], "Open Acme invoices")]),
+    );
+  const { view, user, router } = renderPanel();
+  await view.findByText("Open Acme invoices");
+  const invoice = view
+    .getByRole("button", { name: "Hide Invoice Review's conversations" })
+    .closest("li") as HTMLElement;
+  const under = [...invoice.querySelectorAll("[data-slot=bot-row] ~ div a")];
+  expect(under.map((link) => link.textContent)).toEqual([
+    "New conversation",
+    expect.stringContaining("Open Acme invoices"),
+  ]);
+
+  expect(
+    view
+      .getByRole("link", { name: "New conversation with Invoice Review" })
+      .getAttribute("href"),
+  ).toBe("/channel/new?agent=invoice");
+
+  const start = await view.findByRole("link", {
+    name: "Start one with Finance Ops",
+  });
+  expect(start.closest("p")?.textContent).toBe(
+    "No conversations with this Bot yet. Start one.",
+  );
+  await user.click(start);
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/channel/new"),
+  );
+  expect(router.state.location.search).toEqual({ agent: "finance" });
+});
+
 test("a Bot's row is filled only on hover, not for being its page", async () => {
   const { view, router } = renderPanel();
   await view.findByRole("heading", { level: 2, name: "Bots" });
@@ -570,4 +607,19 @@ test("a Bot's row is filled only on hover, not for being its page", async () => 
   const link = await view.findByRole("link", { name: /^Invoice Review/ });
   await waitFor(() => expect(link.getAttribute("data-status")).toBe("active"));
   expect(link.className.split(/\s+/)).not.toContain("bg-foreground/5");
+});
+
+test("right-clicking a Bot offers a new conversation with it", async () => {
+  const { view, user, router } = renderPanel();
+  const bot = await view.findByRole("link", { name: /^Old Helper/ });
+  fireEvent.contextMenu(bot);
+  await user.click(
+    await view.findByRole("menuitem", {
+      name: "New conversation with Old Helper",
+    }),
+  );
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/channel/new"),
+  );
+  expect(router.state.location.search).toEqual({ agent: "old" });
 });

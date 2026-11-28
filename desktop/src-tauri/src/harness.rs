@@ -44,6 +44,9 @@ pub enum Credential {
     /// *subscription* only ever buys its own vendor's models, and this is the row where the
     /// subscription path exists.
     Anthropic,
+    /// A ChatGPT plan, signed in to with Sign in with ChatGPT, and nothing else: the OpenAI Agents
+    /// SDK engine reads the plan's token and has no key path of its own.
+    ChatgptPlan,
     /// Google, and only Google.
     ///
     /// Separate from `AnyProvider` because Antigravity's bundled harness requires a Gemini key
@@ -63,13 +66,11 @@ THE CONSTRAINT IS ON THE LOGIN, NOT THE FRAMEWORK, and this is where that bites.
 the list takes any model through an API key, so the Bot step and the model step are independent
 there. A subscription is different: it only ever buys that vendor's own models, and only through a
 path that speaks that vendor's subscription auth. Anthropic's is the Claude Agent SDK, which reads
-`CLAUDE_CODE_OAUTH_TOKEN`; OpenAI's is the Codex model, which the LangGraph AG-UI image selects from
-the token store.
+`CLAUDE_CODE_OAUTH_TOKEN`; OpenAI's is the OpenAI Agents SDK, on the token OpenAI's official Sign
+in with ChatGPT plan usage issues (`crate::chatgpt_sign_in`), sent to the public Responses API.
 
-A ChatGPT plan runs on the TypeScript LangGraph Bot, like every other sign-in but the Claude plan,
-and that Bot sends its model calls to the Python LangGraph image, which holds the Codex transport.
-So a ChatGPT-plan installation keeps the Python image running beside its Bot: see
-`crate::plan::CHATGPT_PLAN_SERVICE`.
+Each plan's Bot is its vendor's own agent SDK, run as the plan's engine
+(`crate::ai_connection::Plan`), so the vendor keeps it working with its own sign-in.
 
 MEASURED, on the screen built to catch it: signing in to a Claude plan and keeping the default Bot
 produced a stack that came up clean and a Bot whose own log said "Missing credentials. Please pass
@@ -81,7 +82,7 @@ Nobody is asked to know this. The plan picks the Bot that can use it.
 pub fn speaking_for(provider: &str) -> Option<&'static str> {
     match provider {
         "anthropic" => Some("claude-agent-sdk"),
-        "openai" => Some(DEFAULT_HARNESS),
+        "openai" => Some("openai-agents-sdk"),
         _ => None,
     }
 }
@@ -273,12 +274,48 @@ at a container nobody started — which looks like a broken Bot rather than a ba
 */
 pub fn picked(
     choice: Option<&HarnessChoice>,
+    root: &std::path::Path,
+) -> Result<Option<crate::env::PickedHarness>, String> {
+    pick(choice, root).map_err(String::from)
+}
+
+/// Why [`pick`] refused: the pick itself, or an image list it could not read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PickError {
+    /// The release's image list is missing or unreadable. Not about the pick: the installation is
+    /// damaged, and Install puts the list back (`deployment::ReferenceError::Unreadable`).
+    ImageList(String),
+    /// The pick itself: a Bot this build does not have, one this release does not publish, or an
+    /// address that is not one.
+    Refused(String),
+}
+
+impl From<PickError> for String {
+    fn from(error: PickError) -> Self {
+        match error {
+            PickError::ImageList(detail) | PickError::Refused(detail) => detail,
+        }
+    }
+}
+
+impl From<crate::deployment::ReferenceError> for PickError {
+    fn from(error: crate::deployment::ReferenceError) -> Self {
+        match error {
+            crate::deployment::ReferenceError::Unreadable(detail) => Self::ImageList(detail),
+            crate::deployment::ReferenceError::NotIncluded(detail) => Self::Refused(detail),
+        }
+    }
+}
+
+/// [`picked`], saying whether the refusal is about the pick or about an unreadable image list.
+pub fn pick(
+    choice: Option<&HarnessChoice>,
     // Where the deployment is, because the image reference is read from the manifest laid down
     // beside it. A name built from a version was what this took before, and an unqualified name
     // sends every engine to Docker Hub: the pull was refused there and the person was shown a
     // registry permissions error for a repository that had never been pushed.
     root: &std::path::Path,
-) -> Result<Option<crate::env::PickedHarness>, String> {
+) -> Result<Option<crate::env::PickedHarness>, PickError> {
     let Some(choice) = choice else {
         return Ok(None);
     };
@@ -289,7 +326,9 @@ pub fn picked(
     let row = catalogue()
         .into_iter()
         .find(|row| row.id == id)
-        .ok_or_else(|| format!("There is no Bot called \"{id}\" to install."))?;
+        .ok_or_else(|| {
+            PickError::Refused(format!("There is no Bot called \"{id}\" to install."))
+        })?;
     if row.id == "byo-url" {
         let url = choice
             .agent_url
@@ -297,7 +336,8 @@ pub fn picked(
             .ok_or_else(|| {
                 "Enter a valid http:// or https:// address for the agent endpoint.".to_string()
             })
-            .and_then(byo_remote_ag_ui_url)?;
+            .and_then(byo_remote_ag_ui_url)
+            .map_err(PickError::Refused)?;
         return Ok(Some(crate::env::PickedHarness::RemoteAgUi {
             url,
             name: row.name,
@@ -305,11 +345,13 @@ pub fn picked(
         }));
     }
     let (Some(image), Some(port)) = (row.image, row.port) else {
-        return Err(format!("\"{id}\" is not a Bot this can install."));
+        return Err(PickError::Refused(format!(
+            "\"{id}\" is not a Bot this can install."
+        )));
     };
     let mastra = row.id == "mastra";
     Ok(Some(crate::env::PickedHarness::Installed {
-        image: crate::deployment::reference(root, &image)?,
+        image: crate::deployment::image_reference(root, &image)?,
         port,
         name: row.name,
         mastra,
@@ -491,7 +533,10 @@ mod tests {
                 },
                 ts,
             ),
-            (ModelCredential::ChatGptPlan { store: "{}".into() }, ts),
+            (
+                ModelCredential::ChatGptPlan { store: "{}".into() },
+                "ghcr.io/copilotkit/openbot-agent-openai-agents@sha256:abc",
+            ),
             (
                 ModelCredential::ClaudePlan {
                     token: "plan".into(),
@@ -518,18 +563,14 @@ mod tests {
         let ts = "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc";
         // Install, which has no credential and pulls what the saved choice resolves to.
         assert_eq!(installed_image(&root, saved.clone()), ts);
-        for credential in [
-            ModelCredential::OpenAi {
-                api_key: "sk-test".into(),
-            },
-            ModelCredential::ChatGptPlan { store: "{}".into() },
-        ] {
-            assert_eq!(
-                installed_image(&root, for_credential(&credential, saved.clone())),
-                ts,
-                "{credential:?}"
-            );
-        }
+        let credential = ModelCredential::OpenAi {
+            api_key: "sk-test".into(),
+        };
+        assert_eq!(
+            installed_image(&root, for_credential(&credential, saved.clone())),
+            ts,
+            "{credential:?}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -592,12 +633,13 @@ mod tests {
         }
     }
 
-    /// Anything the AG-UI table marks In Progress stays off. These three were In Progress when the
-    /// list was read, and offering one would mean a row that cannot answer.
+    /// Anything the AG-UI table marks In Progress stays off. These were In Progress when the list
+    /// was read, and offering one would mean a row that cannot answer. (The OpenAI Agents SDK has
+    /// since shipped its AG-UI integration, ag-ui-openai-agents, and runs a ChatGPT plan.)
     #[test]
     fn nothing_still_in_progress_upstream_is_offered() {
         let ids: Vec<String> = catalogue().into_iter().map(|h| h.id).collect();
-        for absent in ["openai-agents-sdk", "bedrock-agents", "cloudflare-agents"] {
+        for absent in ["bedrock-agents", "cloudflare-agents"] {
             assert!(
                 !ids.contains(&absent.to_string()),
                 "{absent} is In Progress upstream"

@@ -151,11 +151,11 @@ export const getCreateOrganizationInvitationResponseMock =
 
 export const getGetOrganizationPlanResponseMock = (): OrganizationPlan => ({
   required: true,
-  status: "trialing",
-  trialEndsAt: "2026-12-20T09:30:00Z",
+  status: "free",
+  freeRunsUsedPercent: 42,
+  trialEndsAt: null,
   renewsAt: null,
-  addCardUrl:
-    "/api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe",
+  addCardUrl: null,
 });
 
 export const getListInvitationsResponseMock = (): InvitationPage => ({

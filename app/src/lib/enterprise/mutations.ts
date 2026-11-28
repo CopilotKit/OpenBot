@@ -11,11 +11,13 @@ import {
 } from "@/lib/api/generated/network-policies/network-policies";
 import {
   stopInactiveComputers,
+  updateAppsSetting,
   updateOrganizationSettings,
 } from "@/lib/api/generated/organization-settings/organization-settings";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { modelKeys } from "@/lib/models/queries";
+import { invalidatePlugins } from "@/lib/plugins/mutations";
 import {
   type CapabilityKey,
   type EgressRule,
@@ -90,6 +92,39 @@ export function setEnterpriseSettingMutationOptions(queryClient: QueryClient) {
       Promise.all([
         invalidateEnterprise(queryClient),
         queryClient.invalidateQueries({ queryKey: modelKeys.all }),
+      ]),
+  });
+}
+
+/**
+ * Open the organization's apps, or lock them down (`lockedDown`, at the apps setting's own address).
+ * Either changes what giving an app does from then on. Locking down takes nothing back unless
+ * `takeBackWhatOpenGave` asks it to: what OpenBot gave Bots by itself while open goes, and what
+ * anybody gave by hand stays. Opening never sends it.
+ */
+export function setAppsLockedDownMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (
+      variables:
+        | { lockedDown: true; takeBackWhatOpenGave: boolean }
+        | { lockedDown: false },
+    ) => {
+      await updateAppsSetting(
+        organizationId(),
+        variables,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't change how apps are given. Try again." },
+      );
+    },
+    /*
+     * What every Bot may use moves with it: each app's page and Bots, and a Bot's own app list, are
+     * asked again beside the settings.
+     */
+    onSuccess: () =>
+      Promise.all([
+        invalidateEnterprise(queryClient),
+        invalidatePlugins(queryClient),
+        queryClient.invalidateQueries({ queryKey: agentKeys.all }),
       ]),
   });
 }

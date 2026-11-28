@@ -3,6 +3,7 @@ import type { ServiceTerms } from "@/lib/api/generated/model";
 import { getServiceTerms } from "@/lib/api/generated/people/people";
 import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { unavailableSaid } from "@/lib/load-failure";
 
 /**
  * The terms of service a person agrees to before they use OpenBot (getServiceTerms): the version in
@@ -24,16 +25,17 @@ const NO_TERMS: ServiceTerms = {
 };
 
 /**
- * A 404 that says the person isn't there is about them, and fails like any other refusal. Any
- * other 404 is an OpenBot older than this operation, which has no terms. An organization not found
- * is read the same way: every other read in it fails too, and the app's own page for that answers
- * the person (OrganizationBoundary), where the terms screen would only say it couldn't load.
+ * Whether a failed read is an OpenBot older than this operation, which has no terms: the address
+ * is not served, so it is the API's plain not found (`NOT_FOUND`), or a 404 that names no code at
+ * all, as `noSuchAddress` reads it in lib/organizations/queries.ts. Every other 404 is a refusal
+ * about this request (the person or the organization it names not found) and fails like any other.
+ * It says nothing about whether the person agreed, so it never lets them past the terms.
  */
 function olderOpenBot(error: unknown): boolean {
   return (
     error instanceof ClientError &&
     error.status === 404 &&
-    error.code !== "PERSON_NOT_FOUND"
+    (error.code === undefined || error.code === "NOT_FOUND")
   );
 }
 
@@ -63,6 +65,12 @@ export function serviceTermsQueryOptions() {
  * OpenBot Cloud person use it without agreeing, so the terms screen takes them instead, says the
  * read failed and offers Try again. An OpenBot with no terms answers no without failing, and an
  * older one's 404 is read as no terms above, so neither ever shows the screen.
+ *
+ * Except a hold: OpenBot moving the organization, or its database out of reach for a moment (503
+ * with its sentence and Retry-After, lib/load-failure.tsx). That says nothing about the terms, and
+ * somebody who agreed long ago was shown "Agree to the terms". It is thrown on, so the gate's page
+ * says the hold calmly ("Back in a moment") and goes on by itself once OpenBot answers, as every
+ * other page does. Nobody gets in without the answer.
  */
 export async function serviceTermsRequired(
   queryClient: QueryClient,
@@ -70,7 +78,8 @@ export async function serviceTermsRequired(
   try {
     return (await queryClient.ensureQueryData(serviceTermsQueryOptions()))
       .acceptanceNeeded;
-  } catch {
+  } catch (error) {
+    if (unavailableSaid(error) !== undefined) throw error;
     return true;
   }
 }

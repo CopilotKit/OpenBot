@@ -43,6 +43,9 @@ export const getGetExportEstimateResponseMock = (): ExportEstimate => ({
       botNames: ["Inbox helper", "Standup"],
     },
   ],
+  carried: [
+    { appId: "fireflies", appName: "Fireflies", botNames: ["Standup"] },
+  ],
   modelKeysAvailable: true,
 });
 

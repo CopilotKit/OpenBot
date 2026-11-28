@@ -10,7 +10,6 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   activitySummary,
-  BotActivityGlance,
   BotActivityRow,
   BotActivitySections,
 } from "@/components/bot-profile/activity";
@@ -105,7 +104,6 @@ test("a goal that runs only when asked is counted as on demand, never as schedul
 
   const page = glance(data);
   expect(await page.findByText("1 scheduled · 1 on demand")).toBeTruthy();
-  expect(page.getByText("Watch OpenBot releases")).toBeTruthy();
   cleanup();
 
   // The Activity page lists both under Recurring, which ends on a row to the Bot's Routines.
@@ -239,7 +237,7 @@ test("the newest three suggestions show, and the rest open in place", async () =
 
 function glance(
   data: Partial<BotActivity>,
-  Component: typeof BotActivityGlance = BotActivityGlance,
+  Component: (props: { agentId: string }) => React.ReactNode = BotActivityRow,
   tasks: readonly unknown[] = [],
 ) {
   global.fetch = (async (input: RequestInfo | URL) =>
@@ -269,43 +267,27 @@ function glance(
   );
 }
 
-test("running and scheduled work shows on the Bot's page, running first, three at most", async () => {
-  const view = glance({
+test("For you always has the row to Activity, counting what is running and lined up", async () => {
+  const busy = glance({
     inProgress: items(2, "Running", true),
     scheduled: items(3, "Scheduled"),
     completed: items(9, "Done"),
   });
-
-  expect(await view.findByText("Running 1")).toBeTruthy();
+  expect(await busy.findByText("2 in progress · 3 scheduled")).toBeTruthy();
   const titles = [
-    ...view.container.querySelectorAll("[data-slot=item-title]"),
+    ...busy.container.querySelectorAll("[data-slot=item-title]"),
   ].map((title) => title.textContent);
-  expect(titles).toEqual([
-    "Running 1",
-    "Running 2",
-    "Scheduled 1",
-    "All activity",
-  ]);
-  expect(view.getByText("2 in progress · 3 scheduled")).toBeTruthy();
-  expect(view.queryByText("Done 1")).toBeNull();
-});
+  // Only the row: what is running and lined up is listed on the Activity page it opens.
+  expect(titles).toEqual(["Activity"]);
+  expect(busy.queryByText("Running 1")).toBeNull();
+  cleanup();
 
-test("with nothing running or scheduled, there is no Activity section, and For you holds the one row", async () => {
-  const idle = {
+  const idle = glance({
     inProgress: [],
     scheduled: [],
     completed: items(4, "Done"),
-  };
-  const section = glance(idle);
-  const row = glance(idle, BotActivityRow);
-
-  expect(await row.findByText("Nothing running or scheduled")).toBeTruthy();
-  const titles = [
-    ...row.container.querySelectorAll("[data-slot=item-title]"),
-  ].map((title) => title.textContent);
-  expect(titles).toEqual(["Activity"]);
-  expect(section.container.querySelector("[data-slot=item]")).toBeNull();
-  expect(section.queryByRole("heading", { name: "Activity" })).toBeNull();
+  });
+  expect(await idle.findByText("Nothing running or scheduled")).toBeTruthy();
 });
 
 /** One of the Bot's delegated tasks, as the API answers it. */
@@ -364,11 +346,14 @@ test("a long title is cut to one line with an ellipsis, and the whole of it show
   const long =
     "Check the latest release of CopilotKit/OpenBot on GitHub (https://github.com/CopilotKit/OpenBot/releases) and post one line in this conversation with its version number (tag) and release date.";
   const [scheduled] = items(1, "Scheduled");
-  const view = glance({
-    inProgress: [],
-    scheduled: [{ ...(scheduled as ActivityItem), title: long }],
-    completed: [],
-  });
+  const view = glance(
+    {
+      inProgress: [],
+      scheduled: [{ ...(scheduled as ActivityItem), title: long }],
+      completed: [],
+    },
+    BotActivitySections,
+  );
 
   const title = await view.findByText(long);
   expect(title.getAttribute("data-slot")).toBe("item-title");
@@ -380,11 +365,14 @@ test("a long title is cut to one line with an ellipsis, and the whole of it show
 
 test("a goal's activity row says Goal and opens the Bot's routines", async () => {
   const [running] = items(1, "Close the month");
-  const view = glance({
-    inProgress: [{ ...(running as ActivityItem), kind: "responsibility" }],
-    scheduled: [],
-    completed: [],
-  });
+  const view = glance(
+    {
+      inProgress: [{ ...(running as ActivityItem), kind: "responsibility" }],
+      scheduled: [],
+      completed: [],
+    },
+    BotActivitySections,
+  );
   const title = await view.findByText("Close the month 1");
   const row = title.closest("a");
   expect(row?.getAttribute("href")).toBe("/bots/scout/routines");

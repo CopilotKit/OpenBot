@@ -1,6 +1,7 @@
 import { type Icon, IconLogout, IconMessages } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
-import type { CSSProperties, ReactNode } from "react";
+import { Link, useRouterState } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BrandName } from "@/components/edition/brand-name";
 import { Strip, StripItem } from "@/components/layout/strip";
 import { openNewOrganization } from "@/components/organizations/new-organization-dialog";
@@ -19,7 +20,6 @@ import {
   type NavigationLink,
   useNavigationItems,
 } from "@/lib/navigation";
-import { ORB_PALETTES } from "@/lib/orb-palette";
 import {
   useOrganizationChoices,
   useWaitingInvitationCount,
@@ -38,11 +38,20 @@ import {
   AccountRow,
   accountMenuClassName,
   accountMenuItemClassName,
+  StripVersion,
 } from "./account-label";
+import { DesktopAppMenuItem } from "./desktop-app-item";
+import { TroubleshootingLogsMenuItem } from "./troubleshooting-logs-item";
 import { useSignOut } from "./use-sign-out";
 
-/** The orb's palette: periwinkle, the nearest of the eight to OpenBot's own mark. */
-const ORB_COLORS = ORB_PALETTES[2];
+/**
+ * The strip's own short names, where a section's name is too long to sit under its icon in a narrow
+ * strip. Only the strip says them: the panel or page each opens keeps its full name.
+ */
+const STRIP_NAMES: Partial<Record<string, string>> = {
+  [CONVERSATIONS]: "Chats",
+  connections: "Apps",
+};
 
 /** OpenBot's orb at the top of the strip. It goes home, as the product's name did. */
 function HomeOrb() {
@@ -52,18 +61,9 @@ function HomeOrb() {
       className="flex size-9 items-center justify-center rounded-full outline-hidden ring-sidebar-ring focus-visible:ring-2"
       to="/"
     >
-      <span
-        aria-hidden="true"
-        className="bot-orb-still inline-block size-7 rounded-full ring-1 ring-foreground/10"
-        style={
-          {
-            "--c1": ORB_COLORS.c1,
-            "--c2": ORB_COLORS.c2,
-            "--c3": ORB_COLORS.c3,
-            "--c4": ORB_COLORS.c4,
-          } as CSSProperties
-        }
-      />
+      <div aria-hidden="true">
+        <AgentOrb size="28px" />
+      </div>
     </Link>
   );
 }
@@ -93,10 +93,14 @@ function PanelItem({
       icon={icon}
       label={label}
       onClick={() => {
-        show(id);
         // A narrow window's sheet shows the strip and the panel together: nothing to fold.
-        if (isMobile) return;
-        setOpen(current ? !open : true);
+        if (!isMobile) setOpen(current ? !open : true);
+        /*
+         * After opening the panel, not before: on a page whose section has none (Routines), opening
+         * it asks the frame for a section that has one, which is Conversations. The last section
+         * asked for is the one that opens, and it is this one.
+         */
+        show(id);
       }}
     />
   );
@@ -104,7 +108,10 @@ function PanelItem({
 
 /** One of the main menu's destinations with no panel, as a section whose pages it opens. */
 function PageItem({ item }: { item: NavigationLink }) {
-  const { section, page } = useOpenSection();
+  const { section, page, show } = useOpenSection();
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
   const recording = useLiveRecording();
   // Skills says when a recording is live: teaching a Bot a task is how a skill is recorded.
   const recordingHere = item.id === "skills" ? recording : null;
@@ -115,14 +122,25 @@ function PageItem({ item }: { item: NavigationLink }) {
       aria-current={page === item.id ? "page" : undefined}
       end={recordingHere ? <RecordingDot {...recordingHere} /> : null}
       icon={item.icon}
-      label={item.label}
+      label={STRIP_NAMES[item.id] ?? item.label}
+      /*
+       * Already on its page, the link goes nowhere, so the page cannot hand the strip back: a
+       * panel opened over it (Bots on Routines) kept its icon lit and Routines could not be chosen.
+       * Opening the section here does what arriving on the page would have.
+       */
+      onClick={() => {
+        if (pathname === item.to) show(item.id);
+      }}
       render={<Link to={item.to} />}
       tooltip={recordingHere?.label}
     />
   );
 }
 
-/** The account at the strip's foot, and the menu it opens: organizations, the account's pages, Sign out. */
+/**
+ * The account at the strip's foot, and the menu it opens: organizations, the account's pages, Get
+ * the desktop app on OpenBot Cloud, Get troubleshooting logs, Sign out.
+ */
 function StripAccount() {
   const navigation = useNavigationItems();
   const signOut = useSignOut();
@@ -175,6 +193,8 @@ function StripAccount() {
               <BrandName>{item.label}</BrandName>
             </DropdownMenuItem>
           ))}
+        <DesktopAppMenuItem className={accountMenuItemClassName} />
+        <TroubleshootingLogsMenuItem className={accountMenuItemClassName} />
         {signOutOffered ? (
           <DropdownMenuItem
             className={accountMenuItemClassName}
@@ -193,14 +213,27 @@ function StripAccount() {
 
 /**
  * The app's strip: the orb, Conversations, the main menu's destinations in the shared list's order
- * (`lib/navigation.ts`), and the account at the foot. A section with a panel switches the panel and
- * leaves the page alone; any other opens its page.
+ * (`lib/navigation.ts`), and the account at the foot, with the release the server runs under it on
+ * OpenBot Cloud. A section with a panel switches the panel and leaves the page alone; any other
+ * opens its page.
  */
 export function SectionStrip() {
   const navigation = useNavigationItems();
   return (
-    <Strip footer={<StripAccount />} header={<HomeOrb />}>
-      <PanelItem icon={IconMessages} id={CONVERSATIONS} label="Conversations" />
+    <Strip
+      footer={
+        <>
+          <StripAccount />
+          <StripVersion />
+        </>
+      }
+      header={<HomeOrb />}
+    >
+      <PanelItem
+        icon={IconMessages}
+        id={CONVERSATIONS}
+        label={STRIP_NAMES[CONVERSATIONS] ?? "Conversations"}
+      />
       {navigation
         .filter(isNavigationLink)
         .filter((item) => item.section === "primary")
@@ -212,7 +245,7 @@ export function SectionStrip() {
               icon={item.icon}
               id={item.id}
               key={item.id}
-              label={item.label}
+              label={STRIP_NAMES[item.id] ?? item.label}
             />
           ) : (
             <PageItem item={item} key={item.id} />

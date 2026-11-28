@@ -8,7 +8,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
 import {
   PageEmpty,
@@ -16,6 +16,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { ORGANIZATION_SWITCH } from "@/components/manage/organization-app-switch";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
@@ -23,6 +24,7 @@ import {
   NotConnected,
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
+import { KeyVersionOffer } from "@/components/plugins/key-version";
 import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
 import { AppTeamGrantsRow } from "@/components/team-grants/team-grants-row";
 import { Button } from "@/components/ui/button";
@@ -56,6 +58,7 @@ import {
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
+  setEveryBotMutationOptions,
   setOwnerGrantsMutationOptions,
 } from "@/lib/apps/mutations";
 import {
@@ -63,10 +66,20 @@ import {
   appsQueryOptions,
   catalogueQueryOptions,
 } from "@/lib/apps/queries";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { storeMcpToken } from "@/lib/credentials/mutations";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
 import { atStart, useManagePaths } from "@/lib/manage-paths";
+import { signsInForDirectory } from "@/lib/plugins/directory-state";
 import {
   connectAccountMutationOptions,
   grantPlugin,
@@ -91,7 +104,10 @@ import {
   describeApproval,
 } from "@/lib/plugins/shared-use";
 import { toolInWords, toolName } from "@/lib/plugins/tool-words";
-import { toolsListError } from "@/lib/plugins/tools-error";
+import {
+  listsToolsOnceConnected,
+  toolsListError,
+} from "@/lib/plugins/tools-error";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 
 /**
@@ -248,7 +264,7 @@ export function connectionKindFor(
  * buttons — somebody reading with a screen reader has to be told the controls are gone and why,
  * not left to notice their absence.
  */
-function ConnectionStateUnreadable() {
+function ConnectionStateUnreadable({ error }: { error: unknown }) {
   const paths = useManagePaths();
   return (
     <Item size="sm">
@@ -256,9 +272,12 @@ function ConnectionStateUnreadable() {
         <ItemTitle>Your account</ItemTitle>
         <ItemDescription role="alert">
           {/* A hosted OpenBot's logs are OpenBot by CopilotKit's: its admin can't read them. */}
-          {paths.hosted
-            ? "Couldn't load whether you've connected an account here. Try again in a moment."
-            : `Couldn't load whether you've connected an account here. Try again in a moment, or check ${paths.deploymentName}'s logs if it keeps happening.`}
+          {loadFailure(
+            error,
+            paths.hosted
+              ? "Couldn't load whether you've connected an account here. Try again in a moment."
+              : `Couldn't load whether you've connected an account here. Try again in a moment, or check ${paths.deploymentName}'s logs if it keeps happening.`,
+          )}
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -268,15 +287,30 @@ function ConnectionStateUnreadable() {
 export function PluginPage({
   pluginKey: key,
   startConnect = false,
+  startAdd,
+  onAdded,
 }: {
   pluginKey: string;
-  /** Open the key form on arrival, for an app Browse apps just added that takes a key. */
+  /**
+   * Start connecting on arrival: the key form for an app that takes a key (Browse apps just added
+   * it), the sign-in for one that signs in (Reconnect on Connections, or on a card's shared account).
+   */
   startConnect?: boolean;
+  /**
+   * Open the form a catalogue entry needs before it can be added, on arrival: its instance host or
+   * its access token. The list of apps to reconnect after a move opens it, so the admin's Reconnect
+   * is one press.
+   */
+  startAdd?: "instance" | "token";
+  /** Once the app is added here, where the page was opened to add it from somewhere else. */
+  onAdded?: () => void;
 }) {
   const paths = useManagePaths();
   // One person: adding and connecting are one step, and nothing here is about other people.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  // Whether this person may add apps, for the offer of an app's key version below.
+  const role = useQuery(currentUserQueryOptions()).data?.role;
   // Whose vault a secret saved here goes into: each organization has its own.
   const vaultOwner = personal ? "OpenBot" : "this organization";
   // Routines is on for every Bot in every edition and has no off switch. See personal-defaults.ts.
@@ -314,6 +348,11 @@ export function PluginPage({
   ).find((row) => row.serverId === key);
   const youConnected = connection !== undefined;
   /*
+   * A sign-in the vendor withdrew: the row stands over a revoked grant. It read as Connected with
+   * nothing to press; it is offered Reconnect, which is Connect's press.
+   */
+  const withdrawn = connection?.revoked === true;
+  /*
    * A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, AND ONLY WHERE IT IS READ.
    *
    * Nothing read `connections.error` at all, so a 500 from listConnections degraded an
@@ -334,8 +373,9 @@ export function PluginPage({
    */
   const connectionsUnreadable = connections.error !== null;
 
-  const [error, setError] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<OpenDialog>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
+  const [dialog, setDialog] = useState<OpenDialog>(startAdd ?? null);
   /** Which way the mode-switch confirmation is asking, or null while it is closed. */
   const [modeTarget, setModeTarget] = useState<"personal" | "shared" | null>(
     null,
@@ -363,7 +403,7 @@ export function PluginPage({
   } | null>(null);
 
   /* Every write reports into one banner rather than each growing its own handler. */
-  const report = { onError: (thrown: Error) => setError(thrown.message) };
+  const report = { onError: (thrown: Error) => setError(thrown) };
   const addCurated = useMutation({
     ...addCuratedServerMutationOptions(queryClient),
     ...report,
@@ -378,6 +418,10 @@ export function PluginPage({
   });
   const ownerGrants = useMutation({
     ...setOwnerGrantsMutationOptions(queryClient),
+    ...report,
+  });
+  const everyBot = useMutation({
+    ...setEveryBotMutationOptions(queryClient),
     ...report,
   });
   const navigate = useNavigate();
@@ -426,9 +470,10 @@ export function PluginPage({
           ? start.authorizationUrl
           : null;
       if (authorizationUrl === null) {
-        setError(
-          "OpenBot got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.",
-        );
+        setError({
+          message:
+            "OpenBot got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.",
+        });
         return;
       }
       window.location.href = authorizationUrl;
@@ -479,7 +524,7 @@ export function PluginPage({
      disconnected sentence and once on its own — and two copies of it would drift. */
   /* It names this app's own account. It said "your documents" on every app, Gmail included,
      because it was written for Google Drive. */
-  const reassurance = `Setup is complete without it, and it reaches only your own ${title} account.`;
+  const reassurance = `Setup is complete without it, and it reaches only your own ${vendorNameOf(title)} account.`;
 
   /*
    * A SHARED APP'S ROW IS THE TEAM ACCOUNT, NOT THIS ADMINISTRATOR'S.
@@ -511,7 +556,9 @@ export function PluginPage({
     brokered: auth === "brokered",
     configured: setup.data?.directoryAvailable ?? false,
     recorded: shared ? (sharedConnection?.connected ?? false) : youConnected,
-    report: setError,
+    // Words the row says itself, or the error kept whole: either way drawn through the shared rule.
+    report: (said: string | Failure | null) =>
+      setError(typeof said === "string" ? { message: said } : said),
     // Back to this page afterwards, not to the personal settings screen.
     returnTo: "admin",
     serverId: key,
@@ -567,20 +614,41 @@ export function PluginPage({
       setToken("");
       setClient({ clientId: "", clientSecret: "" });
       setDialog(null);
+      onAdded?.();
       return true;
     } catch (thrown) {
-      setError((thrown as Error).message);
+      setError(failureOf(thrown, String(thrown)));
       return false;
     }
   };
 
+  /** Set when Connect opened the OAuth client form: saving it goes on to the sign-in. */
+  const connectAfterClient = useRef(false);
+
   /*
-   * THE PERSONAL EDITION'S ONE STEP. Adding an app and connecting your account are two decisions
-   * only when two people make them. Here Connect adds the app and, for an app reached as you, goes
-   * straight on to the account it needs, once the list says there is a client to consent against.
+   * ONE PRESS, IN EVERY EDITION. Connect adds the app (for everyone in the organization, in the team
+   * edition) and goes straight on to what is left, the way a Bot's card and Browse apps do: the
+   * sign-in for an app reached as you once there is a client to consent against, and otherwise the
+   * form that has to be filled in first. An app that takes a token or an instance host opens that
+   * form before anything is added, and its Save adds it. There used to be an "Enable for this
+   * organization" switch here, and Connect only appeared after it: two steps for one thing.
    */
   const connectNew = async () => {
-    if (!(await add()) || auth !== "user-oauth") return;
+    setError(null);
+    if (auth === "deployment-bearer") {
+      setDialog("token");
+      return;
+    }
+    if (entry?.perInstance) {
+      setDialog("instance");
+      return;
+    }
+    if (await add()) await signInOnceAdded();
+  };
+
+  /** What is left once Connect has added it, for an app reached as you: the sign-in. */
+  const signInOnceAdded = async () => {
+    if (auth !== "user-oauth") return;
     const fresh = await queryClient.fetchQuery({
       ...appsQueryOptions(),
       staleTime: 0,
@@ -588,7 +656,11 @@ export function PluginPage({
     const added = fresh.find((item) => item.id === key);
     if (added && (added.hasCredential || added.dynamicClient)) {
       connectSelf.mutate(key);
+      return;
     }
+    // No client to consent against yet: its form, and the sign-in once it is saved.
+    connectAfterClient.current = true;
+    setDialog("client");
   };
 
   /*
@@ -617,12 +689,33 @@ export function PluginPage({
       }
       setDialog(null);
     } catch (thrown) {
-      setError((thrown as Error).message);
+      setError(failureOf(thrown, String(thrown)));
     } finally {
       await invalidatePlugins(queryClient);
       setGranting(null);
     }
   };
+
+  /*
+   * THE SIGN-IN ON ARRIVAL (`startConnect`), for an app OpenBot signs in to itself that is here,
+   * with a client to consent against, and whose account isn't connected or was withdrawn: the same
+   * press as the Connect or Reconnect below, made for the person who already pressed Reconnect on
+   * Connections. Once per visit. A directory app's row starts its own (`BrokeredAccountRow`).
+   */
+  const signInOnArrival =
+    startConnect &&
+    auth === "user-oauth" &&
+    server !== undefined &&
+    (server.hasCredential || server.dynamicClient) &&
+    connections.isSuccess &&
+    (!youConnected || withdrawn);
+  const signInStarted = useRef(false);
+  const { mutate: startSignIn } = connectSelf;
+  useEffect(() => {
+    if (!signInOnArrival || signInStarted.current) return;
+    signInStarted.current = true;
+    startSignIn(key);
+  }, [signInOnArrival, startSignIn, key]);
 
   /*
    * Nothing rather than a placeholder, so no sentence asserts anything while the fetch is open —
@@ -649,9 +742,12 @@ export function PluginPage({
         title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          {personal
-            ? "Couldn't load your apps. Try again in a moment."
-            : "Couldn't load apps. Try again in a moment."}
+          {loadFailure(
+            [plugins.error, catalogue.error],
+            personal
+              ? "Couldn't load your apps. Try again in a moment."
+              : "Couldn't load apps. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );
@@ -693,7 +789,7 @@ export function PluginPage({
     >
       {error ? (
         <p className="break-words text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
 
@@ -722,13 +818,18 @@ export function PluginPage({
                 </ItemDescription>
               </ItemContent>
             </Item>
-          ) : personal && !server ? (
+          ) : !server ? (
+            /*
+             * Not added yet: Connect, which adds it and goes on to whatever is left in the same
+             * press (`connectNew`). The off switch below is drawn only once it is added.
+             */
             <Item size="sm">
               <ItemContent>
-                <ItemTitle>Add {title}</ItemTitle>
+                <ItemTitle>Connect {title}</ItemTitle>
                 <ItemDescription>
-                  Connect it to give your Bots its tools. Bots can read with it
-                  right away, and ask you before they change anything.
+                  {personal
+                    ? "Connect it to give your Bots its tools. Bots can read with it right away, and ask you before they change anything."
+                    : "Connect it to make it available to everyone in the organization. Then choose which Bots get its tools."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -739,7 +840,7 @@ export function PluginPage({
                   size="sm"
                   type="button"
                 >
-                  Connect
+                  {addCurated.isPending ? "Connecting…" : "Connect"}
                 </Button>
               </ItemActions>
             </Item>
@@ -747,22 +848,20 @@ export function PluginPage({
             <Item size="sm">
               <ItemContent>
                 <ItemTitle>
-                  {personal ? "Turned on" : "Enable for this organization"}
+                  {personal ? "On" : ORGANIZATION_SWITCH.title}
                 </ItemTitle>
                 <ItemDescription>
                   {personal
                     ? "Your Bots can use its tools. Turning this off removes it and every Bot's access to its tools."
-                    : server
-                      ? "Bots can be given its tools. Turning this off removes it and every Bot's access to its tools."
-                      : "No Bot can reach this vendor. Turn it on to set it up and give Bots its tools."}
+                    : ORGANIZATION_SWITCH.on}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Switch
                   aria-label={
                     personal
-                      ? `Turn ${title} on or off`
-                      : `Enable ${title} for this organization`
+                      ? `${title} on for your Bots`
+                      : ORGANIZATION_SWITCH.label(title)
                   }
                   checked={server !== undefined}
                   onCheckedChange={(next) => {
@@ -867,6 +966,32 @@ export function PluginPage({
                 </ItemActions>
               </Item>
               {/*
+               * Every Bot in the organization, Bots made later too. Binary and immediate, so a
+               * Switch. Turning it off takes back only what this switch gave.
+               */}
+              <Separator />
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Every Bot</ItemTitle>
+                  <ItemDescription>
+                    {server.everyBot === true
+                      ? "Every Bot in this organization can use it, Bots made later too."
+                      : "Only the Bots it's given to can use it."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Switch
+                    aria-label={`Give ${title} to every Bot`}
+                    checked={server.everyBot === true}
+                    disabled={everyBot.isPending}
+                    onCheckedChange={(next) => {
+                      setError(null);
+                      everyBot.mutate({ serverId: key, everyBot: next });
+                    }}
+                  />
+                </ItemActions>
+              </Item>
+              {/*
                * Which teams may give it to their own Bots without asking. A set of teams, so a
                * summary and a dialog. No icon, as no other row of this card has one.
                */}
@@ -903,7 +1028,7 @@ export function PluginPage({
             /* The personal edition has one person, so each sentence speaks to them and names nobody else. */
             auth === "user-oauth"
               ? personal
-                ? `Connect your ${title} account through OpenBot. OpenBot registers an OAuth client, and your Bots see only what you can see.`
+                ? `Connect your ${vendorNameOf(title)} account through OpenBot. OpenBot registers an OAuth client, and your Bots see only what you can see.`
                 : `This vendor answers as whoever is asking. ${paths.hosted ? "OpenBot" : "The deployment"} registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see.`
               : auth === "builtin"
                 ? `Built into ${paths.deploymentName}. There is no vendor to reach and no credential to keep. ${personal ? "A call runs as you." : "A call runs as whoever asked."}`
@@ -1124,7 +1249,7 @@ export function PluginPage({
               <>
                 <Separator />
                 {connectionsUnreadable ? (
-                  <ConnectionStateUnreadable />
+                  <ConnectionStateUnreadable error={connections.error} />
                 ) : server?.sharedOnly && !shared ? (
                   /*
                    * NO PERSONAL CONNECT FOR AN APP THAT CAN ONLY HOLD A SHARED ACCOUNT. It signs in
@@ -1149,6 +1274,7 @@ export function PluginPage({
                     heading="Shared account"
                     notice="Sign in as the shared account, not your own."
                     provider={provider}
+                    startConnect={startConnect}
                     title={title}
                   />
                 ) : (
@@ -1161,14 +1287,14 @@ export function PluginPage({
                        every tool in the personal edition, as the OAuth row below says. */
                     connectedDescription={
                       personal
-                        ? `Connected. Your Bots use your ${title} as you. ${brokeredDisconnectNote(provider)}`
-                        : `Connected. A Bot with these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`
+                        ? `Connected. Your Bots use your ${vendorNameOf(title)} as you. ${brokeredDisconnectNote(provider)}`
+                        : `Connected. A Bot with these tools uses your ${vendorNameOf(title)} as you. ${brokeredDisconnectNote(provider)}`
                     }
                     /* One person: connecting is what lets their Bots use it, as the OAuth row
                        below says, and there is no setup it could be beside. */
                     disconnectedDescription={
                       personal
-                        ? `Connect your ${title} account so your Bots can use it.`
+                        ? `Connect your ${vendorNameOf(title)} account so your Bots can use it.`
                         : `Connect your own account to try this connector. ${reassurance}`
                     }
                     /* The half of the line above that is true whichever way this app connects.
@@ -1190,28 +1316,45 @@ export function PluginPage({
               <>
                 <Separator />
                 {connectionsUnreadable ? (
-                  <ConnectionStateUnreadable />
+                  <ConnectionStateUnreadable error={connections.error} />
                 ) : (
                   <Item size="sm">
                     <ItemContent>
                       <ItemTitle>Your account</ItemTitle>
                       <ItemDescription>
-                        {personal
-                          ? youConnected
-                            ? `Connected. Your Bots use your ${title} as you.`
-                            : `Connect your ${title} account so your Bots can use it.`
-                          : youConnected
-                            ? `Connected. A Bot with these tools uses your ${title} as you. Everybody else connects their own.`
-                            : `Connect your own account to try this connector. ${reassurance}`}
+                        {withdrawn
+                          ? `Your ${title} connection needs reconnecting.`
+                          : personal
+                            ? youConnected
+                              ? `Connected. Your Bots use your ${vendorNameOf(title)} as you.`
+                              : `Connect your ${vendorNameOf(title)} account so your Bots can use it.`
+                            : youConnected
+                              ? `Connected. A Bot with these tools uses your ${vendorNameOf(title)} as you. Everybody else connects their own.`
+                              : `Connect your own account to try this connector. ${reassurance}`}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
-                      {youConnected ? (
+                      {withdrawn ? (
+                        /* Connect's press over the withdrawn grant: the vendor's consent page. */
+                        <Button
+                          disabled={connectSelf.isPending}
+                          onClick={() => {
+                            setError(null);
+                            connectSelf.mutate(key);
+                          }}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          {connectSelf.isPending ? "Connecting…" : "Reconnect"}
+                          <IconArrowUpRight />
+                        </Button>
+                      ) : youConnected ? (
                         <>
                           {/* Decorative: the word beside it already says which. */}
                           <span
                             aria-hidden="true"
-                            className="size-1.5 rounded-full bg-emerald-500"
+                            className="size-1.5 rounded-full bg-success"
                           />
                           <span className="text-muted-foreground text-xs">
                             Connected
@@ -1348,6 +1491,17 @@ export function PluginPage({
               )}
             </div>
           ) : null}
+
+          {/*
+           * THE SAME APP WITH ITS KEY, for an app the directory lists as a sign-in in place of its
+           * key: the vendor's own server, or the directory's sign-in app. A quiet second way to
+           * connect it, for somebody who may add apps, in one press: added, then its key form.
+           */}
+          {server &&
+          signsInForDirectory(server) &&
+          (personal || isOrganizationAdmin(role)) ? (
+            <KeyVersionOffer appId={key} title={server.title} />
+          ) : null}
         </PageSection>
       ) : null}
 
@@ -1405,11 +1559,20 @@ export function PluginPage({
           />
           {server.tools.length === 0 ? (
             <PageEmpty icon={IconTool} title="No tools listed">
-              {/* A server that signs each person in lists its tools once somebody has. */}
-              {server.signIn && !youConnected
-                ? `Connect your ${title} account to see its tools.`
-                : (toolsListError(server.lastError, { title, personal }) ??
-                  "Refresh tools to check again.")}
+              {/*
+               * A server that signs each person in lists its tools once somebody has. The personal
+               * edition's one person is pointed at the Connect above; an admin is never told to
+               * connect their own account for it.
+               */}
+              {server.signIn && (!youConnected || withdrawn)
+                ? personal
+                  ? `Connect your ${vendorNameOf(title)} account to see its tools.`
+                  : listsToolsOnceConnected(title)
+                : (toolsListError(server.lastError, {
+                    title,
+                    personal,
+                    connectAbove: true,
+                  })?.text ?? "Refresh tools to check again.")}
             </PageEmpty>
           ) : (
             <PageRows>
@@ -1458,7 +1621,7 @@ export function PluginPage({
                       <span
                         className={
                           tool.effect === "write"
-                            ? "text-amber-600 text-xs dark:text-amber-500"
+                            ? "text-warning text-xs"
                             : "text-muted-foreground text-xs"
                         }
                       >
@@ -1656,11 +1819,23 @@ export function PluginPage({
             <Button
               onClick={() => {
                 if (!server) {
-                  void add();
+                  // Opened by Connect: Save adds it, and an app reached as you goes on to its sign-in.
+                  void add().then((added) =>
+                    added ? signInOnceAdded() : undefined,
+                  );
                   return;
                 }
                 if (dialog === "client") {
-                  registerClient.mutate({ serverId: key, ...client });
+                  const thenConnect = connectAfterClient.current;
+                  connectAfterClient.current = false;
+                  registerClient.mutate(
+                    { serverId: key, ...client },
+                    {
+                      onSuccess: () => {
+                        if (thenConnect) connectSelf.mutate(key);
+                      },
+                    },
+                  );
                 }
                 setDialog(null);
               }}
@@ -1674,7 +1849,7 @@ export function PluginPage({
 
       {/*
        * Who first, then what: the decision arrives as "set this Bot up", not as a list of tools
-       * looking for an owner. Both groups get a select-all; the amber heading and the footer's
+       * looking for an owner. Both groups get a select-all; the warning-coloured heading and the footer's
        * "N of which change things" are what keep a bulk write grant a read decision, not a blind one.
        */}
       {server ? (
@@ -1787,7 +1962,7 @@ export function PluginPage({
                   >
                     <div className="mb-1 flex items-center justify-between">
                       <p
-                        className="font-medium text-amber-600 text-sm dark:text-amber-500"
+                        className="font-medium text-warning text-sm"
                         id="grant-writes-heading"
                       >
                         Changes things
