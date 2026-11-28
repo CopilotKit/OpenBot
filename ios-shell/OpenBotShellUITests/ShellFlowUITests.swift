@@ -484,6 +484,21 @@ final class ShellFlowUITests: ShellTestCase {
         }
     }
 
+    // A page that never says ready (the probe site stands in for a challenge page or an older web
+    // app): the skeleton goes by itself, and the lock screen does not come.
+    func testSkeletonNeverTrapsAPageWithoutTheBridge() throws {
+        let app = launch(base: "http://127.0.0.1:8765", moment: "no-bridge",
+                         extra: ["OPENBOT_SHELL_TEST_PLAIN_SESSION_COOKIE": "probe"])
+        XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 15), "no tabs")
+        let skeleton = app.descendants(matching: .any)["loading-skeleton"]
+        XCTAssertTrue(skeleton.waitForNonExistence(timeout: 15), "the skeleton stayed over a page without the bridge")
+        XCTAssertTrue(firstExisting([app.webViews.staticTexts.firstMatch], timeout: 10) != nil, "the page is not shown")
+        sleep(25)
+        XCTAssertFalse(lockScreen(app).exists, "the load watchdog locked a page that had loaded")
+        screenshot("page-without-bridge")
+        note("no bridge: \(debugState(app))")
+    }
+
     // MARK: - Helpers
 
     private func accountButton(_ app: XCUIApplication) -> XCUIElement {

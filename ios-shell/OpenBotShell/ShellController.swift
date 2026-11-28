@@ -639,6 +639,12 @@ final class ShellController: NSObject, WebControllerDelegate {
         refreshChrome()
         if let url = controller.webView.url, config.isOwnOrigin(url) {
             checkPageDrawn()
+            // Never trap a person behind the skeleton: a page that finished but says nothing (a
+            // Cloudflare check, an intermediary's error page, a web app without the bridge) shows
+            // itself 1.5 s after it finished.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.endPageLoad("finished-without-ready")
+            }
         } else if model.signIn == .webFallback {
             // The identity provider's page: no skeleton over another site.
             endPageLoad("other-site")
