@@ -44,9 +44,13 @@ What is native:
   accessibility value says which case it is: `no-network` or `load-failed`.
 - **The keyboard.** The web view's form-assistant bar (arrows and a check mark above the keyboard)
   is removed (`KeyboardAccessory.swift`, the react-native-webview technique, on WebKit's private
-  content view: if a future iOS renames it, the bar simply comes back). The keyboard goes away by
-  dragging the page down or tapping outside a field. The system sign-in sheet is Safari's view, so
+  content view: if a future iOS renames it, the bar simply comes back). While the keyboard is up the
+  web view ends at its top edge, so the message box and Send stay above it. The keyboard goes away by
+  dragging the page down or tapping outside a field: on a page that does not scroll (the web app
+  turns overscroll off in the shell) a pan recognizer beside WebKit's ends editing after a mostly
+  downward 40 pt drag that did not start in a field. The system sign-in sheet is Safari's view, so
   its bar stays there.
+- **Orientation.** A phone stays in portrait; an iPad turns every way.
 - **The bridge.** The page gets `window.__OPENBOT_NATIVE_SHELL__ = {platform: "ios", version, bridge: 1}`
   at document start (main frame, own origin only) and posts `ready`, `route` and `signed-out` to
   `window.webkit.messageHandlers.openbotShell` (`app/src/lib/native-shell/`). When the page says
@@ -115,6 +119,7 @@ ignores them.
 | `OPENBOT_SHELL_FORCE_DARK=1` | The whole app, web view included, in dark mode. |
 | `OPENBOT_SHELL_DELAY_FIRST_LOAD_SECONDS=<n>` | Holds the first page load back n seconds when signed in (to see the skeleton). |
 | `OPENBOT_SHELL_TEST_PLAIN_SESSION_COOKIE=<value>` | Sets `better-auth.session_token` (the http mock's name). |
+| `OPENBOT_SHELL_TEST_KILL_CONTENT_SECONDS=<n>` | Kills the web content process n seconds after a signed-in launch (WebKit's private `_killWebContentProcess`). |
 
 In every build, Release included (a launch environment cannot be set on a person's phone, so these
 change nothing there): `OPENBOT_BASE_URL`, `OPENBOT_SHELL_DIAGNOSTICS=1`, `OPENBOT_SHELL_TEST_NAME`, and
@@ -142,7 +147,7 @@ compare. The comment at the top of `serve.py` lists every endpoint.
 A Release build has none of the hooks above (CI greps the binary for their names and fails if one is
 there), no Web Inspector, and no App Transport Security exception: `NSAllowsLocalNetworking`, which
 the probe and the http mocks need, is added to the built Info.plist by a Debug-only build phase
-(`project.yml`). CI runs `ReleaseUITests` against a Release build, each test on a fresh install.
+(`project.yml`). CI runs `RealBackendUITests` against a Release build, each test on a fresh install.
 `PRODUCTION-PARITY.md` lists what the tests here do and do not prove about a shipped app.
 
 ## The mock stacks
@@ -151,7 +156,7 @@ The flow tests run against the real built web app over `app/workbench/mock-serve
 
 ```sh
 bun install --frozen-lockfile && cp .env.example .env && (cd app && bun run build)
-MOCK_SIGNED_OUT=1 SERVER_PORT=3001 bun app/workbench/mock-server.ts &
+MOCK_SIGNED_OUT=1 SERVER_PORT=3001 bun app/workbench/mock-server.ts &   # MOCK_REPLY=1: a run answers one sentence
 APP_PORT=3010 SERVER_PORT=3001 bun app/serve.ts &                      # A: with the hand-off
 MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 bun app/workbench/mock-server.ts &
 APP_PORT=3011 SERVER_PORT=3002 bun app/serve.ts &                      # B: without it
@@ -160,7 +165,8 @@ APP_PORT=3011 SERVER_PORT=3002 bun app/serve.ts &                      # B: with
 ## CI
 
 `.github/workflows/ios-shell.yml` runs on pushes to `ios-webview-shell` that touch this folder,
-and by hand. It builds the web app, starts both mock stacks and the probe, boots an iPhone
+and by hand (inputs: the two Google sign-ins, `real_backend_only`, and `device: ipad`, which runs
+everything but the real-backend suites on an iPad simulator). It builds the web app, starts both mock stacks and the probe, boots an iPhone
 simulator, builds once (`build-for-testing`) and runs the UI tests (`test-without-building`). It
 uploads `ios-shell-shots-<run id>` (every screenshot as a small JPEG named `<test>--<moment>.jpg`,
 the text attachments, `SUMMARY.md`, `diagnostics.jsonl`), `ios-shell-<run id>` (everything else)
@@ -185,9 +191,10 @@ Where the video workflow's time goes (each job has a 13-minute limit; the two jo
 | Record (demo tour / real journey) | about 2 min | about 2 min |
 | Cut and make the 600-px copy | about 25 s | about 25 s |
 
-The production tests never fail for network reasons. `testProductionSignedIn` and
-`testProductionGoogleSignIn` use a throwaway account and run only when the repository secrets
-`OPENBOT_SHELL_TEST_SESSION`, or `OPENBOT_SHELL_GOOGLE_EMAIL`, `OPENBOT_SHELL_GOOGLE_PASSWORD` and
-`OPENBOT_SHELL_GOOGLE_TOTP_SECRET`, are set. Their screenshots, diagnostics and log lines go only to
+The real-account tests (`testRealSignedInJourneyWithSessionCookie`, and the two Google sign-ins,
+`testRealGoogleSignInInSystemSheet` and `testRealGoogleSignInInWebViewAndJourney`, which also need
+their workflow input because each sends a prompt to the account's phone) run only when the
+repository secrets `OPENBOT_SHELL_TEST_SESSION`, or `OPENBOT_SHELL_GOOGLE_EMAIL`,
+`OPENBOT_SHELL_GOOGLE_PASSWORD` and `OPENBOT_SHELL_GOOGLE_TOTP_SECRET`, are set. Their screenshots, diagnostics and log lines go only to
 `ios-shell-private-<run id>` (`ci/collect_shots.py`). Note: on a public repository Actions
 artifacts can be downloaded by any signed-in GitHub user.
