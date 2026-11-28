@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The Recorder ties a step to the save that carries what you typed when the text has an
+  apostrophe. A form post spells `Let's` as `Let%27s`, and the Recorder only looked for spellings
+  that leave the apostrophe as it is, so a comment like "Let's meet at noon" posted from a form was
+  not recognised as carrying it, and the step could be recorded without its save request.
+
 - **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
   connection writes take `provider: privatemode` with `login: endpoint`, an address and a key.
   `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode

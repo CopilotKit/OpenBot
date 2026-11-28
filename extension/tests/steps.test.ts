@@ -477,6 +477,13 @@ test("a value is found in a body as typed, JSON-escaped or form-encoded; a redac
     true,
   );
   expect(carriesValues("name=Ada%20Lovelace", ["Ada Lovelace"])).toBe(true);
+  // A form body percent-encodes an apostrophe, which encodeURIComponent does not.
+  expect(
+    carriesValues(
+      new URLSearchParams({ text: "Let's meet at noon (sharp)!" }).toString(),
+      ["Let's meet at noon (sharp)!"],
+    ),
+  ).toBe(true);
   expect(carriesValues('{"name":"Grace"}', ["Ada"])).toBe(false);
   const h = harness();
   h.steps.step(1, edit(START, "Code", "[redacted]"));
