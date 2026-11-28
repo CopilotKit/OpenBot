@@ -141,10 +141,13 @@ describe.skipIf(!asked)("a hold longer than one Retry-After", () => {
             await go(page, "/teams");
 
             // Whichever the gate shows: the hold, or (as it did) the terms.
-            await page
+            const shown = page
               .getByText(/^(Back in a moment|Agree to the terms)$/)
-              .first()
-              .waitFor({ timeout: 5_000 });
+              .first();
+            await shown.waitFor({ timeout: 5_000 });
+            // The gate's first words are the hold, never terms. Read at once: a hold that ends
+            // while the screenshot below is taken has Teams open before the lines after it run.
+            expect(await shown.textContent()).toBe("Back in a moment");
             await shoot(
               page,
               "organization-held",
@@ -154,16 +157,21 @@ describe.skipIf(!asked)("a hold longer than one Retry-After", () => {
             );
             expect(pathOf(page)).not.toBe("/terms");
             expect(await page.getByText("Agree to the terms").count()).toBe(0);
-            await page
-              .getByRole("heading", { name: "Back in a moment" })
-              .waitFor();
-            await page
-              .getByRole("status")
-              .filter({ hasText: hold.said })
-              .waitFor();
-            expect(await page.getByText("Something went wrong").count()).toBe(
-              0,
-            );
+            // The hold page names the hold in its status while it is up. A hold that ended while
+            // the screenshot was taken has Teams open already, and the waits below take from there.
+            if (
+              (await page
+                .getByRole("heading", { name: "Back in a moment" })
+                .count()) > 0
+            ) {
+              await page
+                .getByRole("status")
+                .filter({ hasText: hold.said })
+                .waitFor({ timeout: 5_000 });
+              expect(await page.getByText("Something went wrong").count()).toBe(
+                0,
+              );
+            }
             expect(await cutOff(page)).toEqual({ sideways: false, cut: [] });
 
             // Nothing pressed: once OpenBot answers again, Teams opens, never the terms.
