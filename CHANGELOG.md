@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
+  connection writes take `provider: privatemode` with `login: endpoint`, an address and a key.
+  `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode
+  has no sign-in.
+
 - **Unbiased AI is no longer an AI provider choice.** OpenBot Desktop's setup, Settings and Admin
   AI providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
   and OpenBot Desktop's Sign in with Unbiased AI is gone. Settings saved for it and the model shown
