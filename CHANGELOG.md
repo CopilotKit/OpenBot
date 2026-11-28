@@ -2400,6 +2400,8 @@ or a script has to say.
   it, so its pages sent `OpenBot-Client: web/<previous>` and an `OPENBOT_MINIMUM_CLIENTS` naming
   this release refused its own web app. `openbot release` prints it.
 - A step a rule refused, or one that failed, shows its whole reason, wrapped, where it was cut off.
+- A command id repeated in one management-agent heartbeat now runs once, and a malformed command
+  no longer uses up its id, so a later valid command with that id is not dropped.
 
 ## 1.1.0
 
