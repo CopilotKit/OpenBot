@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The management agent refuses an HTTP management URL at start-up instead of silently sending its
+  heartbeats without a client certificate, and stops reading an answer from the management service
+  once it grows past the size a real reply can have.
+
 - **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
   connection writes take `provider: privatemode` with `login: endpoint`, an address and a key.
   `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode

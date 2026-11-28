@@ -36,7 +36,8 @@ export type EnrollmentConfig = z.infer<typeof EnrollmentConfig>;
 
 export const AgentConfig = z
   .strictObject({
-    managementUrl: z.url({ protocol: /^https?$/ }),
+    /** The agent authenticates with a client certificate; over http:// none is presented. */
+    managementUrl: z.url({ protocol: /^https$/ }),
     /**
      * Whether the agent runs the product's upgrades, with Flux beside it (the `openbot-agent` release).
      * false: the agent the product chart installs by default, connected and reporting, running restart
