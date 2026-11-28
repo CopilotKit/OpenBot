@@ -5068,8 +5068,27 @@ pub fn default_root_in(home: &Path) -> PathBuf {
 /// is laid out relative to wherever the window happens to be running from.
 ///
 /// Only the ends. A space inside a path is part of a directory's name and stays where it is.
+///
+/// A leading `~` is the person's home folder, the way every shell reads it. No container engine
+/// expands it, so a deployment typed `~/OpenBot` would be laid out under a directory literally
+/// named `~`, and the bind mount Compose writes for `./.openbot` names a source path that does not
+/// exist (#2388). `~` on its own is the home folder itself. `~` anywhere else, and `~` before
+/// another name (`~someone/OpenBot`), stays as typed: only the person's own home is OpenBot's to
+/// name.
 pub fn root_from(typed: &str) -> PathBuf {
-    PathBuf::from(typed.trim())
+    let trimmed = typed.trim();
+    let under_home = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix("~\\"));
+    if let Some(rest) = under_home {
+        // A leading separator would make `join` put nothing under the home folder at all, but
+        // replace it with a path of its own.
+        return dirs_home().join(rest.trim_start_matches(['/', '\\']));
+    }
+    if trimmed == "~" {
+        return dirs_home();
+    }
+    PathBuf::from(trimmed)
 }
 
 fn dirs_home() -> PathBuf {
@@ -9860,6 +9879,59 @@ fn main() {
             root_from("/home/me/OpenBot"),
             PathBuf::from("/home/me/OpenBot")
         );
+    }
+
+    /// The home folder `~` is read from, held at a known place for the length of one test. Only one
+    /// test at a time: the environment is the whole process's.
+    struct HomeFixture {
+        previous: Option<std::ffi::OsString>,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl HomeFixture {
+        fn at(home: &str) -> Self {
+            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous = std::env::var_os("HOME");
+            std::env::set_var("HOME", home);
+            Self {
+                previous,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for HomeFixture {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var("HOME", previous);
+            } else {
+                std::env::remove_var("HOME");
+            }
+        }
+    }
+
+    #[test]
+    fn a_deployment_directory_typed_from_home_is_the_one_under_it() {
+        // `~` is how a person names their home folder, and no container engine expands it: Compose
+        // would lay the deployment out under a directory literally named `~`, and the bind mount it
+        // writes for `./.openbot` names a source path that does not exist (#2388).
+        let _home = HomeFixture::at("/home/me");
+        assert_eq!(root_from("~/OpenBot"), PathBuf::from("/home/me/OpenBot"));
+        assert_eq!(root_from(r"~\OpenBot"), PathBuf::from("/home/me/OpenBot"));
+        assert_eq!(root_from("~/"), PathBuf::from("/home/me"));
+        assert_eq!(root_from("~"), PathBuf::from("/home/me"));
+        // `~` means the home folder only at the start, and only this person's.
+        assert_eq!(
+            root_from("/tmp/~notes/OpenBot"),
+            PathBuf::from("/tmp/~notes/OpenBot")
+        );
+        assert_eq!(
+            root_from("~someone/OpenBot"),
+            PathBuf::from("~someone/OpenBot")
+        );
+        // Either separator, doubled, is still the one directory under home.
+        assert_eq!(root_from("~//OpenBot"), PathBuf::from("/home/me/OpenBot"));
     }
 
     #[test]

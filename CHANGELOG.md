@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **A deployment directory typed from home is the one under it.** In OpenBot Desktop's setup, a
+  directory typed `~/OpenBot` was passed to the container engine with the `~` unexpanded, so the
+  deployment was laid out under a directory literally named `~` and setup failed saying the bind
+  source path does not exist. A leading `~` now means the home folder, the way every shell reads
+  it, and setup goes to the folder the person meant.
+
 ## 1.2.2
 
 **Before upgrading.**
