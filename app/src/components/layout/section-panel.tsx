@@ -1,3 +1,4 @@
+import "../app-sidebar/mobile-panels.css";
 import type { ReactNode } from "react";
 import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { Sidebar } from "@/components/ui/sidebar";
@@ -19,6 +20,7 @@ export function SectionPanel({
   title,
   actions,
   children,
+  search,
   className,
   hidden = false,
   standalone = false,
@@ -26,6 +28,7 @@ export function SectionPanel({
   title: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
+  search?: ReactNode;
   className?: string;
   hidden?: boolean;
   /** Fill a native tab with the section instead of mounting it inside the desktop sidebar. */
@@ -37,7 +40,7 @@ export function SectionPanel({
       <div
         className={cn(
           "flex h-12 shrink-0 items-center gap-0.5 pr-2 pl-4",
-          standalone && "h-14 [&>a]:size-11",
+          standalone && "native-panel-heading",
         )}
         data-desktop-drag="deep"
       >
@@ -47,6 +50,7 @@ export function SectionPanel({
         {actions}
         {standalone && <ShellAccountMenu />}
       </div>
+      {standalone && search}
       {children}
     </>
   );
@@ -55,7 +59,7 @@ export function SectionPanel({
   if (standalone) {
     return (
       <section
-        className="flex min-h-0 min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
+        className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
         data-slot="native-tab-panel"
       >
         {content}
