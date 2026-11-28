@@ -33,16 +33,17 @@ final class DemoTourUITests: ShellTestCase {
         var app = launch(base: ShellTestCase.mockA, moment: "tour", ephemeral: false)
         let signIn = app.buttons["sign-in-button"]
         XCTAssertTrue(signIn.waitForExistence(timeout: 20))
-        pause(1.5)
+        pause(1)
         signIn.tap()
+        // Whichever comes first: the consent alert (then the sheet), or the sheet.
         let consent = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Continue"]
-        if consent.waitForExistence(timeout: 6) {
-            pause(2)
+        let link = app.webViews.links["Sign in as test person"]
+        if let first = firstExisting([consent, link], timeout: 20), first == consent {
+            pause(1.5)
             consent.tap()
         } else {
             note("demo: no consent alert this time")
         }
-        let link = app.webViews.links["Sign in as test person"]
         if link.waitForExistence(timeout: 15) {
             pause(1.2)
             link.tap()
@@ -96,7 +97,7 @@ final class DemoTourUITests: ShellTestCase {
 
         // The lock screen, then the connection comes back.
         app = launch(base: ShellTestCase.mockA, moment: "tour-offline", reset: false,
-                     extra: ["OPENBOT_SHELL_FORCE_OFFLINE_SECONDS": "6"])
+                     extra: ["OPENBOT_SHELL_FORCE_OFFLINE_SECONDS": "4"])
         XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 8), "demo: no lock screen")
         XCTAssertTrue(lockScreen(app).waitForNonExistence(timeout: 15), "demo: the lock did not lift")
         pause(1.5)

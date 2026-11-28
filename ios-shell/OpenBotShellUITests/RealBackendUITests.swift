@@ -28,6 +28,11 @@ class RealBackendTestCase: ShellTestCase {
         }
     }
 
+    /// A pause for a person to see a screen: short in the video workflow, as briefed in the tests.
+    func hold(_ seconds: UInt32) {
+        sleep(videoMode ? min(seconds, 2) : seconds)
+    }
+
     func secret(_ name: String) -> String? {
         let value = ProcessInfo.processInfo.environment[name] ?? ""
         return value.isEmpty ? nil : value
@@ -278,14 +283,14 @@ class RealBackendTestCase: ShellTestCase {
         XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 30), "no tabs")
         let composer = app.webViews.textViews.firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "no message box on Home")
-        sleep(3)
+        hold(3)
         screenshot("j1-home")
 
         // One real message, and the reply streaming in.
         composer.tap()
         _ = app.keyboards.firstMatch.waitForExistence(timeout: 8)
         composer.typeText(RealBackendTestCase.prompt)
-        sleep(1)
+        hold(1)
         screenshot("j2-message-typed")
         let before = Set(labels(in: app.webViews.firstMatch, limit: 400))
         if let send = firstExisting([webElement(app, label: "Send message")], timeout: 5) {
@@ -295,17 +300,17 @@ class RealBackendTestCase: ShellTestCase {
         }
         var lengths: [Int] = []
         let started = Date()
-        while Date().timeIntervalSince(started) < 60 {
-            sleep(3)
+        while Date().timeIntervalSince(started) < (videoMode ? 30 : 60) {
+            hold(videoMode ? 1 : 3)
             let now = labels(in: app.webViews.firstMatch, limit: 400)
             let fresh = now.filter { !before.contains($0) && !$0.contains(RealBackendTestCase.prompt) && $0.hasPrefix("StaticText") }
             lengths.append(fresh.map { $0.count }.max() ?? 0)
             if lengths.count == 2 { screenshot("j3-reply-streaming") }
-            if lengths.count >= 4, lengths.suffix(3).allSatisfy({ $0 == lengths.last! }), (lengths.last ?? 0) > 0 { break }
+            if lengths.count >= 3, lengths.suffix(2).allSatisfy({ $0 == lengths.last! }), (lengths.last ?? 0) > 0 { break }
         }
         let grew = zip(lengths, lengths.dropFirst()).contains { $0 < $1 && $0 > 0 }
         note("reply: longest new text by 3 s step \(lengths); grew while shown (streaming) \(grew); after \(Int(Date().timeIntervalSince(started))) s")
-        sleep(3)
+        hold(3)
         screenshot("j4-reply")
         dismissKeyboardIfUp(app, tapping: webText(app, RealBackendTestCase.prompt))
         XCTAssertTrue(tab(app, .bots).waitForExistence(timeout: 5), "the tab bar did not come back after the reply")
@@ -313,11 +318,11 @@ class RealBackendTestCase: ShellTestCase {
 
         // Bots, a Bot.
         tab(app, .bots).tap()
-        sleep(5)
+        hold(5)
         screenshot("j5-bots")
         if let bot = firstExisting([webText(app, "General Assistant")], timeout: 10) {
             bot.tap()
-            sleep(5)
+            hold(5)
             dismissKeyboardIfUp(app)
             screenshot("j6-a-bot")
         }
@@ -325,36 +330,36 @@ class RealBackendTestCase: ShellTestCase {
 
         // Conversations: production has no /conversations yet.
         tab(app, .conversations).tap()
-        sleep(6)
+        hold(6)
         screenshot("j7-conversations-tab")
         note("conversations tab: \(debugState(app)); web app's sidebar button \(webElement(app, label: "Show sidebar").exists)")
         if webElement(app, label: "Show sidebar").exists {
             webElement(app, label: "Show sidebar").tap()
-            sleep(2)
+            hold(2)
             screenshot("j8-web-sidebar")
             if webElement(app, label: "Hide sidebar").exists { webElement(app, label: "Hide sidebar").tap() }
-            sleep(1)
+            hold(1)
         }
 
         tab(app, .home).tap()
-        sleep(2)
+        hold(2)
         // Background for 40 s (6 s in the video), then back.
         XCUIDevice.shared.press(.home)
         sleep(videoMode ? 6 : 40)
         app.activate()
-        sleep(3)
+        hold(3)
         screenshot("j9-back-from-background")
         tab(app, .home).tap()
         XCTAssertTrue(app.webViews.textViews.firstMatch.waitForExistence(timeout: 20), "Home did not come back after the background")
         note("after background: \(debugState(app))")
 
         // Killed and opened again: straight to the tabs.
-        sleep(4)
+        hold(4)
         app.terminate()
         app = relaunch()
         XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 20), "a relaunch did not go straight to the tabs")
         XCTAssertFalse(app.buttons["sign-in-button"].exists)
-        sleep(6)
+        hold(6)
         screenshot("j10-relaunched")
 
         guard signOut else {
@@ -365,7 +370,7 @@ class RealBackendTestCase: ShellTestCase {
         // the account button at the drawer's bottom, then Sign out. The app notices the URL on /sign.
         if webElement(app, label: "Show sidebar").waitForExistence(timeout: 5) {
             webElement(app, label: "Show sidebar").tap()
-            sleep(2)
+            hold(2)
         }
         // Production's account button is not exposed as a button: look at anything in the drawer's
         // bottom-left corner, and failing that tap where its avatar sits.
@@ -525,7 +530,7 @@ final class RealBackendDebugUITests: RealBackendTestCase {
             XCTFail("the session cookie did not reach the tabs; state \(debugState(app))")
             return
         }
-        sleep(6)
+        hold(6)
         if app.buttons["sign-in-button"].exists || webText(app, "Sign in to OpenBot Cloud").exists {
             screenshot("session-rejected")
             XCTFail("production rejected the session cookie (it may be stale or copied wrong)")

@@ -57,19 +57,37 @@ jobs:
       - name: Start the clock
         run: echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
 
-      - name: Generate the Xcode project and boot a simulator
+      - name: Boot a simulator in the background
         run: |
-          echo "$(date +%s) project-and-simulator" >> "$RUNNER_TEMP/timing"
-          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
-          (cd ios-shell && xcodegen generate)
           picked="$(python3 ios-shell/ci/pick_simulator.py)"
           udid="$(printf '%s' "$picked" | cut -f1)"
           echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
           defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
-          xcrun simctl boot "$udid" || true
-          xcrun simctl bootstatus "$udid" -b
-          xcrun simctl spawn "$udid" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true || true
-          xcrun simctl spawn "$udid" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true || true
+          # Booting takes minutes on a fresh runner: it runs while the rest of the job does.
+          nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
+            && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
+            xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
+            touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/xcodegen-dist
+          key: ios-shell-video-xcodegen-v1
+
+      - name: Generate the Xcode project
+        run: |
+          echo "$(date +%s) project" >> "$RUNNER_TEMP/timing"
+          if [ ! -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
+            mkdir -p ~/xcodegen-dist
+            curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip \
+              && unzip -q -o "$RUNNER_TEMP/xcodegen.zip" -d ~/xcodegen-dist || true
+          fi
+          if [ -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
+            (cd ios-shell && ~/xcodegen-dist/xcodegen/bin/xcodegen generate)
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
+            (cd ios-shell && xcodegen generate)
+          fi
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -130,6 +148,8 @@ jobs:
         env:
           TEST_RUNNER_OPENBOT_SHELL_VIDEO_MODE: "1"
         run: |
+          for _ in $(seq 1 300); do [ -f "$RUNNER_TEMP/simulator.ready" ] && break; sleep 1; done
+          [ -f "$RUNNER_TEMP/simulator.ready" ] || { cat "$RUNNER_TEMP/boot.log"; exit 1; }
           echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
           started="$(python3 -c 'import time; print(time.time())')"
           echo "STARTED=$started" >> "$GITHUB_ENV"
@@ -190,19 +210,37 @@ jobs:
       - name: Start the clock
         run: echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
 
-      - name: Generate the Xcode project and boot a simulator
+      - name: Boot a simulator in the background
         run: |
-          echo "$(date +%s) project-and-simulator" >> "$RUNNER_TEMP/timing"
-          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
-          (cd ios-shell && xcodegen generate)
           picked="$(python3 ios-shell/ci/pick_simulator.py)"
           udid="$(printf '%s' "$picked" | cut -f1)"
           echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
           defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
-          xcrun simctl boot "$udid" || true
-          xcrun simctl bootstatus "$udid" -b
-          xcrun simctl spawn "$udid" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true || true
-          xcrun simctl spawn "$udid" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true || true
+          # Booting takes minutes on a fresh runner: it runs while the rest of the job does.
+          nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
+            && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
+            xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
+            touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/xcodegen-dist
+          key: ios-shell-video-xcodegen-v1
+
+      - name: Generate the Xcode project
+        run: |
+          echo "$(date +%s) project" >> "$RUNNER_TEMP/timing"
+          if [ ! -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
+            mkdir -p ~/xcodegen-dist
+            curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip \
+              && unzip -q -o "$RUNNER_TEMP/xcodegen.zip" -d ~/xcodegen-dist || true
+          fi
+          if [ -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
+            (cd ios-shell && ~/xcodegen-dist/xcodegen/bin/xcodegen generate)
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
+            (cd ios-shell && xcodegen generate)
+          fi
 
       - name: Decide the build
         env:
@@ -238,6 +276,8 @@ jobs:
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
           REAL_SIGN_OUT: ${{ inputs.real_sign_out }}
         run: |
+          for _ in $(seq 1 300); do [ -f "$RUNNER_TEMP/simulator.ready" ] && break; sleep 1; done
+          [ -f "$RUNNER_TEMP/simulator.ready" ] || { cat "$RUNNER_TEMP/boot.log"; exit 1; }
           echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
           if [ "$REAL_SIGN_OUT" = "true" ]; then export TEST_RUNNER_OPENBOT_SHELL_REAL_SIGN_OUT=1; fi
           if [ "$CONFIGURATION" = "Release" ]; then

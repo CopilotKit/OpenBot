@@ -198,8 +198,9 @@ final class ShellController: NSObject, WebControllerDelegate {
     /// complete and the body has something in it, checking a few times.
     private func checkPageDrawn(attempt: Int = 0) {
         guard model.pageLoading else { return }
-        // Drawn: the document is complete and at least three pieces of text are really on screen
-        // (screen-reader-only text measures 1 px and does not count).
+        // Drawn: the document is complete and at least three pieces of text are really on screen:
+        // inside the viewport, not hidden, not faded out, more than 4 px (screen-reader-only text
+        // measures 1 px).
         let script = """
         (function () {
           if (document.readyState !== 'complete' || !document.body) return false;
@@ -209,7 +210,16 @@ final class ShellController: NSObject, WebControllerDelegate {
             if (!node.textContent.trim()) continue;
             range.selectNodeContents(node);
             var r = range.getBoundingClientRect();
-            if (r.width > 4 && r.height > 4 && r.bottom > 0 && r.top < innerHeight) seen++;
+            if (!(r.width > 4 && r.height > 4 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth)) continue;
+            // Not faded out (a page's intro animation starts at opacity 0) and not hidden.
+            var el = node.parentElement, visible = true, opacity = 1;
+            while (el && el !== document.documentElement) {
+              var cs = getComputedStyle(el);
+              if (cs.visibility === 'hidden' || cs.display === 'none') { visible = false; break; }
+              opacity *= parseFloat(cs.opacity || '1');
+              el = el.parentElement;
+            }
+            if (visible && opacity > 0.5) seen++;
           }
           return seen >= 3;
         })()

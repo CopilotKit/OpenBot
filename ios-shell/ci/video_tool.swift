@@ -13,7 +13,9 @@ guard args.count == 6, let start = Double(args[3]), let length = Double(args[4])
 let asset = AVURLAsset(url: URL(fileURLWithPath: args[1]))
 let output = URL(fileURLWithPath: args[2])
 try? FileManager.default.removeItem(at: output)
-guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+// Cutting alone copies the stream (no re-encode); scaling needs one encode.
+let preset = width > 0 ? AVAssetExportPresetMediumQuality : AVAssetExportPresetPassthrough
+guard let export = AVAssetExportSession(asset: asset, presetName: preset) else {
     FileHandle.standardError.write("no export session\n".data(using: .utf8)!)
     exit(1)
 }

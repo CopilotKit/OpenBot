@@ -44,8 +44,13 @@ if ffmpeg:
     shrink = [ffmpeg, "-loglevel", "error", "-y", "-i", tmp, "-vf", "scale=600:-2", "-c:v", "libx264", "-crf", "28",
               "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", small]
 else:
-    cut = ["xcrun", "swift", tool, video, tmp, f"{begin:.2f}", f"{length or 0:.2f}", "0"]
-    shrink = ["xcrun", "swift", tool, tmp, small, "0", "0", "600"]
+    # Compiled once (about 10 s) and run twice, rather than interpreted twice.
+    binary = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "video_tool")
+    if not os.path.exists(binary):
+        subprocess.run(["xcrun", "swiftc", "-O", tool, "-o", binary], check=False)
+    runner = [binary] if os.path.exists(binary) else ["xcrun", "swift", tool]
+    cut = runner + [video, tmp, f"{begin:.2f}", f"{length or 0:.2f}", "0"]
+    shrink = runner + [tmp, small, "0", "0", "600"]
 ok, error = run(cut)
 if ok and os.path.exists(tmp) and os.path.getsize(tmp) > 10000:
     ok2, error2 = run(shrink)

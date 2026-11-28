@@ -420,6 +420,48 @@ final class ShellFlowUITests: ShellTestCase {
         note("after background: \(debugState(app))")
     }
 
+    // Inside the shell the page offers no browser notifications, even where the server has push:
+    // not after the first message, and not in Settings, Notifications.
+    func testNoBrowserNotificationOffersInTheShell() throws {
+        let app = launchSignedIn()
+        let composer = app.webViews.textViews.firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 30))
+        composer.tap()
+        _ = app.keyboards.firstMatch.waitForExistence(timeout: 6)
+        composer.typeText("Hello there")
+        guard let send = firstExisting([webElement(app, label: "Send message")], timeout: 5) else {
+            XCTFail("no Send button")
+            return
+        }
+        send.tap()
+        sleep(4)
+        dismissKeyboardIfUp(app)
+        screenshot("1-after-first-message")
+        let offer = app.webViews.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] 'Enable notifications'")).firstMatch
+        XCTAssertFalse(offer.exists, "the page offers browser notifications inside the shell")
+        // Settings, Notifications, through the web app's Account menu.
+        tab(app, .home).tap()
+        let account = webElement(app, label: "Account")
+        XCTAssertTrue(account.waitForExistence(timeout: 10))
+        account.tap()
+        guard let settings = firstExisting([webElement(app, label: "Settings")], timeout: 5) else {
+            XCTFail("no Settings in the Account menu")
+            return
+        }
+        settings.tap()
+        guard let notifications = firstExisting([webText(app, "Notifications")], timeout: 10) else {
+            XCTFail("no Notifications row in Settings")
+            return
+        }
+        notifications.tap()
+        sleep(3)
+        screenshot("2-settings-notifications")
+        let row = app.webViews.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] 'Notifications in this browser'")).firstMatch
+        XCTAssertFalse(row.exists, "Settings offers notifications in this browser inside the shell")
+    }
+
     // The native skeleton while the first page loads (the first load is held back 3 s here).
     func testLoadingSkeleton() throws {
         var app = launchSignedIn(moment: "sign-in")
