@@ -74,6 +74,15 @@ class HandoffConfigTest {
     }
 
     @Test
+    fun ticketIgnoresTheCallbacksOtherParameters() {
+        val https = HandoffMode.Https("my.open.bot", "/api/auth/shell/callback")
+        assertEquals("T3", HandoffConfig.ticket("https://my.open.bot/api/auth/shell/callback?ticket=T3&platform=android", https))
+        assertEquals("T3", HandoffConfig.ticket("https://my.open.bot/api/auth/shell/callback?platform=android&ticket=T3", https))
+        assertEquals("T4", HandoffConfig.ticket("openbotshell://signed-in?ticket=T4&platform=android", HandoffMode.Scheme))
+        assertNull(HandoffConfig.ticket("https://my.open.bot/api/auth/shell/callback?platform=android", https))
+    }
+
+    @Test
     fun pkceChallengeIsS256OfTheVerifier() {
         // RFC 7636 appendix B.
         assertEquals("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",

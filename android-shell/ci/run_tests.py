@@ -78,6 +78,7 @@ SUITE2 = [
     "ShellFlowTest#testSignOutFromAccountMenu",
     "ShellFlowTest#testSignInClearsALeftoverSession",
     "ShellFlowTest#testWellFormedForgedTicketDoesNotSignIn",
+    "ShellFlowTest#testOpenTheAppIntentIsTheCallback",
     "ShellFlowTest#testFallbackToWebSignIn",
     "ShellFlowTest#testOfflineLock",
     "ShellFlowTest#testKeyboardHidesTabBar",

@@ -67,6 +67,25 @@ emulator) the WebView very often gets Cloudflare's challenge instead of OpenBot:
   fix is on the Cloudflare side (a rule that does not challenge the app, for example by its
   `OpenBotShell-Android` mark combined with a signed header), not in the app.
 
+## The request headers of `enter`
+
+`enter` is a native `loadUrl(url, headers)` (`WebController.loadEnter`), with the header
+`OpenBot-Shell: android`. `ProbeTest#testEnterRequestHeaders` runs that exact code path against the
+probe's header echo (`/api/echo-headers` on `127.0.0.1`, a trustworthy origin, so Chromium sends the
+`Sec-Fetch-*` headers as it would to https), (a) from the signed-out first screen with nothing
+loaded and (b) while a page is showing, as in a renewal:
+
+| WebView | Case | Sec-Fetch-Site | Sec-Fetch-Mode | Sec-Fetch-Dest | Sec-Fetch-User | OpenBot-Shell |
+| --- | --- | --- | --- | --- | --- | --- |
+| 124.0.6367.219 (API 35, run 46144762894) | first screen | none | navigate | document | ?1 | android |
+| 124.0.6367.219 (API 35, run 46144762894) | page showing | none | navigate | document | ?1 | android |
+| 133.0.6943.137 (API 36, run 46144794643) | first screen | none | navigate | document | ?1 | android |
+| 133.0.6943.137 (API 36, run 46144794643) | page showing | none | navigate | document | ?1 | android |
+
+A native `loadUrl` is a browser-initiated navigation: `Sec-Fetch-Site: none` even with an OpenBot page
+on screen. A page cannot produce that combination with a custom header (a page's navigation is
+`same-origin` or `cross-site`, and a page's `fetch` with `OpenBot-Shell` is `Sec-Fetch-Mode: cors`).
+
 ## Real-device checklist
 
 1. Install from an internal-testing track; sign in with Google in the Custom Tab (default browser),

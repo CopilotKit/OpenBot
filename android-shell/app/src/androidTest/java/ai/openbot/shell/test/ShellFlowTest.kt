@@ -1,6 +1,11 @@
 package ai.openbot.shell.test
 
+import ai.openbot.shell.HandoffMode
+import ai.openbot.shell.PendingSignIn
+import ai.openbot.shell.PkcePair
+import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.uiautomator.Until
 import androidx.test.uiautomator.By
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -317,6 +322,38 @@ class ShellFlowTest : ShellTestBase() {
         screenshot("1-after-forged-ticket")
         check(signInThroughCustomTab("real", shots = false), "the real sign-in did not reach the tabs after a forged ticket")
     }
+
+    // The https callback page's "Open the OpenBot app" link: an intent:// address for this package.
+    // It must reach the trampoline and be taken like the automatic return (same pending sign-in,
+    // same ticket check). Here the mock refuses the ticket, so the sign-in screen says so.
+    @Test
+    fun testOpenTheAppIntentIsTheCallback() {
+        launch(MOCK_A, "open-the-app")
+        if (!check(waitFor("sign_in_button", 20_000) != null, "no Sign in button")) return
+        val ticket = "B".repeat(32)
+        val https = "https://my.open.bot/api/auth/shell/callback?ticket=$ticket&platform=android"
+        val link = "intent://my.open.bot/api/auth/shell/callback?ticket=$ticket&platform=android" +
+            "#Intent;scheme=https;package=$pkg;S.browser_fallback_url=${java.net.URLEncoder.encode(https, "UTF-8")};end"
+        val intent = Intent.parseUri(link, Intent.URI_INTENT_SCHEME)
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val targets = instrumentation.targetContext.packageManager.queryIntentActivities(intent, 0).map { it.activityInfo.name }
+        note("the Open the OpenBot app intent resolves to $targets")
+        check(targets == listOf("ai.openbot.shell.SignInCallbackActivity"), "the intent does not reach the trampoline: $targets")
+        // With no sign-in pending, the trampoline drops it.
+        instrumentation.targetContext.startActivity(Intent(intent))
+        sleep(3_000)
+        check(device.findObject(By.text(notFinished())) == null, "a callback with no pending sign-in was taken")
+        // With an https sign-in pending, it is the callback.
+        PendingSignIn.begin(PkcePair.make(), HandoffMode.Https("my.open.bot", "/api/auth/shell/callback"), "/")
+        instrumentation.targetContext.startActivity(Intent(intent))
+        val refused = device.wait(Until.findObject(By.text(notFinished())), 30_000)
+        check(refused != null, "the intent was not taken as the callback; ${debugState()}")
+        screenshot("open-the-app-intent-taken")
+        PendingSignIn.clear()
+    }
+
+    private fun notFinished(): String = instrumentation.targetContext.getString(ai.openbot.shell.R.string.sign_in_not_finished)
 
     private fun sessionCookieNames(): List<String> {
         val header = android.webkit.CookieManager.getInstance().getCookie("$MOCK_A/") ?: return emptyList()

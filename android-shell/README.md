@@ -27,13 +27,25 @@ What is native:
   on only while a sign-in this app started is waiting (`PendingSignIn`, in memory; otherwise it is
   dropped). `"callback":"https"`: the same, finishing on `https://my.open.bot/api/auth/shell/callback`,
   claimed as an App Link (`android:autoVerify="true"`); the app uses it only when Android reports the
-  domain verified (API 31+, `DomainVerificationManager`), else the web sign-in. The ticket and the
+  domain verified (API 31+, `DomainVerificationManager`), else the web sign-in. The server's https
+  callback is `<app>/api/auth/shell/callback?ticket=<T>&platform=android`; only `ticket` is read. When
+  the browser shows that address as a page, its "Open the OpenBot app" link is an `intent://` address
+  for this package (`scheme=https`, `browser_fallback_url`): the same https filter on the trampoline
+  takes it, with the same pending sign-in and ticket checks (`testOpenTheAppIntentIsTheCallback`). The ticket and the
   verifier then go to `/api/auth/shell/enter` in the WebView, which sets the session cookie there;
   that one request carries the header `OpenBot-Shell: android`, which the server requires for it
   (login CSRF: a page cannot add the header, so it cannot plant a session in someone else's app). The
   enter address is never kept as the page to reload or logged. The trampoline passes a callback on
   only with a well-formed ticket for the pending sign-in's mode, so another app firing
-  `openbotshell://` neither ends the sign-in nor closes the Custom Tab.
+  `openbotshell://` neither ends the sign-in nor closes the Custom Tab. From the first screen,
+  `enter` loads only after the web view's session cookies, the origin's other cookies (not
+  Cloudflare's), all site storage and the cache have been cleared (the server refuses `enter` over
+  another person's live session, and the web app's /sign would carry on as that person). Once the
+  failure page (`/sign?native-sign-in=failed`) shows for an attempt, it failed, whatever cookie or
+  page follows. The verifier stays until an `enter` succeeds or the person cancels: a well-formed
+  ticket the server refuses (another app's) goes back to waiting, at most 3 callbacks
+  (`SignInAttempt`, `SignInAttemptTest`). A renewal keeps the session, and the outgoing page's
+  `signed-out` and `/sign` are ignored while its `enter` loads.
   Every step has a timeout and an error line on the native screen; closing the Custom Tab returns
   quietly. The hand-off path is `/api/auth/shell/handoff?challenge=<C>&platform=android&callback=<scheme|https>`
   (`ShellUrls.kt`, to the letter of the server's `docs/shell-sign-in.md`). The confirmation page's
@@ -55,7 +67,8 @@ What is native:
   once, and a landing on `/sign` (a `route` message, or the URL of a web app without the bridge)
   after a 2.5 s confirmation (still on `/sign`, or no session cookie: the web app's /sign sends a
   signed-in person on to "/"). Then the two session cookies, the origin's other cookies (except
-  Cloudflare's `cf_*` clearance), its storage, the cache and the history go, and the native sign-in
+  Cloudflare's `cf_*` clearance), all site storage (`WebStorage.deleteAllData`: this WebView holds only
+  OpenBot and identity providers), the cache and the history go, and the native sign-in
   shows. After signing in the history is cleared, and Back never goes to another site's page, `/sign`
   or `/api/`.
 - **The loading skeleton.** `LoadingSkeletonView` (`loading_skeleton`, "Loading") is the web area's
@@ -102,9 +115,11 @@ What is native:
   (parsed with `Intent.parseUri`, component and selector removed, browsable only, from a tap); `mailto:`
   and `tel:` to the system. File inputs use the photo picker for images and the document picker
   otherwise (no media permission). `window.open` goes through a throwaway WebView that catches the
-  address: the app's own pages load in the one WebView, other sites in a Custom Tab, a blank window is
-  dropped (the app's page stays). JavaScript dialogs show only for the app's own pages, titled
-  OpenBot. Downloads: http(s) go to the system's DownloadManager with the page's cookies; `blob:` and
+  address: the app's own pages load in the one WebView, other sites in a Custom Tab, `mailto:`, `tel:`
+  and `sms:` go to the system; a blank window waits for its address until the page closes it, or 60 s
+  (the app's page stays). JavaScript dialogs show only for the app's own pages, titled
+  OpenBot. Downloads: http(s) from the app's own origin go to the system's DownloadManager with the
+  page's cookies, into Downloads (API 29+); other sites' files are declined; `blob:` and
   `data:` downloads cannot be handed over and are declined with a message. The microphone and camera are granted only to the base origin,
   after Android's own runtime permission. A dead renderer (`onRenderProcessGone`) gets a new WebView
   and a reload.
@@ -143,6 +158,8 @@ Intent extras (strings), read in `src/debug/java/ai/openbot/shell/DebugHooks.kt`
 | `openbot.force_dark=1` | The whole app, WebView included, in dark mode. |
 | `openbot.debug_tab_url=URL` | Sign in opens URL in a Custom Tab instead. |
 | `openbot.delay_first_load_ms=N` | The first page load starts N ms late, so the loading skeleton can be seen. |
+| `openbot.software_layer=1` | The WebView drawn in software (recordings only: the emulator's GPU path misdraws some pages). |
+| `openbot.start_signed_out=1` | The first screen even with a session cookie: a leftover session, for `testSignInClearsALeftoverSession`. |
 
 Debug and releaseTest (`TEST_OVERRIDES`): `openbot.base_url`, `openbot.diagnostics=1`, `openbot.test_name`.
 Debug builds also draw an invisible view whose content description starts `debug-state` with the
