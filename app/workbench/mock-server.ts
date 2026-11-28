@@ -21,6 +21,10 @@
  *   # phone app builds that don't send it yet:
  *   MOCK_ENTER_NO_HEADER_CHECK=1 bun app/workbench/mock-server.ts
  *
+ *   # Another person in another organization (Sam Rivera in Acme when unset), say for a second mock
+ *   # standing in for a self-hosted OpenBot:
+ *   MOCK_PERSON_NAME="Robin Park" MOCK_ORG_NAME="Globex" SERVER_PORT=3002 bun app/workbench/mock-server.ts
+ *
  * It listens on 127.0.0.1:${SERVER_PORT:-3001}. Besides the API it answers:
  *
  *   GET  /__mock/session                    {"signedIn": boolean}: whether a request with no cookie is
@@ -45,7 +49,8 @@
  *        Ends the mock's session: its cookie stops counting until the next /enter.
  *
  * Signed in, the API answers as the workbench's app-home scene does (workbench/session.ts,
- * api/extraHandlers.ts and the spec's generated answers), with a fixed person (Sam Rivera, in Acme),
+ * api/extraHandlers.ts and the spec's generated answers), with a person (Sam Rivera, in Acme, unless
+ * MOCK_PERSON_NAME and MOCK_ORG_NAME say otherwise),
  * three Bots (General Assistant, Research Bot, Writing Bot) and fifteen conversations, the first three
  * Competitor pricing notes (pinned and unread), Quarterly forecast and Trip to Lisbon, then one a Bot
  * is working in (Board update for December), another unread (Launch announcement) and more, eight of
@@ -68,9 +73,24 @@ import { DEFAULT_SESSION, sessionApi } from "./session";
 
 const PORT = Number(process.env.SERVER_PORT ?? 3001);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
-const ORGANIZATION = DEFAULT_SESSION.signedIn
-  ? DEFAULT_SESSION.organization.id
-  : "default";
+/**
+ * The signed-in person and their organization: Sam Rivera in Acme, or the names in MOCK_PERSON_NAME
+ * and MOCK_ORG_NAME, so a second mock beside the first (a self-hosted OpenBot in a sign-in test) can
+ * show which server a screen is on. The app draws the initials from the name.
+ */
+const SESSION: typeof DEFAULT_SESSION = DEFAULT_SESSION.signedIn
+  ? {
+      ...DEFAULT_SESSION,
+      name: process.env.MOCK_PERSON_NAME?.trim() || DEFAULT_SESSION.name,
+      organization: {
+        ...DEFAULT_SESSION.organization,
+        name:
+          process.env.MOCK_ORG_NAME?.trim() ||
+          DEFAULT_SESSION.organization.name,
+      },
+    }
+  : DEFAULT_SESSION;
+const ORGANIZATION = SESSION.signedIn ? SESSION.organization.id : "default";
 const API = `*/api/v2/organizations/:organizationId`;
 /** The cookie that makes a request signed in, whatever the session's default. */
 export const MOCK_SESSION_COOKIE = "better-auth.session_token";
@@ -758,7 +778,7 @@ async function start() {
     now: () => performance.now(),
   });
   // The signed-in session's answers. A signed-out request is refused before it gets here.
-  for (const [route, answer] of Object.entries(sessionApi(DEFAULT_SESSION))) {
+  for (const [route, answer] of Object.entries(sessionApi(SESSION))) {
     if (answer) api.setAnswer(route as ApiRoute, answer);
   }
   const answer = unused.fetch;
