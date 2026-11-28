@@ -15,7 +15,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   OpenBot Desktop and Settings save it. Google ADK, AG2, CrewAI, Langroid, LlamaIndex, Mastra and
   Strands now send each handed-back tool call to a Gemini model with Google's documented
   placeholder, and keep a real signature when there is one. Requests to every other provider are
-  sent as before. Antigravity was not affected.
+  sent as before. Antigravity was not affected. On LangGraph (Python), a call with no signature on
+  record, as in a conversation from before 1.2.2, now goes with the placeholder at Google's
+  OpenAI-compatible endpoint too, as it already did on LangGraph (TypeScript).
 - **`BOT_PROVIDER=google` works on Google ADK, Strands, Langroid, CrewAI, LlamaIndex and AG2.**
   The first five stopped before reaching Google ("LLM Provider NOT provided"), and AG2 asked for an
   OpenAI key. AG2 now answers on Google's own Gemini API with the Google key.

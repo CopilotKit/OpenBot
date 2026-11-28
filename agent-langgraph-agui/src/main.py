@@ -16,6 +16,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
 from run_model_key import RunModelKey
+import gemini_signatures
+
+# thought_signatures.py sends back the signature Gemini gave a call. A call with none on record (a
+# thread from before it, or a caller that dropped it) gets Google's placeholder here, so Gemini does
+# not refuse the step. See gemini_signatures.py.
+gemini_signatures.install()
 
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from fastapi import FastAPI, Request
