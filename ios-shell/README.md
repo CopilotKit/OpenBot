@@ -58,7 +58,12 @@ What is native:
   downloads goes to the share sheet, never in place of the page. A 5xx page on the web app's own
   origin is a load failure (the lock screen). Another site's page that fails (an identity provider
   blocked on this network) sends the web view back to the web app's last page instead of locking.
-  Sign-out clears the site's data. Once a page has said `ready`, only its own `signed-out` or
+  Sign-out clears the site's data, and so does every sign-in before it loads `enter` (a web view
+  showing the sign-in screen can still hold a live session, and the server refuses `enter` for a
+  web view holding another person's). Both keep Cloudflare's `cf_clearance` cookie, as the Android
+  app does: it says only that this device passed Cloudflare's check, and dropping it can show the
+  next person a challenge page inside the app. During a renewal, the outgoing page's `signed-out`
+  and `/sign` are ignored: the renewal's own result decides. Once a page has said `ready`, only its own `signed-out` or
   `route` end the session; without the bridge, reaching `/sign` ends it only if the session cookie
   is really gone.
 - **The bridge.** The page gets `window.__OPENBOT_NATIVE_SHELL__ = {platform: "ios", version, bridge: 1}`
@@ -157,6 +162,9 @@ ignores them.
 | `OPENBOT_SHELL_FORCE_DARK=1` | The whole app, web view included, in dark mode. |
 | `OPENBOT_SHELL_DELAY_FIRST_LOAD_SECONDS=<n>` | Holds the first page load back n seconds when signed in (to see the skeleton). |
 | `OPENBOT_SHELL_TEST_PLAIN_SESSION_COOKIE=<value>` | Sets `better-auth.session_token` (the http mock's name). |
+| `OPENBOT_SHELL_TEST_ENTER_PROBE_URL=<url>` | Loads that URL in place of `enter`, through the same call and header (the probe's `/api/echo-headers` shows what WebKit sent). |
+| `OPENBOT_SHELL_TEST_ENTER_PROBE_AFTER_SECONDS=<n>` | With the above, signed in: makes a renewal's `enter` call n seconds after launch, with a page showing. |
+| `OPENBOT_SHELL_TEST_LATE_SESSION_COOKIE=<value>` | Plants `better-auth.session_token` after the launch decided "signed out": a session left in a web view showing the sign-in screen. |
 | `OPENBOT_SHELL_TEST_KILL_CONTENT_SECONDS=<n>` | Kills the web content process n seconds after a signed-in launch (WebKit's private `_killWebContentProcess`). |
 
 In DEBUG builds and the CI Release test build only (not in a store build): `OPENBOT_BASE_URL`,

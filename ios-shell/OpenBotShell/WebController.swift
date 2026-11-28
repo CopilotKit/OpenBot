@@ -284,6 +284,9 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             dragHandled = false
             dragOnEditable = nil
             dragOverScroller = nil
+            // Nothing of the last drag carries over (a late answer must not read its finger).
+            dragFinger = .zero
+            dragMove = .zero
             guard keyboardIsUp else { return }
             // The start point in the page's layout viewport: the visual viewport may be scaled or
             // moved (WebKit shifts it while the keyboard is up).
@@ -465,7 +468,10 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             return
         }
         if navigationAction.shouldPerformDownload {
-            decisionHandler(.download)
+            // Files only from the web app's own page; another site's or a frame's go nowhere.
+            let allowed = isMainFrame && config.isOwnOrigin(url)
+            diagnostics.log("download-request", ["allowed": allowed])
+            decisionHandler(allowed ? .download : .cancel)
             return
         }
         if scheme == "http" || scheme == "https" {
@@ -533,10 +539,12 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         }
         let http = navigationResponse.response as? HTTPURLResponse
         let disposition = http?.value(forHTTPHeaderField: "Content-Disposition")?.lowercased() ?? ""
-        if navigationResponse.isForMainFrame, disposition.hasPrefix("attachment") || !navigationResponse.canShowMIMEType {
-            // A file: never in place of the app's page. Saved and handed to the share sheet.
-            diagnostics.log("download-response", ["mimeType": http?.mimeType ?? navigationResponse.response.mimeType ?? ""])
-            decisionHandler(.download)
+        if disposition.hasPrefix("attachment") || !navigationResponse.canShowMIMEType {
+            // A file: never in place of the app's page. From the web app's own main frame it is saved
+            // and handed to the share sheet; from anywhere else it is dropped.
+            let fromApp = navigationResponse.isForMainFrame && (navigationResponse.response.url.map { config.isOwnOrigin($0) } ?? false)
+            diagnostics.log("download-response", ["mimeType": http?.mimeType ?? navigationResponse.response.mimeType ?? "", "allowed": fromApp])
+            decisionHandler(fromApp ? .download : .cancel)
             return
         }
         if navigationResponse.isForMainFrame, let http = http, http.statusCode >= 500,
@@ -560,7 +568,12 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         download.delegate = self
     }
 
+    /// Whether the navigation in progress has committed: until it does, the last page is still on
+    /// screen, intact.
+    private var committedSinceStart = true
+
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        committedSinceStart = false
         if let url = webView.url, url.absoluteString != "about:blank" {
             if !isHandoffURL(url) { lastRequestedURL = url }
             diagnostics.log("main-frame-start", ["url": Diagnostics.redact(url)])
@@ -576,6 +589,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        committedSinceStart = true
         disarmWatchdog()
         hideKeyboardAccessory(when: "commit")
         // WebKit commits about:blank in place of a load it refuses without an error (a restricted
@@ -737,7 +751,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
                  type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         // Only the OpenBot origin may use the microphone and camera; iOS still asks the person.
-        let granted = origin.host.lowercased() == config.baseHost
+        let granted = isOwnOrigin(origin)
         diagnostics.log("media-permission", [
             "origin": "\(origin.protocol)://\(origin.host):\(origin.port)",
             "type": type.rawValue,
@@ -778,9 +792,17 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     /// Another site's page did not load: back to the web app's last page, without the lock screen.
     private func leaveFailedOtherSite(_ url: URL, why: String) {
-        diagnostics.log("other-site-failed", ["host": url.host ?? "", "why": why])
+        // A load that never committed left the last page as it was (an open conversation, say):
+        // nothing to reload. Only a page that is gone (a blocked load put about:blank in its place,
+        // or another site's page is what is showing) sends the web view back.
+        let pageIntact = !committedSinceStart && (webView.backForwardList.currentItem.map { config.isOwnOrigin($0.url) } ?? false)
+        diagnostics.log("other-site-failed", ["host": url.host ?? "", "why": why, "pageIntact": pageIntact])
         lastLoadFailed = false
         delegate?.webController(self, otherSiteFailed: url)
+        if pageIntact {
+            committedSinceStart = true
+            return
+        }
         load(lastOwnOriginURL ?? config.baseURL)
     }
 
@@ -896,13 +918,20 @@ extension WebController: WKDownloadDelegate {
         diagnostics.log("download-finished", ["bytes": (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1])
         guard let presenter = topViewController() else { return }
         let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        // The file's folder goes when the share sheet closes, whatever the person chose.
+        sheet.completionWithItemsHandler = { [weak self] _, _, _, _ in
+            try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+            self?.diagnostics.log("download-cleaned", [:])
+        }
         sheet.popoverPresentationController?.sourceView = webView
         sheet.popoverPresentationController?.sourceRect = CGRect(x: webView.bounds.midX, y: webView.bounds.midY, width: 1, height: 1)
         presenter.present(sheet, animated: true)
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        downloadFiles.removeValue(forKey: ObjectIdentifier(download))
+        if let file = downloadFiles.removeValue(forKey: ObjectIdentifier(download)) {
+            try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+        }
         diagnostics.log("download-failed", ["description": (error as NSError).localizedDescription])
     }
 }

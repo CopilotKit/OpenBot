@@ -275,7 +275,7 @@ jobs:
           fi
           echo "the store build reads nothing from its launch environment"
           app="$(ls -d DerivedDataRelease/Build/Products/Release-iphonesimulator/OpenBotShell.app)"
-          found="$(strings -a "$app/OpenBotShell" | grep -E 'OPENBOT_SHELL_(TEST_SESSION_COOKIE|TEST_PLAIN_SESSION_COOKIE|TEST_STALE_SESSION|FORCE_OFFLINE|FORCE_DARK|DELAY_FIRST_LOAD|TEST_KILL_CONTENT|HANDOFF_AUTO|DEBUG_SHEET_URL|PLAIN_WEBVIEW|RESET)|debug-state' || true)"
+          found="$(strings -a "$app/OpenBotShell" | grep -E 'OPENBOT_SHELL_(TEST_SESSION_COOKIE|TEST_PLAIN_SESSION_COOKIE|TEST_STALE_SESSION|FORCE_OFFLINE|FORCE_DARK|DELAY_FIRST_LOAD|TEST_KILL_CONTENT|TEST_ENTER_PROBE|TEST_LATE_SESSION|HANDOFF_AUTO|DEBUG_SHEET_URL|PLAIN_WEBVIEW|RESET)|debug-state' || true)"
           if [ -n "$found" ]; then
             echo "::error::DEBUG-only hooks are in the Release binary:"
             echo "$found"

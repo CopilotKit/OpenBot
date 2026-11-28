@@ -158,6 +158,14 @@ final class ShellController: NSObject, WebControllerDelegate {
                     guard let self = self else { return }
                     self.diagnostics.log("session-cookie", ["present": present, "timedOut": timedOut, "attempt": 2])
                     if present { self.launchSignedIn() } else { self.model.phase = .signedOut }
+                    #if DEBUG
+                    if !present, let value = self.config.testLateSessionCookie {
+                        SessionCookies.set(name: SessionCookies.plainName, value: value, secure: false,
+                                           host: self.config.baseHost, in: self.cookieStore) { ok in
+                            self.diagnostics.log("test-hook", ["hook": "late-session-cookie", "ok": ok])
+                        }
+                    }
+                    #endif
                 }
             }
         }
@@ -174,6 +182,15 @@ final class ShellController: NSObject, WebControllerDelegate {
                 let selector = NSSelectorFromString("_killWebContentProcess")
                 self?.diagnostics.log("test-hook", ["hook": "kill-content", "available": webView.responds(to: selector)])
                 if webView.responds(to: selector) { webView.perform(selector) }
+            }
+        }
+        if let probe = config.testEnterProbeURL, let after = config.testEnterProbeAfterSeconds {
+            // A renewal's `enter` call while a page is showing, pointed at the probe.
+            DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
+                guard let self = self else { return }
+                self.diagnostics.log("test-hook", ["hook": "enter-probe-while-signed-in"])
+                self.renewing = true
+                self.web.load(probe, headers: [ShellController.shellHeader: "ios"], remember: self.config.url("/"))
             }
         }
         if let delay = config.delayFirstLoadSeconds {
@@ -400,8 +417,27 @@ final class ShellController: NSObject, WebControllerDelegate {
         // The header tells the server this request comes from the app (no session without it: a
         // page elsewhere cannot make the web view sign in to someone else's account). A retry or a
         // restarted web process loads `path`, never the one-time enter URL again.
-        web.load(enterURL(ticket: ticket, verifier: verifier, to: path),
-                 headers: [ShellController.shellHeader: "ios"], remember: config.url(path))
+        var url = enterURL(ticket: ticket, verifier: verifier, to: path)
+        #if DEBUG
+        if let probe = config.testEnterProbeURL { url = probe }
+        #endif
+        let load = { [weak self] in
+            guard let self = self else { return }
+            self.web.load(url, headers: [ShellController.shellHeader: "ios"], remember: self.config.url(path))
+        }
+        if renewing {
+            // The same person's session stays until the new one replaces it.
+            load()
+        } else {
+            // Signed out, the web view can still hold a live session (WebKit can answer "no cookies"
+            // at a cold launch, see decideLaunchState). The server refuses `enter` for a web view
+            // holding another person's session, so the site's data goes first, and `enter` loads
+            // only once that has finished.
+            clearSiteData(reason: "before-enter") { [weak self] in
+                guard let self = self, self.model.signIn == .entering else { return }
+                load()
+            }
+        }
     }
 
     static let shellHeader = "OpenBot-Shell"
@@ -452,20 +488,52 @@ final class ShellController: NSObject, WebControllerDelegate {
         SessionCookies.delete(in: cookieStore, host: config.baseHost) { [weak self] deleted in
             self?.diagnostics.log("session-cookies-deleted", ["count": deleted])
         }
-        clearSiteData()
+        clearSiteData(reason: "sign-out")
     }
 
     /// Everything the web app's site stored (cookies, local storage, IndexedDB, caches) goes at sign
     /// out, so the next person to sign in on this phone finds nothing of the last one.
-    private func clearSiteData() {
+    /// Clears every piece of data the site stored but Cloudflare's clearance cookie (`cf_clearance`,
+    /// which only says this device passed Cloudflare's check, as the Android app keeps it): cookies,
+    /// local storage, IndexedDB, caches. Calls back on the main queue when it has finished. A clear
+    /// that is still running is waited for, so a sign-in that starts during sign-out's clear loads
+    /// `enter` only after it.
+    private var siteDataClearWaiters: [() -> Void]?
+    private func clearSiteData(reason: String, completion: (() -> Void)? = nil) {
+        if siteDataClearWaiters != nil {
+            // One clear at a time; a later caller waits for this one and then clears again.
+            siteDataClearWaiters?.append { [weak self] in self?.clearSiteData(reason: reason, completion: completion) }
+            return
+        }
+        siteDataClearWaiters = []
         let store = web.webView.configuration.websiteDataStore
-        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        var types = WKWebsiteDataStore.allWebsiteDataTypes()
+        types.remove(WKWebsiteDataTypeCookies)
         let host = config.baseHost
+        let mineHost = { (domain: String) -> Bool in
+            let d = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+            return host == d || host.hasSuffix("." + d)
+        }
         store.fetchDataRecords(ofTypes: types) { [weak self] records in
-            let mine = records.filter { host == $0.displayName || host.hasSuffix("." + $0.displayName) }
+            let mine = records.filter { mineHost($0.displayName) }
             store.removeData(ofTypes: types, for: mine) {
-                self?.diagnostics.log("site-data-cleared", ["records": mine.count])
-                DispatchQueue.main.async { self?.model.siteDataClears += 1 }
+                store.httpCookieStore.getAllCookies { cookies in
+                    let doomed = cookies.filter { mineHost($0.domain) && $0.name != "cf_clearance" }
+                    let group = DispatchGroup()
+                    for cookie in doomed {
+                        group.enter()
+                        store.httpCookieStore.delete(cookie) { group.leave() }
+                    }
+                    group.notify(queue: .main) {
+                        guard let self = self else { return }
+                        self.diagnostics.log("site-data-cleared", ["records": mine.count, "cookies": doomed.count, "reason": reason])
+                        self.model.siteDataClears += 1
+                        let waiters = self.siteDataClearWaiters ?? []
+                        self.siteDataClearWaiters = nil
+                        completion?()
+                        waiters.forEach { $0() }
+                    }
+                }
             }
         }
     }
@@ -611,6 +679,10 @@ final class ShellController: NSObject, WebControllerDelegate {
             } else if path == "/sign" || path.hasPrefix("/sign/") {
                 if model.signIn == .entering {
                     failSignIn("Sign-in didn't finish. Try again.")
+                } else if renewing {
+                    // The outgoing page during a renewal: the server replaces its session, and a
+                    // request in flight can see the old one gone. The renewal's own result decides.
+                    diagnostics.log("route-sign-ignored", ["why": "renewal"])
                 } else if model.phase == .signedIn {
                     sessionEnded(reason: "route-sign")
                 }
@@ -619,6 +691,8 @@ final class ShellController: NSObject, WebControllerDelegate {
         case "signed-out":
             if model.signIn == .entering {
                 failSignIn("Sign-in didn't finish. Try again.")
+            } else if renewing {
+                diagnostics.log("signed-out-ignored", ["why": "renewal"])
             } else if model.phase == .signedIn {
                 sessionEnded(reason: "signed-out")
             }

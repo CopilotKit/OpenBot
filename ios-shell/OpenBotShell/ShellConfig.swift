@@ -35,6 +35,14 @@ struct ShellConfig {
     /// Kills the web content process this long after a signed-in launch, as iOS does under memory
     /// pressure, to test the recovery.
     var killContentAfterSeconds: Double?
+    /// Loads this URL, through the exact call `enter` uses (same headers), in place of `enter`: the
+    /// probe echoes the request's headers back (the Sec-Fetch-* measurement).
+    var testEnterProbeURL: URL?
+    /// Signed in, this long after launch: the same call as a renewal's `enter`, with a page showing.
+    var testEnterProbeAfterSeconds: Double?
+    /// Planted as `better-auth.session_token` after the launch has decided "signed out": a live
+    /// session left in a web view that shows the sign-in screen.
+    var testLateSessionCookie: String?
 
     static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> ShellConfig {
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0"
@@ -84,6 +92,15 @@ struct ShellConfig {
         }
         if let value = environment["OPENBOT_SHELL_TEST_KILL_CONTENT_SECONDS"], let seconds = Double(value), seconds > 0 {
             config.killContentAfterSeconds = seconds
+        }
+        if let value = environment["OPENBOT_SHELL_TEST_ENTER_PROBE_URL"], let url = URL(string: value) {
+            config.testEnterProbeURL = url
+        }
+        if let value = environment["OPENBOT_SHELL_TEST_ENTER_PROBE_AFTER_SECONDS"], let seconds = Double(value), seconds > 0 {
+            config.testEnterProbeAfterSeconds = seconds
+        }
+        if let value = environment["OPENBOT_SHELL_TEST_LATE_SESSION_COOKIE"], !value.isEmpty {
+            config.testLateSessionCookie = value
         }
         #endif
         return config

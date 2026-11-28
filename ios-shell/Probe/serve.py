@@ -12,6 +12,7 @@ Serves two origins on 127.0.0.1:
     POST /api/persist/clear   expires probe_persist
     GET  /api/persist/check   {"cookie": true|false}: did probe_persist come back
     GET  /status/503          an HTML error page with status 503
+    GET  /api/echo-headers    an HTML page listing the request's Sec-Fetch-* and OpenBot-Shell headers
     GET  /download            a text file sent as an attachment (Content-Disposition)
   API port 8766 ("a different-origin API"), nothing static:
     GET     /nocors           JSON with no CORS headers (a cross-origin fetch must be blocked)
@@ -142,6 +143,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_slowly("text/event-stream", [f"data: event {i}\n\n" for i in (1, 2, 3)])
         if path == "/api/stream":
             return self.send_slowly("text/plain; charset=utf-8", [f"line {i}\n" for i in (1, 2, 3)])
+        if path == "/api/echo-headers":
+            names = ["Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-User", "OpenBot-Shell"]
+            rows = "".join(f"<p>{n}: {self.headers.get(n) or '(absent)'}</p>" for n in names)
+            print("echo-headers " + " | ".join(f"{n}={self.headers.get(n)}" for n in names), flush=True)
+            return self.send_body(200, "text/html; charset=utf-8",
+                                  f"<!doctype html><title>Headers</title><h1>Request headers</h1>{rows}")
         if path.startswith("/api/"):
             return self.send_json({"error": "not found"}, 404)
         if path == "/status/503":

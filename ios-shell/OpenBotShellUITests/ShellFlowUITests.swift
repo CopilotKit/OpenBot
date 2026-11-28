@@ -604,4 +604,57 @@ final class ShellFlowUITests: ShellTestCase {
         tab(app, .conversations).tap()
         XCTAssertTrue(webText(app, "Competitor pricing notes").waitForExistence(timeout: 15), "the tabs stopped routing after the back swipes")
     }
+
+    // Review N1: a live session left in a web view that shows the sign-in screen (WebKit can answer
+    // "no cookies" at a cold launch) is cleared, with the site's data, before `enter` loads: the
+    // server would refuse another person's ticket. The mock does not tell people apart, so this
+    // checks the order (the clear finished, then the sign-in finished), not a refusal.
+    func testSignInClearsALeftoverSessionFirst() throws {
+        let app = launch(base: ShellTestCase.mockA, moment: "leftover", auto: true,
+                         extra: ["OPENBOT_SHELL_TEST_LATE_SESSION_COOKIE": "someone-else"])
+        let button = app.buttons["sign-in-button"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        sleep(2)
+        XCTAssertEqual(stateValue(app, "cleared"), "0", "the site's data was cleared before signing in started")
+        button.tap()
+        XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 45), "signing in did not reach the tabs: \(debugState(app))")
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        let cleared = Int(stateValue(app, "cleared") ?? "0") ?? 0
+        note("leftover session: \(debugState(app))")
+        XCTAssertGreaterThanOrEqual(cleared, 1, "the leftover session was not cleared before enter")
+        XCTAssertEqual(stateValue(app, "phase"), "signedIn")
+    }
+
+    // The measurement for the server's Sec-Fetch rule: the headers WebKit sends on the request that
+    // loads `enter`, through the very call `enter` uses, (a) from the signed-out first screen and
+    // (b) as a renewal does, with a page showing. The probe echoes them into the page.
+    func testEnterRequestHeaders() throws {
+        let probe = "http://127.0.0.1:8765/api/echo-headers"
+        var app = launch(base: ShellTestCase.mockA, moment: "signed-out", auto: true,
+                         extra: ["OPENBOT_SHELL_TEST_ENTER_PROBE_URL": probe])
+        XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 20))
+        app.buttons["sign-in-button"].tap()
+        let shellHeader = webText(app, "OpenBot-Shell:")
+        XCTAssertTrue(shellHeader.waitForExistence(timeout: 30), "the probe's header page did not load (signed out)")
+        let signedOut = webLabels(app).filter { $0.contains("Sec-Fetch") || $0.contains("OpenBot-Shell") }
+        note("enter headers, signed out: \(signedOut.joined(separator: "; "))")
+        attachText("enter-headers-signed-out", signedOut.joined(separator: "\n"))
+        screenshot("enter-headers-signed-out")
+        app.terminate()
+
+        // Signed in for real first; the relaunch then makes the renewal's call with Home showing.
+        app = launchSignedIn(moment: "sign-in")
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        leaveAndTerminate(app)
+        app = launch(base: ShellTestCase.mockA, moment: "renewal", reset: false,
+                     extra: ["OPENBOT_SHELL_TEST_ENTER_PROBE_URL": probe, "OPENBOT_SHELL_TEST_ENTER_PROBE_AFTER_SECONDS": "8"])
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30), "no page showing before the renewal's call")
+        XCTAssertTrue(webText(app, "OpenBot-Shell:").waitForExistence(timeout: 40), "the probe's header page did not load (renewal)")
+        let renewal = webLabels(app).filter { $0.contains("Sec-Fetch") || $0.contains("OpenBot-Shell") }
+        note("enter headers, renewal with a page showing: \(renewal.joined(separator: "; "))")
+        attachText("enter-headers-renewal", renewal.joined(separator: "\n"))
+        screenshot("enter-headers-renewal")
+        XCTAssertTrue(renewal.contains { $0.contains("OpenBot-Shell: ios") }, "the renewal's load did not carry OpenBot-Shell: ios")
+        XCTAssertTrue(signedOut.contains { $0.contains("OpenBot-Shell: ios") }, "the sign-in's load did not carry OpenBot-Shell: ios")
+    }
 }
