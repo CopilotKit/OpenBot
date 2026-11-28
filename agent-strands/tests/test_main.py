@@ -105,6 +105,7 @@ def provider():
         ("openai", "openai/gpt-5.6-terra", "openai/openai/gpt-5.6-terra"),
         ("", "qwen/qwen3-8b", "openai/qwen/qwen3-8b"),
         ("anthropic", "claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"),
+        ("google", "gemini-2.5-flash", "gemini/gemini-2.5-flash"),
     ],
 )
 def test_model_id_keeps_the_chosen_provider_on_a_name_that_contains_a_slash(

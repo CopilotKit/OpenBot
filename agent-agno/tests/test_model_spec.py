@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from model_providers import BotSettings, bot_settings
+from model_providers import BotSettings, bot_settings, litellm_model_id
 
 BOT_ID = "agent-agno"
 
@@ -30,3 +30,10 @@ def test_blank_environment_falls_through_to_the_file(monkeypatch):
     monkeypatch.setenv("BOT_PROVIDER", "")
     monkeypatch.setenv("BOT_MODEL", "   ")
     assert bot_settings(BOT_ID) == BotSettings(provider="openai", model="gpt-5.5")
+
+
+def test_litellm_calls_google_gemini():
+    """litellm has no `google` provider; Google AI Studio is `gemini` there."""
+    assert litellm_model_id("google", "gemini-2.5-flash") == "gemini/gemini-2.5-flash"
+    assert litellm_model_id("openai", "qwen/qwen3-8b") == "openai/qwen/qwen3-8b"
+    assert litellm_model_id("anthropic", "claude-haiku") == "anthropic/claude-haiku"

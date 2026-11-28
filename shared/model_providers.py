@@ -180,6 +180,20 @@ def bot_settings(
     return BotSettings(provider=provider, model=model)
 
 
+# litellm's name for a provider, where it differs from OpenBot's. litellm addresses Google AI Studio
+# as `gemini`; `google/...` is not a provider it knows and fails with `LLM Provider NOT provided`.
+_LITELLM_PROVIDER = {"google": "gemini"}
+
+
+def litellm_model_id(provider: str, model: str) -> str:
+    """`provider/model` as litellm addresses it: the chosen provider stays in front of the model.
+
+    OpenBot calls Google AI Studio `google`; litellm calls it `gemini`, so that one name is
+    translated. Every other provider is passed through as typed.
+    """
+    return f"{_LITELLM_PROVIDER.get(provider, provider)}/{model}"
+
+
 # `requiresResponsesApi` in shared/model-providers.ts, the rule every Bot in the box decides by:
 # `gpt-5.6-*` and every `gpt-6*` take function tools only on the Responses API, `gpt-5.4*` and
 # `gpt-5.5*` take them on Chat Completions only without a reasoning effort, and the `-pro` and
