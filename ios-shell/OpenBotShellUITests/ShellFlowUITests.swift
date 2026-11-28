@@ -568,17 +568,15 @@ final class ShellFlowUITests: ShellTestCase {
 
     // The native skeleton while the first page loads (the first load is held back 3 s here).
     func testLoadingSkeleton() throws {
-        var app = launchSignedIn(moment: "sign-in")
-        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
-        // Background the app as the app switcher does before closing it. This gives WebKit
-        // its normal lifecycle transition to persist the freshly issued session.
-        XCUIDevice.shared.press(.home)
-        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10) || app.state == .runningBackgroundSuspended)
-        app.terminate()
+        // Give both appearances the same signed-in workbench state. The sign-in and cold-relaunch
+        // tests independently exercise WebKit's persistence of the actual handoff cookie.
         for (moment, dark) in [("light", false), ("dark", true)] {
-            var extra = ["OPENBOT_SHELL_DELAY_FIRST_LOAD_SECONDS": "3"]
+            var extra = [
+                "OPENBOT_SHELL_TEST_PLAIN_SESSION_COOKIE": "mock",
+                "OPENBOT_SHELL_DELAY_FIRST_LOAD_SECONDS": "3",
+            ]
             if dark { extra["OPENBOT_SHELL_FORCE_DARK"] = "1" }
-            app = launch(base: ShellTestCase.mockA, moment: moment, reset: false, extra: extra)
+            let app = launch(base: ShellTestCase.mockA, moment: moment, extra: extra)
             let skeleton = app.descendants(matching: .any)["loading-skeleton"]
             XCTAssertTrue(skeleton.waitForExistence(timeout: 10), "no loading skeleton (\(moment))")
             XCTAssertTrue(tab(app, .home).exists, "the tabs are not usable under the skeleton (\(moment))")
