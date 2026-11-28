@@ -89,10 +89,15 @@ jobs:
             (cd ios-shell && xcodegen generate)
           fi
 
+      # git's own id for the app's sources: hashFiles timed out on a slow runner.
+      - name: Work out the build cache key
+        id: dd-key-1
+        run: echo "tree=$(git rev-parse HEAD:ios-shell)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: DerivedData-Debug
-          key: ios-shell-video-dd-Debug-${{ hashFiles('ios-shell/**') }}
+          key: ios-shell-video-dd-Debug-${{ steps.dd-key-1.outputs.tree }}
           restore-keys: ios-shell-video-dd-Debug-
 
       # The app builds while the web app does: on a cold web cache the two together are what
@@ -280,10 +285,15 @@ jobs:
           # With the Google sign-in: a Release build, no hook. Otherwise the session-cookie hook (Debug).
           if [ "$GOOGLE_INPUT" = "true" ]; then echo "CONFIGURATION=Release" >> "$GITHUB_ENV"; else echo "CONFIGURATION=Debug" >> "$GITHUB_ENV"; fi
 
+      # git's own id for the app's sources: hashFiles timed out on a slow runner.
+      - name: Work out the build cache key
+        id: dd-key-2
+        run: echo "tree=$(git rev-parse HEAD:ios-shell)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: DerivedData-${{ env.CONFIGURATION }}
-          key: ios-shell-video-dd-${{ env.CONFIGURATION }}-${{ hashFiles('ios-shell/**') }}
+          key: ios-shell-video-dd-${{ env.CONFIGURATION }}-${{ steps.dd-key-2.outputs.tree }}
           restore-keys: ios-shell-video-dd-${{ env.CONFIGURATION }}-
 
       - name: Build the app and its UI tests

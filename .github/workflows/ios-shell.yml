@@ -118,10 +118,15 @@ jobs:
             (cd ios-shell && xcodegen generate)
           fi
 
+      # git's own id for the app's sources: hashFiles timed out on a slow runner.
+      - name: Work out the build cache key
+        id: dd-key-1
+        run: echo "tree=$(git rev-parse HEAD:ios-shell)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: DerivedData
-          key: ios-shell-dd-Debug-${{ hashFiles('ios-shell/**') }}
+          key: ios-shell-dd-Debug-${{ steps.dd-key-1.outputs.tree }}
           restore-keys: ios-shell-dd-Debug-
 
       # The app builds while the web app does.
