@@ -317,7 +317,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             }
         case .changed, .ended:
             // A drag may have scrolled the page: a fresh picture once it has come to rest.
-            if pan.state == .ended { transition.refresh(after: 0.8) }
+            if pan.state == .ended, WebController.slideBack { transition.refresh(after: 0.8) }
             dragFinger = pan.location(in: nil)
             dragMove = pan.translation(in: webView)
             considerKeyboardDismiss()
@@ -365,7 +365,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     func updateBack(canGoBack: Bool?, depth: Int? = nil, tab: String? = nil) {
         if let tab = tab { transition.route(tab: tab, depth: depth) }
         // A fresh picture of the new page once it has settled, for the next push.
-        transition.refresh(after: 0.3)
+        if WebController.slideBack { transition.refresh(after: 0.3) }
         // The page has its new route: once it has drawn, a cover left by a back goes.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.transition.pageDrawn() }
         let mode = ShellBack.decide(canGoBack: canGoBack)
@@ -382,7 +382,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         touch.delaysTouchesBegan = false
         touch.delaysTouchesEnded = false
         touch.delegate = self
-        touch.onTouchDown = { [weak self] in self?.transition.touchDown() }
+        touch.onTouchDown = { [weak self] in if WebController.slideBack { self?.transition.touchDown() } }
         webView.addGestureRecognizer(touch)
     }
 
@@ -431,6 +431,8 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         let ok: () -> Void = { [weak self] in
             self?.webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent(\"openbot:navigate-ok\"))", completionHandler: nil)
         }
+        // With the slide off nothing is kept: the page goes ahead at once.
+        guard WebController.slideBack else { ok(); return }
         switch direction {
         case "push": transition.willPush(tab: tab, completion: ok)
         case "back": if WebController.slideBack { transition.playBack(back: ok) } else { ok() }

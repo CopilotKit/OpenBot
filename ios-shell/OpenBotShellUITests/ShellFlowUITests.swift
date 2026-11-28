@@ -796,7 +796,9 @@ final class ShellFlowUITests: ShellTestCase {
     // conversation away over the list's picture and lands on the list at its scroll position, with no
     // blank web view on the way (the frames are checked in the video workflow's recording).
     func testSwipeBackSlidesToTheList() throws {
-        let app = launchSignedIn(extra: ["OPENBOT_SHELL_SLIDE_BACK": "1"])
+        // Signed in from the start (the mock's session cookie), so the recording is the swipe.
+        let app = launch(base: ShellTestCase.mockA, moment: "signed-in",
+                         extra: ["OPENBOT_SHELL_SLIDE_BACK": "1", "OPENBOT_SHELL_TEST_PLAIN_SESSION_COOKIE": "mock"])
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
         tapTab(app, .conversations)
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 15))
@@ -814,5 +816,23 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertTrue(tab(app, .conversations).isSelected)
         sleep(1)
         screenshot("after-slide")
+    }
+
+    // With the slide off (the default), a slow drag from the left edge is 1 clear thing: back on
+    // release past a third of the width; no text selection starts under it.
+    func testSlowEdgeDragGoesBackWithTheSlideOff() throws {
+        let app = launchSignedIn()
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        tapTab(app, .conversations)
+        XCTAssertTrue(chatsList(app).waitForExistence(timeout: 15))
+        XCTAssertTrue(openConversation(app, "Quarterly forecast"))
+        XCTAssertTrue(waitForState(app, "back=page", timeout: 5), "\(debugState(app))")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.45))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.47)),
+                   withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "a slow edge drag did not go back: \(debugState(app))")
+        let copy = app.menuItems["Copy"]
+        XCTAssertFalse(copy.exists, "a slow edge drag started a text selection")
+        screenshot("after-slow-edge-drag")
     }
 }

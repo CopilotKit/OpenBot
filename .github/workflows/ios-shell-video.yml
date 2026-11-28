@@ -102,10 +102,48 @@ jobs:
           grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
           tar -C DerivedData-Debug/Build -czf products.tgz Products
 
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      # The built web app goes to the recording job too: a cache restore there took 2 minutes.
+      - name: Work out the web app's cache key
+        id: web-key
+        run: |
+          sum="$( (git rev-parse HEAD:app/src HEAD:app/public HEAD:shared HEAD:tokens; \
+            git hash-object app/index.html app/package.json app/vite.config.* app/tsconfig*.json bun.lock package.json .env.example) | shasum | cut -c1-40)"
+          echo "key=ios-shell-web-v2-$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Look for the built web app in the cache
+        id: web-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: ${{ steps.web-key.outputs.key }}
+
+      - name: Build the web app if needed
+        if: steps.web-cache.outputs.cache-hit != 'true'
+        run: |
+          bun install --frozen-lockfile
+          cp .env.example .env
+          (cd app && bun run build)
+
+      - name: Keep the built web app for the next run
+        if: steps.web-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: ${{ steps.web-cache.outputs.cache-primary-key }}
+
+      - name: Pack the web app
+        run: tar -czf web.tgz app/dist
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-shell-video-build-${{ github.run_id }}
-          path: products.tgz
+          path: |
+            products.tgz
+            web.tgz
           retention-days: 1
 
   demo:
@@ -143,36 +181,19 @@ jobs:
         run: |
           echo "$(date +%s) unpack" >> "$RUNNER_TEMP/timing"
           mkdir -p built && tar -C built -xzf products.tgz
+          tar -xzf web.tgz
           echo "XCTESTRUN=$(ls "$PWD"/built/Products/*.xctestrun | head -1)" >> "$GITHUB_ENV"
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
 
-      # From git's own object ids: hashFiles over the workspace timed out once DerivedData was in it.
-      - name: Work out the web app's cache key
-        id: web-key
-        run: |
-          sum="$( (git rev-parse HEAD:app/src HEAD:app/public HEAD:shared HEAD:tokens; \
-            git hash-object app/index.html app/package.json app/vite.config.* app/tsconfig*.json bun.lock package.json .env.example) | shasum | cut -c1-40)"
-          echo "key=ios-shell-web-v2-$sum" >> "$GITHUB_OUTPUT"
-
-      - name: Look for the built web app in the cache
-        id: web-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: app/dist
-          key: ${{ steps.web-key.outputs.key }}
-
       - name: Install, build the web app if needed, start mock stack A
         timeout-minutes: 10
-        env:
-          WEB_CACHED: ${{ steps.web-cache.outputs.cache-hit }}
         run: |
           mkdir -p artifacts/video
           bun install --frozen-lockfile
           cp .env.example .env
-          if [ "$WEB_CACHED" != "true" ]; then (cd app && bun run build); else echo "web app from the cache"; fi
           MOCK_REPLY=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > artifacts/mock-a.log 2>&1 &
           APP_PORT=3010 SERVER_PORT=3001 nohup bun app/serve.ts > artifacts/app-a.log 2>&1 &
           for _ in $(seq 1 60); do
@@ -190,14 +211,6 @@ jobs:
           done
           tail -n 40 artifacts/mock-a.log artifacts/app-a.log
           exit 1
-
-      # Saved straight away, so a run the 13-minute cap stops still leaves the next one a warm cache.
-      - name: Keep the built web app for the next run
-        if: steps.web-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: app/dist
-          key: ${{ steps.web-cache.outputs.cache-primary-key }}
 
       - name: Record the demo tour
         timeout-minutes: 10
