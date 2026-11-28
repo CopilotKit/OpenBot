@@ -126,11 +126,20 @@ final class DemoTourUITests: ShellTestCase {
         let answer = webText(app, "All three moved to per-seat pricing this year.")
         XCTAssertTrue(answer.waitForExistence(timeout: 15))
         pause(1.5)
-        dismissKeyboardIfUp(app, tapping: answer)
+        tapWhenThere(app.webViews.buttons["Back to Chats"].firstMatch, "Back to Chats")
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        pause(1)
         scene("conversation")
 
         // Bots, one Bot.
         tab(app, .bots).tap()
+        let disclosure = app.webViews.buttons["Hide Research Bot's conversations"].firstMatch
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 15))
+        pause(1.5)
+        tapWhenThere(webText(app, "Competitor pricing notes"), "Research Bot's conversation")
+        tapWhenThere(app.webViews.buttons["Back to Bots"].firstMatch, "Back to Bots")
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        pause(1.5)
         tapWhenThere(webText(app, "Research Bot"), "Research Bot")
         pause(1.5)
         dismissKeyboardIfUp(app)
