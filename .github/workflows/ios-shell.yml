@@ -225,7 +225,7 @@ jobs:
             -parallel-testing-enabled NO \
             -skip-testing:OpenBotShellUITests/RealBackendUITests \
             CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee xcodebuild.log
+            > xcodebuild.log 2>&1
 
       - name: Copy the Debug app's diagnostics
         if: always()
@@ -265,7 +265,6 @@ jobs:
               cat "$container/Documents/diagnostics.jsonl" >> artifacts/diagnostics.jsonl
             fi
           done
-          grep -E "Test Case .*(passed|failed|skipped)|error: -\[" xcodebuild-release.log || true
           exit $status
 
       - name: Export screenshots and attachments
@@ -282,8 +281,21 @@ jobs:
               --predicate 'process == "OpenBotShell"' > artifacts/simulator-app.log 2>&1 || true
           fi
 
-      - name: Write the summary and collect the screenshots
-        if: always()
+      - name: Publish test outcomes and mock screenshots
+        if: always() && github.event.repository.private == false
+        run: |
+          python3 ios-shell/ci/public_results.py public-results artifacts/attachments xcodebuild.log xcodebuild-release.log
+          cat public-results/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && github.event.repository.private == false
+        with:
+          name: ios-shell-shots-${{ github.run_id }}
+          path: public-results/
+          retention-days: 14
+
+      - name: Write the full internal summary and collect the screenshots
+        if: always() && github.event.repository.private == true
         run: |
           bundles="$(ls -d TestResults.xcresult Release-*.xcresult 2>/dev/null | paste -sd: -)"
           logs="$(ls xcodebuild.log xcodebuild-release.log 2>/dev/null | paste -sd: -)"
@@ -302,7 +314,7 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
+        if: always() && github.event.repository.private == true
         with:
           name: ios-shell-shots-${{ github.run_id }}
           path: artifacts/shots/
@@ -310,7 +322,7 @@ jobs:
           if-no-files-found: warn
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
+        if: always() && github.event.repository.private == true
         with:
           name: ios-shell-${{ github.run_id }}
           path: |

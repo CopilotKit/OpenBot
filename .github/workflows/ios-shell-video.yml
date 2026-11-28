@@ -302,8 +302,7 @@ jobs:
           status=$?
           kill -INT "$recorder"
           wait "$recorder"
-          # Notes only: never the account's data or the secrets.
-          grep -E "Test Case|error: -\[|SHELL_NOTE" xcodebuild-real.log | grep -v "label:" || true
+          python3 ios-shell/ci/public_results.py public-results unused-attachments xcodebuild-real.log
           xcrun xcresulttool export attachments --path RealJourney.xcresult --output-path private-artifacts/attachments || true
           exit $status
 
