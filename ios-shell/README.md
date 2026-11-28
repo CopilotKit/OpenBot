@@ -189,5 +189,4 @@ The production tests never fail for network reasons. `testProductionSignedIn` an
 `testProductionGoogleSignIn` use a throwaway account and run only when the repository secrets
 `OPENBOT_SHELL_TEST_SESSION`, or `OPENBOT_SHELL_GOOGLE_EMAIL`, `OPENBOT_SHELL_GOOGLE_PASSWORD` and
 `OPENBOT_SHELL_GOOGLE_TOTP_SECRET`, are set. Their screenshots, diagnostics and log lines go only to
-`ios-shell-private-<run id>` (`ci/collect_shots.py`). Note: on a public repository Actions
-artifacts can be downloaded by any signed-in GitHub user.
+`ios-shell-private-<run id>` (`ci/collect_shots.py`). Real-account screenshots and recordings upload only in private repositories. On a public repository, run the journey locally to retain that evidence.
