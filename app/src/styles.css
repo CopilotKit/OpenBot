@@ -569,3 +569,90 @@ html[data-from-setup] body {
     opacity: 0;
   }
 }
+
+/*
+ * Inside the phone app's native shell (lib/native-shell, marked by index.html before the first
+ * paint). The page is the web view between the shell's status bar and its tab bar, so it does not
+ * bounce past its edges like a web page: a bounce would show the web view's backing behind the
+ * page. Pressing and holding still selects text, in a message as anywhere.
+ */
+html[data-native-shell],
+html[data-native-shell] body {
+  overscroll-behavior: none;
+}
+
+/*
+ * A field under 16px makes iOS zoom the page in when it is focused, and the page stays zoomed after.
+ * In the shell every field a person types in is 16px, whatever its own class says; none in the app
+ * is drawn larger. A placeholder too long for a narrow phone ends in an ellipsis rather than
+ * mid-word, and the To field's long one keeps the smaller size it had: a placeholder's size does not
+ * make iOS zoom, only the field's own.
+ *
+ * This is on purpose the kind of rule theme.css warns about ("THERE IS DELIBERATELY NO `button,
+ * input, textarea, select { font: inherit }` HERE"): unlayered, on input, textarea and select, so it
+ * outranks every `text-*` on a field. There such a rule disabled the sizes by accident, everywhere.
+ * Here it is meant, and only under `html[data-native-shell]`, where one size for every field is the
+ * point.
+ */
+html[data-native-shell]
+:is(
+  input:not(
+    [type="checkbox"],
+    [type="radio"],
+    [type="range"],
+    [type="color"],
+    [type="file"]
+  ),
+  textarea,
+  select
+) {
+  font-size: 1rem;
+  text-overflow: ellipsis;
+}
+html[data-native-shell] [data-slot="combobox-chip-input"]::placeholder {
+  font-size: 0.875rem;
+}
+
+/*
+ * The sidebar's panels as the phone app's Chats and Bots tabs (components/layout/native-shell-panels):
+ * the same rows as on Desktop, at a thumb's height, 44px. Only the sizes change: the title's buttons,
+ * the search field, each conversation's row, each Bot's row and its fold caret, and the rows under a
+ * Bot (New conversation, Show more).
+ */
+html[data-native-shell] [data-slot="section-panel-header"] {
+  height: 3.5rem;
+}
+html[data-native-shell]
+  [data-slot="section-panel-header"]
+  [data-slot="button"] {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+html[data-native-shell] [data-slot="section-panel"] [data-slot="input-group"] {
+  height: 2.75rem;
+}
+html[data-native-shell]
+  [data-slot="section-panel"]
+  :is(a[href^="/channel/"], a[href^="/group/"]) {
+  min-height: 2.75rem;
+}
+html[data-native-shell]
+  [data-slot="section-panel"]
+  [data-slot="bot-row"]
+  > *
+  > a,
+html[data-native-shell]
+  [data-slot="section-panel"]
+  [data-slot="bot-row"]
+  > button {
+  height: 2.75rem;
+}
+html[data-native-shell]
+  [data-slot="section-panel"]
+  [data-slot="bot-row"]
+  > button {
+  width: 2.75rem;
+}
+html[data-native-shell] [data-slot="section-panel"] [data-bot-list-action] {
+  height: 2.75rem;
+}

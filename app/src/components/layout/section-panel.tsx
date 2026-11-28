@@ -17,12 +17,15 @@ import { cn } from "@/lib/utils";
 export function SectionPanel({
   title,
   actions,
+  accessory,
   children,
   className,
   hidden = false,
 }: {
   title: ReactNode;
   actions?: ReactNode;
+  /** After `actions`, at the row's end: the phone app's account button, where it has no sidebar. */
+  accessory?: ReactNode;
   children: ReactNode;
   className?: string;
   hidden?: boolean;
@@ -41,11 +44,13 @@ export function SectionPanel({
       <div
         className="flex h-12 shrink-0 items-center gap-0.5 pr-2 pl-4"
         data-desktop-drag="deep"
+        data-slot="section-panel-header"
       >
         <h2 className="min-w-0 flex-1 truncate font-semibold text-base tracking-tight">
           {title}
         </h2>
         {actions}
+        {accessory}
       </div>
       {children}
     </Sidebar>

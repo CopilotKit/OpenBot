@@ -145,6 +145,7 @@ import { useClearWhenHoldEnds } from "@/lib/held-ends";
 import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
 import {
@@ -2705,8 +2706,9 @@ export function ChannelChat({
             taskRunning={agent.isRunning || runsInFlight > 0}
           />
           <ConversationView
-            // Remounted per conversation, so opening one puts the caret in its composer once.
-            autoFocus
+            // Remounted per conversation, so opening one puts the caret in its composer once. Not in
+            // the phone app: a keyboard that comes up by itself covers what the person came to read.
+            autoFocus={nativeShell() === null}
             threadId={channel.threadId}
             // The clock beside `+`: a routine for the Bot this conversation talks to, posting here.
             routine={

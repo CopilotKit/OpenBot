@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { settleFromSetup } from "./lib/desktop/from-setup";
 import { installAppErrorReporting } from "./lib/error-reporting";
+import { markNativeShell } from "./lib/native-shell/shell";
 import { queryClient } from "./query-client";
 import { router } from "./router";
 import "@copilotkit/react-core/v2/styles.css";
@@ -15,6 +16,10 @@ installAppErrorReporting();
 // Opened by OpenBot Desktop's setup: the first paint fades up from the window's ground, and only
 // in the Desktop window (lib/desktop/from-setup.ts).
 settleFromSetup();
+
+// Inside the phone app's native shell: marked for the styles, as index.html did before the first
+// paint (lib/native-shell/shell.ts), and worked out once for the app.
+markNativeShell();
 
 const rootElement = document.getElementById("root");
 

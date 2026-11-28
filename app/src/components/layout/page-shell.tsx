@@ -1,6 +1,13 @@
 import { IconChevronLeft } from "@tabler/icons-react";
-import { Link, type LinkProps } from "@tanstack/react-router";
+import { Link, type LinkProps, useRouter } from "@tanstack/react-router";
 import type * as React from "react";
+import { createContext, useContext } from "react";
+import { nativeShell } from "@/lib/native-shell/shell";
+import { rootTabOf } from "@/lib/native-shell/tab-stacks";
+import {
+  currentTabRoot,
+  goBackInShell,
+} from "@/lib/native-shell/use-tab-navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { PageColumn, PageHeader, type ShellWidth } from "./page-parts";
@@ -22,6 +29,22 @@ import { SidebarToggle, useSidebarToggleVisible } from "./sidebar-toggle";
  * whichever it happened to see first.
  */
 
+/** A screen's Back link: where it goes and what it says. */
+export type PageBack = {
+  linkProps: LinkProps;
+  label: string;
+  /** Drawn, but not a link: leaving now would lose what the page is waiting on. */
+  disabled?: boolean;
+};
+
+const DefaultPageBack = createContext<PageBack | null>(null);
+
+/**
+ * The Back link a screen gets when it names none of its own. Only where there is no sidebar to go
+ * back by: Settings and Admin inside the phone app's native shell lead back to their first page.
+ */
+export const DefaultPageBackProvider = DefaultPageBack.Provider;
+
 export function PageShell({
   action,
   children,
@@ -38,13 +61,33 @@ export function PageShell({
   description?: React.ReactNode;
   title: string;
   width?: ShellWidth;
-  backButton?: {
-    linkProps: LinkProps;
-    label: string;
-    /** Drawn, but not a link: leaving now would lose what the page is waiting on. */
-    disabled?: boolean;
-  };
+  backButton?: PageBack;
 }) {
+  const fallbackBack = useContext(DefaultPageBack);
+  /*
+   * In the phone app's native shell every page under a tab's root has Back, even one that names
+   * none (Settings, Admin, opened from the Account menu): its tab's stack popped once, where the
+   * link's own address is only the fallback (`lib/native-shell/use-tab-navigation.ts`).
+   */
+  const shell = nativeShell() !== null;
+  /*
+   * Read only in the shell, and from a router only where there is one: a screen drawn without a
+   * router (a test of a settings page) draws exactly as before, outside the shell.
+   */
+  const router = useRouter({ warn: false });
+  const atTabRoot =
+    shell &&
+    rootTabOf(router?.state.location.pathname ?? window.location.pathname) !==
+      null;
+  const back: PageBack | undefined =
+    backButton ??
+    fallbackBack ??
+    (shell && !atTabRoot
+      ? {
+          label: "Back",
+          linkProps: { to: (currentTabRoot() ?? "/") as LinkProps["to"] },
+        }
+      : undefined);
   /*
    * The bar carries the toggle and the Back link, and is drawn when it has at least one of them.
    * The screens with a Back link already drew exactly this bar, so for them nothing changes; what
@@ -61,7 +104,7 @@ export function PageShell({
    * provider at all, so there is nothing for a toggle to act on there.
    */
   const showToggle = useSidebarToggleVisible();
-  const bar = showToggle || !!backButton;
+  const bar = showToggle || !!back;
 
   const header = (
     <PageHeader title={title} action={action} description={description} />
@@ -70,18 +113,27 @@ export function PageShell({
   const barRow = bar ? (
     <div className="max-w-7xl w-full h-14 flex items-center gap-1 px-3">
       {showToggle ? <SidebarToggle /> : null}
-      {!backButton ? null : backButton.disabled ? (
+      {!back ? null : back.disabled ? (
         <Button disabled variant="ghost">
           <IconChevronLeft />
-          {backButton.label}
+          {back.label}
         </Button>
       ) : (
         <Button
+          // In the phone app, a whole tap target: 44px tall in the bar's 56.
+          className={shell ? "h-11" : undefined}
+          onClick={
+            shell
+              ? (event: React.MouseEvent) => {
+                  if (goBackInShell()) event.preventDefault();
+                }
+              : undefined
+          }
           variant="ghost"
-          render={(props) => <Link {...backButton.linkProps} {...props} />}
+          render={(props) => <Link {...back.linkProps} {...props} />}
         >
           <IconChevronLeft />
-          {backButton.label}
+          {back.label}
         </Button>
       )}
     </div>
@@ -95,7 +147,12 @@ export function PageShell({
        */
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {barRow}
-        <div className={cn("shrink-0 px-4", bar ? "pt-8" : "pt-12")}>
+        <div
+          className={cn(
+            "shrink-0 px-4",
+            nativeShell() ? (bar ? "pt-4" : "pt-6") : bar ? "pt-8" : "pt-12",
+          )}
+        >
           {header}
         </div>
         <div className={cn("mt-6 flex min-h-0 flex-1 flex-col", className)}>

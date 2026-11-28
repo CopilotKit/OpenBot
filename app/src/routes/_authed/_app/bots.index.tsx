@@ -9,6 +9,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { NewBotSheet } from "@/components/agents/new-bot-sheet";
 import { BotRoster } from "@/components/bots/bot-roster";
+import { ShellAccountMenu } from "@/components/layout/native-shell-account";
+import { ShellBots } from "@/components/layout/native-shell-panels";
 import {
   PageRows,
   PageSection,
@@ -24,17 +26,18 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import {
   deploymentCapabilitiesQueryOptions,
   useOffersMemory,
 } from "@/lib/deployment/queries";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { currentOrganizationId } from "@/lib/organizations/current";
 import {
   organizationHasOthersQueryOptions,
   useOrganizationAudience,
 } from "@/lib/organizations/queries";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { loadFirstScreen } from "@/lib/route-data";
 
 /** Just longer than the sheet's 200ms exit, so it has finished sliding away before the page changes. */
@@ -65,8 +68,40 @@ export const Route = createFileRoute("/_authed/_app/bots/")({
         : []),
     ]);
   },
-  component: BotsPage,
+  component: BotsRoute,
 });
+
+/**
+ * In the phone app's native shell, the Bots tab, which is the sidebar's Bots panel itself
+ * (`ShellBots`); in a browser and OpenBot Desktop, the page below.
+ */
+function BotsRoute() {
+  return nativeShell() ? <ShellBotsRoute /> : <BotsPage />;
+}
+
+function ShellBotsRoute() {
+  const { new: creating } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  return (
+    <ShellBots
+      creating={creating === true}
+      onClose={() => void navigate({ search: {} })}
+      onCreated={(agentId) => {
+        // As the page below does: close first, then go, so Back from the new Bot lands here.
+        void navigate({ replace: true, search: {} });
+        window.setTimeout(
+          () =>
+            void navigate({
+              params: { agentId },
+              search: {},
+              to: "/bots/$agentId",
+            }),
+          SHEET_CLOSE_MS,
+        );
+      }}
+    />
+  );
+}
 
 function BotsPage() {
   const { new: creating } = Route.useSearch();
@@ -78,16 +113,20 @@ function BotsPage() {
   return (
     <PageShell
       action={
-        <Button
-          render={(props) => (
-            <Link {...props} search={{ new: true }} to="/bots" />
-          )}
-          size="sm"
-          variant="ghost"
-        >
-          <IconPlus />
-          New Bot
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            render={(props) => (
+              <Link {...props} search={{ new: true }} to="/bots" />
+            )}
+            size="sm"
+            variant="ghost"
+          >
+            <IconPlus />
+            New Bot
+          </Button>
+          {/* Only inside the phone app's native shell, which has no sidebar. */}
+          <ShellAccountMenu />
+        </div>
       }
       description={
         personal || alone

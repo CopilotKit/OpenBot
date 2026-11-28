@@ -174,9 +174,15 @@ export function settingsSidebarItems(
   );
 }
 
-export function SettingsSidebar({
-  ...props
-}: React.ComponentProps<typeof Sidebar>) {
+/**
+ * The entries this person sees, and how many setup rows wait on them (counted beside Setup). The
+ * sidebar draws them, and General lists them inside the phone app's native shell, which has no
+ * sidebar (`settings-pages.tsx`).
+ */
+export function useSettingsItems(): {
+  items: SettingsSidebarItem[];
+  toFix: number;
+} {
   const user = useQuery(currentUserQueryOptions()).data;
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions()).data;
   const canSetUp = mayOpenSetup(user, capabilities);
@@ -201,6 +207,13 @@ export function SettingsSidebar({
     (option) =>
       (!option.setup || canSetUp) && (!option.organization || hasOrganization),
   );
+  return { items, toFix };
+}
+
+export function SettingsSidebar({
+  ...props
+}: React.ComponentProps<typeof Sidebar>) {
+  const { items, toFix } = useSettingsItems();
   return (
     <Sidebar variant="inset" {...props}>
       {/* Matched to the app sidebar's header, as Admin's is. See admin-sidebar.tsx. */}

@@ -54,6 +54,7 @@ import {
   loadFailure,
 } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { organizationMembersQueryOptions } from "@/lib/organizations/queries";
 import { skillListQueryOptions } from "@/lib/skills/queries";
@@ -513,15 +514,18 @@ export function AuditPage({
                         <IconRefresh />
                         Refresh
                       </Button>
-                      <Button
-                        disabled={exporting}
-                        onClick={exportCsv}
-                        size="sm"
-                        variant="outline"
-                      >
-                        <IconDownload />
-                        {exporting ? "Exporting…" : "Export CSV"}
-                      </Button>
+                      {/* Not in the phone app, whose web view doesn't take a download yet. */}
+                      {nativeShell() ? null : (
+                        <Button
+                          disabled={exporting}
+                          onClick={exportCsv}
+                          size="sm"
+                          variant="outline"
+                        >
+                          <IconDownload />
+                          {exporting ? "Exporting…" : "Export CSV"}
+                        </Button>
+                      )}
                     </div>
                   </div>
                   {exportError ? (

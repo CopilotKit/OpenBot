@@ -20,6 +20,7 @@ import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { WorkingNow } from "@/components/channels/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
 import { HomeField, useHomeIntro } from "@/components/home/home-field";
+import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -53,6 +54,7 @@ import {
 } from "@/lib/load-failure";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { usePickedBotModel } from "@/lib/models/run-model";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { newId } from "@/lib/new-id";
 import { takeInvitationLink } from "@/lib/organizations/invitation-link";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
@@ -342,6 +344,8 @@ function RouteComponent() {
     <>
       <SidebarToggleBar>
         <BusinessLink />
+        {/* Only inside the phone app's native shell, which has no sidebar. */}
+        <ShellAccountMenu />
       </SidebarToggleBar>
       {/*
        * Home scrolls inside the pane, so a long Explore list can be reached. The gutter is kept on
@@ -425,7 +429,8 @@ function RouteComponent() {
                     ...(restored.files ? { initialFiles: restored.files } : {}),
                   }
                 : asked
-                  ? { initialValue: asked, autoFocus: true }
+                  ? // Not in the phone app: a keyboard over the first screen, unasked for.
+                    { initialValue: asked, autoFocus: nativeShell() === null }
                   : {})}
               onSubmit={(draft) => send(draft)}
             />

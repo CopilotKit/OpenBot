@@ -8,6 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { sidebarToggleShown } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 import { useSidebarPanelAvailable } from "./sidebar-shell";
@@ -127,6 +128,20 @@ export function SidebarToggle({ className }: { className?: string }) {
  * `children` sit at the band's right end, so a screen can put something there without a second bar.
  */
 export function SidebarToggleBar({ children }: { children?: ReactNode }) {
+  /*
+   * In the phone app's native shell (`components/layout/native-shell-frame.tsx`) there is no sidebar
+   * and no toggle to keep a place for, so no band: only what the screen put at its end, with
+   * `PageShell`'s column's padding so Home's account button sits where Conversations and Bots put
+   * theirs, and nothing when that draws nothing (`empty:hidden`). A skin's frame with no sidebar
+   * (OpenDuet, OpenDots) keeps the band, as before the shell.
+   */
+  if (nativeShell()) {
+    return children ? (
+      <div className="flex shrink-0 items-center justify-end gap-2 px-4 pt-6 empty:hidden">
+        {children}
+      </div>
+    ) : null;
+  }
   return (
     <div className="h-12 shrink-0 flex items-center px-3">
       <SidebarToggle />

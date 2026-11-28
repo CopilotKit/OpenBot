@@ -33,6 +33,52 @@
         if (skin && skin !== "openbot") document.documentElement.dataset.skin = skin;
       } catch {}
       try {
+        // Inside the phone app's native shell (lib/native-shell/shell.ts works this out the same
+        // way, and app/tests/native-shell.test.ts holds the two together): what the shell
+        // injects, then its user agent, then ?native-shell=ios for testing, kept for the tab, only
+        // in a development build or on a development host (?native-shell=off forgets it anywhere).
+        // Marked for the styles, and the page takes the whole web view, which the shell lays out
+        // between its own bars. A browser's viewport is left as it is.
+        let remembered = null;
+        const host = String(window.location.hostname || "").toLowerCase();
+        const overridable =
+          "%DEV%" === "true" ||
+          host === "localhost" ||
+          host === "127.0.0.1" ||
+          host === "[::1]" ||
+          host === "::1" ||
+          host.endsWith(".localhost") ||
+          host.endsWith(".test");
+        const param = new URLSearchParams(window.location.search).get("native-shell");
+        const asked = param === "off" || overridable ? param : null;
+        try {
+          if (asked === "off") window.sessionStorage.removeItem("openbot-native-shell");
+          else if (asked === "ios" || asked === "android" || asked === "test")
+            window.sessionStorage.setItem("openbot-native-shell", "test");
+          remembered = window.sessionStorage.getItem("openbot-native-shell");
+        } catch {}
+        const injected = window.__OPENBOT_NATIVE_SHELL__;
+        const mark = /OpenBotShell-(\w+)/.exec(window.navigator.userAgent);
+        const platform =
+          injected && (injected.platform === "ios" || injected.platform === "android")
+            ? injected.platform
+            : mark
+              ? mark[1].toLowerCase() === "android"
+                ? "android"
+                : "ios"
+              : asked === "ios" || asked === "android" || asked === "test"
+                ? "test"
+                : overridable && asked !== "off" && remembered === "test"
+                  ? "test"
+                  : null;
+        if (platform) {
+          document.documentElement.dataset.nativeShell = platform;
+          const viewport = document.querySelector('meta[name="viewport"]');
+          if (viewport && !viewport.content.includes("viewport-fit"))
+            viewport.content += ", viewport-fit=cover";
+        }
+      } catch {}
+      try {
         // Opened by OpenBot Desktop's setup, which faded out to the window's ground and marked the
         // address once (lib/desktop/from-setup.ts): the first paint fades up from that ground. The
         // mark comes off the address at once, so a reload or a copied link never fades. Not with

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { toast } from "@/components/ui/toast";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { currentOrganizationId } from "@/lib/organizations/current";
 import { saveTroubleshootingLogs } from "@/lib/troubleshooting/logs";
 
@@ -13,6 +14,8 @@ const SAVED_TOAST = "troubleshooting-logs-saved";
 /**
  * Get troubleshooting logs, in the account menu: one file to send in when something went wrong
  * (`lib/troubleshooting/logs.ts`), and a toast that says where it was saved and what was taken out.
+ * Not in the phone app's native shell, whose web view doesn't take a download yet: there the press
+ * would do nothing, or replace the page with the file.
  */
 export function TroubleshootingLogsMenuItem({
   className,
@@ -21,6 +24,7 @@ export function TroubleshootingLogsMenuItem({
 }) {
   const { data: person } = useQuery(currentUserQueryOptions());
   const [saving, setSaving] = useState(false);
+  if (nativeShell()) return null;
   return (
     <DropdownMenuItem
       className={className}
