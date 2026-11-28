@@ -1,8 +1,13 @@
 import { IconChevronLeft } from "@tabler/icons-react";
-import { Link, type LinkProps } from "@tanstack/react-router";
+import { Link, type LinkProps, useRouterState } from "@tanstack/react-router";
 import type * as React from "react";
 import { createContext, useContext } from "react";
 import { nativeShell } from "@/lib/native-shell/shell";
+import { rootTabOf } from "@/lib/native-shell/tab-stacks";
+import {
+  currentTabRoot,
+  goBackInShell,
+} from "@/lib/native-shell/use-tab-navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { PageColumn, PageHeader, type ShellWidth } from "./page-parts";
@@ -59,7 +64,24 @@ export function PageShell({
   backButton?: PageBack;
 }) {
   const fallbackBack = useContext(DefaultPageBack);
-  const back = backButton ?? fallbackBack ?? undefined;
+  /*
+   * In the phone app's native shell every page under a tab's root has Back, even one that names
+   * none (Settings, Admin, opened from the Account menu): its tab's stack popped once, where the
+   * link's own address is only the fallback (`lib/native-shell/use-tab-navigation.ts`).
+   */
+  const shell = nativeShell() !== null;
+  const atTabRoot = useRouterState({
+    select: (state) => rootTabOf(state.location.pathname) !== null,
+  });
+  const back: PageBack | undefined =
+    backButton ??
+    fallbackBack ??
+    (shell && !atTabRoot
+      ? {
+          label: "Back",
+          linkProps: { to: (currentTabRoot() ?? "/") as LinkProps["to"] },
+        }
+      : undefined);
   /*
    * The bar carries the toggle and the Back link, and is drawn when it has at least one of them.
    * The screens with a Back link already drew exactly this bar, so for them nothing changes; what
@@ -93,7 +115,14 @@ export function PageShell({
       ) : (
         <Button
           // In the phone app, a whole tap target: 44px tall in the bar's 56.
-          className={nativeShell() ? "h-11" : undefined}
+          className={shell ? "h-11" : undefined}
+          onClick={
+            shell
+              ? (event: React.MouseEvent) => {
+                  if (goBackInShell()) event.preventDefault();
+                }
+              : undefined
+          }
           variant="ghost"
           render={(props) => <Link {...back.linkProps} {...props} />}
         >

@@ -2,6 +2,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { postToShell, type ShellMessage, tabForPath } from "./bridge";
 import { nativeShell } from "./shell";
+import { shellTabState } from "./use-tab-navigation";
 
 /**
  * WHEN THE SHELL HEARS `ready`: once per page load, when the first page has drawn something a person
@@ -165,11 +166,15 @@ export function useNativeShellRouteReports(): void {
   useEffect(() => {
     if (!inShell || settled === null) return;
     const path = settled.slice(1);
+    // The tab whose stack the page is in, and whether Back can go anywhere in it. The sign-in page
+    // is in no tab: the shell shows its own sign-in over it.
+    const tabs = path === "/sign" ? null : shellTabState();
     tellShell({
       type: "route",
       path,
-      tab: tabForPath(path),
+      tab: tabs ? tabs.tab : tabForPath(path),
       signedIn: settled.startsWith("1"),
+      canGoBack: tabs?.canGoBack ?? false,
     });
   }, [inShell, settled]);
 }

@@ -614,6 +614,50 @@ html[data-native-shell] [data-slot="combobox-chip-input"]::placeholder {
 }
 
 /*
+ * The sidebar's panels as the phone app's Chats and Bots tabs (components/layout/native-shell-panels):
+ * the same rows as on Desktop, at a thumb's height, 44px. Only the sizes change: the title's buttons,
+ * the search field, each conversation's row, each Bot's row and its fold caret, and the rows under a
+ * Bot (New conversation, Show more).
+ */
+html[data-native-shell] [data-slot="section-panel-header"] {
+  height: 3.5rem;
+}
+html[data-native-shell]
+  [data-slot="section-panel-header"]
+  [data-slot="button"] {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+html[data-native-shell] [data-slot="section-panel"] [data-slot="input-group"] {
+  height: 2.75rem;
+}
+html[data-native-shell]
+  [data-slot="section-panel"]
+  :is(a[href^="/channel/"], a[href^="/group/"]) {
+  min-height: 2.75rem;
+}
+html[data-native-shell]
+  [data-slot="section-panel"]
+  [data-slot="bot-row"]
+  > *
+  > a,
+html[data-native-shell]
+  [data-slot="section-panel"]
+  [data-slot="bot-row"]
+  > button {
+  height: 2.75rem;
+}
+html[data-native-shell]
+  [data-slot="section-panel"]
+  [data-slot="bot-row"]
+  > button {
+  width: 2.75rem;
+}
+html[data-native-shell] [data-slot="section-panel"] [data-bot-list-action] {
+  height: 2.75rem;
+}
+
+/*
  * Text in the native shell is set on Tailwind's own 16px base: `text-xs`, `text-sm` and
  * `text-base` are 12, 14 and 16px there, as Tailwind and shadcn define them, where everywhere else
  * they are the same sizes times 15/16 (theme.css). The desktop's denser type is small on a phone

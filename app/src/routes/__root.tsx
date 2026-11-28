@@ -11,6 +11,7 @@ import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDesktopOpenRequests } from "@/lib/desktop/open-requests";
 import { useNativeShellRouteReports } from "@/lib/native-shell/route-reports";
+import { useTabNavigation } from "@/lib/native-shell/use-tab-navigation";
 import { useServiceWorkerOpenRequests } from "@/lib/web-push/open-requests";
 import type { RouterContext } from "../router-context";
 import "@fontsource-variable/inter/wght.css";
@@ -129,6 +130,7 @@ function RootComponent() {
   useDesktopOpenRequests();
   // The phone app's native shell is told where the page is. See `lib/native-shell/route-reports.ts`.
   useNativeShellRouteReports();
+  useTabNavigation();
   // And a click on a push notification, sent by the service worker. See `lib/web-push/open-requests.ts`.
   useServiceWorkerOpenRequests();
   return (

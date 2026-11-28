@@ -12,6 +12,7 @@ import {
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
@@ -163,6 +164,7 @@ function BotConversations({
           buttonVariants({ size: "sm", variant: "ghost" }),
           BOT_LIST_ACTION_ROW,
         )}
+        data-bot-list-action=""
         search={{ agent: botId }}
         to="/channel/new"
       >
@@ -195,6 +197,7 @@ function BotConversations({
       {conversations.hasNextPage ? (
         <Button
           className={BOT_LIST_ACTION_ROW}
+          data-bot-list-action=""
           disabled={conversations.isFetchingNextPage}
           onClick={() => void conversations.fetchNextPage()}
           size="sm"
@@ -290,7 +293,14 @@ function BotRow({
  * The Bots section's panel: every Bot, newest conversation first (`orderBots`), the top three open
  * with their latest conversations. The search narrows the Bots by name; New Bot is in the header.
  */
-export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
+export function BotsPanel({
+  hidden = false,
+  accessory,
+}: {
+  hidden?: boolean;
+  /** At the end of the title's row, after New Bot: the phone app's account button. */
+  accessory?: ReactNode;
+}) {
   const bots = useQuery(agentListQueryOptions());
   const roster = useInfiniteQuery(channelListQueryOptions());
   const attention = useQuery(botAttentionQueryOptions());
@@ -343,6 +353,7 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
           <IconPlus />
         </Button>
       }
+      accessory={accessory}
       className="group-data-[collapsible=icon]:hidden"
       hidden={hidden}
       title="Bots"
