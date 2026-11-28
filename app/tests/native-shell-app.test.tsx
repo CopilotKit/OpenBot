@@ -256,6 +256,19 @@ describe("the frame", () => {
     await waitFor(() => expect(sockets).toBeGreaterThan(0));
   });
 
+  test("a skin's frame with no sidebar, outside the shell, keeps the 48px band", () => {
+    inShell(false);
+    // No sidebar provider, as in OpenDuet's and OpenDots' frames.
+    const view = render(
+      <SidebarToggleBar>
+        <span>At the end</span>
+      </SidebarToggleBar>,
+    );
+    const band = view.container.querySelector(".h-12");
+    expect(band).not.toBeNull();
+    expect(band?.textContent).toContain("At the end");
+  });
+
   test("in the shell, a configuration screen keeps no bar above its title", async () => {
     inShell(true);
     serve([]);
