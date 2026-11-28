@@ -1,0 +1,32 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!--
+      The sign-in hand-off's callback (custom scheme, and the https App Link) lands here, not on the
+      main activity: a translucent trampoline that passes a callback on only while this app's own
+      sign-in is pending and only with one well-formed ticket. Anything else (any app can fire
+      openbotshell://) is dropped without bringing the app forward, so the Custom Tab stays open
+      and the pending sign-in is untouched.
+    -->
+    <activity
+        android:name="ai.openbot.rnshell.nativeshell.SignInCallbackActivity"
+        android:exported="true"
+        android:excludeFromRecents="true"
+        android:noHistory="true"
+        android:taskAffinity=""
+        android:launchMode="singleInstance"
+        android:theme="@android:style/Theme.Translucent.NoTitleBar">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="openbotshell" android:host="signed-in" />
+      </intent-filter>
+      <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="https" android:host="my.open.bot" android:pathPrefix="/api/auth/shell/callback" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

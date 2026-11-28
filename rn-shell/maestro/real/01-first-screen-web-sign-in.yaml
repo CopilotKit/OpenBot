@@ -1,0 +1,35 @@
+# REAL BACKEND (https://my.open.bot, the default of every build). The first screen, then Sign in: the
+# server has no hand-off yet (config 404), so the web sign-in opens in the web view with Cancel.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.reset: "1"
+      openbot.test_name: "real-first-screen"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 30000
+- takeScreenshot: first-screen
+- tapOn:
+    id: "sign-in-button"
+- extendedWaitUntil:
+    visible:
+      id: "web-sign-in-cancel"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*signIn=webFallback.*skeleton=0.*"
+    timeout: 45000
+- extendedWaitUntil:
+    visible: "(?i).*(google|github|microsoft|continue with|sign in|log in).*"
+    timeout: 30000
+- takeScreenshot: web-sign-in
+- tapOn:
+    id: "web-sign-in-cancel"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 10000

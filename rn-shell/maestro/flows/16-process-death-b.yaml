@@ -1,0 +1,17 @@
+# Part 2: after the kill the app recovers to a page (skeleton, reload), never a white page or a crash.
+appId: ai.openbot.rnshell
+---
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*phase=signedIn.*skeleton=0.*"
+    timeout: 45000
+- extendedWaitUntil:
+    visible: "Research Bot"
+    timeout: 30000
+- takeScreenshot: after-kill
+- tapOn:
+    id: "tab-home"
+- extendedWaitUntil:
+    visible: "Start a conversation"
+    timeout: 20000

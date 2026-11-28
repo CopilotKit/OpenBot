@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["ShellNativeModule"]
+  },
+  "android": {
+    "modules": ["ai.openbot.rnshell.nativeshell.ShellNativeModule"]
+  }
+}

@@ -1,0 +1,10 @@
+# Continuous native generation: `npx expo prebuild` writes these from app.config.ts and plugins/.
+/ios/
+/android/
+node_modules/
+.expo/
+dist/
+build/
+*.jsbundle
+*.hbc
+artifacts/

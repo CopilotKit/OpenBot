@@ -1,0 +1,17 @@
+# Part 1 of the web content process test: signed in on Bots. CI then kills the web content process.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.reset: "1"
+      openbot.plain_session_cookie: "mock"
+      openbot.test_name: "process-death"
+- runFlow: ../subflows/wait-signed-in.yaml
+- tapOn:
+    id: "tab-bots"
+- extendedWaitUntil:
+    visible: "Research Bot"
+    timeout: 20000
+- takeScreenshot: before-kill

@@ -1,0 +1,39 @@
+# The tab bar asks the page to navigate (openbot:open); the page's route reports select the tab.
+appId: ai.openbot.rnshell
+---
+- tapOn:
+    id: "tab-conversations"
+- extendedWaitUntil:
+    visible: "Competitor pricing notes"
+    timeout: 20000
+- assertVisible:
+    id: "debug-state"
+    text: ".*tab=conversations nav=event.*"
+- takeScreenshot: conversations
+- tapOn: "Competitor pricing notes"
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*path=/channel.*"
+    timeout: 20000
+- assertVisible:
+    id: "debug-state"
+    text: ".*tab=conversations.*"
+- takeScreenshot: conversation
+- tapOn:
+    id: "tab-bots"
+- extendedWaitUntil:
+    visible: "Research Bot"
+    timeout: 20000
+- assertVisible:
+    id: "debug-state"
+    text: ".*tab=bots.*"
+- takeScreenshot: bots
+- tapOn:
+    id: "tab-home"
+- extendedWaitUntil:
+    visible: "Start a conversation"
+    timeout: 20000
+- assertVisible:
+    id: "debug-state"
+    text: ".*tab=home.*"

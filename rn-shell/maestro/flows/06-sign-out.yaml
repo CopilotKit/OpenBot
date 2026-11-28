@@ -1,0 +1,22 @@
+# Sign out is the web app's own (Account menu); the bridge's signed-out returns to the first screen.
+appId: ai.openbot.rnshell
+---
+- extendedWaitUntil:
+    visible: "Account"
+    timeout: 20000
+- tapOn: "Account"
+- extendedWaitUntil:
+    visible: "Sign out"
+    timeout: 10000
+- takeScreenshot: account-menu
+- tapOn: "Sign out"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 20000
+- assertVisible:
+    id: "debug-state"
+    text: ".*phase=signedOut.*"
+- assertNotVisible:
+    id: "openbot-webview"
+- takeScreenshot: signed-out

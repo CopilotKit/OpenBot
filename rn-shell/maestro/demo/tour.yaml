@@ -1,0 +1,93 @@
+# The demo recording (70-100 s): launch, first screen, sign-in through the system sheet on the mock,
+# the skeleton, Home, typing on the software keyboard with Send visible, sending, the tabs, a
+# conversation, the Account menu, sign-out, and the lock screen coming and going.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.reset: "1"
+      openbot.handoff_auto: "1"
+      openbot.test_name: "demo"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 2500
+- runFlow: ../subflows/handoff.yaml
+- runFlow: ../subflows/wait-signed-in.yaml
+- extendedWaitUntil:
+    visible: "Start a conversation"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 2500
+- tapOn: "Ask anything"
+- inputText: "Summarize what changed in competitor pricing"
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible: "Send message"
+- tapOn: "Send message"
+- waitForAnimationToEnd:
+    timeout: 4000
+- swipe:
+    start: "50%, 30%"
+    end: "50%, 60%"
+    duration: 500
+- tapOn:
+    id: "tab-conversations"
+- extendedWaitUntil:
+    visible: "Competitor pricing notes"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn: "Competitor pricing notes"
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn: "Ask anything"
+- inputText: "What changed since?"
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn: "Send message"
+- waitForAnimationToEnd:
+    timeout: 4000
+- swipe:
+    start: "50%, 30%"
+    end: "50%, 60%"
+    duration: 500
+- tapOn:
+    id: "tab-bots"
+- extendedWaitUntil:
+    visible: "Research Bot"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 2500
+- tapOn:
+    id: "tab-home"
+- extendedWaitUntil:
+    visible: "Account"
+    timeout: 20000
+- tapOn: "Account"
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn: "Sign out"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 2500
+- launchApp:
+    stopApp: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.force_offline_seconds: "5"
+- extendedWaitUntil:
+    visible: "Cannot reach the OpenBot backend"
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible: "Cannot reach the OpenBot backend"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 2500

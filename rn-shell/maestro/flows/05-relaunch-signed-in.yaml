@@ -1,0 +1,13 @@
+# A relaunch keeps the session (the web view's cookie store): straight to the tabs, no first screen.
+appId: ai.openbot.rnshell
+---
+- pressKey: Home
+- launchApp:
+    stopApp: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.test_name: "relaunch"
+- runFlow: ../subflows/wait-signed-in.yaml
+- assertNotVisible:
+    id: "sign-in-button"
+- takeScreenshot: relaunched

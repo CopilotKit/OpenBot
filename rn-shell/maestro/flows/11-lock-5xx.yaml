@@ -1,0 +1,17 @@
+# A 5xx main document on the app's own origin locks the app.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_502}"
+      openbot.reset: "1"
+      openbot.plain_session_cookie: "mock"
+      openbot.test_name: "lock-5xx"
+- extendedWaitUntil:
+    visible: "Cannot reach the OpenBot backend"
+    timeout: 20000
+- assertVisible:
+    id: "debug-state"
+    text: ".*lock=load-failed.*"
+- takeScreenshot: lock-5xx

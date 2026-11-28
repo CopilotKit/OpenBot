@@ -1,0 +1,15 @@
+# The enter header goes on that one request and on no later navigation, same origin or not.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "http://localhost:8790"
+      openbot.probe_url: "http://localhost:8790/enter-probe"
+      openbot.reset: "1"
+      openbot.test_name: "header-probe"
+- extendedWaitUntil:
+    visible: "HEADER PROBE (PASS|FAIL)"
+    timeout: 45000
+- takeScreenshot: header-probe
+- assertVisible: "HEADER PROBE PASS"

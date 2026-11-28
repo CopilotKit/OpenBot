@@ -1,0 +1,31 @@
+# Sign in through the system sheet: config, hand-off with a PKCE challenge, the ticket on the callback,
+# then /api/auth/shell/enter in the web view with the OpenBot-Shell header (mock A refuses it
+# without the header, so landing on Home proves the header was sent).
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.reset: "1"
+      openbot.handoff_auto: "1"
+      openbot.test_name: "handoff-sign-in"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 30000
+- runFlow: ../subflows/handoff.yaml
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*phase=(signedOut signIn=entering|signedIn).*"
+    timeout: 30000
+- takeScreenshot: after-sheet
+- runFlow: ../subflows/wait-signed-in.yaml
+- extendedWaitUntil:
+    visible: "Start a conversation"
+    timeout: 20000
+- assertVisible:
+    id: "debug-state"
+    text: ".*tab=home.*bridge=1.*"
+- takeScreenshot: home

@@ -1,0 +1,10 @@
+# Waits until the app is signed in with the page drawn: the tab bar is there and the skeleton gone.
+appId: ai.openbot.rnshell
+---
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*phase=signedIn.*skeleton=0.*"
+    timeout: 45000
+- assertVisible:
+    id: "tab-bar"

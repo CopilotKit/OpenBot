@@ -1,0 +1,21 @@
+# The native first screen, drawn without the network: the mark, OpenBot, one line and Sign in.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.reset: "1"
+      openbot.test_name: "first-screen"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 30000
+- assertVisible: "OpenBot"
+- assertVisible: "Sign in to talk to your Bots and pick up your conversations."
+- assertNotVisible:
+    id: "openbot-webview"
+- assertVisible:
+    id: "debug-state"
+    text: ".*phase=signedOut.*"
+- takeScreenshot: first-screen

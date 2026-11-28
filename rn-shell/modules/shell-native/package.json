@@ -1,0 +1,10 @@
+{
+  "name": "shell-native",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The few things the OpenBot React Native shell needs from the platform that React Native and react-native-webview do not give: the web view's cookie store (names only), clearing a site's data, flushing cookies, dismissing the keyboard, the launch arguments of a test build, and whether the https callback can be claimed.",
+  "main": "src/index.ts",
+  "license": "MIT",
+  "author": "CopilotKit",
+  "homepage": "https://github.com/CopilotKit/OpenBot"
+}

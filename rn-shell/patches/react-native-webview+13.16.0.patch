@@ -1,0 +1,168 @@
+diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
+index 07f73fd..0248bc1 100644
+--- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
++++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
+@@ -12,6 +12,10 @@ import android.view.View;
+ import android.view.ViewGroup;
+ import android.webkit.ConsoleMessage;
+ import android.webkit.GeolocationPermissions;
++import android.webkit.JsPromptResult;
++import android.webkit.JsResult;
++import android.widget.EditText;
++import android.app.AlertDialog;
+ import android.webkit.PermissionRequest;
+ import android.webkit.ValueCallback;
+ import android.webkit.WebChromeClient;
+@@ -114,6 +118,68 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
+         return true;
+     }
+ 
++    // OpenBot shell: a JavaScript dialog shows only for the page in the main frame (the page's script
++    // refuses dialogs for any origin but the app's), titled OpenBot; a frame's dialogs are declined.
++    protected static String originOf(String url) {
++        if (url == null) return null;
++        Uri uri = Uri.parse(url);
++        if (uri.getScheme() == null || uri.getAuthority() == null) return null;
++        return uri.getScheme().toLowerCase() + "://" + uri.getAuthority().toLowerCase();
++    }
++
++    protected Activity dialogActivity(WebView view, String url) {
++        String page = originOf(view.getUrl());
++        String asking = originOf(url);
++        if (page == null || asking == null || !page.equals(asking)) return null;
++        Activity activity = mWebView.getThemedReactContext().getCurrentActivity();
++        if (activity == null || activity.isFinishing()) return null;
++        return activity;
++    }
++
++    @Override
++    public boolean onJsAlert(WebView view, String url, String message, final JsResult result) {
++        Activity activity = dialogActivity(view, url);
++        if (activity == null) { result.cancel(); return true; }
++        new AlertDialog.Builder(activity)
++            .setTitle("OpenBot")
++            .setMessage(message)
++            .setPositiveButton(android.R.string.ok, (dialog, which) -> result.confirm())
++            .setOnCancelListener(dialog -> result.cancel())
++            .show();
++        return true;
++    }
++
++    @Override
++    public boolean onJsConfirm(WebView view, String url, String message, final JsResult result) {
++        Activity activity = dialogActivity(view, url);
++        if (activity == null) { result.cancel(); return true; }
++        new AlertDialog.Builder(activity)
++            .setTitle("OpenBot")
++            .setMessage(message)
++            .setNegativeButton(android.R.string.cancel, (dialog, which) -> result.cancel())
++            .setPositiveButton(android.R.string.ok, (dialog, which) -> result.confirm())
++            .setOnCancelListener(dialog -> result.cancel())
++            .show();
++        return true;
++    }
++
++    @Override
++    public boolean onJsPrompt(WebView view, String url, String message, String defaultValue, final JsPromptResult result) {
++        Activity activity = dialogActivity(view, url);
++        if (activity == null) { result.cancel(); return true; }
++        final EditText field = new EditText(activity);
++        field.setText(defaultValue == null ? "" : defaultValue);
++        new AlertDialog.Builder(activity)
++            .setTitle("OpenBot")
++            .setMessage(message)
++            .setView(field)
++            .setNegativeButton(android.R.string.cancel, (dialog, which) -> result.cancel())
++            .setPositiveButton(android.R.string.ok, (dialog, which) -> result.confirm(field.getText().toString()))
++            .setOnCancelListener(dialog -> result.cancel())
++            .show();
++        return true;
++    }
++
+     @Override
+     public boolean onConsoleMessage(ConsoleMessage message) {
+         if (ReactBuildConfig.DEBUG) {
+diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java
+index 0287e1c..edecdd1 100644
+--- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java
++++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java
+@@ -40,6 +40,8 @@ import java.util.concurrent.atomic.AtomicReference;
+ public class RNCWebViewClient extends WebViewClient {
+     private static String TAG = "RNCWebViewClient";
+     protected static final int SHOULD_OVERRIDE_URL_LOADING_TIMEOUT = 250;
++    protected boolean mPendingIsMainFrame = true;
++    protected boolean mPendingHasGesture = false;
+ 
+     protected boolean mLastLoadFailed = false;
+     protected RNCWebView.ProgressChangedFilter progressChangedFilter = null;
+@@ -102,6 +104,11 @@ public class RNCWebViewClient extends WebViewClient {
+ 
+             final WritableMap event = createWebViewEvent(view, url);
+             event.putDouble("lockIdentifier", lockIdentifier);
++            // OpenBot shell: which frame asks, and whether a gesture started it (iOS tells both).
++            event.putBoolean("isTopFrame", mPendingIsMainFrame);
++            event.putBoolean("hasGesture", mPendingHasGesture);
++            mPendingIsMainFrame = true;
++            mPendingHasGesture = false;
+             rncWebView.dispatchDirectShouldStartLoadWithRequest(event);
+ 
+             try {
+@@ -110,9 +117,11 @@ public class RNCWebViewClient extends WebViewClient {
+                     final long startTime = SystemClock.elapsedRealtime();
+                     while (lockObject.get() == RNCWebViewModuleImpl.ShouldOverrideUrlLoadingLock.ShouldOverrideCallbackState.UNDECIDED) {
+                         if (SystemClock.elapsedRealtime() - startTime > SHOULD_OVERRIDE_URL_LOADING_TIMEOUT) {
+-                            FLog.w(TAG, "Did not receive response to shouldOverrideUrlLoading in time, defaulting to allow loading.");
++                            // OpenBot shell: no answer in time fails closed for anything but http(s).
++                            final boolean web = url != null && (url.startsWith("https:") || url.startsWith("http:"));
++                            FLog.w(TAG, "Did not receive response to shouldOverrideUrlLoading in time, " + (web ? "allowing an http(s) load." : "blocking."));
+                             RNCWebViewModuleImpl.shouldOverrideUrlLoadingLock.removeLock(lockIdentifier);
+-                            return false;
++                            return !web;
+                         }
+                         lockObject.wait(SHOULD_OVERRIDE_URL_LOADING_TIMEOUT);
+                     }
+@@ -143,6 +152,8 @@ public class RNCWebViewClient extends WebViewClient {
+     @Override
+     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+         final String url = request.getUrl().toString();
++        mPendingIsMainFrame = request.isForMainFrame();
++        mPendingHasGesture = request.hasGesture();
+         return this.shouldOverrideUrlLoading(view, url);
+     }
+ 
+diff --git a/node_modules/react-native-webview/apple/RNCWebViewImpl.m b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
+index 7f5c24d..cc7c2f6 100644
+--- a/node_modules/react-native-webview/apple/RNCWebViewImpl.m
++++ b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
+@@ -1202,7 +1202,10 @@ RCTAutoInsetsProtocol>
+ - (void)webView:(WKWebView *)webView runJavaScriptAlertPanelWithMessage:(NSString *)message initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(void))completionHandler
+ {
+ #if !TARGET_OS_OSX
+-  UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"" message:message preferredStyle:UIAlertControllerStyleAlert];
++  // OpenBot shell: only the main frame may show a dialog (a page's script in that frame refuses the
++  // dialogs of any origin but the app's), and it is titled OpenBot.
++  if (!frame.isMainFrame) { completionHandler(); return; }
++  UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"OpenBot" message:message preferredStyle:UIAlertControllerStyleAlert];
+   [alert addAction:[UIAlertAction actionWithTitle:@"Ok" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+     completionHandler();
+   }]];
+@@ -1221,7 +1224,8 @@ RCTAutoInsetsProtocol>
+  */
+ - (void)webView:(WKWebView *)webView runJavaScriptConfirmPanelWithMessage:(NSString *)message initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(BOOL))completionHandler{
+ #if !TARGET_OS_OSX
+-  UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"" message:message preferredStyle:UIAlertControllerStyleAlert];
++  if (!frame.isMainFrame) { completionHandler(NO); return; }
++  UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"OpenBot" message:message preferredStyle:UIAlertControllerStyleAlert];
+   [alert addAction:[UIAlertAction actionWithTitle:@"Ok" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+     completionHandler(YES);
+   }]];
+@@ -1246,7 +1250,8 @@ RCTAutoInsetsProtocol>
+  */
+ - (void)webView:(WKWebView *)webView runJavaScriptTextInputPanelWithPrompt:(NSString *)prompt defaultText:(NSString *)defaultText initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(NSString *))completionHandler{
+ #if !TARGET_OS_OSX
+-  UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"" message:prompt preferredStyle:UIAlertControllerStyleAlert];
++  if (!frame.isMainFrame) { completionHandler(nil); return; }
++  UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"OpenBot" message:prompt preferredStyle:UIAlertControllerStyleAlert];
+   [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+     textField.text = defaultText;
+   }];

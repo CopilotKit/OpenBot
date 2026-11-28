@@ -1,0 +1,23 @@
+# The skeleton covers the web view until the page has drawn text (a first load held back 6 s).
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.reset: "1"
+      openbot.plain_session_cookie: "mock"
+      openbot.delay_first_load_ms: "6000"
+      openbot.test_name: "skeleton"
+- extendedWaitUntil:
+    visible:
+      id: "loading-skeleton"
+    timeout: 15000
+- assertVisible:
+    id: "debug-state"
+    text: ".*phase=signedIn.*skeleton=1.*"
+- takeScreenshot: skeleton
+- runFlow: ../subflows/wait-signed-in.yaml
+- assertNotVisible:
+    id: "loading-skeleton"
+- assertVisible: "Start a conversation"

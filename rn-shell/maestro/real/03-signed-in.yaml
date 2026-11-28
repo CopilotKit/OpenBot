@@ -1,0 +1,38 @@
+# REAL BACKEND, signed in with the session cookie (CI starts the app with it; never printed). Home,
+# the three tabs, back to Home. No sign-out: that would end the secret's session.
+appId: ai.openbot.rnshell
+---
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*phase=signedIn.*skeleton=0.*"
+    timeout: 60000
+- assertVisible:
+    id: "tab-bar"
+- takeScreenshot: home
+- tapOn:
+    id: "tab-conversations"
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*tab=conversations.*skeleton=0.*"
+    timeout: 30000
+- takeScreenshot: conversations
+- tapOn:
+    id: "tab-bots"
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*tab=bots.*skeleton=0.*"
+    timeout: 30000
+- takeScreenshot: bots
+- tapOn:
+    id: "tab-home"
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*tab=home.*phase=signedIn.*|.*phase=signedIn.*tab=home.*"
+    timeout: 30000
+- assertNotVisible:
+    id: "sign-in-button"
+- takeScreenshot: home-again

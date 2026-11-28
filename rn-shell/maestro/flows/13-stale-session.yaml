@@ -1,0 +1,18 @@
+# A session cookie the server no longer knows: the web app says signed-out, back to the first screen.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.reset: "1"
+      openbot.stale_session: "1"
+      openbot.test_name: "stale-session"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 40000
+- assertVisible:
+    id: "debug-state"
+    text: ".*phase=signedOut signIn=idle.*"
+- takeScreenshot: stale-session

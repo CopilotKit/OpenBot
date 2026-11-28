@@ -1,0 +1,33 @@
+{
+  "name": "openbot-rn-shell",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "dependencies": {
+    "expo": "~55.0.0",
+    "expo-build-properties": "~55.0.18",
+    "expo-constants": "~55.0.17",
+    "expo-crypto": "~55.0.19",
+    "expo-network": "~55.0.18",
+    "expo-splash-screen": "~55.0.25",
+    "expo-status-bar": "~55.0.6",
+    "expo-system-ui": "~55.0.22",
+    "expo-web-browser": "~55.0.20",
+    "react": "19.2.0",
+    "react-native": "0.83.10",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-svg": "15.15.3",
+    "react-native-webview": "13.16.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.5",
+    "@types/react": "~19.2.0",
+    "patch-package": "^8.0.1",
+    "typescript": "~5.9.3"
+  },
+  "scripts": {
+    "postinstall": "patch-package",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test __tests__"
+  }
+}

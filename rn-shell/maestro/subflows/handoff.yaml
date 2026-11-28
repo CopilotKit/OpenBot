@@ -1,0 +1,26 @@
+# Sign in from the first screen through the system sign-in sheet on mock stack A.
+# iOS: ASWebAuthenticationSession asks first ("OpenBot" Wants to Use "localhost" to Sign In); the mock
+# page then follows its own link (openbot.handoff_auto). Android: a Chrome Custom Tab, where the link
+# is tapped (Chrome follows a custom scheme only from a tap).
+appId: ai.openbot.rnshell
+---
+- tapOn:
+    id: "sign-in-button"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible: "Continue"
+          timeout: 20000
+      - takeScreenshot: sheet-consent
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible: "Sign in as test person"
+          timeout: 30000
+      - takeScreenshot: custom-tab
+      - tapOn: "Sign in as test person"

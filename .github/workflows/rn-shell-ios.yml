@@ -1,0 +1,208 @@
+name: RN shell (iOS)
+
+# Builds the React Native shell in rn-shell/ (Expo prebuild, a Release simulator build with the test
+# hooks; simulator only, no signing) and runs its Maestro flows on an iPhone simulator: against two
+# mock stacks of this branch's built web app (app/workbench/mock-server.ts), and against the hosted
+# web app at my.open.bot.
+#
+# Artifacts: rn-shell-ios-<run id> (SUMMARY.md, results, screenshots under shots/, logs) and, only
+# when the signed-in real-backend journey ran, rn-shell-ios-private-<run id>.
+# Optional repository secret: OPENBOT_SHELL_TEST_SESSION. On a public repository Actions artifacts
+# can be downloaded by any signed-in GitHub user.
+on:
+  push:
+    branches:
+      - rn-webview-shell
+    paths:
+      - rn-shell/**
+      - .github/workflows/rn-shell-ios.yml
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Comma-separated flow names to run (empty runs every flow)
+        type: string
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: rn-shell-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    name: Build and test on the iOS simulator
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      ARTIFACTS: ${{ github.workspace }}/artifacts
+      PRIVATE_ARTIFACTS: ${{ github.workspace }}/private-artifacts
+      ONLY: ${{ inputs.only || '' }}
+      USE_CCACHE: "1"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start the clock and boot a simulator in the background
+        run: |
+          mkdir -p "$ARTIFACTS" "$PRIVATE_ARTIFACTS"
+          echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
+          xcodebuild -version | tee "$ARTIFACTS/xcode.txt"
+          picked="$(python3 rn-shell/ci/pick_simulator.py)"
+          udid="$(printf '%s' "$picked" | cut -f1)"
+          echo "Using $picked" | tee -a "$ARTIFACTS/xcode.txt"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          # The software keyboard, as on a phone.
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
+            && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
+            xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
+            touch "$2/simulator.ready"' boot "$udid" "$ARTIFACTS" > "$ARTIFACTS/simulator-boot.log" 2>&1 &
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - name: Look for the built web app in the cache
+        id: web-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: rn-shell-web-${{ hashFiles('app/src/**', 'app/public/**', 'app/index.html', 'app/package.json', 'app/vite.config.*', 'app/tsconfig*.json', 'shared/**', 'tokens/**', 'bun.lock', 'package.json', '.env.example') }}
+
+      - name: Build the web app and start the servers in the background
+        run: nohup rn-shell/ci/start_servers.sh "$ARTIFACTS" > /dev/null 2>&1 &
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rn-shell/package-lock.json
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Maestro in the background
+        run: |
+          nohup bash -c 'curl -fsSL "https://get.maestro.mobile.dev" | bash && touch "$1/maestro.ready" || touch "$1/maestro.failed"' maestro "$ARTIFACTS" \
+            > "$ARTIFACTS/maestro-install.log" 2>&1 &
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Install, check and prebuild the test build
+        timeout-minutes: 6
+        working-directory: rn-shell
+        env:
+          EXPO_PUBLIC_OPENBOT_TEST_BUILD: "1"
+        run: |
+          echo "$(date +%s) npm" >> "$RUNNER_TEMP/timing"
+          npm ci --no-audit --no-fund
+          npx tsc --noEmit
+          bun test __tests__
+          npx expo prebuild --platform ios --no-install --clean
+
+      - name: Cache CocoaPods and ccache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            rn-shell/ios/Pods
+            ~/Library/Caches/CocoaPods
+            .ccache
+          key: rn-shell-ios-pods-${{ hashFiles('rn-shell/package-lock.json', 'rn-shell/patches/**', 'rn-shell/modules/**', 'rn-shell/app.config.ts') }}
+          restore-keys: rn-shell-ios-pods-
+
+      - name: Install the pods
+        timeout-minutes: 8
+        working-directory: rn-shell/ios
+        run: |
+          echo "$(date +%s) pods" >> "$RUNNER_TEMP/timing"
+          command -v ccache > /dev/null || HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install ccache > /dev/null
+          pod install > "$ARTIFACTS/pod-install.log" 2>&1 || { tail -n 60 "$ARTIFACTS/pod-install.log"; exit 1; }
+          tail -n 3 "$ARTIFACTS/pod-install.log"
+
+      - name: Build the Release app with the test hooks (simulator)
+        timeout-minutes: 25
+        working-directory: rn-shell/ios
+        env:
+          EXPO_PUBLIC_OPENBOT_TEST_BUILD: "1"
+        run: |
+          echo "$(date +%s) xcodebuild" >> "$RUNNER_TEMP/timing"
+          set -o pipefail
+          xcodebuild build -workspace OpenBot.xcworkspace -scheme OpenBot -configuration Release \
+            -sdk iphonesimulator -destination "generic/platform=iOS Simulator" -derivedDataPath ../build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO ONLY_ACTIVE_ARCH=YES 2>&1 \
+            | tee "$ARTIFACTS/xcodebuild.log" | grep -E "error:|BUILD (SUCCEEDED|FAILED)|\*\* BUILD" || true
+          app="$(ls -d ../build/DerivedData/Build/Products/Release-iphonesimulator/OpenBot.app 2>/dev/null || true)"
+          [ -n "$app" ] || { grep -E "error:" "$ARTIFACTS/xcodebuild.log" | head -40; tail -n 80 "$ARTIFACTS/xcodebuild.log"; exit 1; }
+          echo "APP_PATH=$PWD/$app" >> "$GITHUB_ENV"
+          du -sh "$app" | tee "$ARTIFACTS/app-size.txt"
+          ccache -s | tail -n 5 || true
+
+      - name: Wait for the simulator, the servers and Maestro, then install the app
+        timeout-minutes: 10
+        run: |
+          echo "$(date +%s) wait" >> "$RUNNER_TEMP/timing"
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/simulator.ready" - 300 "$ARTIFACTS/simulator-boot.log"
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/servers.ready" "$ARTIFACTS/servers.failed" 420 "$ARTIFACTS/servers.log"
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/maestro.ready" "$ARTIFACTS/maestro.failed" 240 "$ARTIFACTS/maestro-install.log"
+          maestro --version
+          xcrun simctl install "$SIM_UDID" "$APP_PATH"
+
+      - name: Run the mock suite
+        id: mock
+        timeout-minutes: 30
+        run: |
+          echo "$(date +%s) mock-suite" >> "$RUNNER_TEMP/timing"
+          nohup xcrun simctl spawn "$SIM_UDID" log stream --style compact --predicate 'process == "OpenBot"' > "$ARTIFACTS/simulator-app.log" 2>&1 &
+          python3 rn-shell/ci/run_flows.py --platform ios --suite mock --artifacts "$ARTIFACTS" --only "$ONLY"
+
+      - name: Run the real-backend suite
+        if: always() && steps.mock.conclusion != 'cancelled'
+        timeout-minutes: 12
+        env:
+          OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
+        run: |
+          echo "$(date +%s) real-suite" >> "$RUNNER_TEMP/timing"
+          python3 rn-shell/ci/run_flows.py --platform ios --suite real --artifacts "$ARTIFACTS" --private "$PRIVATE_ARTIFACTS" --only "$ONLY"
+
+      - name: Keep the built web app for the next run
+        if: always() && steps.web-cache.outputs.cache-hit != 'true' && hashFiles('app/dist/index.html') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: ${{ steps.web-cache.outputs.cache-primary-key }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "$(date +%s) end" >> "$RUNNER_TEMP/timing"
+          grep -h OPENBOT_DIAG "$ARTIFACTS/simulator-app.log" > "$ARTIFACTS/diagnostics.txt" 2>/dev/null || true
+          {
+            [ -f "$ARTIFACTS/SUMMARY.md" ] && cat "$ARTIFACTS/SUMMARY.md"
+            echo "### Seconds per step"
+            awk 'NR > 1 { printf "- %s: %d s\n", name, $1 - previous } { previous = $1; name = $2 }' "$RUNNER_TEMP/timing"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          cp "$RUNNER_TEMP/timing" "$ARTIFACTS/timing.txt" || true
+          if [ -n "$(ls -A "$PRIVATE_ARTIFACTS" 2>/dev/null)" ]; then echo "HAS_PRIVATE=1" >> "$GITHUB_ENV"; fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rn-shell-ios-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && env.HAS_PRIVATE == '1'
+        with:
+          name: rn-shell-ios-private-${{ github.run_id }}
+          path: private-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -1,0 +1,25 @@
+# No network: the native lock screen, with Try again and the support address.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.reset: "1"
+      openbot.force_offline: "1"
+      openbot.test_name: "lock-offline"
+- extendedWaitUntil:
+    visible: "Cannot reach the OpenBot backend"
+    timeout: 20000
+- assertVisible: "For security purposes, this application can only be used when connected to the OpenBot backend. Please check your internet connection, VPC configuration and network settings to make sure this device can reach the OpenBot backend. Contact your system administrator if you are unable to connect."
+- assertVisible:
+    id: "retry-button"
+- assertVisible:
+    id: "support-email"
+- assertVisible:
+    id: "debug-state"
+    text: ".*lock=no-network.*"
+- takeScreenshot: lock-offline
+- tapOn:
+    id: "retry-button"
+- assertVisible: "Cannot reach the OpenBot backend"

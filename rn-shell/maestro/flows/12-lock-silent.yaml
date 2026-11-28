@@ -1,0 +1,23 @@
+# A server that never answers: the skeleton covers the wait, the lock screen replaces it at the 20 s
+# watchdog, never a blank frame between.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_SILENT}"
+      openbot.reset: "1"
+      openbot.plain_session_cookie: "mock"
+      openbot.test_name: "lock-silent"
+- extendedWaitUntil:
+    visible:
+      id: "loading-skeleton"
+    timeout: 15000
+- takeScreenshot: silent-skeleton
+- extendedWaitUntil:
+    visible: "Cannot reach the OpenBot backend"
+    timeout: 40000
+- assertVisible:
+    id: "debug-state"
+    text: ".*lock=load-failed.*"
+- takeScreenshot: silent-lock

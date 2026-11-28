@@ -1,0 +1,60 @@
+# The keyboard: the web view ends at its top edge (Send stays above it), the tab bar hides while it is
+# up and comes back after, and a drag down on a page that does not scroll (Home) puts it away. In a
+# conversation, sending keeps it up.
+appId: ai.openbot.rnshell
+---
+- tapOn: "Ask anything"
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*keyboard=1.*"
+    timeout: 10000
+- inputText: "Hello from Maestro"
+- assertNotVisible:
+    id: "tab-bar"
+- assertVisible: "Send message"
+- takeScreenshot: home-keyboard
+- swipe:
+    start: "50%, 30%"
+    end: "50%, 60%"
+    duration: 400
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*keyboard=0.*"
+    timeout: 10000
+- assertVisible:
+    id: "tab-bar"
+- takeScreenshot: home-keyboard-down
+- tapOn:
+    id: "tab-conversations"
+- extendedWaitUntil:
+    visible: "Quarterly forecast"
+    timeout: 20000
+- tapOn: "Quarterly forecast"
+- extendedWaitUntil:
+    visible: "Here is the first draft."
+    timeout: 20000
+- tapOn: "Ask anything"
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*keyboard=1.*"
+    timeout: 10000
+- inputText: "What changed?"
+- assertVisible: "Send message"
+- takeScreenshot: conversation-keyboard
+- tapOn: "Send message"
+- assertVisible:
+    id: "debug-state"
+    text: ".*keyboard=1.*"
+- takeScreenshot: conversation-sent
+- tapOn:
+    id: "tab-home"
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*keyboard=0.*tab=home.*|.*tab=home.*keyboard=0.*"
+    timeout: 10000
+- assertVisible:
+    id: "tab-bar"

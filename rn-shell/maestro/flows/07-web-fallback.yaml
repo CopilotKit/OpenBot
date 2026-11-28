@@ -1,0 +1,33 @@
+# A server without the hand-off (config 404): the web app's own sign-in, in the web view, with Cancel.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_B}"
+      openbot.reset: "1"
+      openbot.test_name: "web-fallback"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 30000
+- tapOn:
+    id: "sign-in-button"
+- extendedWaitUntil:
+    visible:
+      id: "web-sign-in-cancel"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "debug-state"
+      text: ".*signIn=webFallback.*path=/sign.*skeleton=0.*"
+    timeout: 30000
+- takeScreenshot: web-sign-in
+- tapOn:
+    id: "web-sign-in-cancel"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 10000
+- assertNotVisible:
+    id: "openbot-webview"

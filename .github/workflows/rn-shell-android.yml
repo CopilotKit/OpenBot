@@ -1,0 +1,208 @@
+name: RN shell (Android)
+
+# Builds the React Native shell in rn-shell/ (Expo prebuild, a release build with the test hooks) and
+# runs its Maestro flows on an Android emulator: against two mock stacks of this branch's built web
+# app (app/workbench/mock-server.ts), and against the hosted web app at my.open.bot.
+#
+# Artifacts: rn-shell-android-<run id> (SUMMARY.md, results, screenshots under shots/, logs) and,
+# only when the signed-in real-backend journey ran, rn-shell-android-private-<run id>.
+# Optional repository secret: OPENBOT_SHELL_TEST_SESSION (the real-backend signed-in journey skips
+# without it). On a public repository Actions artifacts can be downloaded by any signed-in GitHub user.
+on:
+  push:
+    branches:
+      - rn-webview-shell
+    paths:
+      - rn-shell/**
+      - .github/workflows/rn-shell-android.yml
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Comma-separated flow names to run (empty runs every flow)
+        type: string
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: rn-shell-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  emulator:
+    name: Build and test on the Android emulator
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      API_LEVEL: "35"
+      ARTIFACTS: ${{ github.workspace }}/artifacts
+      PRIVATE_ARTIFACTS: ${{ github.workspace }}/private-artifacts
+      ONLY: ${{ inputs.only || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start the clock
+        run: |
+          mkdir -p "$ARTIFACTS" "$PRIVATE_ARTIFACTS"
+          echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
+
+      - name: Cache the emulator's system image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /usr/local/lib/android/sdk/system-images/android-35/google_apis/x86_64
+          key: android-system-image-35-google_apis-x86_64-v1
+
+      - name: Boot the emulator in the background (guest GPU)
+        env:
+          GPU_MODE: guest
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          nohup bash -c 'rn-shell/ci/emulator.sh boot && touch "$1/emulator.booted" || touch "$1/emulator.failed"' boot "$ARTIFACTS" \
+            > "$ARTIFACTS/emulator-boot.log" 2>&1 &
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - name: Look for the built web app in the cache
+        id: web-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: rn-shell-web-${{ hashFiles('app/src/**', 'app/public/**', 'app/index.html', 'app/package.json', 'app/vite.config.*', 'app/tsconfig*.json', 'shared/**', 'tokens/**', 'bun.lock', 'package.json', '.env.example') }}
+
+      - name: Build the web app and start the servers in the background
+        run: nohup rn-shell/ci/start_servers.sh "$ARTIFACTS" > /dev/null 2>&1 &
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rn-shell/package-lock.json
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Cache Gradle
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: rn-shell-gradle-${{ hashFiles('rn-shell/package-lock.json', 'rn-shell/patches/**') }}
+          restore-keys: rn-shell-gradle-
+
+      - name: Install, check and prebuild the test build
+        timeout-minutes: 6
+        working-directory: rn-shell
+        env:
+          EXPO_PUBLIC_OPENBOT_TEST_BUILD: "1"
+        run: |
+          echo "$(date +%s) npm" >> "$RUNNER_TEMP/timing"
+          npm ci --no-audit --no-fund
+          npx tsc --noEmit
+          bun test __tests__
+          npx expo prebuild --platform android --no-install --clean
+          sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g/' android/gradle.properties
+          echo "org.gradle.caching=true" >> android/gradle.properties
+
+      - name: Build the release APK with the test hooks (x86_64)
+        timeout-minutes: 20
+        working-directory: rn-shell/android
+        env:
+          EXPO_PUBLIC_OPENBOT_TEST_BUILD: "1"
+        run: |
+          echo "$(date +%s) gradle" >> "$RUNNER_TEMP/timing"
+          ./gradlew --no-daemon :app:assembleRelease -PreactNativeArchitectures=x86_64 2>&1 \
+            | tee "$ARTIFACTS/gradle.log" | grep -E "BUILD|error:|^e: |FAILURE" || true
+          test -f app/build/outputs/apk/release/app-release.apk || { tail -n 120 "$ARTIFACTS/gradle.log"; exit 1; }
+          ls -la app/build/outputs/apk/release/
+
+      - name: Free the build's memory for the emulator
+        run: |
+          (cd rn-shell/android && ./gradlew --stop > /dev/null 2>&1) || true
+          pkill -f KotlinCompileDaemon || true
+          free -m
+
+      - name: Install Maestro
+        timeout-minutes: 4
+        run: |
+          echo "$(date +%s) maestro" >> "$RUNNER_TEMP/timing"
+          curl -fsSL "https://get.maestro.mobile.dev" | bash > "$ARTIFACTS/maestro-install.log" 2>&1
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          "$HOME/.maestro/bin/maestro" --version
+
+      - name: Wait for the emulator and the servers, then install the app
+        timeout-minutes: 12
+        run: |
+          echo "$(date +%s) wait" >> "$RUNNER_TEMP/timing"
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/emulator.booted" "$ARTIFACTS/emulator.failed" 600 "$ARTIFACTS/emulator-boot.log"
+          GPU_MODE=guest rn-shell/ci/emulator.sh prepare
+          rn-shell/ci/emulator.sh describe
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/servers.ready" "$ARTIFACTS/servers.failed" 420 "$ARTIFACTS/servers.log"
+          adb install -r -g rn-shell/android/app/build/outputs/apk/release/app-release.apk
+          adb shell pm list packages | grep ai.openbot
+
+      - name: Run the mock suite
+        id: mock
+        timeout-minutes: 25
+        run: |
+          echo "$(date +%s) mock-suite" >> "$RUNNER_TEMP/timing"
+          adb logcat -c || true
+          nohup adb logcat -v time ReactNativeJS:V ReactNative:W chromium:W '*:S' > "$ARTIFACTS/logcat.txt" 2>&1 &
+          python3 rn-shell/ci/run_flows.py --platform android --suite mock --artifacts "$ARTIFACTS" --only "$ONLY"
+
+      - name: Run the real-backend suite
+        if: always() && steps.mock.conclusion != 'cancelled'
+        timeout-minutes: 12
+        env:
+          OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
+        run: |
+          echo "$(date +%s) real-suite" >> "$RUNNER_TEMP/timing"
+          python3 rn-shell/ci/run_flows.py --platform android --suite real --artifacts "$ARTIFACTS" --private "$PRIVATE_ARTIFACTS" --only "$ONLY"
+
+      - name: Keep the built web app for the next run
+        if: always() && steps.web-cache.outputs.cache-hit != 'true' && hashFiles('app/dist/index.html') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: ${{ steps.web-cache.outputs.cache-primary-key }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "$(date +%s) end" >> "$RUNNER_TEMP/timing"
+          grep -h OPENBOT_DIAG "$ARTIFACTS/logcat.txt" > "$ARTIFACTS/diagnostics.txt" 2>/dev/null || true
+          {
+            [ -f "$ARTIFACTS/SUMMARY.md" ] && cat "$ARTIFACTS/SUMMARY.md"
+            echo "### Seconds per step"
+            awk 'NR > 1 { printf "- %s: %d s\n", name, $1 - previous } { previous = $1; name = $2 }' "$RUNNER_TEMP/timing"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          cp "$RUNNER_TEMP/timing" "$ARTIFACTS/timing.txt" || true
+          if [ -n "$(ls -A "$PRIVATE_ARTIFACTS" 2>/dev/null)" ]; then echo "HAS_PRIVATE=1" >> "$GITHUB_ENV"; fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rn-shell-android-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && env.HAS_PRIVATE == '1'
+        with:
+          name: rn-shell-android-private-${{ github.run_id }}
+          path: private-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore

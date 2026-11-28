@@ -1,0 +1,96 @@
+name: RN shell (checks and store builds)
+
+# The React Native shell's checks that need no simulator: typecheck and unit tests, then what a store
+# build ships. The store build is the one made WITHOUT EXPO_PUBLIC_OPENBOT_TEST_BUILD: this proves it
+# has none of the test hooks in its JavaScript, no App Transport Security exception and no URL scheme
+# on iOS, no cleartext on Android, and measures the Android store APK (arm64-v8a).
+on:
+  push:
+    branches:
+      - rn-webview-shell
+    paths:
+      - rn-shell/**
+      - .github/workflows/rn-shell-checks.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: rn-shell-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  store:
+    name: Unit tests and the store builds' contents
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      ARTIFACTS: ${{ github.workspace }}/artifacts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rn-shell/package-lock.json
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install, typecheck, unit tests
+        timeout-minutes: 6
+        working-directory: rn-shell
+        run: |
+          mkdir -p "$ARTIFACTS"
+          npm ci --no-audit --no-fund
+          npx tsc --noEmit
+          bun test __tests__ 2>&1 | tee "$ARTIFACTS/unit-tests.txt"
+
+      - name: The store configuration (prebuild without the test flag)
+        timeout-minutes: 4
+        working-directory: rn-shell
+        run: bash ci/check_store.sh config "$ARTIFACTS"
+
+      - name: The store JavaScript bundles have no test hooks
+        timeout-minutes: 6
+        working-directory: rn-shell
+        run: bash ci/check_store.sh bundles "$ARTIFACTS"
+
+      - name: Cache Gradle
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: rn-shell-gradle-store-${{ hashFiles('rn-shell/package-lock.json', 'rn-shell/patches/**') }}
+          restore-keys: rn-shell-gradle-
+
+      - name: Build the Android store APK (arm64-v8a) and check it
+        timeout-minutes: 20
+        working-directory: rn-shell
+        run: bash ci/check_store.sh apk "$ARTIFACTS"
+
+      - name: Summary
+        if: always()
+        run: |
+          [ -f "$ARTIFACTS/STORE.md" ] && cat "$ARTIFACTS/STORE.md" >> "$GITHUB_STEP_SUMMARY" || true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rn-shell-checks-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn

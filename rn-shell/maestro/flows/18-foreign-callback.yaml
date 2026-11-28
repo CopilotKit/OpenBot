@@ -1,0 +1,29 @@
+# ANDROID: another app fires openbotshell:// while a sign-in is pending. A callback without a
+# well-formed ticket is dropped by the trampoline: the Custom Tab stays, the sign-in stays pending,
+# and the real link still signs in.
+appId: ai.openbot.rnshell
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.reset: "1"
+      openbot.test_name: "foreign-callback"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 30000
+- tapOn:
+    id: "sign-in-button"
+- extendedWaitUntil:
+    visible: "Sign in as test person"
+    timeout: 30000
+- openLink: "openbotshell://signed-in?ticket=%3Cnot-a-ticket%3E"
+- openLink: "openbotshell://signed-in"
+- extendedWaitUntil:
+    visible: "Sign in as test person"
+    timeout: 10000
+- takeScreenshot: tab-still-open
+- tapOn: "Sign in as test person"
+- runFlow: ../subflows/wait-signed-in.yaml
+- takeScreenshot: signed-in-after
