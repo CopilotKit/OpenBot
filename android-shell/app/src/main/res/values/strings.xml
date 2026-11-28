@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenBot</string>
+    <string name="sign_in_title">OpenBot</string>
+    <string name="sign_in_line">Sign in to talk to your Bots and pick up your conversations.</string>
+    <string name="sign_in">Sign in</string>
+    <string name="signing_in">Signing in</string>
+    <string name="cancel">Cancel</string>
+    <string name="sign_in_not_finished">Sign-in didn\'t finish. Try again.</string>
+    <string name="sign_in_too_long">Sign-in took too long. Try again.</string>
+    <string name="sign_in_no_browser">No browser to sign in with. Try again.</string>
+
+    <string name="tab_conversations">Chats</string>
+    <string name="tab_home">Home</string>
+    <string name="tab_bots">Bots</string>
+
+    <string name="lock_heading">Cannot reach the OpenBot backend</string>
+    <string name="lock_message">For security purposes, this application can only be used when connected to the OpenBot backend. Please check your internet connection, VPC configuration and network settings to make sure this device can reach the OpenBot backend. Contact your system administrator if you are unable to connect.</string>
+    <string name="lock_retry">Try again</string>
+    <string name="lock_need_help">Need help?</string>
+    <string name="support_address" translatable="false">support@open.bot</string>
+
+    <string name="loading">Loading</string>
+
+    <string name="dialog_ok">OK</string>
+    <string name="dialog_cancel">Cancel</string>
+</resources>

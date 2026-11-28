@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Back to front: the page's colour (root background, behind the status bar and the bottom bar),
+     the web view between the status bar and the bottom bar, the native sign-in screen, and the lock
+     screen over everything. Insets are applied in code (ShellActivity.applyInsets). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?android:attr/colorBackground">
+
+    <LinearLayout
+        android:id="@+id/content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <FrameLayout
+            android:id="@+id/web_sign_in_bar"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:paddingHorizontal="4dp"
+            android:visibility="gone">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/web_sign_in_cancel"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="start|center_vertical"
+                android:text="@string/cancel" />
+        </FrameLayout>
+
+        <!-- The WebView is added at index 0; the loading skeleton covers it until the page renders. -->
+        <FrameLayout
+            android:id="@+id/web_container"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <ai.openbot.shell.LoadingSkeletonView
+                android:id="@+id/loading_skeleton"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@string/loading"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <com.google.android.material.bottomnavigation.BottomNavigationView
+            android:id="@+id/bottom_nav"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            app:labelVisibilityMode="labeled"
+            app:menu="@menu/tabs" />
+    </LinearLayout>
+
+    <include
+        android:id="@+id/sign_in_screen"
+        layout="@layout/sign_in_screen" />
+
+    <include
+        android:id="@+id/offline_lock"
+        layout="@layout/offline_lock"
+        android:visibility="gone" />
+</FrameLayout>

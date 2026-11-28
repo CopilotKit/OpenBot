@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Probe persistence</title>
+  <style>body { font: 14px -apple-system, system-ui, sans-serif; padding: calc(env(safe-area-inset-top) + 8px) 12px; }</style>
+</head>
+<body>
+  <h1>Session persistence</h1>
+  <p id="visitor">checking</p>
+  <p id="detail"></p>
+  <p id="saved"></p>
+  <script>
+    // First visit: no persistent cookie, no localStorage value. This page then sets both, so the
+    // next visit, after the app is killed and relaunched, should say "returning visitor: yes".
+    // ?reset=1 clears both first.
+    (async () => {
+      const key = 'openbot-probe-persist';
+      try {
+        if (new URLSearchParams(location.search).has('reset')) {
+          localStorage.removeItem(key);
+          await fetch('/api/persist/clear', { method: 'POST', cache: 'no-store' });
+        }
+        const hadStorage = localStorage.getItem(key) === 'yes';
+        const check = JSON.parse(await (await fetch('/api/persist/check', { cache: 'no-store' })).text());
+        document.getElementById('visitor').textContent = `returning visitor: ${hadStorage && check.cookie ? 'yes' : 'no'}`;
+        document.getElementById('detail').textContent = `details: localStorage value ${hadStorage ? 'present' : 'absent'}, persistent cookie ${check.cookie ? 'present' : 'absent'}`;
+        localStorage.setItem(key, 'yes');
+        await fetch('/api/persist/set', { method: 'POST', cache: 'no-store' });
+        document.getElementById('saved').textContent = 'state saved';
+      } catch (e) {
+        document.getElementById('visitor').textContent = `returning visitor: error ${e}`;
+      }
+    })();
+  </script>
+</body>
+</html>

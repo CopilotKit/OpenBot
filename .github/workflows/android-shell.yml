@@ -1,0 +1,208 @@
+name: Android shell
+
+# Builds the experimental Android shell in android-shell/ and runs its instrumented tests on an
+# emulator: against the hosted web app at my.open.bot (suite 1), against two mock stacks of this
+# branch's built web app (app/workbench/mock-server.ts, suite 2), and against the iOS shell's probe
+# site (web view basics). The build (debug, the release-like releaseTest, release, lint, unit
+# tests) runs first, so a compile error fails the job before the emulator boots.
+#
+# Artifacts: android-shell-<run id> (SUMMARY.md, diagnostics, logcat, screenshots under shots/,
+# lint reports; recordings come from android-shell-video.yml) and, only when a test used a real account,
+# android-shell-private-<run id>.
+#
+# Optional repository secrets for the tests against a real account (skipped when empty):
+# OPENBOT_SHELL_TEST_SESSION, OPENBOT_SHELL_GOOGLE_EMAIL, OPENBOT_SHELL_GOOGLE_PASSWORD,
+# OPENBOT_SHELL_GOOGLE_TOTP_SECRET.
+on:
+  push:
+    branches:
+      - android-webview-shell
+    paths:
+      - android-shell/**
+      - .github/workflows/android-shell.yml
+      - app/workbench/mock-server.ts
+  workflow_dispatch:
+    inputs:
+      google_sign_in:
+        description: Run the Google sign-in in a Custom Tab (sends one sign-in prompt to the account's phone)
+        type: boolean
+        default: false
+      real_backend_only:
+        description: Run only the real-backend suite (skip the mock suite, the probe and the demo)
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: android-shell-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  emulator:
+    name: Build and test on the Android emulator
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      API_LEVEL: "35"
+      ARTIFACTS: ${{ github.workspace }}/artifacts
+      PRIVATE_ARTIFACTS: ${{ github.workspace }}/private-artifacts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            android-shell/**/*.gradle.kts
+            android-shell/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Build the app, the tests, lint and unit tests
+        id: build
+        timeout-minutes: 15
+        working-directory: android-shell
+        run: |
+          mkdir -p "$ARTIFACTS" "$PRIVATE_ARTIFACTS"
+          # Maven Central answers 429 now and then: up to three tries.
+          for attempt in 1 2 3; do
+            ./gradlew --no-daemon --stacktrace \
+              assembleDebug assembleDebugAndroidTest assembleRelease assembleReleaseTest \
+              testDebugUnitTest lint lintRelease 2>&1 | tee "$ARTIFACTS/gradle.log"
+            status=${PIPESTATUS[0]}
+            if [ "$status" = 0 ] || ! grep -q "Could not resolve\|status code 429\|Could not GET" "$ARTIFACTS/gradle.log"; then break; fi
+            echo "dependency download failed (attempt $attempt); retrying in 30 s"
+            sleep 30
+          done
+          mkdir -p "$ARTIFACTS/lint"
+          cp app/build/reports/lint-results-*.{html,xml,txt} "$ARTIFACTS/lint/" 2>/dev/null || true
+          cp -r app/build/reports/tests "$ARTIFACTS/unit-tests" 2>/dev/null || true
+          for report in app/build/reports/lint-results-*.txt; do
+            [ -f "$report" ] && { echo "::group::$report"; cat "$report"; echo "::endgroup::"; }
+          done
+          exit "$status"
+
+      - name: Free the build's memory for the emulator
+        run: |
+          (cd android-shell && ./gradlew --stop > /dev/null 2>&1) || true
+          pkill -f KotlinCompileDaemon || true
+          free -m
+
+      - name: Check what ships
+        working-directory: android-shell
+        run: |
+          ls -la app/build/outputs/apk/*/
+          ci/check_apk.sh app/build/outputs/apk/release/app-release-unsigned.apk \
+            app/build/outputs/apk/releaseTest/app-releaseTest.apk | tee "$ARTIFACTS/check-apk.txt"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: inputs.real_backend_only != true
+        with:
+          bun-version: 1.4.3
+
+      - name: Install dependencies and build the web app
+        if: inputs.real_backend_only != true
+        timeout-minutes: 15
+        run: |
+          bun install --frozen-lockfile
+          cp .env.example .env
+          cd app && bun run build
+
+      - name: Start the mock stacks, the probe and the silent server
+        if: inputs.real_backend_only != true
+        run: |
+          # A: signed out unless the mock's cookie is sent, with the sign-in hand-off.
+          MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-a.log" 2>&1 &
+          APP_PORT=3010 SERVER_PORT=3001 nohup bun app/serve.ts > "$ARTIFACTS/app-a.log" 2>&1 &
+          # B: the same without the hand-off.
+          MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-b.log" 2>&1 &
+          APP_PORT=3011 SERVER_PORT=3002 nohup bun app/serve.ts > "$ARTIFACTS/app-b.log" 2>&1 &
+          nohup bun ios-shell/Probe/without-bridge.ts > "$ARTIFACTS/without-bridge.log" 2>&1 &
+          nohup python3 ios-shell/Probe/serve.py > "$ARTIFACTS/probe-server.log" 2>&1 &
+          nohup python3 android-shell/ci/silent_server.py > "$ARTIFACTS/silent-server.log" 2>&1 &
+          challenge="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          for _ in $(seq 1 60); do
+            a_page="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/ || true)"
+            b_page="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3011/ || true)"
+            a_handoff="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3010/api/auth/shell/handoff?challenge=$challenge&platform=android" || true)"
+            b_config="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3011/api/auth/shell/config?platform=android" || true)"
+            a_config="$(curl -s "http://127.0.0.1:3010/api/auth/shell/config?platform=android" || true)"
+            probe="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/ || true)"
+            if [ "$a_page" = 200 ] && [ "$b_page" = 200 ] && [ "$a_handoff" = 200 ] && [ "$b_config" = 404 ] && [ "$probe" = 200 ]; then
+              echo "mock stacks and probe are up; A's config for android: $a_config"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "servers did not start: A $a_page/$a_handoff, B $b_page/$b_config, probe $probe"
+          tail -n 40 "$ARTIFACTS"/mock-a.log "$ARTIFACTS"/app-a.log "$ARTIFACTS"/mock-b.log "$ARTIFACTS"/app-b.log "$ARTIFACTS"/probe-server.log
+          exit 1
+
+      - name: Cache the emulator's system image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /usr/local/lib/android/sdk/system-images/android-35/google_apis/x86_64
+          key: android-system-image-35-google_apis-x86_64-v1
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+
+      - name: Boot and prepare the emulator
+        id: emulator
+        timeout-minutes: 20
+        run: android-shell/ci/emulator.sh all
+
+      - name: Install the apps
+        run: |
+          adb install -r -g android-shell/app/build/outputs/apk/debug/app-debug.apk
+          adb install -r -g android-shell/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          adb install -r -g android-shell/app/build/outputs/apk/releaseTest/app-releaseTest.apk
+          adb shell pm list packages | grep ai.openbot
+
+      - name: Run the instrumented tests
+        id: tests
+        timeout-minutes: 25
+        env:
+          OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
+          OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
+          OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
+          OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
+          GOOGLE_SIGN_IN: ${{ inputs.google_sign_in }}
+          REAL_BACKEND_ONLY: ${{ inputs.real_backend_only }}
+        run: |
+          python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
+
+      - name: Write the summary and collect the screenshots
+        if: always()
+        run: |
+          free -m; sudo dmesg 2>/dev/null | grep -i -E "killed process|out of memory" | tail -5 || true
+          python3 android-shell/ci/summarize.py "$ARTIFACTS" || true
+          python3 android-shell/ci/collect.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" || true
+          if [ -f "$ARTIFACTS/SUMMARY.md" ]; then cat "$ARTIFACTS/SUMMARY.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -n "$(ls -A "$PRIVATE_ARTIFACTS/shots" "$PRIVATE_ARTIFACTS/video" 2>/dev/null)" ]; then echo "HAS_PRIVATE=1" >> "$GITHUB_ENV"; fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && (!inputs.real_backend_only || github.event.repository.private == true)
+        with:
+          name: android-shell-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && env.HAS_PRIVATE == '1' && github.event.repository.private == true
+        with:
+          name: android-shell-private-${{ github.run_id }}
+          path: private-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore

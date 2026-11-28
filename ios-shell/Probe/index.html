@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>OpenBot shell probe</title>
+  <style>
+    body {
+      font: 12px -apple-system, system-ui, sans-serif;
+      margin: 0;
+      padding: calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 10px)
+               calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 10px);
+    }
+    h1 { font-size: 16px; margin: 0 0 6px; }
+    p { margin: 4px 0; }
+    ul { padding-left: 16px; margin: 6px 0; }
+    li { margin: 2px 0; }
+    li[data-result="pass"] { color: #1a7f37; }
+    li[data-result="fail"] { color: #cf222e; font-weight: 600; }
+    li[data-result="skip"], li[data-result="info"] { color: #6e7781; }
+    button { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>OpenBot shell probe</h1>
+  <p><button id="open-popup" type="button">Open popup</button> <button id="ask-mic" type="button">Ask for microphone</button></p>
+  <p id="mic-result">mic: not asked</p>
+  <p><input type="file" id="file-input"></p>
+  <ul id="checks"></ul>
+  <script src="probe.js"></script>
+</body>
+</html>
