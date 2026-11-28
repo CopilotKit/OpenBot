@@ -138,8 +138,10 @@ function pageEnvironment(): NativeShellEnvironment {
     userAgent: navigator.userAgent,
     search: window.location.search,
     hostname: window.location.hostname,
-    // A boolean under Vite, a string where another build (the Recorder) types the env.
-    dev: String(import.meta.env.DEV) === "true",
+    // A boolean under Vite, a string where another build (the Recorder) types the env, and no
+    // `import.meta.env` at all where the app is bundled without Vite (the real-browser tests):
+    // absent is not a development build.
+    dev: String(import.meta.env?.DEV) === "true",
     storage: pageStorage(),
   };
 }
