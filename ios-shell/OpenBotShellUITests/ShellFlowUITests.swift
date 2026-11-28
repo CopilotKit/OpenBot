@@ -58,6 +58,18 @@ final class ShellFlowUITests: ShellTestCase {
         note("after recovery: \(debugState(app))")
     }
 
+    func testHandoffToAPageWithoutTheBridge() {
+        let app = launch(base: "http://127.0.0.1:3013", moment: "without-bridge", auto: true)
+        let signIn = app.buttons["sign-in-button"]
+        XCTAssertTrue(signIn.waitForExistence(timeout: 25))
+        signIn.tap()
+        let heading = webText(app, "Start a conversation")
+        XCTAssertTrue(heading.waitForExistence(timeout: 45))
+        XCTAssertTrue(waitForState(app, "signIn=idle", timeout: 30))
+        XCTAssertTrue(tab(app, .home).exists, "The ticket was accepted but the shell returned to Sign in")
+        XCTAssertTrue(heading.exists)
+    }
+
     // b.
     func testNativeSignInThroughSheet() throws {
         var app = launch(base: ShellTestCase.mockA, moment: "manual")

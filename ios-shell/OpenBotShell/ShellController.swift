@@ -640,6 +640,16 @@ final class ShellController: NSObject, WebControllerDelegate {
            config.isOwnOrigin(url) || model.signIn == .webFallback {
             beginPageLoad("commit")
         }
+        // A successful ticket exchange sets the session cookie before redirecting to the app.
+        // An older web build may never send a native route message.
+        if model.signIn == .entering, let url = controller.webView.url, config.isOwnOrigin(url),
+           url.path != "/sign", !url.path.hasPrefix("/sign/"), !url.path.hasPrefix("/api/") {
+            SessionCookies.present(in: cookieStore, host: config.baseHost) { [weak self] present, _ in
+                guard let self, present, self.model.signIn == .entering else { return }
+                self.diagnostics.log("handoff-session-confirmed", [:])
+                self.finishSignIn()
+            }
+        }
         if failureSource == .some(.web) || failureSource == nil { clearLoadFailure() }
     }
 }

@@ -113,6 +113,7 @@ jobs:
 
       - name: Start the probe server
         run: |
+          nohup bun ios-shell/Probe/without-bridge.ts > artifacts/without-bridge.log 2>&1 &
           nohup python3 ios-shell/Probe/serve.py > artifacts/probe-server.log 2>&1 &
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8765/ > /dev/null && curl -sS -o /dev/null http://127.0.0.1:8766/cors; then
