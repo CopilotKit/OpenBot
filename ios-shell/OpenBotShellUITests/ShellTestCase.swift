@@ -17,15 +17,19 @@ class ShellTestCase: XCTestCase {
         super.setUp()
         continueAfterFailure = true
         XCUIDevice.shared.appearance = .light
+        XCUIDevice.shared.orientation = .portrait
     }
+
+    var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 
     // MARK: - Launching
 
     /// Launches the app. `base` nil means the app's own default (my.open.bot).
     func launch(base: String?, moment: String, reset: Bool = true, plain: Bool = false,
                 ephemeral: Bool = true, auto: Bool = false,
-                extra: [String: String] = [:]) -> XCUIApplication {
+                extra: [String: String] = [:], arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
+        app.launchArguments += arguments
         app.launchEnvironment["OPENBOT_SHELL_DIAGNOSTICS"] = "1"
         app.launchEnvironment["OPENBOT_SHELL_TEST_NAME"] = "\(testName)-\(moment)"
         if let base = base { app.launchEnvironment["OPENBOT_BASE_URL"] = base }
@@ -48,8 +52,9 @@ class ShellTestCase: XCTestCase {
     }
 
     /// Signs in on mock stack A through the sheet in auto mode and waits for the tabs.
-    func launchSignedIn(moment: String = "signed-in") -> XCUIApplication {
-        let app = launch(base: ShellTestCase.mockA, moment: moment, auto: true)
+    func launchSignedIn(moment: String = "signed-in", extra: [String: String] = [:],
+                        arguments: [String] = []) -> XCUIApplication {
+        let app = launch(base: ShellTestCase.mockA, moment: moment, auto: true, extra: extra, arguments: arguments)
         let button = app.buttons["sign-in-button"]
         XCTAssertTrue(button.waitForExistence(timeout: 20), "no native Sign in button")
         button.tap()

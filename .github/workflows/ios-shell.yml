@@ -35,6 +35,11 @@ on:
         description: Run only the real-backend suite (skip the mock suite, the probe and the demo)
         type: boolean
         default: false
+      device:
+        description: The simulator to run on (an iPad runs everything but the real-backend suites)
+        type: choice
+        options: [iphone, ipad]
+        default: iphone
 
 permissions: {}
 
@@ -125,6 +130,17 @@ jobs:
           cat artifacts/probe-server.log
           exit 1
 
+      - name: Start the server that never answers
+        run: |
+          # testSlowServerShowsSkeletonThenLock: accepts connections on 3013 and never answers.
+          nohup python3 -c '
+          import socket, time
+          s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          s.bind(("127.0.0.1", 3013)); s.listen(64); held = []
+          while True:
+              c, _ = s.accept(); held.append(c)
+          ' > artifacts/silent-server.log 2>&1 &
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -133,8 +149,11 @@ jobs:
         run: xcodegen generate
 
       - name: Pick and boot a simulator
+        env:
+          DEVICE: ${{ inputs.device || 'iphone' }}
         run: |
-          picked="$(python3 ios-shell/ci/pick_simulator.py)"
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          picked="$(python3 ios-shell/ci/pick_simulator.py "$DEVICE")"
           udid="$(printf '%s' "$picked" | cut -f1)"
           name="$(printf '%s' "$picked" | cut -f2)"
           runtime="$(printf '%s' "$picked" | cut -f3)"
@@ -182,7 +201,7 @@ jobs:
             2>&1 | tee xcodebuild-build-release.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build-release.log
           app="$(ls -d DerivedDataRelease/Build/Products/Release-iphonesimulator/OpenBotShell.app)"
-          found="$(strings -a "$app/OpenBotShell" | grep -E 'OPENBOT_SHELL_(TEST_SESSION_COOKIE|TEST_PLAIN_SESSION_COOKIE|TEST_STALE_SESSION|FORCE_OFFLINE|FORCE_DARK|DELAY_FIRST_LOAD|HANDOFF_AUTO|DEBUG_SHEET_URL|PLAIN_WEBVIEW|RESET)|debug-state' || true)"
+          found="$(strings -a "$app/OpenBotShell" | grep -E 'OPENBOT_SHELL_(TEST_SESSION_COOKIE|TEST_PLAIN_SESSION_COOKIE|TEST_STALE_SESSION|FORCE_OFFLINE|FORCE_DARK|DELAY_FIRST_LOAD|TEST_KILL_CONTENT|HANDOFF_AUTO|DEBUG_SHEET_URL|PLAIN_WEBVIEW|RESET)|debug-state' || true)"
           if [ -n "$found" ]; then
             echo "::error::DEBUG-only hooks are in the Release binary:"
             echo "$found"
@@ -214,6 +233,7 @@ jobs:
           export TEST_RUNNER_OPENBOT_SHELL_LATE_STACK_TRIGGER="$LATE_STACK_TRIGGER"
           only=()
           if [ "$REAL_BACKEND_ONLY" = "true" ]; then only=(-only-testing:OpenBotShellUITests/RealBackendDebugUITests); fi
+          if [ "$DEVICE" = "ipad" ]; then only=(-skip-testing:OpenBotShellUITests/RealBackendDebugUITests); fi
           set -o pipefail
           xcodebuild test-without-building "${only[@]}" \
             -project ios-shell/OpenBotShell.xcodeproj \
@@ -240,7 +260,7 @@ jobs:
           fi
 
       - name: Run the real-backend suite on the Release build (a fresh install per test)
-        if: always() && steps.build-release.outcome == 'success'
+        if: always() && steps.build-release.outcome == 'success' && env.DEVICE != 'ipad'
         timeout-minutes: 30
         env:
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}

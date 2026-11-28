@@ -158,6 +158,15 @@ final class ShellController: NSObject, WebControllerDelegate {
         beginPageLoad("launch")
         model.phase = .signedIn
         #if DEBUG
+        if let kill = config.killContentAfterSeconds {
+            DispatchQueue.main.asyncAfter(deadline: .now() + kill) { [weak self] in
+                guard let webView = self?.web.webView else { return }
+                // WebKit's own test hook (private, DEBUG builds only).
+                let selector = NSSelectorFromString("_killWebContentProcess")
+                self?.diagnostics.log("test-hook", ["hook": "kill-content", "available": webView.responds(to: selector)])
+                if webView.responds(to: selector) { webView.perform(selector) }
+            }
+        }
         if let delay = config.delayFirstLoadSeconds {
             diagnostics.log("test-hook", ["hook": "delay-first-load", "seconds": delay])
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.web.load(path: "/") }
@@ -177,6 +186,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         loadingSince = Date()
         loadingCheck?.cancel()
         diagnostics.log("page-load-begin", ["reason": reason])
+        if !model.pageLoading { model.skeletonsShown += 1 }
         model.pageLoading = true
     }
 
@@ -637,6 +647,7 @@ final class ShellController: NSObject, WebControllerDelegate {
     }
 
     func webControllerContentProcessRestarted(_ controller: WebController) {
+        model.contentRestarts += 1
         if model.webVisible { beginPageLoad("content-process") }
     }
 

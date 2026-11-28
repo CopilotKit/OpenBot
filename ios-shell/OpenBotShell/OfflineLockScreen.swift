@@ -50,6 +50,7 @@ struct OfflineLockScreen: View {
                                 .foregroundColor(Color(uiColor: .label))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Email support at \(OfflineLockScreen.supportAddress)")
                         .accessibilityIdentifier("support-email")
                     }
                     .font(.footnote)

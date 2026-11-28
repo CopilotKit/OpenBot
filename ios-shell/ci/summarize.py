@@ -97,6 +97,8 @@ SUITES = [
      "server hand-off draft PR carry them)",
      lambda suite, name: suite.startswith("ShellFlow")),
     ("Web view basics (local probe site)", lambda suite, name: suite.startswith("ShellUITests")),
+    ("Hardening (mock stack: iPad, Dynamic Type, dark, VoiceOver labels, rotation, a killed web "
+     "process, a server that never answers)", lambda suite, name: suite.startswith("Hardening")),
     ("Demo recording", lambda suite, name: suite.startswith("DemoTour")),
     ("Unit tests (pure sign-in logic)", lambda suite, name: suite.startswith("HandoffConfig")),
 ]

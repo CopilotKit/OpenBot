@@ -35,10 +35,10 @@ targets:
           UIImageName: LaunchMark
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        # A phone stays in portrait: the web app's phone layout is drawn for it, and in landscape
+        # the keyboard would leave the message box about 100 pt. An iPad turns every way.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown

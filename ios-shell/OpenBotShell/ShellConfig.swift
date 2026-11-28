@@ -32,6 +32,9 @@ struct ShellConfig {
     var delayFirstLoadSeconds: Double?
     /// Plants `better-auth.session_token=<value>` (the plain name the http mock uses).
     var testPlainSessionCookie: String?
+    /// Kills the web content process this long after a signed-in launch, as iOS does under memory
+    /// pressure, to test the recovery.
+    var killContentAfterSeconds: Double?
 
     static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> ShellConfig {
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0"
@@ -65,6 +68,9 @@ struct ShellConfig {
         }
         if let value = environment["OPENBOT_SHELL_TEST_PLAIN_SESSION_COOKIE"], !value.isEmpty {
             config.testPlainSessionCookie = value
+        }
+        if let value = environment["OPENBOT_SHELL_TEST_KILL_CONTENT_SECONDS"], let seconds = Double(value), seconds > 0 {
+            config.killContentAfterSeconds = seconds
         }
         #endif
         return config
