@@ -4,6 +4,8 @@ import {
   DECLINED_BY_PERSON,
   declinedByPerson,
   doneByPerson,
+  NOT_RUN_UNANSWERED,
+  OUTCOME_UNKNOWN,
   outcomeForPerson,
 } from "@openbot/shared/approval-outcomes";
 import type { DecisionToolName } from "@openbot/shared/decision-tools";
@@ -571,6 +573,15 @@ export function browserDetails(
   };
 }
 
+/**
+ * Whether a step's answer says it was started and cut off before it answered, so nobody knows
+ * whether it happened: the server's own words for it, or the approval gate's.
+ */
+function cutOff(text: string): boolean {
+  const said = text.trim();
+  return said === OUTCOME_UNKNOWN || said.startsWith("Outcome unknown:");
+}
+
 /** CopilotKit's stand-in for a frontend tool's answer that has not been given yet. */
 const FORWARDED_TO_CLIENT = "Forwarded to client";
 
@@ -605,11 +616,47 @@ export function readOutcome(content: unknown): ToolOutcome | null {
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     const outcome = parsed as Record<string, unknown>;
     if (outcome.waiting === true) return null;
+    /*
+     * A STEP THE RUN ENDED UNDER. When a run ends with a step still open (the person's Stop, a
+     * server that restarted, a stream cut short), the runtime closes the step with an answer of its
+     * own, `{ status: "stopped" | "error", reason, message }`, which has no `ok`. Found in an
+     * end-to-end run with the server restarted part way through a save: read as a computer's answer,
+     * it drew "Saved a file" for a file that was never written.
+     */
+    if (
+      outcome.ok === undefined &&
+      (outcome.status === "stopped" || outcome.status === "error") &&
+      typeof outcome.message === "string"
+    )
+      return { ...outcome, ok: false, reason: outcome.message };
+    /*
+     * A STEP CUT OFF INSIDE THE SERVER'S OWN RUN, as the server answers it there: `{ ok: false,
+     * error: "Outcome unknown: ..." }`. Read as the sentence on its own is (below): not run, and
+     * said to the person in their words, never as a failure with nothing to say.
+     */
+    const said =
+      typeof outcome.error === "string"
+        ? outcome.error
+        : typeof outcome.reason === "string"
+          ? outcome.reason
+          : "";
+    if (outcome.ok === false && cutOff(said))
+      return { ...outcome, ok: false, outcomeUnknown: true, reason: said };
     return { ...outcome, ok: outcome.ok !== false };
   }
   if (doneByPerson(text)) return { ok: true, doneByPerson: true, reason: text };
   if (declinedByPerson(text))
     return { ok: false, refused: true, declined: true, reason: text };
+  /*
+   * A step that never ran because nothing took it before the Bot went on: nothing turned it away.
+   * Read as a refusal, a command a sleeping phone never ran was drawn "Blocked", in red.
+   */
+  if (text === NOT_RUN_UNANSWERED) return { ok: false, reason: text };
+  /*
+   * Nor one whose run was cut off before it answered, so nobody knows whether it happened, and which
+   * was not run again: the server says so of a step it ran itself. Nothing turned it away either.
+   */
+  if (cutOff(text)) return { ok: false, outcomeUnknown: true, reason: text };
   return text.startsWith("Error:")
     ? { ok: false, reason: text.slice("Error:".length).trim() }
     : { ok: false, refused: true, reason: text };
@@ -840,6 +887,18 @@ export function detailsOf(
       output: outputOf(result),
       ...(typeof result.exitCode === "number"
         ? { exitCode: result.exitCode }
+        : {}),
+      /*
+       * Not run: the pane must not say "Exit 0" about a command the computer never ran. A command
+       * that ran has an exit code; an answer with none that did not work (the gate refused the step,
+       * the computer could not be reached) is a command that did not run. It read as "Ran … Exit 0"
+       * beside a card saying "Didn't run", and that was taken for the command having run.
+       */
+      ...(result.ok === false &&
+      typeof result.exitCode !== "number" &&
+      result.refused !== true &&
+      result.doneByPerson !== true
+        ? { failed: true }
         : {}),
       ...notTheBot,
       ...(result.truncated === true ? { truncated: true } : {}),

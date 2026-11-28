@@ -181,6 +181,30 @@ test("an app the person hasn't connected reads as not connected on Activity, the
   expectInWords(view.container);
 });
 
+test("actions a Bot wasn't given, of an app it holds, read as not given, never as not connected", async () => {
+  const view = await renderPage("personal", {
+    [`?${LEAVE_OUT}`]: [
+      failedCall(
+        "tools",
+        4,
+        connectAppRefusal({
+          serverId: "composio-gmail",
+          title: "Gmail",
+          message: "This Bot wasn't given the Gmail actions it needs.",
+          reason: "tools",
+          actions: ["composio-gmail/GMAIL_SEND_EMAIL"],
+          need: "to send an email.",
+        }),
+      ),
+    ],
+  });
+  expect(drawn(view.container)[0]?.decision).toEqual([
+    "Not given",
+    "The Bot needed more of Gmail to send an email.",
+  ]);
+  expectInWords(view.container);
+});
+
 test("Admin reads the refusal's own sentence, without the marker", async () => {
   const view = await renderPage("team", { "": [STORED_BEFORE] });
   expect(drawn(view.container)[0]?.decision).toEqual([

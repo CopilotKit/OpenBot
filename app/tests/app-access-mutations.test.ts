@@ -8,6 +8,7 @@ import {
   requestAppAccessMutationOptions,
 } from "../src/lib/app-access/mutations";
 import { appAccessKeys } from "../src/lib/app-access/queries";
+import { enterpriseKeys } from "../src/lib/enterprise/queries";
 import { pluginKeys } from "../src/lib/plugins/queries";
 import {
   APP_ACCESS_REQUESTS_PATH,
@@ -67,6 +68,12 @@ async function run(
   return { asked, result };
 }
 
+/** Every plugin screen, and Connectors on Admin, Apps, which lists every app added. */
+const EVERY_PLUGIN_QUERY = [
+  { queryKey: pluginKeys.all },
+  { queryKey: enterpriseKeys.overview() },
+];
+
 test("every app-access key sits under the plugin root, so plugin writes refresh it", () => {
   for (const key of [
     appAccessKeys.all,
@@ -92,7 +99,7 @@ test("asking names the Bot and the app and nothing else", async () => {
     },
   ]);
   expect(result).toEqual({ request: filed });
-  expect(asked).toEqual([{ queryKey: pluginKeys.all }]);
+  expect(asked).toEqual(EVERY_PLUGIN_QUERY);
 });
 
 test("approving sends refs only when given", async () => {
@@ -137,7 +144,7 @@ test("an admin's one press names the Bot and the app in the path, and sends no r
     },
   ]);
   expect(sent[0]).not.toHaveProperty("body");
-  expect(asked).toEqual([{ queryKey: pluginKeys.all }]);
+  expect(asked).toEqual(EVERY_PLUGIN_QUERY);
 });
 
 test("a refused write still refreshes every plugin screen", async () => {
@@ -152,6 +159,6 @@ test("a refused write still refreshes every plugin screen", async () => {
     expect((result as Error).message).toBe(
       "That request has already been answered.",
     );
-    expect(asked).toEqual([{ queryKey: pluginKeys.all }]);
+    expect(asked).toEqual(EVERY_PLUGIN_QUERY);
   }
 });

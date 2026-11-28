@@ -149,7 +149,13 @@ export function earlyDownloadsSaid(
  */
 export function EarlyDownloadsLine({
   firstScreen = false,
+  quiet = false,
 }: {
+  /**
+   * A row beside the line spins already (Install's own): the line keeps its words and its bar, with
+   * no spinner of its own. Two spinners read as two waits.
+   */
+  quiet?: boolean;
   /**
    * The Welcome screen, whose Install starts the downloads. There the line keeps the height of its tallest
    * state (a line, a bar and the bytes) whatever it says, and when it says nothing: on Windows F
@@ -170,7 +176,9 @@ export function EarlyDownloadsLine({
         firstScreen ? "early-downloads first-screen" : "early-downloads"
       }
     >
-      {said && <StatusLine working={download != null}>{said}</StatusLine>}
+      {said && (
+        <StatusLine working={download != null && !quiet}>{said}</StatusLine>
+      )}
       {said && download && where && (
         <DownloadProgress downloads={download} where={where} />
       )}

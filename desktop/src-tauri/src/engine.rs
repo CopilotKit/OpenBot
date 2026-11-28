@@ -45,8 +45,9 @@ use serde::{Deserialize, Serialize};
 /// OpenBot's. The setup window then says the line on whichever screen the person is on, and OpenBot
 /// comes back to the front once that window is done with.
 ///
-/// `asks` when the step waits for the person's go-ahead in OpenBot's own window before it raises
-/// such a prompt (`install::GoAhead`). The window explains what comes next, with one button.
+/// `asks` when the step waits for the person's go-ahead in OpenBot's own window (`install::GoAhead`):
+/// before it raises such a prompt (`before_prompt`, with Continue), or after the person closed one
+/// (with Try again). The window explains what comes next, with one button.
 ///
 /// `said` is what the person reads, in plain words: what OpenBot is doing for them. `detail` is the
 /// same moment in the log's words, with the names a person never needs on screen (Podman, the
@@ -60,6 +61,10 @@ pub struct StepLine {
     /// The engine itself is being updated (`engine_versions`): the window asks nothing of it until
     /// the update is done. An engine being updated refuses what is asked of it.
     pub updating: bool,
+    /// With `asks`: the go-ahead is for the system's password prompt, which comes up only once the
+    /// person chooses Continue (`install::install_with_password`). Without it, an `asks` line is a
+    /// wait after a prompt the person closed, with Try again.
+    pub before_prompt: bool,
     pub detail: Option<String>,
 }
 
@@ -71,6 +76,7 @@ impl StepLine {
             elsewhere: false,
             asks: false,
             updating: false,
+            before_prompt: false,
             detail: None,
         }
     }
@@ -82,6 +88,7 @@ impl StepLine {
             elsewhere: true,
             asks: false,
             updating: false,
+            before_prompt: false,
             detail: None,
         }
     }
@@ -93,7 +100,17 @@ impl StepLine {
             elsewhere: false,
             asks: true,
             updating: false,
+            before_prompt: false,
             detail: None,
+        }
+    }
+
+    /// A line about a step that waits for the person's Continue in OpenBot's window before the
+    /// system's password prompt comes up: see `before_prompt`.
+    pub fn before_prompt(said: impl Into<String>) -> Self {
+        Self {
+            before_prompt: true,
+            ..Self::asks(said)
         }
     }
 
@@ -430,11 +447,24 @@ fn running_machine(preferred: &str) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let machines: Vec<MachineListing> = serde_json::from_slice(&output.stdout).ok()?;
+    running_machine_in(&output.stdout, preferred, &crate::acquire::podman)
+}
+
+/// `running_machine`, from what `podman machine list --format json` said, with every other podman
+/// command run by `run`.
+fn running_machine_in(
+    listing: &[u8],
+    preferred: &str,
+    run: &dyn Fn(&[&str]) -> Result<String, String>,
+) -> Option<String> {
+    let machines: Vec<MachineListing> = serde_json::from_slice(listing).ok()?;
     usable_running_machine(&machines, preferred, |name| {
-        passed_over(name, std::env::consts::OS, crate::acquire::machine_behind).is_some()
+        passed_over(name, std::env::consts::OS, |connection| {
+            crate::acquire::machine_behind_with(connection, run)
+        })
+        .is_some()
     })
-    .map(|name| crate::acquire::connection_of_machine(&name))
+    .map(|name| crate::acquire::connection_of_machine_with(&name, run))
 }
 
 /// The running machine to use, by name: `preferred` when it runs, else the first running one that
@@ -490,6 +520,46 @@ pub fn passed_over_machine(address: &Address) -> Option<String> {
         std::env::consts::OS,
         crate::acquire::machine_behind,
     )
+}
+
+/// `passed_over_machine`, with every podman command run by `run`, the default connection
+/// included: `pin` asks for it with no time limit.
+fn passed_over_machine_with(
+    address: &Address,
+    run: &dyn Fn(&[&str]) -> Result<String, String>,
+) -> Option<String> {
+    if address.engine != Engine::Podman || !matches!(std::env::consts::OS, "macos" | "windows") {
+        return None;
+    }
+    let env = |name| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let connection = match (&address.connection, env("CONTAINER_CONNECTION")) {
+        (Some(connection), _) => connection.clone(),
+        (None, Some(connection)) => connection,
+        // A URL, as `pin` keeps it: not a machine's connection.
+        (None, None) if env("CONTAINER_HOST").is_some() => return None,
+        (None, None) => {
+            let listed = run(&[
+                "system",
+                "connection",
+                "list",
+                "--format",
+                "{{if .Default}}{{.Name}}{{end}}",
+            ])
+            .ok()?;
+            let names: Vec<&str> = listed
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect();
+            match names.as_slice() {
+                [name] => (*name).to_owned(),
+                _ => return None,
+            }
+        }
+    };
+    passed_over(&connection, std::env::consts::OS, |connection| {
+        crate::acquire::machine_behind_with(connection, run)
+    })
 }
 
 /// `passed_over_machine` for the connection `connection` on `os`, with the machine behind it read
@@ -856,6 +926,66 @@ pub fn own_machine_only(os: &str) -> bool {
 /// What is here, before anything is installed.
 pub fn detect() -> EngineStatus {
     detect_among(&[Engine::Docker, Engine::Podman])
+}
+
+/**
+`detect`, with every engine command it runs stopped at `deadline` and none started after it:
+nothing when one was still running then, since an engine that hangs is neither answering nor
+absent. For troubleshooting logs, which must not wait on a stalled engine.
+*/
+pub fn detect_by(deadline: std::time::Instant) -> Option<EngineStatus> {
+    let left = || deadline.saturating_duration_since(std::time::Instant::now());
+    let timed_out = std::cell::Cell::new(false);
+    // Past the deadline nothing more is started: it would only be stopped at once.
+    let out_of_time = || {
+        let out = left().is_zero();
+        if out {
+            timed_out.set(true);
+        }
+        out
+    };
+    // Every podman command the detection runs: `machine list`, `machine inspect`, the default
+    // connection and the `volume ls` that finds where OpenBot's database is.
+    let podman = |args: &[&str]| -> Result<String, String> {
+        if out_of_time() {
+            return Err("no time left".to_owned());
+        }
+        match crate::quiet::output_within(&mut podman_command(args), left()) {
+            Ok(out) if out.status.success() => {
+                Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+            }
+            Ok(out) => Err(crate::quiet::said(&out.stderr)),
+            Err(error) => {
+                if error.kind() == std::io::ErrorKind::TimedOut {
+                    timed_out.set(true);
+                }
+                Err(error.to_string())
+            }
+        }
+    };
+    let status = detect_among_with(
+        &[Engine::Docker, Engine::Podman],
+        own_machine_only(std::env::consts::OS),
+        |address| {
+            if out_of_time() {
+                return false;
+            }
+            match address.responds_within(left()) {
+                Some(answered) => answered,
+                None => {
+                    timed_out.set(true);
+                    false
+                }
+            }
+        },
+        |address| passed_over_machine_with(address, &podman),
+        || {
+            let listing = podman(&["machine", "list", "--format", "json"]).ok()?;
+            running_machine_in(listing.as_bytes(), crate::acquire::MACHINE, &podman)
+        },
+        |engine| program(engine).is_some(),
+    );
+    (!timed_out.get()).then_some(status)
 }
 
 /// What is here of the engine an installation was set up on, or of either when it saved none.

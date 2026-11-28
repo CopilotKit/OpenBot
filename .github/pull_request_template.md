@@ -33,6 +33,13 @@ conditional update, `LISTEN`/`NOTIFY` for fan-out.
 - [ ] New refusals and new failures each write a row.
 - [ ] Nothing new is trusted from the client that the server can resolve itself.
 
+## API and database
+
+- [ ] This changes nothing under `api/`, no app's requests, no database change and no
+      `release-policy.json`. Or it does, and it keeps every rule and ticks the checklist in
+      [docs/api-and-migrations.md](https://github.com/CopilotKit/OpenBot/blob/main/docs/api-and-migrations.md): nothing a released app uses is
+      removed, renamed or tightened in place, and no migration breaks a running server.
+
 ## Changelog
 
 - [ ] A line in `CHANGELOG.md` under `Unreleased`, or a sentence on why a deployment behaves no

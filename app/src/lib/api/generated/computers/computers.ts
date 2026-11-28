@@ -48,6 +48,9 @@ import type {
   ComputerPageFrameAnswer,
   ComputerPageText,
   ComputerReset,
+  ComputerRestore,
+  ComputerRestoreConflictResponse,
+  ComputerRestoreRequest,
   ComputerScreenshot,
   ComputerScroll,
   ComputerSecretAsk,
@@ -55,6 +58,7 @@ import type {
   ComputerSecretValue,
   ComputerSecretsOffResponse,
   ComputerSnapshot,
+  ComputerSnapshotAsk,
   ComputerStatus,
   ComputerStopped,
   ComputerTarget,
@@ -63,6 +67,7 @@ import type {
   ComputerUpdated,
   ForbiddenResponse,
   GetComputerControlParams,
+  GetWorkspaceSnapshotsParams,
   IdempotencyConflictResponse,
   InvalidRequestResponse,
   ListComputerFilesHeaders,
@@ -72,10 +77,12 @@ import type {
   OrganizationNotFoundResponse,
   PressComputerKeyHeaders,
   ReadComputerFileHeaders,
+  ReadComputerPageParams,
   ReleaseComputerControlHeaders,
   RequestComputerControlHeaders,
   RequestComputerSecretHeaders,
   ResetComputerHeaders,
+  RestoreComputerHeaders,
   RunComputerCommandHeaders,
   ScrollComputerHeaders,
   SendComputerHumanInputHeaders,
@@ -89,6 +96,8 @@ import type {
   UnexpectedErrorResponse,
   UpdateComputerHeaders,
   WakeComputerHeaders,
+  WorkspaceSnapshotNotFoundResponse,
+  WorkspaceSnapshots,
   WriteComputerFileHeaders,
 } from "../model";
 
@@ -1135,6 +1144,431 @@ export const useWakeComputer = <
 > => {
   return useMutation(getWakeComputerMutationOptions(options), queryClient);
 };
+export const getGetWorkspaceSnapshotsUrl = (
+  organizationId: string,
+  botId: string,
+  params?: GetWorkspaceSnapshotsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/workspace-snapshots?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/workspace-snapshots`;
+};
+
+/**
+ * Return the saved copies of the computer this Bot runs on for the caller, newest first, and the latest restore of it. OpenBot saves each computer's files and browser sign-ins once a day and keeps the last 7, and saves it again just before every restore. computer names another person's computer the Bot runs on (person:<id> or bot:<id>), which only an administrator of the organization may read. available is false where this OpenBot keeps no copies. canRestore says whether the caller may restore it: an administrator of the organization, or the person whose computer it is when they own the Bot (an isolated Bot's computer is its owner's). Reading it never starts the computer.
+ * @summary Read a computer's saved copies
+ */
+export const getWorkspaceSnapshots = async (
+  organizationId: string,
+  botId: string,
+  params?: GetWorkspaceSnapshotsParams,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<WorkspaceSnapshots> => {
+  return apiRequest<WorkspaceSnapshots>(
+    getGetWorkspaceSnapshotsUrl(organizationId, botId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetWorkspaceSnapshotsQueryKey = (
+  organizationId: string,
+  botId: string,
+  params?: GetWorkspaceSnapshotsParams,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/computers/${botId}/workspace-snapshots`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetWorkspaceSnapshotsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ComputerBotNotFoundResponse
+    | ServerErrorResponse
+    | ComputerUnavailableResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  botId: string,
+  params?: GetWorkspaceSnapshotsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetWorkspaceSnapshotsQueryKey(organizationId, botId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getWorkspaceSnapshots>>
+  > = ({ signal }) =>
+    getWorkspaceSnapshots(organizationId, botId, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      botId !== null &&
+      botId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetWorkspaceSnapshotsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getWorkspaceSnapshots>>
+>;
+export type GetWorkspaceSnapshotsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | ComputerBotNotFoundResponse
+  | ServerErrorResponse
+  | ComputerUnavailableResponse
+  | UnexpectedErrorResponse;
+
+export function useGetWorkspaceSnapshots<
+  TData = Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ComputerBotNotFoundResponse
+    | ServerErrorResponse
+    | ComputerUnavailableResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  botId: string,
+  params: undefined | GetWorkspaceSnapshotsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+          TError,
+          Awaited<ReturnType<typeof getWorkspaceSnapshots>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetWorkspaceSnapshots<
+  TData = Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ComputerBotNotFoundResponse
+    | ServerErrorResponse
+    | ComputerUnavailableResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  botId: string,
+  params?: GetWorkspaceSnapshotsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+          TError,
+          Awaited<ReturnType<typeof getWorkspaceSnapshots>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetWorkspaceSnapshots<
+  TData = Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ComputerBotNotFoundResponse
+    | ServerErrorResponse
+    | ComputerUnavailableResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  botId: string,
+  params?: GetWorkspaceSnapshotsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read a computer's saved copies
+ */
+
+export function useGetWorkspaceSnapshots<
+  TData = Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ComputerBotNotFoundResponse
+    | ServerErrorResponse
+    | ComputerUnavailableResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  botId: string,
+  params?: GetWorkspaceSnapshotsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getWorkspaceSnapshots>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetWorkspaceSnapshotsQueryOptions(
+    organizationId,
+    botId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getRestoreComputerUrl = (
+  organizationId: string,
+  botId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/restore`;
+};
+
+/**
+ * Put the computer this Bot runs on back the way it was in one of its saved copies, and record it on the audit trail. Nothing is restored unless someone asks: OpenBot first saves the computer as it is now (kept as a copy of kind before-restore), then replaces every file and browser sign-in on it with the copy's and starts it again. Every Bot on that computer goes back, and routines that use it wait until it is back. The answer comes at once, with the restore running; read getWorkspaceSnapshots for how it ends. computer names another person's computer, as in getWorkspaceSnapshots. Only an administrator of the organization, or the person whose computer it is when they own the Bot, may do this. One restore of a computer runs at a time.
+ * @summary Restore a computer from a saved copy
+ */
+export const restoreComputer = async (
+  organizationId: string,
+  botId: string,
+  computerRestoreRequest: ComputerRestoreRequest,
+  headers: RestoreComputerHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ComputerRestore> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<ComputerRestore>(
+    getRestoreComputerUrl(organizationId, botId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(computerRestoreRequest),
+    },
+  );
+};
+
+export const getRestoreComputerMutationKey = () => ["restoreComputer"] as const;
+
+export const getRestoreComputerMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | WorkspaceSnapshotNotFoundResponse
+    | ComputerRestoreConflictResponse
+    | ServerErrorResponse
+    | ComputerUnavailableResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreComputer>>,
+    TError,
+    RestoreComputerMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof restoreComputer>>,
+  TError,
+  RestoreComputerMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRestoreComputerMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof restoreComputer>>,
+    RestoreComputerMutationVariables
+  > = (props) => {
+    const { organizationId, botId, data, headers } = props ?? {};
+
+    return restoreComputer(
+      organizationId,
+      botId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RestoreComputerMutationResult = NonNullable<
+  Awaited<ReturnType<typeof restoreComputer>>
+>;
+export type RestoreComputerMutationBody = ComputerRestoreRequest;
+export type RestoreComputerMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | WorkspaceSnapshotNotFoundResponse
+  | ComputerRestoreConflictResponse
+  | ServerErrorResponse
+  | ComputerUnavailableResponse
+  | UnexpectedErrorResponse;
+export type RestoreComputerMutationVariables = {
+  organizationId: string;
+  botId: string;
+  data: ComputerRestoreRequest;
+  headers: RestoreComputerHeaders;
+};
+
+/**
+ * @summary Restore a computer from a saved copy
+ */
+export const useRestoreComputer = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | WorkspaceSnapshotNotFoundResponse
+    | ComputerRestoreConflictResponse
+    | ServerErrorResponse
+    | ComputerUnavailableResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof restoreComputer>>,
+      TError,
+      RestoreComputerMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof restoreComputer>>,
+  TError,
+  RestoreComputerMutationVariables,
+  TContext
+> => {
+  return useMutation(getRestoreComputerMutationOptions(options), queryClient);
+};
 export const getGetComputerScreenshotUrl = (
   organizationId: string,
   botId: string,
@@ -1624,21 +2058,35 @@ export function useGetComputerPageFrame<
 export const getReadComputerPageUrl = (
   organizationId: string,
   botId: string,
+  params?: ReadComputerPageParams,
 ) => {
-  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/page`;
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/page?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/page`;
 };
 
 /**
- * Return the text of the page the Bot's browser is showing, with its address and title.
+ * Return the text of the page the Bot's browser is showing, with its address and title. Asked with the Bot's threadId and toolCallId, the step runs once, however many times it is asked.
  * @summary Read the page a Bot's browser is on
  */
 export const readComputerPage = async (
   organizationId: string,
   botId: string,
+  params?: ReadComputerPageParams,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<ComputerPageText> => {
   return apiRequest<ComputerPageText>(
-    getReadComputerPageUrl(organizationId, botId),
+    getReadComputerPageUrl(organizationId, botId, params),
     {
       ...options,
       method: "GET",
@@ -1649,9 +2097,11 @@ export const readComputerPage = async (
 export const getReadComputerPageQueryKey = (
   organizationId: string,
   botId: string,
+  params?: ReadComputerPageParams,
 ) => {
   return [
     `/api/v2/organizations/${organizationId}/computers/${botId}/page`,
+    ...(params ? [params] : []),
   ] as const;
 };
 
@@ -1669,6 +2119,7 @@ export const getReadComputerPageQueryOptions = <
 >(
   organizationId: string,
   botId: string,
+  params?: ReadComputerPageParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -1684,12 +2135,15 @@ export const getReadComputerPageQueryOptions = <
 
   const queryKey =
     queryOptions?.queryKey ??
-    getReadComputerPageQueryKey(organizationId, botId);
+    getReadComputerPageQueryKey(organizationId, botId, params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof readComputerPage>>
   > = ({ signal }) =>
-    readComputerPage(organizationId, botId, { signal, ...requestOptions });
+    readComputerPage(organizationId, botId, params, {
+      signal,
+      ...requestOptions,
+    });
 
   return {
     queryKey,
@@ -1734,6 +2188,7 @@ export function useReadComputerPage<
 >(
   organizationId: string,
   botId: string,
+  params: undefined | ReadComputerPageParams,
   options: {
     query: Partial<
       UseQueryOptions<
@@ -1770,6 +2225,7 @@ export function useReadComputerPage<
 >(
   organizationId: string,
   botId: string,
+  params?: ReadComputerPageParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -1806,6 +2262,7 @@ export function useReadComputerPage<
 >(
   organizationId: string,
   botId: string,
+  params?: ReadComputerPageParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -1838,6 +2295,7 @@ export function useReadComputerPage<
 >(
   organizationId: string,
   botId: string,
+  params?: ReadComputerPageParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -1855,6 +2313,7 @@ export function useReadComputerPage<
   const queryOptions = getReadComputerPageQueryOptions(
     organizationId,
     botId,
+    params,
     options,
   );
 
@@ -3303,13 +3762,14 @@ export const getSnapshotComputerUrl = (
 };
 
 /**
- * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again. The body is optional: sent with the Bot's threadId and toolCallId, the step runs once, however many times it is asked.
  * @summary List what a Bot can act on in the page
  */
 export const snapshotComputer = async (
   organizationId: string,
   botId: string,
   headers: SnapshotComputerHeaders,
+  computerSnapshotAsk?: ComputerSnapshotAsk,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<ComputerSnapshot> => {
   const getHeaders = (
@@ -3338,7 +3798,12 @@ export const snapshotComputer = async (
     {
       ...options,
       method: "POST",
-      headers: { ...headers, ...getHeaders(options?.headers) },
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(computerSnapshotAsk),
     },
   );
 };
@@ -3384,9 +3849,15 @@ export const getSnapshotComputerMutationOptions = <
     Awaited<ReturnType<typeof snapshotComputer>>,
     SnapshotComputerMutationVariables
   > = (props) => {
-    const { organizationId, botId, headers } = props ?? {};
+    const { organizationId, botId, headers, data } = props ?? {};
 
-    return snapshotComputer(organizationId, botId, headers, requestOptions);
+    return snapshotComputer(
+      organizationId,
+      botId,
+      headers,
+      data,
+      requestOptions,
+    );
   };
 
   return { mutationFn, ...mutationOptions };
@@ -3395,7 +3866,7 @@ export const getSnapshotComputerMutationOptions = <
 export type SnapshotComputerMutationResult = NonNullable<
   Awaited<ReturnType<typeof snapshotComputer>>
 >;
-
+export type SnapshotComputerMutationBody = ComputerSnapshotAsk | undefined;
 export type SnapshotComputerMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
@@ -3409,6 +3880,7 @@ export type SnapshotComputerMutationVariables = {
   organizationId: string;
   botId: string;
   headers: SnapshotComputerHeaders;
+  data?: ComputerSnapshotAsk;
 };
 
 /**

@@ -1,5 +1,16 @@
 import { queryOptions } from "@tanstack/react-query";
-import type { ModelChoice, ModelChoiceInput } from "@/lib/api/generated/model";
+import type {
+  ModelCatalogueConnection,
+  ModelChoice,
+  ModelChoiceInput,
+} from "@/lib/api/generated/model";
+
+/**
+ * One AI connection's models, where several are connected: its id (what a pick names), whose it is,
+ * whether it can run now and why not, and its own models and default. Never a key or an address.
+ */
+export type CatalogueConnection = ModelCatalogueConnection;
+
 import {
   getModelCatalogue,
   getModelChoice,
@@ -30,7 +41,7 @@ export type ModelOption = {
 
 /**
  * Who actually serves the models: a provider's own API, an OpenAI-compatible endpoint in front of
- * one, or a ChatGPT or Claude plan. What the Providers page names.
+ * one, or a ChatGPT or Claude plan. What the AI providers page names.
  */
 export type ModelSource =
   | "openai"
@@ -43,7 +54,7 @@ export type ModelSource =
 
 /**
  * Who decides which models people may pick. `all`: one person on their own machine, offered every
- * model the credential lists. `allowed`: a team, where an admin allows models in Admin, Providers.
+ * model the credential lists. `allowed`: a team, where an admin allows models in Admin, AI providers.
  */
 export type ModelExposure = "all" | "allowed";
 
@@ -58,6 +69,12 @@ export type ModelCatalogue = {
   models: ModelOption[];
   /** Whether there is anything to pick. False hides the picker. */
   choosable: boolean;
+  /**
+   * Every AI connection the person's runs can use, each with its own models, the default first.
+   * The fields above describe the default one. Absent from an OpenBot older than several
+   * connections.
+   */
+  connections?: CatalogueConnection[];
 };
 
 /**

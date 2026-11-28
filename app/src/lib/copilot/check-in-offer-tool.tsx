@@ -21,6 +21,7 @@ import {
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * A Bot offering to keep an eye on one thing for the person: the card `offer_check_in` draws.
@@ -157,7 +158,7 @@ export function CheckInOfferCard({
       </div>
       {create.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {create.error.message}
+          {failureSaid(create.error)}
         </p>
       ) : null}
       {channelId ? null : (

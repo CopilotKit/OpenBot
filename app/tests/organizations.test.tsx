@@ -664,7 +664,13 @@ test("on an OpenBot that lists no organizations the account menu is exactly as i
   const unlisted = await open();
   const before = await accountMenuMarkup(unlisted);
   // Teams are the one organization's own, so they are there with or without others to switch to.
-  expect(before.words).toEqual(["Teams", "Admin", "Settings", "Sign out"]);
+  expect(before.words).toEqual([
+    "Teams",
+    "Admin",
+    "Settings",
+    "Get troubleshooting logs",
+    "Sign out",
+  ]);
   expect(before.row).not.toContain("Acme");
   expect(unlisted.view.queryByText("Organizations")).toBeNull();
   expect(unlisted.view.queryByRole("menuitemradio")).toBeNull();
@@ -683,6 +689,7 @@ test("on an OpenBot that lists no organizations the account menu is exactly as i
     "Teams",
     "Admin",
     "Settings",
+    "Get troubleshooting logs",
     "Sign out",
   ]);
   expect(now.row).toContain("Acme");

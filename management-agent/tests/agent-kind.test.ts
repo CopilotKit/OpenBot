@@ -4,8 +4,16 @@
  * CA, the contract's strict schemas, Ed25519-signed commands), and moves a real openbot-bundle
  * between two real release builds:
  *
- *  1. first install of the first build from an empty namespace;
+ *  1. first install from an empty namespace, of a build whose image does not exist: Flux fails it,
+ *     recovery-required; a person clears it and the desired version moves to the real first
+ *     build; the agent waits for the window, then installs that build (no backup: nothing was ever
+ *     accepted, so there is no data yet) and /release reports it;
+ *     Every chart is signed with a test cosign key the agent's chart is given (product.verify), and
+ *     Flux verifies each one before Helm reads it;
  *  2. a new desired version outside the maintenance window waits, with Flux left where it was;
+ *     inside it, a copy of that release that is unsigned, then one signed with another key, is
+ *     refused before anything is touched: no backup, no quiescing, Flux left on the accepted chart,
+ *     and the heartbeat says why;
  *  3. inside the window: quiesce, a backup Job (backup.kind=command, pg_dump of the bundle's real
  *     PostgreSQL, verified with pg_restore) that finishes before Flux is pinned to the new chart
  *     digest, then verification through /release;
@@ -27,6 +35,8 @@
  *   OPENBOT_AGENT_E2E_PULL=kind-registry:5000 the same registry as the cluster reaches it
  *   OPENBOT_AGENT_E2E_HOST=172.18.0.1         this machine as the cluster reaches it
  *   OPENBOT_AGENT_E2E_VALUES=/path/values.yaml  the bundle's own values (licence etc.), never committed
+ *
+ * cosign must be on the PATH: the test signs the charts it pushes.
  */
 import {
   afterAll,
@@ -111,9 +121,36 @@ interface Build {
   manifest: string;
   digest: string;
 }
+
+/** The test's chart-signing keys, made in beforeAll: the one the agent trusts, and another. */
+const keys = { directory: "", password: "openbot-agent-e2e" };
+const keyFile = (name: "trusted" | "other", ext: "key" | "pub") =>
+  join(keys.directory, `${name}.${ext}`);
+/** Signs a pushed chart by its digest, as the release does: a cosign key, nothing in a public log. */
+function sign(digest: string, key: "trusted" | "other") {
+  execFileSync(
+    "cosign",
+    [
+      "sign",
+      "--yes",
+      "--key",
+      keyFile(key, "key"),
+      "--tlog-upload=false",
+      "--allow-http-registry=true",
+      `${env.OPENBOT_AGENT_E2E_PUSH}/charts/openbot-bundle@${digest}`,
+    ],
+    {
+      env: { ...env, COSIGN_PASSWORD: keys.password },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+}
+
+/** Pushes a build's bundle chart, signed with the trusted key unless `signedWith` says otherwise. */
 function push(
   version: string,
   releases = env.OPENBOT_AGENT_E2E_RELEASES ?? "",
+  signedWith: "trusted" | "other" | "nothing" = "trusted",
 ): Build {
   const directory = join(releases, version);
   const chart = readdirSync(directory).find(
@@ -136,11 +173,103 @@ function push(
   const output = `${pushed.stdout}${pushed.stderr}`;
   const digest = output.match(/Digest:\s*(sha256:[0-9a-f]{64})/)?.[1];
   if (!digest) throw new Error(`helm push printed no digest: ${output}`);
+  if (signedWith !== "nothing") sign(digest, signedWith);
   return {
     version,
     manifest: readFileSync(join(releases, `${version}.json`), "utf8"),
     digest,
   };
+}
+
+/** The image digest every broken build names, which no registry has. */
+const MISSING_IMAGE = `sha256:${"0123456789abcdef".repeat(4)}`;
+
+/**
+ * A release whose image does not exist: `build`'s bundle under another chart version (so another
+ * chart digest), and a manifest that names an image digest no registry has. `edit` adjusts the
+ * manifest further (its upgrade path, say).
+ */
+function brokenBuild(
+  build: Build,
+  directory: string,
+  edit: (manifest: {
+    upgrade: { fromVersions: string[] };
+    compatibility: { database: { from: string[]; to: string } };
+  }) => void = () => {},
+): Build {
+  return repackaged(build, directory, "broken", true, edit);
+}
+
+/**
+ * `build`'s bundle under another chart version (so another chart digest) and a manifest of that
+ * version, its images left as they are: the same release, pushed unsigned or signed with a key the
+ * agent does not trust.
+ */
+function unsignedBuild(
+  build: Build,
+  directory: string,
+  signedWith: "other" | "nothing",
+): Build {
+  return repackaged(
+    build,
+    directory,
+    signedWith === "nothing" ? "unsigned" : "otherkey",
+    false,
+    () => {},
+    signedWith,
+  );
+}
+
+function repackaged(
+  build: Build,
+  directory: string,
+  suffix: string,
+  missingImages: boolean,
+  edit: Parameters<typeof brokenBuild>[2] = () => {},
+  signedWith: "trusted" | "other" | "nothing" = "trusted",
+): Build {
+  const base = join(directory, `${suffix}-${build.version}`);
+  const version = `${build.version}-${suffix}`;
+  const source = join(base, "source");
+  mkdirSync(source, { recursive: true });
+  mkdirSync(join(base, version), { recursive: true });
+  const buildDirectory = join(
+    env.OPENBOT_AGENT_E2E_RELEASES ?? "",
+    build.version,
+  );
+  const buildChart = readdirSync(buildDirectory).find(
+    (file) => file.startsWith("openbot-bundle-") && file.endsWith(".tgz"),
+  );
+  sh("tar", ["-xzf", join(buildDirectory, buildChart ?? ""), "-C", source]);
+  const chartYaml = join(source, "openbot-bundle", "Chart.yaml");
+  writeFileSync(
+    chartYaml,
+    readFileSync(chartYaml, "utf8").replace(
+      /^version:\s*"?([^"\s]+)"?\s*$/m,
+      `version: $1-${suffix}`,
+    ),
+  );
+  sh("helm", [
+    "package",
+    join(source, "openbot-bundle"),
+    "--destination",
+    join(base, version),
+  ]);
+  const manifest = JSON.parse(build.manifest);
+  manifest.version = version;
+  if (missingImages)
+    for (const image of Object.values(
+      manifest.artifacts.images as Record<string, { reference: string }>,
+    ))
+      image.reference = image.reference.replace(
+        /@sha256:[0-9a-f]{64}$/,
+        `@${MISSING_IMAGE}`,
+      );
+  edit(manifest);
+  writeFileSync(join(base, `${version}.json`), JSON.stringify(manifest));
+  const copy = push(version, base, signedWith);
+  expect(copy.digest).not.toBe(build.digest);
+  return copy;
 }
 
 const run = kubeconfig ? describe : describe.skip;
@@ -169,6 +298,12 @@ async function desire(build: Build) {
   };
 }
 const latest = () => service.heartbeats.at(-1);
+/** A maintenance window that is not now: three days on from today, four hours. */
+const outside = () => ({
+  weekday: (new Date().getUTCDay() + 3) % 7,
+  startUtc: "00:00",
+  hours: 4,
+});
 /** Seconds between the agent's heartbeats here, so each step it waits on comes round sooner than
  * the minute a real install uses. */
 const HEARTBEAT_SECONDS = 5;
@@ -181,14 +316,64 @@ async function moreHeartbeats(count: number) {
     10,
   );
 }
-const pinned = () =>
-  json<{ spec: { ref?: { digest?: string } } }>(
+const agentState = () =>
+  json<{ data: Record<string, string> }>(
+    "-n",
+    SYSTEM,
+    "get",
+    "configmap",
+    "openbot-agent-state",
+  ).data;
+const agentJournal = () => JSON.parse(agentState()["journal.json"] ?? "{}");
+const backupJobs = () =>
+  kubectl("-n", SYSTEM, "get", "jobs", "-o", "name")
+    .split("\n")
+    .filter((name) => name.includes("openbot-backup-"));
+/** How long Flux gives a product install or upgrade, through the agent chart's values. */
+const productTimeout = (value: string) =>
+  shAsync("helm", [
+    "upgrade",
+    "openbot-agent",
+    env.OPENBOT_AGENT_E2E_CHART ?? "",
+    "-n",
+    SYSTEM,
+    "--reuse-values",
+    "--set",
+    `product.timeout=${value}`,
+  ]);
+/** What a person does to clear recovery-required, as the journal says: removes journal.json. */
+const clearJournal = () =>
+  kubectl(
+    "-n",
+    SYSTEM,
+    "patch",
+    "configmap",
+    "openbot-agent-state",
+    "--type=json",
+    "-p",
+    JSON.stringify([{ op: "remove", path: "/data/journal.json" }]),
+  );
+interface Source {
+  spec: {
+    ref?: { digest?: string };
+    suspend?: boolean;
+    verify?: { secretRef?: { name?: string } };
+  };
+  status?: { conditions?: { type: string; status: string }[] };
+}
+const productSource = (name = "openbot") =>
+  json<Source>(
     "-n",
     SYSTEM,
     "get",
     "ocirepositories.source.toolkit.fluxcd.io",
-    "openbot",
-  ).spec.ref?.digest;
+    name,
+  );
+const sourceVerified = (source: Source) =>
+  source.status?.conditions?.find(
+    (condition) => condition.type === "SourceVerified",
+  )?.status;
+const pinned = () => productSource().spec.ref?.digest;
 
 run("management agent on a real cluster", () => {
   beforeAll(async () => {
@@ -196,6 +381,23 @@ run("management agent on a real cluster", () => {
     pki = makePki(installId, [host]);
     service = new FakeManagementService(pki, installId);
     const port = await service.start(0, "0.0.0.0");
+    // The charts are signed as a release signs them, with a key of the test's own that the agent
+    // is given in place of OpenBot's (product.verify.publicKey).
+    keys.directory = join(pki.directory, "chart-keys");
+    mkdirSync(keys.directory, { recursive: true });
+    for (const name of ["trusted", "other"])
+      execFileSync(
+        "cosign",
+        [
+          "generate-key-pair",
+          "--output-key-prefix",
+          join(keys.directory, name),
+        ],
+        {
+          env: { ...env, COSIGN_PASSWORD: keys.password },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
     from = push(env.OPENBOT_AGENT_E2E_FROM ?? "v1.1.0");
     to = push(env.OPENBOT_AGENT_E2E_TO ?? "v1.1.1-rc.1");
     expect(from.digest).not.toBe(to.digest);
@@ -239,6 +441,8 @@ run("management agent on a real cluster", () => {
     const [repository, tag] = (env.OPENBOT_AGENT_E2E_IMAGE ?? "").split(":");
     const values = {
       installId,
+      // The agent's own release, which runs upgrades with Flux beside it.
+      managedUpgrades: true,
       commandPublicKey: service.publicKey,
       cloud: "other",
       heartbeatIntervalSeconds: HEARTBEAT_SECONDS,
@@ -253,10 +457,13 @@ run("management agent on a real cluster", () => {
         namespace: PRODUCT,
         url: `oci://${env.OPENBOT_AGENT_E2E_PULL}/charts/openbot-bundle`,
         insecure: true,
+        // The chart's signature check, on by default, with this test's key instead of OpenBot's.
+        verify: { publicKey: readFileSync(keyFile("trusted", "pub"), "utf8") },
         valuesFrom: [
           { kind: "Secret", name: "openbot-values", valuesKey: "values.yaml" },
         ],
-        timeout: "20m",
+        // So the failed first install fails in minutes; the first test puts 20 minutes back.
+        timeout: "4m",
       },
       backup: {
         kind: "command",
@@ -302,19 +509,73 @@ run("management agent on a real cluster", () => {
     if (pki) rmSync(pki.directory, { recursive: true, force: true });
   });
 
-  test("installs the first build on an empty namespace and reports it", async () => {
+  test("a failed first install, once a person clears it, installs the build named next", async () => {
     // Outside any window: a first install changes no existing data, so it does not wait.
-    service.window = {
-      weekday: (new Date().getUTCDay() + 3) % 7,
-      startUtc: "00:00",
-      hours: 4,
-    };
-    await desire(from);
+    service.window = outside();
+    const broken = brokenBuild(from, pki.directory);
+    await desire(broken);
     await until(
       "the agent's first heartbeat",
       () => service.heartbeats.length > 0,
       5,
     );
+    const failed = await until(
+      "the failed first install journaled as recovery-required",
+      () => {
+        const entry = agentJournal();
+        return (
+          entry.toVersion === broken.version &&
+          entry.phase === "recovery-required" &&
+          entry
+        );
+      },
+      20,
+    );
+    expect(failed.fromVersion).toBe("none");
+    await until(
+      "recovery-required in the heartbeat",
+      () => latest()?.upgrade.state === "recovery-required",
+      5,
+    );
+    // Left as it failed: Flux on the failed chart and the release's server in the namespace, but no
+    // server that answers /release, and no release accepted.
+    expect(pinned()).toBe(broken.digest);
+    expect(
+      kubectl(
+        "-n",
+        PRODUCT,
+        "get",
+        "deployment",
+        "-l",
+        "app.kubernetes.io/instance=openbot,app.kubernetes.io/component=server",
+        "-o",
+        "name",
+      ).trim(),
+    ).not.toBe("");
+    expect(
+      JSON.parse(agentState()["state.json"] ?? "{}").accepted ?? null,
+    ).toBeNull();
+    await productTimeout("20m");
+
+    // A person clears it and the desired version moves to the real first build. Outside the window
+    // the agent says it waits for it, and leaves Flux where it is.
+    clearJournal();
+    await desire(from);
+    await until(
+      "waiting for the window to install the first build",
+      () => {
+        const last = latest();
+        return (
+          last?.upgrade.state === "waiting-window" &&
+          last.upgrade.targetVersion === from.version
+        );
+      },
+      5,
+    );
+    expect(pinned()).toBe(broken.digest);
+
+    // Inside the window it installs that build, with no backup, and /release reports it.
+    service.window = { weekday: 0, startUtc: "00:00", hours: 168 };
     const heartbeat = await until(
       `${from.version} installed and verified`,
       () => {
@@ -329,7 +590,29 @@ run("management agent on a real cluster", () => {
     );
     expect(heartbeat.flux.helmReleases[0]?.ready).toBe(true);
     expect(pinned()).toBe(from.digest);
+    // Installed with the signature check on, by default: Flux verified the chart with the key the
+    // chart was given, from the Secret the chart made of it.
+    expect(productSource().spec.verify?.secretRef?.name).toBe(
+      "openbot-agent-cosign",
+    );
+    expect(sourceVerified(productSource())).toBe("True");
+    const installed = agentJournal();
+    expect(installed.phase).toBe("accepted");
+    expect(installed.fromVersion).toBe("none");
+    expect(installed.toVersion).toBe(from.version);
+    expect(installed.backupReference).toBe("none");
+    expect(backupJobs()).toEqual([]);
+    const state = JSON.parse(agentState()["state.json"] ?? "{}");
+    expect(state.accepted.version).toBe(from.version);
+    expect(state.accepted.digest).toBe(from.digest);
+    expect(state.firstInstall).toBeNull();
+    // No pod is left on the missing image.
+    expect(kubectl("-n", PRODUCT, "get", "pods", "-o", "json")).not.toContain(
+      MISSING_IMAGE,
+    );
     expect(service.refused).toEqual([]);
+    // The next test starts outside the window.
+    service.window = outside();
   });
 
   test("waits outside the window and leaves Flux where it is", async () => {
@@ -393,6 +676,54 @@ run("management agent on a real cluster", () => {
     expect(kubectl("-n", SYSTEM, "get", "jobs", "-o", "name")).not.toContain(
       "openbot-backup-",
     );
+  });
+
+  test("inside the window, a chart that is unsigned or signed with another key is refused before anything is touched", async () => {
+    const server = () =>
+      json<{ items: { spec: { replicas?: number } }[] }>(
+        "-n",
+        PRODUCT,
+        "get",
+        "deployment",
+        "-l",
+        "app.kubernetes.io/instance=openbot,app.kubernetes.io/component=server",
+      ).items[0]?.spec.replicas;
+    const replicas = server();
+    for (const signedWith of ["nothing", "other"] as const) {
+      const refused = unsignedBuild(to, pki.directory, signedWith);
+      await desire(refused);
+      service.window = { weekday: 0, startUtc: "00:00", hours: 168 };
+      const heartbeat = await until(
+        `${refused.version} refused`,
+        () => {
+          const last = latest();
+          return (
+            last?.upgrade.journal?.includes(
+              `${refused.version} refused, nothing was changed`,
+            ) && last
+          );
+        },
+        10,
+      );
+      expect(heartbeat.upgrade.journal).toContain(refused.digest);
+      expect(heartbeat.upgrade.journal).toContain(
+        "does not verify with this install's chart key",
+      );
+      // Nothing was touched: Flux on the accepted chart, no backup, the server as it was, no
+      // journal of an upgrade to it, and the check's own source suspended again.
+      expect(pinned()).toBe(from.digest);
+      expect(backupJobs()).toEqual([]);
+      expect(server()).toBe(replicas);
+      expect(agentJournal().toVersion).not.toBe(refused.version);
+      await until(
+        "the signature check's source suspended",
+        () => productSource("openbot-signature-check").spec.suspend === true,
+        2,
+      );
+      service.window = outside();
+    }
+    // Back to the next real release, outside the window, as the next test expects.
+    await desire(to);
   });
 
   test("a failed backup puts the release back as it was and is not retried at once", async () => {
@@ -582,78 +913,34 @@ run("management agent on a real cluster", () => {
 
   test("after a failed upgrade and a person's recovery, Flux is pinned back to the accepted release", async () => {
     service.window = { weekday: 0, startUtc: "00:00", hours: 168 };
-    // A release whose image does not exist: this build's bundle under another chart version (so
-    // another chart digest), and a manifest that names an image digest no registry has.
-    const base = join(pki.directory, "broken");
-    const version = `${to.version}-broken`;
-    const source = join(base, "source");
-    mkdirSync(source, { recursive: true });
-    mkdirSync(join(base, version), { recursive: true });
-    const toDirectory = join(env.OPENBOT_AGENT_E2E_RELEASES ?? "", to.version);
-    const toChart = readdirSync(toDirectory).find(
-      (file) => file.startsWith("openbot-bundle-") && file.endsWith(".tgz"),
-    );
-    sh("tar", ["-xzf", join(toDirectory, toChart ?? ""), "-C", source]);
-    const chartYaml = join(source, "openbot-bundle", "Chart.yaml");
-    writeFileSync(
-      chartYaml,
-      readFileSync(chartYaml, "utf8").replace(
-        /^version:\s*"?([^"\s]+)"?\s*$/m,
-        "version: $1-broken",
-      ),
-    );
-    sh("helm", [
-      "package",
-      join(source, "openbot-bundle"),
-      "--destination",
-      join(base, version),
-    ]);
-    const manifest = JSON.parse(to.manifest);
-    const missing = `sha256:${"0123456789abcdef".repeat(4)}`;
-    manifest.version = version;
-    for (const image of Object.values(
-      manifest.artifacts.images as Record<string, { reference: string }>,
-    ))
-      image.reference = image.reference.replace(
-        /@sha256:[0-9a-f]{64}$/,
-        `@${missing}`,
-      );
-    manifest.upgrade.fromVersions = [to.version];
-    manifest.compatibility.database.from = [manifest.compatibility.database.to];
-    writeFileSync(join(base, `${version}.json`), JSON.stringify(manifest));
-    const broken = push(version, base);
-    expect(broken.digest).not.toBe(to.digest);
+    // A release whose image does not exist, upgradable from the accepted one.
+    const broken = brokenBuild(to, pki.directory, (manifest) => {
+      manifest.upgrade.fromVersions = [to.version];
+      manifest.compatibility.database.from = [
+        manifest.compatibility.database.to,
+      ];
+    });
+    const version = broken.version;
+    const missing = MISSING_IMAGE;
 
     // So the failed upgrade fails in 90 seconds rather than after the bundle's 20 minutes. The
     // return to the accepted release runs under it too: its images are already on the node, so it
     // is ready well inside that.
-    const timeout = (value: string) =>
-      shAsync("helm", [
-        "upgrade",
-        "openbot-agent",
-        env.OPENBOT_AGENT_E2E_CHART ?? "",
-        "-n",
-        SYSTEM,
-        "--reuse-values",
-        "--set",
-        `product.timeout=${value}`,
-      ]);
+    const timeout = productTimeout;
     await timeout("90s");
 
-    const state = () =>
-      json<{ data: Record<string, string> }>(
-        "-n",
-        SYSTEM,
-        "get",
-        "configmap",
-        "openbot-agent-state",
-      ).data;
-    const journal = () => JSON.parse(state()["journal.json"] ?? "{}");
-    const backups = () =>
-      kubectl("-n", SYSTEM, "get", "jobs", "-o", "name")
-        .split("\n")
-        .filter((name) => name.includes("openbot-backup-"));
+    const state = agentState;
+    const journal = agentJournal;
+    const backups = backupJobs;
     const backupsBefore = backups().length;
+    const history = () =>
+      JSON.parse(
+        sh("helm", ["history", "openbot", "-n", PRODUCT, "-o", "json"]),
+      ) as { revision: number; chart: string }[];
+    // The failed first install left broken revisions of its own; only this upgrade's count here.
+    const revisionBefore = Math.max(
+      ...history().map((entry) => entry.revision),
+    );
 
     await desire(broken);
     const failed = await until(
@@ -681,11 +968,10 @@ run("management agent on a real cluster", () => {
     // more heartbeats first, so a second attempt has had the time to start before it is counted.
     await moreHeartbeats(3);
     const brokenAttempts = () =>
-      (
-        JSON.parse(
-          sh("helm", ["history", "openbot", "-n", PRODUCT, "-o", "json"]),
-        ) as { chart: string }[]
-      ).filter((revision) => revision.chart.includes("-broken"));
+      history().filter(
+        (entry) =>
+          entry.revision > revisionBefore && entry.chart.includes("-broken"),
+      );
     expect(brokenAttempts()).toHaveLength(1);
     // Left as it failed: Flux on the failed chart, the pins naming the missing image.
     expect(pinned()).toBe(broken.digest);

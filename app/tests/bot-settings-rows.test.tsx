@@ -182,8 +182,10 @@ test("the owner sees Sharing, and each row opens its own page", async () => {
   expect(view.getByText("Setup").closest("a")?.getAttribute("href")).toBe(
     "/bots/expenses/setup",
   );
-  // Public and unpublished: everyone can already use it.
-  expect(await view.findByText("Everyone (public)")).toBeTruthy();
+  // Public and unpublished: everyone in the organization can already use it.
+  expect(
+    await view.findByText("Everyone in the organization (public)"),
+  ).toBeTruthy();
 });
 
 test("someone who neither owns the Bot nor administers the deployment does not see Sharing", async () => {
@@ -193,7 +195,7 @@ test("someone who neither owns the Bot nor administers the deployment does not s
   expect(view.queryByText("Sharing")).toBeNull();
 });
 
-test("the personal edition shows Routines, Skills, Apps, Computer, Approvals, Setup and Agents, in that order", async () => {
+test("the personal edition shows Routines, Skills, Apps, Computer, Approvals and Setup, in that order", async () => {
   serving("admin");
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
@@ -215,7 +217,6 @@ test("the personal edition shows Routines, Skills, Apps, Computer, Approvals, Se
     "Computer",
     "Approvals",
     "Setup",
-    "Agents",
   ]);
   expect(view.container.querySelector('a[href$="/memory"]')).toBeNull();
 });
@@ -235,7 +236,6 @@ test("the team edition keeps the order, with Memory, then Sharing and Reaching y
     "Apps",
     "Approvals",
     "Setup",
-    "Agents",
     "Sharing",
     "Reaching you",
   ]);
@@ -254,7 +254,7 @@ test("someone a Bot was published to sees Sharing, where its link is", async () 
   expect(await view.findByText("Everyone in the organization")).toBeTruthy();
 });
 
-test("the rows for routines, reach, memory, approvals and agents say what this Bot has and open their pages", async () => {
+test("the rows for routines, reach, memory and approvals say what this Bot has and open their pages", async () => {
   serving("user");
   const view = draw(BOT);
   const row = async (title: string, summary: string, path: string) => {
@@ -267,19 +267,19 @@ test("the rows for routines, reach, memory, approvals and agents say what this B
   await row("Reaching you", "Slack", "reach");
   await row("Memory", "1 source", "memory");
   await row("Approvals", "1 rule", "approvals");
-  await row("Agents", "Does the work itself on OpenBot", "agents");
 });
 
 /*
- * Task threads are hidden for now (`TASK_THREADS_OFFERED`), and OpenBot runs every Bot as one that
- * does the work itself, so a Bot set to hand work out says what it does now.
+ * A person has Bots, and nothing called an agent: a Bot's page has no Agents row, and its old Agents
+ * address leads back to the Bot (agents-addresses.test.ts).
  */
-test("a Bot set to hand work to agents has the Agents row of a Bot that does the work itself", async () => {
+test("a Bot's page has no Agents row, whatever the Bot is set to", async () => {
   delegationMode = "orchestrate";
   serving("user");
   const view = draw(BOT);
-  expect(await view.findByText("Does the work itself on OpenBot")).toBeTruthy();
-  expect(view.queryByText(/Hands work to/)).toBeNull();
+  expect(await view.findByText("Setup")).toBeTruthy();
+  expect(view.queryByText("Agents")).toBeNull();
+  expect(view.container.querySelector('a[href$="/agents"]')).toBeNull();
 });
 
 /** The personal starter on the harness picked at setup, as OpenBot Desktop on Windows starts it. */

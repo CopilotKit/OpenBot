@@ -1,5 +1,5 @@
 /**
- * Settings → General → AI model inside OpenBot Desktop: a plan or a sign-in changes the connection
+ * Settings → AI providers inside OpenBot Desktop: a plan or a sign-in changes the connection
  * with OpenBot running.
  *
  * Before, Change there only asked Desktop to stop OpenBot and reopen its setup window
@@ -27,6 +27,7 @@ import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentType } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
+import { finishesInDesktop } from "@/lib/ai-connection/desktop";
 import type { AiConnection } from "@/lib/api/generated/model";
 import {
   GetAiConnectionResponse,
@@ -34,7 +35,7 @@ import {
 } from "@/lib/api/generated/models/models.zod";
 import { modelKeys } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
-import { Route as GeneralRoute } from "@/routes/_authed/settings/index";
+import { Route as ProvidersRoute } from "@/routes/_authed/settings/providers";
 import { settleReactWork } from "./settle-react-work";
 
 const AI_CONNECTION = "/api/v2/organizations/default/ai-connection";
@@ -64,8 +65,34 @@ const ENGINE_NOT_READY = {
   traceId: "trace_test",
 };
 
+/**
+ * Claude's authorize address as Desktop answers it: the loopback redirect, which finishes on its
+ * own, or Claude's code page, from a Desktop older than that (it ignores `redirect`).
+ */
+function claudeAuthorize(redirectUri: string) {
+  const url = new URL("https://claude.com/cai/oauth/authorize");
+  for (const [name, value] of [
+    ["code", "true"],
+    ["client_id", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"],
+    ["response_type", "code"],
+    ["redirect_uri", redirectUri],
+    ["scope", "user:inference"],
+    ["code_challenge", "challenge"],
+    ["code_challenge_method", "S256"],
+    ["state", "state"],
+  ])
+    url.searchParams.set(name, value);
+  return url.toString();
+}
+const LOOPBACK = claudeAuthorize("http://localhost:53682/callback");
+const MANUAL = claudeAuthorize(
+  "https://platform.claude.com/oauth/code/callback",
+);
+
 let connection: AiConnection;
 let refuse: boolean;
+/** What this Desktop answers `begin_plan_sign_in` for Claude with. */
+let claudeUrl: string;
 /** Everything Desktop and the server were asked, in order. */
 let calls: { what: string; args?: unknown }[];
 
@@ -89,7 +116,7 @@ async function shellInvoke(command: string, args?: Record<string, unknown>) {
     case "ai_providers":
       return [];
     case "begin_plan_sign_in":
-      return { url: "https://claude.ai/oauth/authorize?code=true" };
+      return { url: claudeUrl };
     case "finish_plan_sign_in":
     case "cancel_plan_sign_in":
     case "settle_ai_connection":
@@ -107,6 +134,7 @@ beforeEach(() => {
   calls = [];
   refuse = false;
   connection = OPENAI_KEY;
+  claudeUrl = LOOPBACK;
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
     invoke: shellInvoke,
     transformCallback: () => 0,
@@ -150,8 +178,8 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-function renderGeneral() {
-  const Page = GeneralRoute.options.component as ComponentType;
+function renderProviders() {
+  const Page = ProvidersRoute.options.component as ComponentType;
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
@@ -161,8 +189,8 @@ function renderGeneral() {
   );
 }
 
-/** Open the AI model row, choose Change, then Anthropic, and sign in with the Claude plan. */
-async function signInWithClaude(view: ReturnType<typeof renderGeneral>) {
+/** Open the AI model row, choose Change, then Anthropic, and start the Claude plan's sign-in. */
+async function startClaude(view: ReturnType<typeof renderProviders>) {
   await userEvent.click(
     await view.findByRole("button", { name: /Uses your OpenAI API key/ }),
   );
@@ -177,22 +205,23 @@ async function signInWithClaude(view: ReturnType<typeof renderGeneral>) {
       name: "Sign in with Anthropic",
     }),
   );
-  await userEvent.type(
-    await within(dialog).findByLabelText("Code from your browser"),
-    "code#state",
-  );
-  await userEvent.click(within(dialog).getByRole("button", { name: "Finish" }));
-  await within(dialog).findByText("Signed in to Anthropic.");
   return dialog;
 }
 
+/**
+ * Sign in with the Claude plan: approved in the browser, which comes back to Desktop. The sign-in
+ * switches to it at once, with nothing else pressed.
+ */
+async function signInWithClaude(view: ReturnType<typeof renderProviders>) {
+  return startClaude(view);
+}
+
 test("a Claude plan: signed in, its engine started alone, the server switched, Desktop settled, and OpenBot never stopped", async () => {
-  const view = renderGeneral();
+  const view = renderProviders();
   const dialog = await signInWithClaude(view);
-  await userEvent.click(
-    within(dialog).getByRole("button", { name: "Connect" }),
-  );
   await within(dialog).findByText("Connected to Anthropic");
+  // Nothing to paste: the sign-in finished on its own.
+  expect(within(dialog).queryByLabelText("Code from your browser")).toBeNull();
 
   const asked = aiCalls();
   expect(asked.map((call) => call.what)).toEqual([
@@ -203,22 +232,65 @@ test("a Claude plan: signed in, its engine started alone, the server switched, D
     "replaceAiConnection",
     "settle_ai_connection",
   ]);
-  expect(asked[1]?.args).toEqual({ plan: "claude" });
-  expect(asked[2]?.args).toEqual({ plan: "claude", code: "code#state" });
+  expect(asked[1]?.args).toEqual({ plan: "claude", redirect: "loopback" });
+  expect(asked[2]?.args).toEqual({ plan: "claude" });
   expect(asked[3]?.args).toEqual({ provider: "anthropic", login: "plan" });
   expect(asked[4]?.args).toEqual({ provider: "anthropic", login: "plan" });
   expect(asked[5]?.args).toEqual({ provider: "anthropic", login: "plan" });
   expect(calls.map((call) => call.what)).not.toContain("change_ai_connection");
 });
 
+/**
+ * A Desktop older than Claude's loopback sign-in ignores `redirect` and sends Claude's code page:
+ * the page keeps its paste box, and finishes with the code the person brings back.
+ */
+test("a Claude plan in an older Desktop: the code Claude's page shows is pasted, as before", async () => {
+  claudeUrl = MANUAL;
+  const view = renderProviders();
+  const dialog = await startClaude(view);
+  await userEvent.type(
+    await within(dialog).findByLabelText("Code from your browser"),
+    "code#state",
+  );
+  await userEvent.click(within(dialog).getByRole("button", { name: "Finish" }));
+  // Finish signs in and switches at once.
+  await within(dialog).findByText("Connected to Anthropic");
+  const asked = aiCalls();
+  expect(asked.map((call) => call.what)).toEqual([
+    "ai_providers",
+    "begin_plan_sign_in",
+    "finish_plan_sign_in",
+    "prepare_ai_connection",
+    "replaceAiConnection",
+    "settle_ai_connection",
+  ]);
+  expect(asked[2]?.args).toEqual({ plan: "claude", code: "code#state" });
+});
+
+/** The rule that picks between the two, read off the address Desktop answered. */
+test("a Claude sign-in finishes in Desktop only when its redirect comes back to this computer", () => {
+  expect(finishesInDesktop(LOOPBACK)).toBe(true);
+  expect(
+    finishesInDesktop(claudeAuthorize("http://127.0.0.1:53682/callback")),
+  ).toBe(true);
+  expect(finishesInDesktop(MANUAL)).toBe(false);
+  // What a Desktop before both answered in tests: no redirect named at all.
+  expect(finishesInDesktop("https://claude.ai/oauth/authorize?code=true")).toBe(
+    false,
+  );
+  expect(
+    finishesInDesktop(claudeAuthorize("https://localhost.example/callback")),
+  ).toBe(false);
+  expect(finishesInDesktop("not an address")).toBe(false);
+});
+
 test("a refused switch says why in one sentence, and Desktop settles back to the connection still in use", async () => {
   refuse = true;
-  const view = renderGeneral();
+  const view = renderProviders();
   const dialog = await signInWithClaude(view);
-  await userEvent.click(
-    within(dialog).getByRole("button", { name: "Connect" }),
-  );
+  // The switch the sign-in makes at once is refused: why, in the dialog, still signed in.
   const alert = await within(dialog).findByRole("alert");
+  expect(within(dialog).getByText("Signed in to Anthropic.")).toBeDefined();
   expect(alert.textContent).toBe(
     "Claude hasn't started yet. Try again in a moment.",
   );
@@ -237,11 +309,8 @@ test("after a switch, the models a person may pick and each conversation's pick 
     model: "gpt-6.1-pro",
     effort: null,
   });
-  const view = renderGeneral();
+  const view = renderProviders();
   const dialog = await signInWithClaude(view);
-  await userEvent.click(
-    within(dialog).getByRole("button", { name: "Connect" }),
-  );
   await within(dialog).findByText("Connected to Anthropic");
   expect(queryClient.getQueryState(modelKeys.catalogue)?.isInvalidated).toBe(
     true,

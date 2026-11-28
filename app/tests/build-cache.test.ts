@@ -24,6 +24,7 @@ async function withProject(
   try {
     await mkdir(join(appDir, "src/lib/generated"), { recursive: true });
     await mkdir(join(appDir, "dist"), { recursive: true });
+    await mkdir(join(appDir, "public"), { recursive: true });
     await mkdir(join(rootDir, "examples/brand"), { recursive: true });
     await mkdir(join(rootDir, "shared"), { recursive: true });
     await writeFile(join(rootDir, "package.json"), '{"version":"1.2.3"}\n');
@@ -41,6 +42,7 @@ async function withProject(
       join(rootDir, "shared/attachments.ts"),
       "export const MAX_ATTACHMENTS_PER_MESSAGE = 8;\n",
     );
+    await writeFile(join(appDir, "public/favicon.ico"), "icon-a");
     await writeFile(join(appDir, "dist/index.html"), "<html></html>\n");
     await callback({ rootDir, appDir });
   } finally {
@@ -86,6 +88,7 @@ describe("production build cache", () => {
       "shared/attachments.ts",
       "export const MAX_ATTACHMENTS_PER_MESSAGE = 10;\n",
     ],
+    ["an icon the build copies as it is", "app/public/favicon.ico", "icon-b"],
   ] as const)(
     "rejects a build when %s changes",
     async (_name, path, contents) => {

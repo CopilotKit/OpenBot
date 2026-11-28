@@ -36,6 +36,7 @@ import {
 import { toast } from "@/components/ui/toast";
 import { addressFrom } from "@/lib/browser/address";
 import { cn } from "@/lib/utils";
+import { failureSaid } from "@/lib/load-failure";
 
 /*
  * THE BAR ABOVE A BROWSER SHOWN IN THE PAGE: its tabs, then back, forward, reload, Clear browser data and the address.
@@ -480,7 +481,7 @@ export function ClearBrowserDialog({
         {clear.error ? (
           <DialogBody className="mt-4">
             <p className="text-destructive text-sm" role="alert">
-              {clear.error.message}
+              {failureSaid(clear.error)}
             </p>
           </DialogBody>
         ) : null}

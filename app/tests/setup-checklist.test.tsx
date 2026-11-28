@@ -188,10 +188,10 @@ test("a required gap is red, an optional one amber, and Ready green", async () =
     "text-destructive",
   );
   expect(rowOf(view, "chat").getByText("Needs setup").className).toContain(
-    "text-amber-600",
+    "text-warning",
   );
   expect(rowOf(view, "apps").getByText("Ready").className).toContain(
-    "text-emerald-600",
+    "text-success",
   );
 });
 
@@ -251,7 +251,7 @@ test("a member's gaps are one neutral line: no amber or red pill, no Required, n
   }
   const list = view.getByRole("list", { name: "Setup" });
   expect(list.innerHTML).not.toContain("text-destructive");
-  expect(list.innerHTML).not.toContain("text-amber-600");
+  expect(list.innerHTML).not.toContain("text-warning");
   // What works still says so.
   expect(rowOf(view, "intelligence").getByText("Ready")).not.toBeNull();
   expect(view.getByRole("status").textContent).toBe(
@@ -352,6 +352,20 @@ test("the summary counts in the singular and the plural", () => {
   );
   expect(summaryOf([gap("model", true)])).toBe(
     "1 thing needs setup, and 1 is required. Set up the required one first.",
+  );
+});
+
+/*
+ * On a hosted OpenBot the server sends an organization admin no fix for what OpenBot by CopilotKit
+ * sets up (the computer, more apps), so "Each says how to add it" pointed at rows that say nothing.
+ */
+test("on a hosted OpenBot, optional gaps don't promise a way to add each", () => {
+  const gap = ROW({ id: "apps", ready: false, status: "needs_setup" });
+  expect(summaryOf([gap], true)).toBe(
+    "OpenBot is ready to use. 1 optional feature isn't set up yet.",
+  );
+  expect(summaryOf([gap])).toBe(
+    "OpenBot is ready to use. 1 optional feature isn't set up yet. Each says how to add it.",
   );
 });
 

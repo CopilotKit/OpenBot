@@ -129,14 +129,19 @@ export type DesktopUsageData = {
  * desktop app keeps that and the page never holds it.
  */
 export type DesktopConnection =
-  /** `canConnect`: the desktop app is one that can connect to an OpenBot elsewhere. */
-  | { mode: "local"; address: null; canConnect: boolean }
+  /**
+   * `canConnect`: the desktop app is one that can connect to an OpenBot elsewhere. `moveToCloud`:
+   * its build offers OpenBot Cloud and this OpenBot hasn't moved there, so it can move everything
+   * there from this computer.
+   */
+  | { mode: "local"; address: null; canConnect: boolean; moveToCloud: boolean }
   | { mode: "connected"; address: string };
 
 const ON_THIS_COMPUTER: DesktopConnection = {
   mode: "local",
   address: null,
   canConnect: false,
+  moveToCloud: false,
 };
 
 export const desktopKeys = {
@@ -176,10 +181,16 @@ export function desktopConnectionQueryOptions() {
         const answer = await invokeDesktop<{
           mode?: string;
           address?: string | null;
+          moveToCloud?: boolean;
         }>("connection");
         return answer?.mode === "connected" && answer.address
           ? { mode: "connected", address: answer.address }
-          : { mode: "local", address: null, canConnect: true };
+          : {
+              mode: "local",
+              address: null,
+              canConnect: true,
+              moveToCloud: answer?.moveToCloud === true,
+            };
       } catch {
         return ON_THIS_COMPUTER;
       }

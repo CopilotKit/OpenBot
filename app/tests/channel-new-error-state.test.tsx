@@ -217,13 +217,13 @@ function renderChannelNew(
 }
 
 /**
- * `hidden: true` BECAUSE THE OPEN PICKER MAKES THE PAGE INERT, not because the composer is missing.
+ * `hidden: true` BECAUSE AN OPEN PICKER MAKES THE PAGE INERT, not because the composer is missing.
  *
- * `/channel/new` opens the recipient combobox by default whenever no recipient is settled, and Base
- * UI marks everything outside its popup `data-base-ui-inert` while it is open — so the composer is
- * removed from the accessibility tree and the default role query cannot see it at all. That is the
- * real browser behaviour, and it only shows up in a test once `app/tests/preload.ts` has evaluated
- * Base UI against a DOM: without it the isomorphic layout effect is a no-op, the popup never mounts,
+ * While the recipient combobox is open (the person opened it, or Send found no Bot at all to send
+ * to), Base UI marks everything outside its popup `data-base-ui-inert`, so the composer is removed
+ * from the accessibility tree and the default role query cannot see it at all. That is the real
+ * browser behaviour, and it only shows up in a test once `app/tests/preload.ts` has evaluated Base
+ * UI against a DOM: without it the isomorphic layout effect is a no-op, the popup never mounts,
  * nothing is inert, and this query found the composer by accident.
  *
  * The assertion itself is unchanged and is still the property under test: `aria-disabled` says
@@ -248,10 +248,7 @@ const GENERAL_ASSISTANT = agent({
   name: "General Assistant",
   title: "Everyday work",
 });
-/**
- * A team's Bots: more than one, so a new conversation starts with nobody in To: and asks. With
- * only one there is nobody to choose between, and it starts with that Bot picked.
- */
+/** A team's Bots: more than one, so there is somebody to choose between in To:. */
 const SEVERAL_BOTS = [
   GENERAL_ASSISTANT,
   agent({ id: "research-assistant", name: "Research Assistant" }),
@@ -300,7 +297,7 @@ test("/channel/new in the team edition with several Bots leaves the To: field em
     ),
   );
 
-  await expectSendHeldForABot(view);
+  await expectFreshNewConversation(view);
   expect(
     view.queryByRole("button", { hidden: true, name: /^Remove / }),
   ).toBeNull();
@@ -372,6 +369,7 @@ test("/channel/new keeps a usable hidden detail when a background refetch fails"
 
 test("New Bot is a fixed action outside the auto-highlighted recipient options", async () => {
   const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
+  fireEvent.keyDown(await view.findByRole("combobox"), { key: "ArrowDown" });
   const create = await view.findByRole("button", {
     name: "New Bot Create a new Bot",
   });
@@ -450,8 +448,8 @@ test("+ while composing a new conversation with a Bot picked starts a fresh one"
 
   // The URL names no Bot, so neither does the screen, and the half-written message is gone.
   expect(view.router.state.location.href).toBe("/channel/new");
-  // And the caret is back in To:, where the new conversation starts, not left in the old message.
-  await expectPickerOpenAndFocused(view);
+  // And the caret is in the new, empty message, with To: saying OpenBot picks.
+  await expectFreshNewConversation(view);
   await waitFor(() =>
     expect(
       view.queryByRole("button", {
@@ -463,13 +461,7 @@ test("+ while composing a new conversation with a Bot picked starts a fresh one"
   expect(
     (view.getByRole("combobox", { hidden: true }) as HTMLInputElement)
       .placeholder,
-  ).toBe("Choose a Bot…");
-  const editor = await view.findByRole("textbox", {
-    hidden: true,
-    name: "Message",
-  });
-  expect(editor.textContent).toBe("");
-  await expectSendHeldForABot(view);
+  ).toBe(OPENBOT_PICKS);
 });
 
 test("picking and removing Bots keeps the conversation being written", async () => {
@@ -503,7 +495,28 @@ test("picking and removing Bots keeps the conversation being written", async () 
   ).toBe("for both of you");
 });
 
-/** The To: picker is open and the caret is in it, ready for a Bot's name: what one + press gives. */
+/** What To: says while nobody is in it and there is a Bot for OpenBot to pick: home's own hint. */
+const OPENBOT_PICKS = "OpenBot picks the right Bot, or choose one…";
+
+/**
+ * What one + press gives: To: empty and closed, saying OpenBot picks, and the caret in an empty
+ * message, ready to type. Nobody is picked on the person's behalf.
+ */
+async function expectFreshNewConversation(
+  view: ReturnType<typeof renderChannelNew>,
+) {
+  const editor = await view.findByRole("textbox", { name: "Message" });
+  await waitFor(() => {
+    const input = view.getByRole("combobox") as HTMLInputElement;
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect(input.placeholder).toBe(OPENBOT_PICKS);
+    expect(document.activeElement).toBe(editor);
+  });
+  expect(editor.textContent).toBe("");
+  expect(view.queryByRole("button", { name: /^Remove / })).toBeNull();
+}
+
+/** The To: picker is open and the caret is in it, ready for a Bot's name. */
 async function expectPickerOpenAndFocused(
   view: ReturnType<typeof renderChannelNew>,
 ) {
@@ -511,48 +524,18 @@ async function expectPickerOpenAndFocused(
     const input = view.getByRole("combobox", { hidden: true });
     expect(input.getAttribute("aria-expanded")).toBe("true");
     expect(document.activeElement).toBe(input);
-    expect(
-      view.getByRole("option", { hidden: true, name: /General Assistant/ }),
-    ).toBeTruthy();
   });
 }
 
 /**
- * Writing before choosing anybody: the picker is put away first, as a person does by pressing
- * Escape or clicking past it, and then the message is typed into the composer.
- */
-async function typeDraftToNobody(
-  text: string,
-  view: ReturnType<typeof renderChannelNew>,
-) {
-  const user = userEvent.setup({ document });
-  await waitFor(() =>
-    expect(
-      view
-        .getByRole("combobox", { hidden: true })
-        .getAttribute("aria-expanded"),
-    ).toBe("true"),
-  );
-  await user.keyboard("{Escape}");
-  await waitFor(() =>
-    expect(
-      view
-        .getByRole("combobox", { hidden: true })
-        .getAttribute("aria-expanded"),
-    ).toBe("false"),
-  );
-  await typeDraft(text, view);
-}
-
-/**
- * Nobody is in To:, so nothing can be sent: the composer takes words, and Enter keeps them and asks
- * for a Bot rather than sending them anywhere.
+ * No Bot at all for OpenBot to pick, so nothing can be sent: the composer takes words, and Enter
+ * keeps them and asks for a Bot (To: offers New Bot) rather than sending them anywhere.
  */
 async function expectSendHeldForABot(
   view: ReturnType<typeof renderChannelNew>,
 ) {
   await expectMessageComposerDisabled(view, false);
-  await typeDraftToNobody("for whoever", view);
+  await typeDraft("for whoever", view);
   await userEvent.setup({ document }).keyboard("{Enter}");
   expect(await view.findByText("Choose a Bot first.")).toBeTruthy();
   expect(
@@ -565,45 +548,50 @@ function plusButton(view: ReturnType<typeof renderChannelNew>) {
   return view.getByLabelText("New conversation");
 }
 
-test("+ pressed twice fast opens the To: picker exactly as one press does", async () => {
+test("+ pressed twice fast opens a fresh new conversation exactly as one press does", async () => {
   const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
-  await expectPickerOpenAndFocused(view);
+  await expectFreshNewConversation(view);
 
   await userEvent.setup({ document }).dblClick(plusButton(view));
 
-  await expectPickerOpenAndFocused(view);
+  await expectFreshNewConversation(view);
 });
 
-test("+ pressed again after the screen has settled opens the To: picker again", async () => {
+test("+ pressed again after the screen has settled opens a fresh new conversation again", async () => {
   const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
   const user = userEvent.setup({ document });
-  await expectPickerOpenAndFocused(view);
+  await expectFreshNewConversation(view);
   await user.click(plusButton(view));
-  await expectPickerOpenAndFocused(view);
+  await expectFreshNewConversation(view);
   await settleReactWork();
 
   await user.click(plusButton(view));
 
-  await expectPickerOpenAndFocused(view);
+  await expectFreshNewConversation(view);
   expect(view.router.state.location.pathname).toBe("/channel/new");
 });
 
 test("+ while writing to nobody yet starts a fresh conversation", async () => {
   const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
-  await typeDraftToNobody("not for anyone yet", view);
+  await typeDraft("not for anyone yet", view);
 
   await userEvent.setup({ document }).click(plusButton(view));
 
-  await expectPickerOpenAndFocused(view);
-  expect(
-    (await view.findByRole("textbox", { hidden: true, name: "Message" }))
-      .textContent,
-  ).toBe("");
+  await expectFreshNewConversation(view);
 });
 
-test("Enter with no Bot chosen keeps the message, says so, and opens the To: picker", async () => {
-  const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
-  await typeDraftToNobody("hello there", view);
+test("Enter with no Bot at all keeps the message, says so, and opens To: to make one", async () => {
+  const query = queryClientWithAgents([]);
+  query.setQueryData(
+    agentKeys.detail("created-bot"),
+    agent({ id: "created-bot", name: "Created Bot" }),
+  );
+  const view = renderChannelNew(query);
+  // Nobody for OpenBot to pick, so To: asks for one in its own words.
+  expect(
+    ((await view.findByRole("combobox")) as HTMLInputElement).placeholder,
+  ).toBe("Choose a Bot…");
+  await typeDraft("hello there", view);
 
   await userEvent.setup({ document }).keyboard("{Enter}");
 
@@ -620,46 +608,39 @@ test("Enter with no Bot chosen keeps the message, says so, and opens the To: pic
 
   // Answering the question clears it, and the message is still there to send.
   fireEvent.click(
-    await view.findByRole("option", {
+    await view.findByRole("button", {
       hidden: true,
-      name: /General Assistant/,
+      name: "New Bot Create a new Bot",
     }),
   );
+  fireEvent.click(await view.findByRole("button", { name: "Finish creation" }));
   await view.findByRole("button", {
     hidden: true,
-    name: "Remove General Assistant",
+    name: "Remove Created Bot",
   });
   await waitFor(() =>
     expect(view.queryByText("Choose a Bot first.")).toBeNull(),
   );
   expect(editor.textContent).toBe("hello there");
-  await waitFor(() => expect(document.activeElement).toBe(editor));
   await expectMessageComposerDisabled(view, false);
 });
 
 /*
- * + asks who the message is for: To: starts empty with the Bot menu open, in either edition and
- * however many Bots there are. A Bot picked on the person's behalf was one they had to notice and
- * remove. FOUND ON WINDOWS: a message typed with nobody in To: once went nowhere; the open menu
- * says from the start that a Bot is needed, and Enter with nobody picked asks again (above).
+ * + opens To: empty and closed in either edition, however many Bots there are, and the message
+ * goes to the Bot OpenBot picks (new-conversation-openbot-picks.test.tsx). Nobody is put in To: on
+ * the person's behalf: a Bot picked there was one they had to notice and remove.
  */
-test("+ in the personal edition opens To: empty with the Bot menu open, and picks nobody for the person", async () => {
+test("+ in the personal edition opens To: empty, and picks nobody for the person", async () => {
   const errandHelper = agent({ id: "picked-harness", name: "Errand Helper" });
   const view = renderChannelNew(
     queryClientWithEdition([GENERAL_ASSISTANT, errandHelper], "personal"),
   );
 
-  await expectPickerOpenAndFocused(view);
-  expect(
-    view.getByRole("option", { hidden: true, name: /Errand Helper/ }),
-  ).toBeTruthy();
-  expect(
-    view.queryByRole("button", { hidden: true, name: /^Remove / }),
-  ).toBeNull();
+  await expectFreshNewConversation(view);
   expect(view.router.state.location.href).toBe("/channel/new");
 });
 
-test("+ with only one Bot still opens the menu with it, and the Bot picked there is the one Enter sends to", async () => {
+test("+ with only one Bot opens To: empty, and the Bot picked there is the one Enter sends to", async () => {
   const created: unknown[] = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (
@@ -696,11 +677,9 @@ test("+ with only one Bot still opens the menu with it, and the Bot picked there
     const view = renderChannelNew(
       queryClientWithEdition([GENERAL_ASSISTANT], "team"),
     );
-    await expectPickerOpenAndFocused(view);
-    expect(
-      view.queryByRole("button", { hidden: true, name: /^Remove / }),
-    ).toBeNull();
+    await expectFreshNewConversation(view);
 
+    fireEvent.keyDown(view.getByRole("combobox"), { key: "ArrowDown" });
     fireEvent.click(
       await view.findByRole("option", {
         hidden: true,

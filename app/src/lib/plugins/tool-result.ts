@@ -270,6 +270,29 @@ export function toolResultFailed(result: string | undefined): boolean {
     answer.startsWith("The vendor reported an error:") ||
     answer.startsWith("That tool could not be called") ||
     // A folder action on the person's computer that broke there, rather than being declined.
-    answer.startsWith("That host operation could not be completed")
+    answer.startsWith("That host operation could not be completed") ||
+    drewNothing(answer)
   );
+}
+
+/**
+ * Whether the runtime answered a drawing (`render_ui`) with "nothing was rendered": the Bot sent no
+ * operation it could use. FOUND BY THE STOCK AG-UI SUITE on a Google ADK agent, which called
+ * `render_ui` with no operations beside a question; the step read "Drew an interface" for an
+ * interface nobody saw. The answer is the CopilotKit runtime's own (`generative-ui-middleware`):
+ * `{"status":"error","applied":0,"calls":0,"rejected":[],"reason":"…nothing was rendered"}`.
+ */
+function drewNothing(answer: string): boolean {
+  if (!answer.startsWith("{")) return false;
+  try {
+    const parsed: unknown = JSON.parse(answer);
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      (parsed as { status?: unknown }).status === "error" &&
+      (parsed as { applied?: unknown }).applied === 0
+    );
+  } catch {
+    return false;
+  }
 }

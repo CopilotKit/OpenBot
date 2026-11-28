@@ -86,9 +86,14 @@ test("a parked message whose drain the Bot was still too busy for is sent once t
     () => expect(sent).toEqual(["Also add a line naming the worst month."]),
     { timeout: 3_000 },
   );
-  expect(
-    view.container.querySelector("[aria-label^='Remove queued message']"),
-  ).toBeNull();
+  // The send happens inside the drain, before React draws the emptied queue, so the queued line
+  // is still on the page for about a millisecond after it. Checking it straight away failed now and
+  // then on a busy machine; it is waited for, as the screen it ends on.
+  await waitFor(() =>
+    expect(
+      view.container.querySelector("[aria-label^='Remove queued message']"),
+    ).toBeNull(),
+  );
 });
 
 test("a drain that failed at the server still waits for a turn the person starts", async () => {
