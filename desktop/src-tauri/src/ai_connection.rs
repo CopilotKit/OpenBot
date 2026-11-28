@@ -219,9 +219,10 @@ pub fn intent_for(provider: &str, login: &str) -> Option<ModelIntent> {
         ("openai", "plan") => ModelIntent::ChatGptPlan,
         ("google", "oauth") => ModelIntent::GoogleOauth,
         ("xai", "oauth") => ModelIntent::XaiOauth,
-        ("google" | "xai" | "unbiased" | "trustedrouter" | "openai-compatible", "endpoint") => {
-            ModelIntent::CompatibleEndpoint
-        }
+        (
+            "google" | "xai" | "unbiased" | "trustedrouter" | "privatemode" | "openai-compatible",
+            "endpoint",
+        ) => ModelIntent::CompatibleEndpoint,
         _ => return None,
     })
 }
@@ -253,6 +254,7 @@ fn endpoint_provider(base_url: &str) -> &'static str {
         Some("generativelanguage.googleapis.com") => "google",
         Some("api.x.ai") => "xai",
         Some("api.trustedrouter.com") => "trustedrouter",
+        Some("proxyless-api.privatemode.ai") => "privatemode",
         _ => "openai-compatible",
     }
 }
@@ -637,8 +639,8 @@ pub struct AiConnection {
     /// The model named on the setup screen. Only an address or a provider sign-in names one; with a
     /// key or a plan the server picks the provider's own.
     pub model: Option<String>,
-    /// The host of a custom address, for the page to tell Gemini, xAI and TrustedRouter
-    /// apart from a person's own server. Only the host: an address can carry a password or a key.
+    /// The host of a custom address, so the page can distinguish a named endpoint preset from a
+    /// person's own server. Only the host: an address can carry a password or a key.
     pub endpoint_host: Option<String>,
 }
 
@@ -818,6 +820,7 @@ mod tests {
             ("xai", "endpoint", ModelIntent::CompatibleEndpoint),
             ("unbiased", "endpoint", ModelIntent::CompatibleEndpoint),
             ("trustedrouter", "endpoint", ModelIntent::CompatibleEndpoint),
+            ("privatemode", "endpoint", ModelIntent::CompatibleEndpoint),
             (
                 "openai-compatible",
                 "endpoint",
@@ -835,6 +838,7 @@ mod tests {
             ("google", "plan"),
             ("unbiased", "oauth"),
             ("trustedrouter", "oauth"),
+            ("privatemode", "oauth"),
             ("anthropic", "oauth"),
             ("", ""),
         ] {
@@ -875,6 +879,15 @@ mod tests {
                     model: "anthropic/claude-sonnet-5.5".into(),
                 },
                 r#"{"login":"endpoint","provider":"trustedrouter"}"#,
+            ),
+            (
+                ModelCredential::Compatible {
+                    base_url: "https://proxyless-api.privatemode.ai/v1".into(),
+                    container_base_url: None,
+                    api_key: "sentinel-key".into(),
+                    model: "glm-latest".into(),
+                },
+                r#"{"login":"endpoint","provider":"privatemode"}"#,
             ),
             (
                 ModelCredential::Compatible {
