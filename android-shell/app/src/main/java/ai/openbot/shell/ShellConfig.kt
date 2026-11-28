@@ -16,6 +16,7 @@ class HookValues(
     val customTabUrl: String? = null,
     val delayFirstLoadMs: Long = 0L,
     val softwareLayer: Boolean = false,
+    val startSignedOut: Boolean = false,
 ) {
     override fun toString(): String = "HookValues(redacted)"
 }

@@ -67,6 +67,7 @@ PROBE = [
     "ProbeTest#testSessionSurvivesRelaunch",
     "ProbeTest#testSessionSurvivesRelaunch_2_relaunch",
     "ProbeTest#testBlankWindowOpenKeepsThePage",
+    "ProbeTest#testEnterRequestHeaders",
 ]
 SUITE2 = [
     "ShellFlowTest#testFirstScreenIsNative",
@@ -75,6 +76,8 @@ SUITE2 = [
     "ShellFlowTest#testTabsRouteTheWebView",
     "ShellFlowTest#testSignedOutByServerReturnsToNativeSignIn",
     "ShellFlowTest#testSignOutFromAccountMenu",
+    "ShellFlowTest#testSignInClearsALeftoverSession",
+    "ShellFlowTest#testWellFormedForgedTicketDoesNotSignIn",
     "ShellFlowTest#testFallbackToWebSignIn",
     "ShellFlowTest#testOfflineLock",
     "ShellFlowTest#testKeyboardHidesTabBar",

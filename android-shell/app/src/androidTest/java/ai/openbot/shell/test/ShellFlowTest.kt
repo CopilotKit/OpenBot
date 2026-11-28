@@ -244,6 +244,9 @@ class ShellFlowTest : ShellTestBase() {
     fun testSignOutFromAccountMenu() {
         if (!launchSignedIn("sign-in")) return
         check(homeRendered(), "Home did not render")
+        // Something of this person in the page's storage: Sign out must take it away.
+        pageJs("localStorage.setItem('$LEFTOVER_KEY', 'person-a')")
+        check(pageString("localStorage.getItem('$LEFTOVER_KEY')") == "person-a", "could not plant a localStorage key")
         check(tapWeb("Account"), "no Account button on Home")
         sleep(1_000)
         screenshot("1-account-menu")
@@ -253,6 +256,14 @@ class ShellFlowTest : ShellTestBase() {
         sleep(1_000)
         screenshot("2-after-sign-out")
         sleep(2_000)
+
+        // The page's storage went with the session (read in the bare WebView, which clears nothing).
+        launch(MOCK_A, "storage-check", reset = false, plain = true)
+        check(waitFor("openbot_webview", 20_000) != null, "no web view in plain mode")
+        sleep(3_000)
+        val left = pageString("String(localStorage.getItem('$LEFTOVER_KEY'))")
+        note("after Sign out, the planted localStorage key reads '$left'")
+        check(left == "null", "localStorage kept '$left' after Sign out")
 
         // The cookie is gone: a relaunch starts on the sign-in screen and stays there.
         launch(MOCK_A, "relaunch", reset = false)
@@ -265,6 +276,51 @@ class ShellFlowTest : ShellTestBase() {
         check(homeRendered(), "Home did not render after signing in again")
         sleep(1_000)
         screenshot("3-signed-in-again")
+    }
+
+    // N1: a session left in an app that shows its sign-in screen never carries over to the next sign-in.
+    @Test
+    fun testSignInClearsALeftoverSession() {
+        if (!launchSignedIn("person-a")) return
+        check(homeRendered(), "Home did not render")
+        pageJs("localStorage.setItem('$LEFTOVER_KEY', 'person-a')")
+        // The app shows its first screen although person A's live session cookie is still there.
+        launch(MOCK_A, "leftover", reset = false, extras = mapOf("openbot.start_signed_out" to "1"))
+        check(waitFor("sign_in_button", 20_000) != null, "no first screen with the leftover session")
+        val cookieBefore = sessionCookieNames()
+        note("leftover session cookies before signing in: $cookieBefore")
+        check(cookieBefore.isNotEmpty(), "the test could not leave a session cookie behind")
+        screenshot("1-first-screen-with-leftover-session")
+        if (!check(signInThroughCustomTab("person-b", shots = false), "signing in did not reach the tabs")) return
+        check(homeRendered(), "Home did not render after signing in")
+        val left = pageString("String(localStorage.getItem('$LEFTOVER_KEY'))")
+        note("after the new sign-in, the leftover localStorage key reads '$left'")
+        check(left == "null", "person A's page storage survived into the new sign-in ('$left')")
+        screenshot("2-signed-in-fresh")
+    }
+
+    // Finding 16: a well-formed ticket from another app is refused by the server, signs nobody in,
+    // and the person can still sign in.
+    @Test
+    fun testWellFormedForgedTicketDoesNotSignIn() {
+        launch(MOCK_A, "forged")
+        val button = waitFor("sign_in_button", 20_000)
+        if (!check(button != null, "no Sign in button")) return
+        button!!.click()
+        check(waitInCustomTab(MOCK_LINK, 20_000) != null || device.hasObject(By.text("Mock sign-in")), "the Custom Tab did not open")
+        shell("am start -a android.intent.action.VIEW -d openbotshell://signed-in?ticket=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        check(waitFor("sign_in_button", 30_000) != null, "no sign-in screen after the forged ticket; ${debugState()}")
+        sleep(4_000)
+        check(tab(Tab.HOME) == null, "a forged ticket reached the tabs")
+        check(sessionCookieNames().isEmpty(), "a forged ticket left a session cookie")
+        note("after the forged ticket: ${debugState()}")
+        screenshot("1-after-forged-ticket")
+        check(signInThroughCustomTab("real", shots = false), "the real sign-in did not reach the tabs after a forged ticket")
+    }
+
+    private fun sessionCookieNames(): List<String> {
+        val header = android.webkit.CookieManager.getInstance().getCookie("$MOCK_A/") ?: return emptyList()
+        return header.split(";").map { it.substringBefore("=").trim() }.filter { it.endsWith("better-auth.session_token") }
     }
 
     // e.
@@ -442,5 +498,9 @@ class ShellFlowTest : ShellTestBase() {
         sleep(1_000)
         screenshot("2-conversations-after-background")
         note("after background: ${debugState()}")
+    }
+
+    private companion object {
+        const val LEFTOVER_KEY = "openbot-shell-test-leftover"
     }
 }

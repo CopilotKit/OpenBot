@@ -27,6 +27,7 @@ import androidx.appcompat.app.AppCompatDelegate
  * | openbot.delay_first_load_ms=N    | the first page load starts N ms late (to see the skeleton)      |
  * | openbot.software_layer=1         | the WebView drawn in software (recordings only: the emulator's  |
  * |                                  | GPU path misdraws some pages; never in a shipped build)         |
+ * | openbot.start_signed_out=1       | the first screen even with a session cookie (a leftover session) |
  *
  * Also draws an invisible "debug-state" label with the shell's state for the tests.
  */
@@ -47,6 +48,7 @@ object DebugHooks {
                 ?.takeIf { it.startsWith("https://") || it.startsWith("http://") },
             delayFirstLoadMs = extras.getString("openbot.delay_first_load_ms")?.toLongOrNull()?.coerceIn(0, 10_000) ?: 0L,
             softwareLayer = flag("openbot.software_layer"),
+            startSignedOut = flag("openbot.start_signed_out"),
         )
     }
 

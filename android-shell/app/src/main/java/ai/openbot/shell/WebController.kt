@@ -266,8 +266,16 @@ class WebController(
         webView.loadUrl(url, mapOf("OpenBot-Shell" to "android"))
     }
 
-    /** Back to the last page of the app's own origin (after another site's page failed to load). */
+    /**
+     * After another site's page failed to load: back to where the person was in the app (the last
+     * own address doUpdateVisitedHistory saw, single-page routes included), and only when the app's
+     * page is gone; if the WebView still shows it, nothing is reloaded.
+     */
     fun backToOwn() {
+        if (config.isOwnOrigin(webView.url) && !lastLoadFailed) {
+            diagnostics.log("back-to-own", mapOf("result" to "page-still-there"))
+            return
+        }
         load(lastOwnUrl ?: (config.origin + "/"))
     }
 
@@ -624,8 +632,9 @@ class WebController(
 
         /**
          * window.open: a throwaway WebView catches the address the page asks for. The app's own
-         * pages load in the one WebView, other sites go to a Custom Tab, and a blank window (or one
-         * with no address within 5 s) is dropped. Without a tap, nothing opens.
+         * pages load in the one WebView, other sites go to a Custom Tab, mailto:, tel: and sms: go to
+         * the system, and a blank window waits for its address (a connect flow may take a while to
+         * mint it) until the page closes it, or 60 s. Without a tap, nothing opens.
          */
         override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
             val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
@@ -635,6 +644,16 @@ class WebController(
             }
             val popup = WebView(activity)
             var handled = false
+            var destroyed = false
+            fun dispose(reason: String) {
+                if (destroyed) return
+                destroyed = true
+                if (!handled) diagnostics.log("window-open", mapOf("result" to reason))
+                main.post { popup.destroy() }
+            }
+            popup.webChromeClient = object : WebChromeClient() {
+                override fun onCloseWindow(window: WebView) = dispose("closed-by-page")
+            }
             popup.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
                     if (!handled) {
@@ -644,18 +663,15 @@ class WebController(
                         when {
                             config.isOwnOrigin(target) -> load(target.toString())
                             target.scheme == "https" || target.scheme == "http" -> activity.openInCustomTab(target, "window-open")
+                            target.scheme?.lowercase() in POPUP_EXTERNAL_SCHEMES -> openExternal(target)
+                            else -> diagnostics.log("window-open", mapOf("result" to "scheme-refused", "scheme" to target.scheme))
                         }
                     }
-                    main.post { v.destroy() }
+                    dispose("handled")
                     return true
                 }
             }
-            main.postDelayed({
-                if (!handled) {
-                    diagnostics.log("window-open", mapOf("result" to "no-address"))
-                    popup.destroy()
-                }
-            }, 5_000)
+            main.postDelayed({ dispose("no-address-60s") }, POPUP_WAIT_MS)
             transport.webView = popup
             resultMsg.sendToTarget()
             return true
@@ -727,6 +743,12 @@ class WebController(
     companion object {
         const val BRIDGE_NAME = "OpenBotShellAndroid"
         const val DIAGNOSTICS_NAME = "OpenBotShellDiagnostics"
+
+        /** A window.open with no address yet waits this long at most. */
+        const val POPUP_WAIT_MS = 60_000L
+
+        /** What a new window may hand to the system (as a tap on a link may). */
+        val POPUP_EXTERNAL_SCHEMES = setOf("mailto", "tel", "sms")
 
         /** WebView reports some blocked loads without a word: 20 s without a commit locks the app. */
         const val WATCHDOG_MS = 20_000L

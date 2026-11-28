@@ -199,6 +199,15 @@ class ShellController(
     /** A renewal (hosted sign-in intercepted while signed in) is running. */
     private var renewing = false
 
+    /** The hand-off sign-in or renewal under way (SignInAttempt), or null. */
+    private var attempt: SignInAttempt? = null
+
+    /** A renewal's `enter` is loading: the outgoing page's last words are not about the new session. */
+    private val renewalEntering: Boolean get() = attempt?.let { it.renewal && it.entering } == true
+
+    /** Whether the running `enter` may still finish on a cookie or a signed-in page. */
+    private val enterMayFinish: Boolean get() = attempt?.mayFinish() ?: true
+
     /** A Custom Tab this app opened has not come back yet. */
     private var tabOpen = false
     private var callbackArrived = false
@@ -206,7 +215,7 @@ class ShellController(
     private val enterTimeout = Runnable {
         val signedIn = SessionCookies.present(config)
         diagnostics.log("enter-timeout", mapOf("seconds" to SignInFlow.TIMEOUT_MS / 1000, "sessionCookie" to signedIn))
-        if (signedIn && phase == Phase.SIGNED_OUT && signIn == SignInStep.ENTERING) finishSignIn()
+        if (signedIn && phase == Phase.SIGNED_OUT && signIn == SignInStep.ENTERING && enterMayFinish) finishSignIn()
         else failSignIn(activity.getString(R.string.sign_in_too_long))
     }
 
@@ -288,8 +297,8 @@ class ShellController(
 
     /** Signed in when the session cookie is in the WebView's store (CookieManager answers at once). */
     private fun decideLaunchState(restorePath: String?) {
-        val present = SessionCookies.present(config)
-        diagnostics.log("session-cookie", mapOf("present" to present))
+        val present = SessionCookies.present(config) && !hooks.startSignedOut
+        diagnostics.log("session-cookie", mapOf("present" to present, "startSignedOut" to hooks.startSignedOut))
         if (present) launchSignedIn(restorePath ?: "/") else phase = Phase.SIGNED_OUT
     }
 
@@ -357,6 +366,9 @@ class ShellController(
         web.stop()
         clearLoadFailure()
         signIn = SignInStep.IDLE
+        // A session the web sign-in set before Cancel must not wait for the next person.
+        SessionCookies.delete(config)
+        SessionCookies.clearOrigin(config)
     }
 
     private fun handoffPath(challenge: String, mode: HandoffMode): String {
@@ -371,6 +383,7 @@ class ShellController(
     private fun presentTab(pair: PkcePair, mode: HandoffMode, returnTo: String) {
         if (!renewing) signIn = SignInStep.CUSTOM_TAB
         PendingSignIn.begin(pair, mode, returnTo)
+        attempt = SignInAttempt(renewal = renewing)
         tabOpen = true
         callbackArrived = false
         debugTab = false
@@ -384,6 +397,7 @@ class ShellController(
             // No browser can show a Custom Tab: the web sign-in.
             tabOpen = false
             PendingSignIn.clear()
+            attempt = null
             if (renewing) {
                 renewing = false
             } else {
@@ -400,6 +414,7 @@ class ShellController(
             if (!tabOpen || callbackArrived) return@postDelayed
             tabOpen = false
             PendingSignIn.clear()
+            attempt = null
             diagnostics.log("custom-tab", mapOf("result" to "closed-without-callback", "debug" to debugTab))
             if (renewing) {
                 renewing = false
@@ -425,19 +440,54 @@ class ShellController(
             diagnostics.log("callback-ignored", mapOf("reason" to "no-ticket-or-wrong-callback"))
             return
         }
+        val current = attempt ?: SignInAttempt(renewal = renewing).also { attempt = it }
+        if (!current.acceptCallback()) {
+            diagnostics.log("callback-ignored", mapOf("reason" to if (current.entering) "enter-running" else "too-many-callbacks"))
+            return
+        }
         val returnTo = PendingSignIn.returnTo
         callbackArrived = true
         tabOpen = false
-        PendingSignIn.clear()
-        enter(ticket, pair.verifier, returnTo)
+        // The verifier stays until an `enter` succeeds or the person cancels: a fake ticket that
+        // the server refuses does not spend the sign-in this app started.
+        enter(current, ticket, pair.verifier, returnTo)
     }
 
-    private fun enter(ticket: String, verifier: String, to: String) {
-        if (!renewing) signIn = SignInStep.ENTERING
-        diagnostics.log("enter", mapOf("to" to to, "renewal" to renewing))
+    private fun enter(current: SignInAttempt, ticket: String, verifier: String, to: String) {
+        if (!current.renewal) signIn = SignInStep.ENTERING
+        diagnostics.log("enter", mapOf("to" to to, "renewal" to current.renewal, "callback" to current.callbacks))
         main.removeCallbacks(enterTimeout)
         main.postDelayed(enterTimeout, SignInFlow.TIMEOUT_MS)
-        web.loadEnter(enterUrl(ticket, verifier, to), to)
+        val url = enterUrl(ticket, verifier, to)
+        runSteps(current, current.stepsForEnter(), url, to)
+    }
+
+    private fun runSteps(current: SignInAttempt, steps: List<SignInAttempt.Step>, url: String, to: String) {
+        if (attempt !== current || !current.entering) return
+        val step = steps.firstOrNull() ?: return
+        val rest = steps.drop(1)
+        when (step) {
+            SignInAttempt.Step.CLEAR_SESSION -> clearWebSession("before-enter") { runSteps(current, rest, url, to) }
+            SignInAttempt.Step.LOAD_ENTER -> web.loadEnter(url, to)
+        }
+    }
+
+    /**
+     * Clears the web view's session cookies, the origin's other cookies (not Cloudflare's), all site
+     * storage and the cache, and calls `next` on the main thread once the cookie store has done it.
+     */
+    private fun clearWebSession(reason: String, next: () -> Unit) {
+        web.stop()
+        val deleted = SessionCookies.delete(config)
+        val others = SessionCookies.clearOrigin(config)
+        android.webkit.WebStorage.getInstance().deleteAllData()
+        web.webView.clearCache(true)
+        SessionCookies.afterPendingWrites(config) {
+            main.post {
+                diagnostics.log("web-session-cleared", mapOf("reason" to reason, "sessionCookies" to deleted, "otherCookies" to others, "sessionCookieLeft" to SessionCookies.present(config)))
+                next()
+            }
+        }
     }
 
     private fun startWebSignIn() {
@@ -448,6 +498,8 @@ class ShellController(
     private fun finishSignIn() {
         main.removeCallbacks(enterTimeout)
         renewing = false
+        attempt = null
+        PendingSignIn.clear()
         // Signed in first: the web area never leaves the screen between ENTERING and the tabs.
         phase = Phase.SIGNED_IN
         signIn = SignInStep.IDLE
@@ -461,14 +513,25 @@ class ShellController(
 
     private fun failSignIn(message: String) {
         main.removeCallbacks(enterTimeout)
+        val after = attempt?.enterFailed() ?: SignInAttempt.AfterFailure.GIVE_UP
         if (renewing) {
             renewing = false
+            attempt = null
+            PendingSignIn.clear()
             return
         }
         if (phase != Phase.SIGNED_OUT || signIn != SignInStep.ENTERING) return
         web.stop()
         signIn = SignInStep.IDLE
         signInMessage = message
+        if (after == SignInAttempt.AfterFailure.WAIT_FOR_CALLBACK && PendingSignIn.isWaiting()) {
+            // Perhaps another app's ticket: the real callback from the Custom Tab is still taken.
+            diagnostics.log("enter-failed", mapOf("next" to "wait-for-callback", "callbacks" to (attempt?.callbacks ?: 0)))
+        } else {
+            diagnostics.log("enter-failed", mapOf("next" to "give-up"))
+            attempt = null
+            PendingSignIn.clear()
+        }
     }
 
     /** The page says nobody is signed in any more. */
@@ -477,13 +540,16 @@ class ShellController(
         main.removeCallbacks(enterTimeout)
         stopSkeleton()
         renewing = false
+        attempt = null
+        PendingSignIn.clear()
         phase = Phase.SIGNED_OUT
         signIn = SignInStep.IDLE
         clearLoadFailure()
         selectedTab = ShellTab.HOME
         val deleted = SessionCookies.delete(config)
-        // Nothing of the person stays: the origin's storage, the cache and the history go too.
-        android.webkit.WebStorage.getInstance().deleteOrigin(config.origin)
+        // Nothing of the person stays: all site storage (this web view holds only OpenBot and the
+        // identity providers; deleteOrigin is not reliable for localStorage), the cache and history.
+        android.webkit.WebStorage.getInstance().deleteAllData()
         web.webView.clearCache(true)
         web.webView.clearHistory()
         val others = SessionCookies.clearOrigin(config)
@@ -701,9 +767,11 @@ class ShellController(
                 val signedIn = message.optBoolean("signedIn", false)
                 if (!message.isNull("tab")) ShellTab.fromKey(message.optString("tab"))?.let { selectedTab = it }
                 if (signedIn) {
-                    if (phase != Phase.SIGNED_IN || renewing) finishSignIn()
+                    if ((phase != Phase.SIGNED_IN || renewing) && enterMayFinish) finishSignIn()
                 } else if (path == "/sign" || path.startsWith("/sign/")) {
-                    if (phase == Phase.SIGNED_IN) {
+                    if (renewalEntering) {
+                        diagnostics.log("route-ignored", mapOf("reason" to "renewal-entering"))
+                    } else if (phase == Phase.SIGNED_IN) {
                         // The web app's /sign sends a signed-in person on to "/": confirm first.
                         main.removeCallbacks(confirmSignedOut)
                         main.postDelayed(confirmSignedOut, 2_500)
@@ -714,7 +782,10 @@ class ShellController(
                 refreshChrome()
             }
             "signed-out" -> {
-                if (phase == Phase.SIGNED_IN) {
+                if (renewalEntering) {
+                    // The outgoing page's requests can fail once the server swaps the session.
+                    diagnostics.log("signed-out-ignored", mapOf("reason" to "renewal-entering"))
+                } else if (phase == Phase.SIGNED_IN) {
                     sessionEnded("signed-out")
                 } else if (signIn == SignInStep.ENTERING) {
                     failSignIn(activity.getString(R.string.sign_in_not_finished))
@@ -775,8 +846,16 @@ class ShellController(
 
     override fun onUrlChanged(url: String?) {
         if (url == null || !config.isOwnOrigin(url)) return
-        val path = Uri.parse(url).path?.ifEmpty { "/" } ?: "/"
+        val parsed = Uri.parse(url)
+        val path = parsed.path?.ifEmpty { "/" } ?: "/"
         val first = path.split("/").firstOrNull { it.isNotEmpty() }?.let { "/$it" } ?: "/"
+        attempt?.let { current ->
+            current.onOwnPage(path, parsed.encodedQuery)
+            if (current.failurePageSeen && current.entering) {
+                diagnostics.log("enter-failure-page", mapOf("renewal" to current.renewal))
+                failSignIn(activity.getString(R.string.sign_in_not_finished))
+            }
+        }
         if (webPathRoot != first) {
             webPathRoot = first
             changed()
@@ -788,7 +867,7 @@ class ShellController(
             main.removeCallbacks(confirmSignedOut)
             main.postDelayed(confirmSignedOut, 2_500)
         } else if (phase == Phase.SIGNED_OUT && signIn == SignInStep.ENTERING && !onSignPage && !path.startsWith("/api/")) {
-            if (SessionCookies.present(config)) {
+            if (SessionCookies.present(config) && enterMayFinish) {
                 diagnostics.log("signed-in-by-url", mapOf("pathRoot" to first, "step" to "entering"))
                 finishSignIn()
             }
@@ -801,7 +880,7 @@ class ShellController(
     }
 
     private val confirmSignedOut = Runnable {
-        if (phase != Phase.SIGNED_IN) return@Runnable
+        if (phase != Phase.SIGNED_IN || renewalEntering) return@Runnable
         val path = Uri.parse(web.webView.url ?: "").path ?: ""
         val stillOnSign = config.isOwnOrigin(web.webView.url) && (path == "/sign" || path.startsWith("/sign/"))
         val cookie = SessionCookies.present(config)
@@ -825,7 +904,7 @@ class ShellController(
 
     override fun onCommit() {
         mainFrameCommits += 1
-        // However the page behaves after committing, the skeleton is gone 10 s later.
+        // However the page behaves after committing, the skeleton is gone 21 s later.
         main.removeCallbacks(skeletonDeadline)
         if (pageLoading) main.postDelayed(skeletonDeadline, SKELETON_AFTER_COMMIT_MS)
         if (failureSource == FailureSource.WEB || failureSource == null) clearLoadFailure()

@@ -193,8 +193,8 @@ class ShellActivity : AppCompatActivity() {
     }
 
     /**
-     * The page's downloads: http(s) to the system's DownloadManager with the page's cookies and
-     * user agent; blob: and data: addresses (made in the page) cannot be handed over, so they are
+     * The page's downloads: http(s) on the app's own origin to the system's DownloadManager, into
+     * Downloads, with the page's cookies and user agent; other sites' files are declined; blob: and data: addresses (made in the page) cannot be handed over, so they are
      * declined with a short message.
      */
     fun download(url: String, userAgent: String?, contentDisposition: String?, mimeType: String?) {
@@ -205,11 +205,22 @@ class ShellActivity : AppCompatActivity() {
             android.widget.Toast.makeText(this, R.string.download_unsupported, android.widget.Toast.LENGTH_SHORT).show()
             return
         }
+        if (!config.isOwnOrigin(url)) {
+            // Only files from the app's own origin are saved; another site's is declined.
+            diagnostics.log("download", mapOf("result" to "other-origin", "host" to uri.host))
+            android.widget.Toast.makeText(this, R.string.download_unsupported, android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         try {
             val request = android.app.DownloadManager.Request(uri)
                 .setTitle(name)
                 .setMimeType(mimeType)
                 .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            // In Downloads, where the person can find it (API 29+ needs no storage permission for
+            // that; below, the system's own download area is all the app may use).
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                request.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, name)
+            }
             CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
             if (userAgent != null) request.addRequestHeader("User-Agent", userAgent)
             getSystemService(android.app.DownloadManager::class.java).enqueue(request)

@@ -56,6 +56,18 @@ object SessionCookies {
         return names.size
     }
 
+    /**
+     * Calls `done` once the cookie store has applied every write queued before this call: the store
+     * applies writes in order, so a last, harmless write's callback comes after them.
+     */
+    fun afterPendingWrites(config: ShellConfig, done: () -> Unit) {
+        val manager = CookieManager.getInstance()
+        manager.setCookie(config.origin + "/", "openbot-shell-barrier=; Path=/; Max-Age=0") {
+            manager.flush()
+            done()
+        }
+    }
+
     /** Plants a session cookie (the debug hooks only). */
     fun set(config: ShellConfig, name: String, value: String, secure: Boolean, done: (Boolean) -> Unit) {
         val attributes = "; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax" + if (secure) "; Secure" else ""

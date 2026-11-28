@@ -1,6 +1,9 @@
 package ai.openbot.shell.test
 
+import android.app.Activity
 import android.util.Log
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -117,5 +120,44 @@ class ProbeTest : ShellTestBase() {
         val text = pageText()
         check(text.contains("probe done"), "a blank window.open replaced the app's page: ${text.take(120)}")
         note("after a blank window.open: url ${pageString("location.href")}; foreground ${foregroundPackage()}")
+    }
+
+    /**
+     * The request headers of `enter`'s exact code path (WebController.loadEnter: a native
+     * `loadUrl(url, headers)`), against the probe's header echo: (a) from the signed-out first
+     * screen, nothing loaded; (b) while a page is showing, as in a renewal.
+     */
+    @Test
+    fun testEnterRequestHeaders() {
+        launch(PROBE, "signed-out")
+        check(waitFor("sign_in_button", 20_000) != null, "no native first screen on the probe base URL")
+        val first = enterHeaders("first-screen")
+        launch(PROBE, "page-showing", plain = true)
+        check(waitPageText("probe done", 60_000), "the probe page never finished")
+        val showing = enterHeaders("page-showing")
+        check(first.contains("sec-fetch-site:") && showing.contains("sec-fetch-site:"), "the header echo never loaded")
+    }
+
+    private fun enterHeaders(moment: String): String {
+        val url = "${PROBE}api/echo-headers?ticket=probe-ticket-0000000000&verifier=probe&to=%2F"
+        instrumentation.runOnMainSync {
+            val activity: Activity? = listOf(Stage.RESUMED, Stage.PAUSED, Stage.STARTED, Stage.STOPPED)
+                .flatMap { ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(it) }
+                .firstOrNull { it.javaClass.name == ACTIVITY }
+            val field = activity?.javaClass?.getDeclaredField("web")?.apply { isAccessible = true }
+            val web = field?.get(activity)
+            web?.javaClass?.getMethod("loadEnter", String::class.java, String::class.java)?.invoke(web, url, "/")
+        }
+        var text = ""
+        val deadline = System.currentTimeMillis() + 15_000
+        while (System.currentTimeMillis() < deadline) {
+            text = pageString("(document.getElementById('headers')||{}).textContent||''")
+            if (text.contains("sec-fetch-site:")) break
+            sleep(300)
+        }
+        val sdk = android.os.Build.VERSION.SDK_INT
+        for (line in text.lines().filter { it.isNotBlank() }) note("ENTER_HEADERS api$sdk $moment $line")
+        screenshot("enter-headers-$moment")
+        return text
     }
 }

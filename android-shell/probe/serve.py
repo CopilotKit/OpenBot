@@ -126,9 +126,23 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_slowly("text/event-stream", [f"data: event {i}\n\n" for i in (1, 2, 3)])
         if path == "/api/stream":
             return self.send_slowly("text/plain; charset=utf-8", [f"line {i}\n" for i in (1, 2, 3)])
+        if path == "/api/echo-headers":
+            return self.send_echo_headers()
         if path.startswith("/api/"):
             return self.send_json({"error": "not found"}, 404)
         return super().do_GET()
+
+    def send_echo_headers(self):
+        """The navigation's Sec-Fetch-* and OpenBot-Shell request headers, one per line, as a page."""
+        names = ["Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-User", "OpenBot-Shell"]
+        lines = [f"{name.lower()}: {self.headers.get(name, '(absent)')}" for name in names]
+        body = ("<!doctype html><meta charset=utf-8><title>headers</title><pre id=headers>"
+                + "\n".join(lines) + "</pre>").encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
         path = self.path_only()
