@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A relative time in the app that rounds up to the end of its unit now reads in the next unit: 59.7 seconds ago is "1 minute ago" and 23 hours 45 minutes ago is "yesterday", where they read "60 seconds ago" and "24 hours ago".
+
 - **Unbiased AI is no longer an AI provider choice.** OpenBot Desktop's setup, Settings and Admin
   AI providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
   and OpenBot Desktop's Sign in with Unbiased AI is gone. Settings saved for it and the model shown

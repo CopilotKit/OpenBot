@@ -10,20 +10,26 @@ const relativeFormat = new Intl.RelativeTimeFormat(undefined, {
   numeric: "auto",
 });
 
-/** Locale-aware relative timestamp, e.g. "2 minutes ago". */
-export function relativeTime(iso: string): string {
+/**
+ * Locale-aware relative timestamp, e.g. "2 minutes ago".
+ *
+ * The unit is chosen after rounding, so a time that rounds up to a unit's upper bound reads in the
+ * next unit: 59.7 seconds ago is "1 minute ago", not "60 seconds ago".
+ */
+export function relativeTime(iso: string, now: Date = new Date()): string {
   const time = new Date(iso).getTime();
   // An invalid date used to flow into `Math.abs(NaN)` comparisons and `format(-NaN)`, which
   // answers "NaN weeks ago" or throws depending on ICU. Return the input unchanged instead.
   if (!Number.isFinite(time)) return iso;
-  const elapsed = Date.now() - time;
-  const scale =
-    RELATIVE_UNITS.find(({ limit }) => Math.abs(elapsed) < limit) ??
-    RELATIVE_UNITS[RELATIVE_UNITS.length - 1];
-  return relativeFormat.format(
-    -Math.round(elapsed / scale.divisor),
-    scale.unit,
-  );
+  const elapsed = now.getTime() - time;
+  for (const scale of RELATIVE_UNITS) {
+    const value = Math.round(elapsed / scale.divisor);
+    if (Math.abs(value) * scale.divisor < scale.limit) {
+      return relativeFormat.format(-value, scale.unit);
+    }
+  }
+  // Unreachable: the last unit's limit is infinite.
+  return iso;
 }
 
 const SHORT_UNITS = [
