@@ -1,5 +1,5 @@
 import { IconChevronLeft } from "@tabler/icons-react";
-import { Link, type LinkProps, useRouterState } from "@tanstack/react-router";
+import { Link, type LinkProps, useRouter } from "@tanstack/react-router";
 import type * as React from "react";
 import { createContext, useContext } from "react";
 import { nativeShell } from "@/lib/native-shell/shell";
@@ -70,9 +70,15 @@ export function PageShell({
    * link's own address is only the fallback (`lib/native-shell/use-tab-navigation.ts`).
    */
   const shell = nativeShell() !== null;
-  const atTabRoot = useRouterState({
-    select: (state) => rootTabOf(state.location.pathname) !== null,
-  });
+  /*
+   * Read only in the shell, and from a router only where there is one: a screen drawn without a
+   * router (a test of a settings page) draws exactly as before, outside the shell.
+   */
+  const router = useRouter({ warn: false });
+  const atTabRoot =
+    shell &&
+    rootTabOf(router?.state.location.pathname ?? window.location.pathname) !==
+      null;
   const back: PageBack | undefined =
     backButton ??
     fallbackBack ??
