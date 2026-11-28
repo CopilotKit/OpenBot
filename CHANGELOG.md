@@ -8,29 +8,128 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.**
+
+- **Migrations run at start: three, and none removes a table or a column.** The database moves from
+  `0188_audit_events_redacted_index`, where 1.2.1 left it, to `0191_sign_in_one_request_per_call`.
+  Two are expands and `0190` is a backfill that changes no schema: a 1.2.1 server works against the
+  new schema, so the upgrade rolls its servers one by one, with no downtime.
+  - `0189_web_push` adds two tables, the deployment's web push key pair and the browsers each person
+    turned notifications on in, and a column on the delivery outbox naming the browser a delivery
+    goes to. A 1.2.1 server never reads them and never sends a browser push. It waits at most 5
+    seconds for its locks, and gives up rather than hold reads behind a long transaction.
+  - `0190_sign_in_one_request_per_call_backfill` finds any Bot step with more than one sign-in
+    request and keeps one as that step's: the one a turn carries on from, else the newest. The
+    others stay as they were, an open form included, but no longer name the step.
+  - `0191_sign_in_one_request_per_call` holds a Bot's step to one sign-in request with a unique
+    index. It is built concurrently, outside a transaction, so writes carry on while it builds.
+    While the upgrade rolls, a second sign-in request for the same step made through a 1.2.1 server
+    fails instead of opening a second form; the form already open for it still works.
+- **Every member gets their own General Assistant, and an organization's shared one changes once.**
+  On by default, also for a release upgraded with `--reuse-values`. The first time somebody in an
+  organization opens their Bots after the upgrade, its shared General Assistant is settled, once.
+  Where one person is the whole organization, it becomes theirs, with its conversations, routines,
+  apps and memory. Where more people share it, or an admin published it, it stays the
+  organization's with everything on it, renamed Shared Assistant while it still has its original
+  name, and an admin can rename or publish it as any other Bot. Nothing is deleted, and new
+  organizations no longer get a shared one. To keep one General Assistant per organization that
+  everybody shares and only an admin gives apps, as before, set `config.ownGeneralAssistant: false`
+  on Kubernetes, or `OPENBOT_OWN_GENERAL_ASSISTANT=false` elsewhere, before upgrading. Turning it
+  off later takes nobody's own away. A value other than `true` or `false` stops the server at start.
+- **Each server holds fewer database connections, and gives idle ones back.** Everything a server
+  listens for now shares one database connection, where each listener had its own (five or six a
+  server), and a pooled connection left unused for 60 seconds is closed; it used to be kept until
+  the server stopped. The pools are the same size as before, 10 for requests and 4 for background
+  work, and start-up work always leaves one request connection free. So a server holds at most
+  `max + systemMax + 2` connections on its database. To fit a database you share with others, set
+  them: on Kubernetes `database.pool.max`, `database.pool.systemMax` and
+  `database.pool.idleTimeoutSeconds` (`0` keeps an idle connection), elsewhere
+  `OPENBOT_DATABASE_POOL_MAX`, `OPENBOT_DATABASE_SYSTEM_POOL_MAX` and
+  `OPENBOT_DATABASE_IDLE_SECONDS`. Empty keeps the defaults. A value that isn't a whole number, or a
+  pool under 1, stops the server at start and says which. The chart's autoscaling defaults are
+  unchanged.
+- **Browser notifications need nothing set, and reach out to the browsers' push services.** The
+  server makes its web push key pair the first time a browser asks for it, and keeps it in the
+  database sealed with the key encryption key. To sign with one pair across several databases, set
+  both `secrets.webPushVapidPublicKey` and `secrets.webPushVapidPrivateKey` (keys
+  `web-push-vapid-public-key` and `web-push-vapid-private-key` in a Secret of your own), or
+  `WEB_PUSH_VAPID_PUBLIC_KEY` and `WEB_PUSH_VAPID_PRIVATE_KEY`, as
+  `npx web-push generate-vapid-keys` prints them. One without the other, or a pair that doesn't
+  match, stops the server at start. Don't change the pair once browsers have subscribed: each stays
+  unreachable until its person opens OpenBot again. `config.webPushSubject` (`WEB_PUSH_SUBJECT`),
+  an `https:` URL or a `mailto:` address, is who a push service may contact about your pushes;
+  anything else stops the server at start. Pushes go only to the browsers' push services, over
+  HTTPS: Google's (`fcm.googleapis.com`), Mozilla's (`*.push.services.mozilla.com`), Apple's
+  (`*.push.apple.com`) and Microsoft's (`*.notify.windows.com`). A firewall that limits the
+  server's outbound traffic must allow them.
+- **No downtime, and nothing new is required.** The upgrade rolls (`openbot.ai/requires-downtime`
+  stays `"false"`), no setting or secret becomes required, and the `openbot-bundle` and
+  `openbot-agent` charts have no changes of their own.
+
+**Long tasks.**
+
+- **A Bot's work carries on with the page closed.** Send a message, close the tab or lock the
+  phone, and the server now runs the Bot's computer steps itself and carries the turn to the Bot's
+  answer, for a built-in Bot and a Bot connected over AG-UI alike. It used to stop at the first
+  computer step, waiting for a page to run it. If a server stops partway, another picks the turn
+  up. An open page joins the server's run and shows it to its end, instead of saying "The Bot
+  stopped before it finished" under a turn the server finished. The conversation reads as working
+  the whole time, between runs too, also when it is opened partway, and holds what is typed; every
+  open tab is told when the turn is over, so none stays on Stop until a reload. Stop ends the turn
+  at any moment, between two of its runs too, and a Stop the server refuses says so. API: a
+  conversation's work names the carried turn as `turn` for an app that sends
+  `OpenBot-Capabilities: conversation-work-turn`, or opens the events socket with that capability;
+  every other app sees the conversation busy, as before.
+
+- **One notice when a carried turn ends.** If nobody has read the conversation, the person is told
+  once when the turn ends, with its answer, what went wrong, or the card it waits on, however many
+  runs or servers carried it.
+
+- **Take over, type a secret or sign in, and the Bot carries on without the page.** When a Bot needs
+  the person at its browser, or a page stops the Bot for a person, the person is now told wherever
+  they are (phone, browser, Slack, Teams, text message), as for an approval. Once they hand back,
+  type the secret, sign in or say no, the server carries the turn on to the Bot's answer. The same
+  step asked twice opens one request, never a second form, and the page no longer puts its own
+  answer in the conversation beside the server's.
+
+- **Each computer step runs once.** A step asked for at the same moment by the page, a second tab,
+  an older page and the server ran once for each, so a command could run twice. Every step now
+  names its conversation and tool call: the first ask runs it and every other is given the same
+  answer; one still running is waited for, up to 90 seconds, and one whose server stopped mid-step
+  is answered as outcome unknown and never run again. Such a step reads "Didn't run" in the
+  conversation, never "Blocked". API: an app lists the newer answers it understands in the
+  `OpenBot-Capabilities` header (the events socket takes a `capabilities` query), and only an app
+  that sends `computer-step-taken` is told the step was `taken`, or `COMPUTER_STEP_RUNNING` or
+  `COMPUTER_STEP_OUTCOME_UNKNOWN`; released apps are answered as they always were. A direct computer
+  call can name its `threadId` and `toolCallId`.
+
+- **A long task runs until it is done.** A turn no longer ends at 48 hand-backs, a deadline or a
+  step count: it goes on until the Bot answers or somebody presses Stop. The same holds for
+  routines, check-ins, tasks and their follow-ups, deliveries, group conversations, subagents,
+  goals, and a Bot handing work to another. A routine whose last firing is still running skips the
+  next one. A carried turn counts against the computer session limit as any other run does. The
+  engines lost their ceilings too: the LangGraph (TypeScript) engine's 40-step budget, whose last
+  step was sent with no tools and told to finish, and the LangGraph (Python) harness's 25-step
+  limit, which ended a turn at its twelfth tool call with an error.
+
+- **A long run stays inside its model's window.** On every step the server sends the Bot its
+  conversation with old tool results cleared, and leaves out the oldest steps once they no longer
+  fit; the conversation itself keeps everything. Every run holds a tool, `recall_earlier_results`,
+  that reads a cleared result back. The latest results are kept whole only up to 40,000 tokens (the
+  latest step's always), and when a model still refuses a request as too long, the server asks
+  again with more cleared and keeps that level for the rest of the turn. On the Claude Agent SDK
+  harness, a turn of hundreds of steps is cut the same way, keeping the newest 10 results whole and
+  never the person's first and latest messages. The Google ADK harness summarises a long session's
+  older events past 100,000 prompt tokens, keeping the newest 20 as they were.
+
+- **A Bot handed work by another uses the person's computer and runs to its answer.** It had no
+  computer, so asked to run commands it answered "OK." having run nothing, and it stopped at 48
+  hand-backs. It now holds the person's computer, as the person's own run does (only a Bot they may
+  drive, only what the deployment allows), and runs on until it answers. When it needs the person at
+  the browser it says so in words, so the Bot that handed the work on can ask them in their own
+  conversation.
+
 **Conversations.**
-
-- **A turn the server carries on is followed to its answer.** When OpenBot's server carries a
-  person's turn on in a run of its own, an open page now joins that run and shows it to its end,
-  instead of saying "The Bot stopped before it finished" under a turn the server finished. The
-  conversation reads as working the whole time, between runs too, and holds what is typed; a page
-  opened part way through reads it as working from the start. Stop is offered for the whole turn,
-  and a Stop the server refuses says so. A step the server holds itself (taking over the Bot's
-  screen, a secret, a sign-in) is left to it: a sign-in no longer opens a second form, and the page
-  no longer puts its own answer in the conversation beside the server's. API: a conversation's work
-  gains the kind `turn`, sent only to a caller that names `conversation-work-turn` (below).
-
-- **A computer step runs once.** Every step a Bot takes on its computer now names its conversation
-  and tool call, so it runs once however many pages ask for it. A step already running is never run
-  again from the page, and one cut off before it answered reads "Didn't run" with a plain sentence,
-  never "Blocked". API: the computer step outcome gains `taken`, and a direct computer call can name
-  `threadId` and `toolCallId` and be answered `COMPUTER_STEP_RUNNING` or
-  `COMPUTER_STEP_OUTCOME_UNKNOWN`, each only for a caller that names `computer-step-taken`.
-
-- **An app says which newer answers it understands.** Requests carry the `OpenBot-Capabilities`
-  header, and the conversation events socket a `capabilities` query, listing tokens such as
-  `computer-step-taken` and `conversation-work-turn`. The server sends a newer shape only to a
-  caller that names its token, so a released app keeps getting the answers it reads.
 
 - **A new conversation's first message is never lost to a closed page.** It is sent the moment it
   shows, instead of a moment later, and kept in the browser until the server has it. If the page
@@ -52,11 +151,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   link now downloads the stored file, under its name. Any other link the chat can't open shows as
   its words; `javascript:`, `data:`, `file:` and `vbscript:` are still never links.
 
-- **A Bot's "can't run" stays under the message it couldn't answer.** When a Bot's engine isn't
-  answering, the sentence that says so stays under that message after the next message is answered,
-  and after a reload. It used to go as soon as the next turn started, and the message sat in the
-  conversation with nothing under it. `listRefusedTurns` gains the code `BOT_ENGINE_UNAVAILABLE`,
-  and the run's RUN_ERROR carries the same code.
+- **A Bot's "can't run" stays under the message it couldn't answer.** When a Bot on the LangGraph
+  engine finds its engine isn't answering, or isn't run here, the sentence that says so stays under
+  that message after the next message is answered, and after a reload. It used to go as soon as the
+  next turn started, and the message sat in the conversation with nothing under it.
+  `listRefusedTurns` gains the code `BOT_ENGINE_UNAVAILABLE`, and the run's RUN_ERROR carries the
+  same code.
 
 - **A group conversation keeps its side margins on a phone**, 16px a side as a conversation with one
   Bot has, instead of running to the screen's edges. In a wide window it lines up with one too.
@@ -97,7 +197,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   The New routine button on that page is gone (a Bot's own Routines page keeps it), and so is the
   check-ins switch: it is now Check-ins at the top of Settings → Notifications. Behind it,
   `POST /api/v2/organizations/{organizationId}/routines/read` (`readRoutineSentence`) reads a
-  sentence as a routine's answers and writes nothing.
+  sentence as a routine's answers with the deployment's model, and writes nothing. Without a model
+  key it answers 503 `MODEL_NOT_CONFIGURED`, "OpenBot needs a model key to read a sentence. Add one
+  in the Vault, or use the form."
 
 - **A Bot's page shows its routines under For you.** What is running now and what starts next, up
   to five, in the Routines page's words, with See all to the Bot's Routines. The Activity section
@@ -105,15 +207,41 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **Bots.**
 
-- **A long task runs until it is done, on every engine.** A turn has no step ceiling now: it ends
-  when the model answers in words or when it is stopped. The LangGraph (TypeScript) engine dropped
-  its 40-step budget, whose last step was sent with no tools and told to finish, so a long task
-  stopped half done. The LangGraph (Python) harness dropped LangGraph's 25-step limit, which ended a
-  turn at its twelfth tool call with an error. On the Claude Agent SDK harness, a turn of hundreds
-  of steps no longer outgrows the model's window: older results in the current turn are cleared to
-  a note naming their call, keeping the newest 10 whole, and only then are its oldest steps left
-  out, never the person's first and latest messages. The Google ADK harness summarises a long
-  session's older events past 100,000 prompt tokens, keeping the newest 20 as they were.
+- **Everybody has their own General Assistant.** The first time a member opens their Bots, OpenBot
+  makes them a General Assistant of their own, first on their list, so a new conversation starts
+  with it. It's theirs: while the organization's apps are open, an app they connect is on for it,
+  and they give it apps themselves, with no admin. Knowledge and the install's other Bots stay the
+  organization's. Somebody without Use Bots gets none. In the team edition, a Bot nobody owns, such
+  as an organization's Shared Assistant, now says only an admin can give it an app, actions or
+  skills, never its owner: its app card and its Apps and Skills pages name the admins, and offer a
+  member no give button. API: `Bot` gains the read-only `ownerless`; a Bot without it reads as
+  owned, as before.
+
+- **A Bot you can't give apps to says who can.** On a Bot shared with you, with apps open, the app
+  card told you to connect the app and that the Bot's owner would give it; connecting gave the Bot
+  nothing, and then the card offered nothing to press. The card now says only the Bot's owner or an
+  admin can give it the app and offers Request access, which asks an admin, with connecting your own
+  account beside it where it isn't connected. The same goes for actions of an app the Bot holds but
+  wasn't given. The Bot says the same in its words, and a how-to answer no longer walks somebody
+  through giving apps to a Bot that isn't theirs. A Bot no longer ends with "then ask again" after
+  a card that carries the conversation on by itself.
+
+- **Changing a Bot's apps from a conversation no longer fails on a name or an empty argument.**
+  `update_bot_apps` finds a Bot by its name as well as its id, and the settings tools take an
+  argument the model left out as `null`, which read "Didn't work" or "couldn't be read". Its card is
+  titled with the Bot the call names, never "Your Bot".
+
+- **A connected Bot can take its role and tool guidance as context only.** An AG-UI endpoint whose
+  `GET <endpoint>/capabilities` answers `{"custom":{"openbot.runGuidance":{"version":1}}}` is sent
+  the Bot's role and tool guidance as the context entries `OpenBot standing role` and `OpenBot
+  granted tools guidance`, once each on every request, continuations and a resumed interrupt
+  included, and no system message for either. Every other endpoint is sent what it was before.
+  OpenBot asks with the Bot's own headers and keeps the answer five minutes (thirty seconds when
+  nothing answers). A built-in Bot on the engine is asked and sent the same way. The published
+  `@ag-ui/mastra` 2.1.0 and `ag-ui-langgraph` 0.1.0 receivers take it, and give it full weight only
+  to a caller they trust: one presenting a key, or one on a listener only it can reach. New Bot's
+  address step says so for LangChain, Mastra and "An agent you already run", and links that
+  framework's setup; `docs/agent-frameworks.md` gains "Give OpenBot a trusted path".
 
 - **Bots on Gemini 3 no longer stop at their second tool step.** Google refused the second step of
   a task with "Function call is missing a thought_signature in functionCall parts". On the LangGraph
@@ -134,44 +262,30 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the LangGraph (TypeScript) engine, Claude Opus 5 and 5.5 at Extra high or Max stopped with no
   answer; they now answer.
 
-- **New Bot says how to give a connected agent its full role.** For LangChain, Mastra and "An
-  agent you already run", the address step now says that such an agent gives a Bot's role and tool
-  guidance full weight only to a caller it trusts, one presenting a key or on a listener only it can
-  reach, and links that framework's setup. `docs/agent-frameworks.md` gains "Give OpenBot a trusted
-  path" and setups for releases that take run guidance.
-
 **Apps.**
 
-- **Browse apps shows its first apps at once.** With nothing typed, it read every page of the
-  directory before it drew a row. It now shows the first 50 as soon as they come and the next as
-  you scroll, without rows moving, and still says how many apps there are in all. A page that fails
-  keeps what is shown and offers to try again. API: `listAppDirectory` answers an optional `total`,
-  and lists apps you sign in to before apps that take a key, each by title.
+- **Browse apps fills in faster, without rows moving.** Every page of the app directory read the
+  whole directory to answer, whatever the page held, and with nothing typed Browse apps read every
+  page before it drew a row. A page now takes a few milliseconds, and Browse apps shows the first 50
+  as soon as they come and the next as you scroll, still saying how many apps there are in all. A
+  page that fails keeps what is shown and offers to try again. The wider directory comes in the
+  order the screens show it, apps you sign in to first, then apps that take a key, each by name,
+  and every page says how many entries the whole list holds (`listAppDirectory`'s `total`).
+  Released apps sort what they read and are answered as before.
 
-- **A shared Bot's app card says who can give it the app.** On a Bot that isn't yours, with apps
-  open, the card told a member to connect the app and that the Bot's owner would give it; connecting
-  gave the Bot nothing, and then the card offered nothing to press. It now says only the Bot's owner
-  or an admin can give it the app and offers Request access, with connecting your own account beside
-  it where it isn't connected. The same goes for actions of an app the Bot holds but wasn't given.
-  The settings card for a change to a Bot's apps names the Bot, never "Your Bot".
-
-- **A Bot nobody owns says only an admin can give it apps.** In the team edition, a Bot nobody
-  owns, such as an organization's shared assistant, sent a member to an owner it doesn't have. Its
-  app card and its Apps and Skills pages now say only an admin can give it an app, actions or
-  skills, naming the admins, and offer a member no give button. API: `Bot` gains the read-only
-  `ownerless`; a Bot without it reads as owned, as before.
+- **An app's sign-in keeps the organization you picked.** For a person in several organizations,
+  an app's token used with no `OpenBot-Organization` header worked in their own organization,
+  whatever they picked as they signed the app in. It now works in the organization they were
+  working in when they said yes to the app (on OpenBot Cloud, the one picked at sign-in), after a
+  refresh too, while they are still a member of it; else in their own, as before.
+  `listOrganizations` marks that one active, and the consent page asks once for each organization.
+  OpenBot Desktop signed in again at the same address no longer names the organization its switcher
+  had before the sign-out, so it opens where you picked, until you pick another in the switcher.
 
 - **The admin inbox says what approving a request gives.** It told every grant and turn-on request
   "Approving gives {bot} only {app}'s read-only actions", which holds only while apps are locked
   down. While apps are open, the default, it now says "Approving gives {bot} every {app} action.
   Choose fewer on the Bot's page under {app}." Requests for named actions are unchanged.
-
-- **An app's sign-in works in the organization you picked.** For a person in several
-  organizations, an app's token used with no `OpenBot-Organization` header worked in their own
-  organization, whatever they picked as they signed the app in. It now works in the organization
-  they were working in as they allowed the app (on OpenBot Cloud, the one picked at sign-in), also
-  after a refresh, while they are a member of it. `listOrganizations` marks that one active, and
-  consent is asked once for each app in each organization.
 
 **AI providers.**
 
@@ -180,6 +294,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   page lost it. ChatGPT and Claude plans and xAI, in a person's own list and the organization's, and
   OpenBot Desktop's plan sign-in, now connect at once. A refused connect says why, and Connect tries
   again. Sharing an admin's own sign-in with the organization still waits for its own button.
+
+- **A TrustedRouter connection names TrustedRouter and says why it refused.** Every refusal read
+  "Your model provider turned down the request." Not enough credit for a request now says the
+  account doesn't have enough credit for this request and to add credit; a model nothing serves
+  right now says "TrustedRouter can't run this model right now. Choose another model."; a model that
+  can't hold a conversation says "TrustedRouter can't use this model for conversations. Choose
+  another model." Saving a connection refuses those two models with
+  `AI_CONNECTION_MODEL_UNAVAILABLE`, where they used to save and fail at the first message. A 402
+  from any provider is now read as the account's credit.
+
+- **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
+  connection writes take `provider: privatemode` with `login: endpoint`, an address and a key, and
+  `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode has
+  no sign-in.
 
 - **Unbiased AI is no longer an AI provider choice.** OpenBot Desktop's setup, Settings and Admin
   AI providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
@@ -190,30 +318,62 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 **Notifications.**
 
 - **Notifications in the browser, with OpenBot closed.** Settings, Notifications has a new switch,
-  Notifications in this browser. Turned on, a Bot's replies, questions and approvals reach that
-  browser as push notifications, as "Where updates go" routes push, and a click opens the
-  conversation. On iPhone and iPad it works once OpenBot is added to the Home Screen, on iOS 16.4 or
-  later, and the screen says so there. The app's manifest now opens OpenBot from a Home Screen as an
-  app of its own (`display: standalone`). Signing out turns notifications off in that browser.
-  Enable notifications in a conversation and Turn on on a Bot's page do the same as the switch: they
-  used to allow only the notices a page shows while it is open. On an iPhone or iPad in Safari, both
-  say to add OpenBot to the Home Screen first instead of offering a button that can't work. Nothing
-  needs setting up: the server makes its own key pair. `WEB_PUSH_VAPID_PUBLIC_KEY` with
-  `WEB_PUSH_VAPID_PRIVATE_KEY`, and `WEB_PUSH_SUBJECT`, are optional; one key without the other, a
-  pair that doesn't match, or a subject that isn't an `https:` URL or `mailto:` address stops the
-  server at start-up. API: `getWebPushKey`, `saveWebPushSubscription` and
+  Notifications in this browser. Turned on, every notice (replies, questions, approvals, away
+  notices, sign-in and take-over requests) also goes to that browser as a push notification, in
+  that organization, as "Where updates go" routes push, and a click opens the conversation. A
+  browser its push service says is gone is removed, and away notices are now worked out on every
+  deployment, since a browser can always be told. On iPhone and iPad it works once OpenBot is added
+  to the Home Screen, on iOS 16.4 or later, and the screen says so there. The app's manifest now
+  opens OpenBot from a Home Screen as an app of its own (`display: standalone`). Signing out turns
+  notifications off in that browser. Enable notifications in a conversation and Turn on on a Bot's
+  page do the same as the switch: they used to allow only the notices a page shows while it is
+  open. On an iPhone or iPad in Safari, both say to add OpenBot to the Home Screen first instead of
+  offering a button that can't work. API: `getWebPushKey`, `saveWebPushSubscription` and
   `deleteWebPushSubscription`.
 
-**OpenBot Desktop.**
+- **An approval's notice says "Review it in OpenBot."** On phones, browsers, Slack, Teams and text
+  messages it said "Open the Bot's page in OpenBot to review it.", where a tap never went.
 
-- **A new sign-in opens in the organization picked as you signed in.** Signing OpenBot Desktop in
-  again at the same address opened in the organization its switcher had before the sign-out,
-  whatever was picked in the browser. It now opens where you picked, until you pick another in the
-  switcher.
+**A Bot's computer.**
+
+- **The address bar names the address a tab failed to load**, where it sometimes showed
+  `chrome-error://chromewebdata/`.
+
+**OpenBot Desktop.**
 
 - **A command the local sandbox stopped for memory says so.** On Docker with cgroup v2, some
   commands the memory limit killed were told they had run out of time, after half a second. A
   command killed before the time limit is up is now always told it used too much memory.
+
+**Running OpenBot.**
+
+- **A slow answer behind a load balancer is no longer a 502.** The server closed an HTTP connection
+  that had carried nothing for 10 seconds, and counted a request whose answer had not started yet as
+  nothing. Behind a load balancer that keeps connections open longer, an answer over 10 seconds
+  reached the person as a 502, and so did a request sent on a connection the server had just closed.
+  The server now leaves closing an idle connection to whatever is in front of it. A route with a
+  time limit of its own keeps it, and sockets keep their 60 seconds.
+
+- **A server serves as soon as it starts.** It ran four upgrade passes in every organization, one
+  organization after another, before it listened, so its start grew with the organizations (over
+  three minutes with 200). They now run once it listens, two organizations at a time, and once a
+  release: a later server of the same release skips an organization already done, and runs again
+  one left unfinished. An organization's starting Bots, apps and skills are given the first time
+  they are read. The log says `start-up-passes-finished`, or `start-up-passes-unfinished` naming the
+  organization and why. The personal edition still runs its passes before it listens.
+
+- **`/metrics` says how loaded each server is, and which endpoint each request was for.** The
+  server's internal `/metrics` (on Kubernetes, `server.internalStatus.enabled`, off by default) adds
+  CPU time, memory, start time, open files and the event loop's lag over the last minute, under
+  prom-client's names (`process_cpu_seconds_total`, `process_resident_memory_bytes`,
+  `nodejs_eventloop_lag_p99_seconds` and so on), with `http_server_active_requests`,
+  `openbot_server_pending_requests` and `openbot_server_open_websockets`. `http_route` now names the
+  endpoint as registered; it was `/*` for every GET, so a dashboard grouped by it splits out by
+  endpoint from this release. A request that matched no endpoint has no route.
+
+- **A failed sign-in query is logged without its values.** A sign-in or an app's token refresh that
+  failed in the database was printed twice, with its parameters (a token's hash and ids). It is now
+  logged once, with the table, constraint and code the database named, and no values.
 
 ## 1.2.1
 
