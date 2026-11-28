@@ -252,8 +252,25 @@ abstract class ShellTestBase {
         return false
     }
 
-    /** The page's message box: a text field in the WebView. */
-    fun composer(): UiObject2? = find("openbot_webview")?.findObject(By.clazz("android.widget.EditText"))
+    /**
+     * The page's message box: a text field in the WebView (an EditText node), or the rich editor,
+     * which Chromium exposes as a plain node holding its placeholder ("Ask anything", "Message …").
+     */
+    fun composer(): UiObject2? {
+        val web = find("openbot_webview") ?: return null
+        return web.findObject(By.clazz("android.widget.EditText"))
+            ?: web.findObject(By.text("Ask anything")) ?: web.findObject(By.desc("Ask anything"))
+            ?: web.findObject(By.textStartsWith("Message ")) ?: web.findObject(By.descStartsWith("Message "))
+    }
+
+    fun waitComposer(timeoutMs: Long): UiObject2? {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        do {
+            composer()?.let { return it }
+            sleep(500)
+        } while (SystemClock.uptimeMillis() < deadline)
+        return null
+    }
 
     fun dismissKeyboardIfUp() {
         if (!keyboardShown()) return

@@ -35,7 +35,7 @@ class DemoTourTest : ShellTestBase() {
         pause(2_000)
 
         // The software keyboard: the bottom bar hides, the message box sits on the keyboard.
-        val box = device.findObject(By.clazz("android.widget.EditText").pkg(pkg))
+        val box = composer()
         if (box != null) {
             box.click()
             if (waitKeyboard(true, 8_000)) {

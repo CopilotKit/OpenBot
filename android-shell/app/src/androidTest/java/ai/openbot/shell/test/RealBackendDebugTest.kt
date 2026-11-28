@@ -263,12 +263,20 @@ class RealBackendDebugTest : ShellTestBase() {
             return
         }
         sleep(6_000)
+        if (challengeShown()) {
+            // Cloudflare's bot check in front of my.open.bot (see testRealChallengeProbe).
+            screenshot("j0-bot-check")
+            val started = System.currentTimeMillis()
+            while (challengeShown() && System.currentTimeMillis() - started < 60_000) sleep(2_000)
+            note("journey: the bot check showed at the first load; cleared by itself ${!challengeShown()} after ${(System.currentTimeMillis() - started) / 1000} s")
+            sleep(4_000)
+        }
         if (exists("sign_in_button") || pageText().contains("Sign in to OpenBot Cloud")) {
             screenshot("session-rejected")
             check(false, "production rejected the session cookie (it may be stale or copied wrong)")
             return
         }
-        val box = device.wait(androidx.test.uiautomator.Until.findObject(By.clazz("android.widget.EditText").pkg(pkg)), 30_000)
+        val box = waitComposer(30_000)
         check(box != null, "no message box on Home")
         sleep(2_000)
         screenshot("j1-home")
@@ -332,7 +340,7 @@ class RealBackendDebugTest : ShellTestBase() {
         sleep(3_000)
         screenshot("j8-back-from-background")
         tab(Tab.HOME)?.click()
-        check(device.wait(androidx.test.uiautomator.Until.findObject(By.clazz("android.widget.EditText").pkg(pkg)), 20_000) != null, "Home did not come back after the background")
+        check(waitComposer(20_000) != null, "Home did not come back after the background")
         note("after background: ${debugState()}")
         // Let the cookie store reach the disk before the next test kills the process.
         device.pressHome()

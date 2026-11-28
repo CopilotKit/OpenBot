@@ -335,7 +335,7 @@ class ShellFlowTest : ShellTestBase() {
     fun testKeyboardHidesTabBar() {
         if (!launchSignedIn()) return
         check(homeRendered(), "Home did not render")
-        val box = device.wait(androidx.test.uiautomator.Until.findObject(By.clazz("android.widget.EditText").pkg(pkg)), 15_000)
+        val box = waitComposer(15_000)
         if (box == null) {
             screenshot("no-composer")
             check(false, "no composer on Home")
