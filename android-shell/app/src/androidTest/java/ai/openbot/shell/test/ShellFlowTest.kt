@@ -138,9 +138,18 @@ class ShellFlowTest : ShellTestBase() {
         check(tab(Tab.HOME) != null, "the shell returned to Sign in after the server accepted the ticket")
     }
 
+    /** Auth acquisition has its own Custom Tab and cold-launch coverage. */
+    private fun seedWorkbenchSession() {
+        CookieManager.getInstance().apply {
+            setCookie(MOCK_A, "${SessionCookies.PLAIN_NAME}=mock; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600")
+            flush()
+        }
+    }
+
     @Test
     fun testTabsRouteTheWebView() {
-        if (!launchSignedIn()) return
+        seedWorkbenchSession()
+        launch(MOCK_A, "tab-routing", reset = false)
         check(homeRendered(), "Home did not render")
         sleep(2_000)
         val commitsAtStart = stateValue("commits")
@@ -333,10 +342,7 @@ class ShellFlowTest : ShellTestBase() {
 
         // Exercise the lock with the workbench's signed-in fixture. The separate Custom Tab
         // tests cover acquiring and persisting this cookie through the real ticket exchange.
-        CookieManager.getInstance().apply {
-            setCookie(MOCK_A, "${SessionCookies.PLAIN_NAME}=mock; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600")
-            flush()
-        }
+        seedWorkbenchSession()
         launch(MOCK_A, "signed-in-timed", reset = false, extras = mapOf("openbot.force_offline_seconds" to "15"))
         check(waitFor("offline_lock", 5_000) != null, "no lock while signed in and offline")
         screenshot("signed-in-offline-lock")
