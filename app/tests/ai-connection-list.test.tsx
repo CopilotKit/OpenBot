@@ -1022,6 +1022,121 @@ for (const isDefault of [false, true]) {
   });
 }
 
+/** The server's words for a connection whose provider OpenBot no longer offers (`provider-retired`). */
+const PROVIDER_RETIRED = {
+  code: "provider-retired",
+  detail:
+    "OpenBot no longer offers this AI provider. Remove it and connect another AI.",
+};
+
+/** A connection saved for a provider this app doesn't know, as the server lists it once retired. */
+function retiredEntry(overrides: Partial<AiConnectionEntry> = {}) {
+  return entry("openai", {
+    id: "retired-ai",
+    provider: "retired-ai",
+    login: "endpoint",
+    model: "retired-model",
+    endpointHost: null,
+    ready: false,
+    problem: PROVIDER_RETIRED,
+    ...overrides,
+  });
+}
+
+/*
+ * A connection saved for a provider OpenBot no longer offers is still listed, so it can be removed.
+ * Nothing on it fixes it: its page says the server's words and leads to connecting another AI and
+ * to Disconnect, never to signing in again, a new key or Make default.
+ */
+for (const isDefault of [false, true]) {
+  test(`a retired provider ${isDefault ? "that is the default" : "beside the default"} is listed stopped by its id, and its page offers Connect another AI and Disconnect`, async () => {
+    orgList = [
+      entry("anthropic", { isDefault: !isDefault }),
+      retiredEntry({ isDefault }),
+    ];
+    const user = userEvent.setup({ document });
+    const { view, router } = renderAt("/settings/providers");
+    // Listed by the id it was saved with, stopped, with the server's words.
+    const row = await view.findByRole("link", { name: /retired-ai/ });
+    expect(within(row).getByText(PROVIDER_RETIRED.detail)).toBeDefined();
+    expect(
+      view.getByRole("link", { name: /Connect another AI/ }),
+    ).toBeDefined();
+    await user.click(row);
+
+    const notice = await view.findByRole("alert");
+    expect(within(notice).getByText(PROVIDER_RETIRED.detail)).toBeDefined();
+    expect(
+      view.queryByRole("link", { name: /Replace key|Sign in again/ }),
+    ).toBeNull();
+    expect(view.queryByRole("button", { name: "Make default" })).toBeNull();
+    // The organization's default changes in place to another AI; any other connects one beside it.
+    const another = within(notice).getByRole("button", {
+      name: "Connect another AI",
+    });
+    expect(another.getAttribute("href")).toBe(
+      isDefault
+        ? "/settings/providers/retired-ai/change"
+        : "/settings/providers/new",
+    );
+
+    await user.click(view.getByRole("button", { name: "Disconnect" }));
+    await waitFor(() =>
+      expect(writes()).toEqual([
+        { method: "DELETE", path: `${ORG}/ai-connections/retired-ai` },
+      ]),
+    );
+    await waitFor(() => expect(at(router)).toBe("/settings/providers"));
+    expect(view.queryByText(/retired-ai/)).toBeNull();
+  });
+}
+
+test("the organization's retired default is changed in place to another AI, which every Bot then runs on", async () => {
+  orgList = [retiredEntry({ isDefault: true }), entry("anthropic")];
+  orgConnection = {
+    ...ORG_CONNECTION,
+    provider: "retired-ai",
+    login: "endpoint",
+    model: "retired-model",
+    ready: false,
+  };
+  const user = userEvent.setup({ document });
+  const { view, router } = renderAt("/settings/providers/retired-ai");
+  const notice = await view.findByRole("alert");
+  await user.click(
+    within(notice).getByRole("button", { name: "Connect another AI" }),
+  );
+  await view.findByRole("heading", { name: "Change AI connection" });
+  expect(at(router)).toBe("/settings/providers/retired-ai/change");
+  // Every provider OpenBot offers, to pick from: nothing is preset to the retired one.
+  const providers = view.getByRole("group", { name: "AI provider" });
+  await user.click(within(providers).getByText("OpenAI"));
+  await user.type(view.getByLabelText(/API key/), "sk-example");
+  await user.click(view.getByRole("button", { name: /Connect/ }));
+  await waitFor(() =>
+    expect(writes()).toEqual([
+      {
+        method: "PUT",
+        path: `${ORG}/ai-connection`,
+        body: { provider: "openai", login: "api-key", apiKey: "sk-example" },
+      },
+    ]),
+  );
+});
+
+test("a retired provider's Change page offers no way back to it, only Connect another AI", async () => {
+  orgList = [entry("anthropic", { isDefault: true }), retiredEntry()];
+  const { view } = renderAt("/settings/providers/retired-ai/change");
+  expect(await view.findByText(PROVIDER_RETIRED.detail)).toBeDefined();
+  expect(
+    view
+      .getByRole("button", { name: "Connect another AI" })
+      .getAttribute("href"),
+  ).toBe("/settings/providers/new");
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+  expect(writes()).toEqual([]);
+});
+
 test("a stopped key leads with Replace key, a page that opens its provider's key field", async () => {
   orgList = [
     entry("anthropic", { isDefault: true }),

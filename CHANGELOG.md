@@ -8,11 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- **Unbiased AI is no longer an AI provider choice.** OpenBot Desktop's setup, Settings and Admin
-  AI providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
-  and OpenBot Desktop's Sign in with Unbiased AI is gone. The API no longer takes it as a provider.
-  A connection saved for it before is still listed, so it can be removed, but it never runs: it
-  reads as stopped with the new problem `provider-retired`, which says to connect another AI.
+- **Unbiased AI is gone from OpenBot.** It stopped serving models, and nothing in OpenBot offers
+  it: not OpenBot Desktop's setup, Settings or Admin AI providers, Connect another AI, or the
+  conversation and Bot model pickers. The API no longer takes it as a provider. A connection saved
+  for it before is still listed in AI providers, stopped, with the new problem `provider-retired`:
+  its page says OpenBot no longer offers it, and offers Disconnect and Connect another AI. No model
+  picker offers it. A conversation whose model was on it says it can't run, with Remove it leading
+  to that page, and a Bot's default model on it reads as not available. OpenBot Desktop treats a
+  connection it saved for it as one to set up again.
 
 - **The app opens and changes page faster, and holds still.** The checks before every page are
   asked together and the page's code downloads while they run, so Home is ready about a third
