@@ -55,8 +55,22 @@ What is native:
   `openbot:back`, or does nothing at a tab's root; a tap on a tab always asks for its root path, and
   the page decides (another tab: back where it was left; the current tab: its root). Without
   `canGoBack` (production today) the web view's own back gesture works as before, with the guards
-  above. Known difference from a native navigation stack: the page does not follow the finger
-  during the swipe; it changes when the swipe ends.
+  above.
+- **The slide back** (`BackTransition.swift`; 1 live web view, the web app still owning the stacks):
+  - For each tab the app keeps a picture of every page under the current one, taken when the page
+    says `will-navigate` (direction "push") and before it lets the page go on (`openbot:navigate-ok`;
+    the page waits 120 ms at most). `route.depth` trims or pads that list.
+  - A swipe from the left edge moves the live web view with the finger over the previous page's
+    picture (moved 30% left, dimmed, the web view casting a shadow). Past a third of the width, or a
+    quick flick, it completes: the picture goes on top, the app sends `openbot:back`, and the picture
+    fades in 0.15 s once the page's next `route` has come (2 s at most). Shorter, it springs back.
+  - The header's Back (`will-navigate`, direction "back") plays the same slide without a finger.
+  - Tab switches never slide; the tab bar stays put.
+  - No picture (production, a page without `depth`, a cold start into a deep page, memory pressure)
+    or Reduce Motion: no slide; a swipe past a third of the width goes back when it ends.
+  - What a simulator cannot tell: how the slide feels under a finger at 120 Hz, whether the picture
+    and the live page line up to the pixel on every device, and what the pictures cost in memory on
+    an older phone.
 - **Orientation.** A phone stays in portrait; an iPad turns every way.
 - **What the web view lets through.** `enter` is loaded with the header `OpenBot-Shell: ios` and
   never kept or loaded again (a retry or a restarted web process loads its `to`). Other schemes go
