@@ -33,9 +33,10 @@ import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 /**
- * How each channel is turned on: Slack and Teams through an OpenTag pairing, text messages through Twilio, push through
- * the OpenBot phone app. Each is a setting where OpenBot runs, read at start-up, so the docs say what to set; the two
- * sections sit together there. The setup checklist links the same page for Slack and Teams.
+ * How each channel is turned on: Slack and Teams through an OpenTag pairing, Telegram through the Telegram channel,
+ * text messages through Twilio, push through the OpenBot phone app. Each is a setting where OpenBot runs, read at
+ * start-up, so the docs say what to set; the two sections sit together there. The setup checklist links the same page
+ * for Slack and Teams.
  */
 export const CHANNEL_SETUP_DOCS =
   "https://github.com/CopilotKit/openbot/blob/main/docs/configuration.md#slack-and-microsoft-teams-opentag-pairing";
@@ -64,6 +65,7 @@ const TRANSPORTS: { id: UpdateTransport; label: string }[] = [
   { id: "push", label: "Push" },
   { id: "slack", label: "Slack" },
   { id: "teams", label: "Microsoft Teams" },
+  { id: "telegram", label: "Telegram" },
   { id: "sms", label: "SMS" },
 ];
 
@@ -145,10 +147,10 @@ export function UpdateRoutingSection() {
           title="Updates stay in OpenBot"
         >
           {desktop
-            ? "Push, Slack, Microsoft Teams and text messages need OpenBot running on a server."
+            ? "Push, Slack, Microsoft Teams, Telegram and text messages need OpenBot running on a server."
             : setsUp
-              ? "Push, Slack, Microsoft Teams and text messages show up here once they're set up where OpenBot runs."
-              : "Push, Slack, Microsoft Teams and text messages show up here once your admin sets them up."}
+              ? "Push, Slack, Microsoft Teams, Telegram and text messages show up here once they're set up where OpenBot runs."
+              : "Push, Slack, Microsoft Teams, Telegram and text messages show up here once your admin sets them up."}
         </PageEmpty>
       ) : (
         <PageRows>

@@ -6,6 +6,7 @@ import {
 import { listDeliveries } from "@/lib/api/generated/deliveries/deliveries";
 import {
   confirmPhoneDestination,
+  connectTelegramDestination,
   deleteDestination,
   linkChatDestination,
   listDestinations,
@@ -20,8 +21,9 @@ import { ClientError } from "@/lib/client";
 
 /**
  * How a person's Bots reach them outside OpenBot, through the API: their phones for push
- * notifications, the Slack, Teams and phone destinations their conversations continue in, what was
- * sent to them, and which of those ways this deployment has. Each is the person's own (`me`).
+ * notifications, the Slack, Teams, Telegram and phone destinations their conversations continue in,
+ * what was sent to them, and which of those ways this deployment has. Each is the person's own
+ * (`me`).
  */
 
 export type { Delivery, Destination, Device };
@@ -114,7 +116,7 @@ export function deliveriesQueryOptions() {
   });
 }
 
-/** Which of push, Slack, Teams and text messages this deployment has set up. */
+/** Which of push, Slack, Teams, Telegram and text messages this deployment has set up. */
 export function transportsQueryOptions() {
   return queryOptions({
     queryKey: deliveryKeys.transports,
@@ -135,6 +137,7 @@ export function transportsQueryOptions() {
         push: set.has("push"),
         slack: set.has("slack"),
         teams: set.has("teams"),
+        telegram: set.has("telegram"),
         sms: set.has("sms"),
       };
     },
@@ -146,6 +149,18 @@ export function transportsQueryOptions() {
 /** A one-time `link <code>` message for the OpenBot app in Slack or Teams. */
 export type ChatLink = {
   platform: "slack" | "teams";
+  code: string;
+  command: string;
+  /** When the code stops working, in milliseconds since the epoch. */
+  expiresAt: number;
+};
+
+/**
+ * A one-time `link <code>` message for the person's Telegram bot, after OpenBot accepted their bot
+ * token. The username is what they open in Telegram; the token is never returned.
+ */
+export type TelegramLink = {
+  botUsername: string;
   code: string;
   command: string;
   /** When the code stops working, in milliseconds since the epoch. */
@@ -281,4 +296,31 @@ export function confirmSmsMutationOptions(queryClient: QueryClient) {
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: deliveryKeys.destinations }),
   });
+}
+
+/**
+ * Accept a Telegram bot token and answer with the message to send that bot. No `queryClient`: the
+ * chat is not connected until the code is sent from Telegram, so nothing cached has changed yet.
+ */
+export async function startTelegram(target: {
+  channelId: string;
+  agentId: string;
+  botToken: string;
+}): Promise<TelegramLink> {
+  const link = await connectTelegramDestination(
+    organizationId(),
+    ME,
+    {
+      botToken: target.botToken,
+      conversationId: target.channelId,
+      botId: target.agentId,
+    },
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Could not connect this Telegram bot" },
+  );
+  return { ...link, expiresAt: Date.parse(link.expiresAt) };
+}
+
+export function startTelegramMutationOptions() {
+  return mutationOptions({ mutationFn: startTelegram });
 }

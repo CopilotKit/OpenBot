@@ -44,6 +44,7 @@ const TRANSPORTS: Record<string, string> = {
   push: "Push",
   slack: "Slack",
   teams: "Microsoft Teams",
+  telegram: "Telegram",
   sms: "SMS",
 };
 const TRANSPORT_ORDER = Object.keys(TRANSPORTS);
@@ -126,7 +127,7 @@ export function GetMySettingsCard({
               ) : one.reaches.length === 0 ? (
                 <NotSet>Only in OpenBot</NotSet>
               ) : (
-                // In the Notifications screen's order: Push, Slack, Microsoft Teams, SMS.
+                // In the Notifications screen's order: Push, Slack, Microsoft Teams, Telegram, SMS.
                 [...one.reaches]
                   .sort(
                     (a, b) =>

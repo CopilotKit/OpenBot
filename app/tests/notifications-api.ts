@@ -19,6 +19,7 @@ export const DESTINATIONS_PATH = `${ME}/destinations`;
 export const LINK_CHAT_PATH = `${DESTINATIONS_PATH}/link-chat`;
 export const VERIFY_PHONE_PATH = `${DESTINATIONS_PATH}/verify-phone`;
 export const CONFIRM_PHONE_PATH = `${DESTINATIONS_PATH}/confirm-phone`;
+export const CONNECT_TELEGRAM_PATH = `${DESTINATIONS_PATH}/connect-telegram`;
 export const DEVICES_PATH = `${ME}/devices`;
 export const DELIVERIES_PATH = `${ME}/deliveries`;
 export const NOTIFICATION_SETTINGS_PATH = `${ME}/notification-settings`;
@@ -34,13 +35,13 @@ export function botNotificationSettingsPath(botId: string): string {
   return `${ME}/bot-notification-settings/${encodeURIComponent(botId)}`;
 }
 
-type Transport = "slack" | "teams" | "sms" | "push";
+type Transport = "slack" | "teams" | "sms" | "telegram" | "push";
 
 /** What a person has, as `GET /api/delivery` answered it; anything left out is none. */
 export type TodayReachability = {
   bindings?: {
     id: string;
-    transport: "slack" | "teams" | "sms";
+    transport: "slack" | "teams" | "sms" | "telegram";
     channelId: string;
     agentId: string;
     address?: string;
@@ -61,11 +62,12 @@ export type TodayReachability = {
 };
 
 const KINDS = ["progress", "decision", "question", "attention"] as const;
-const TRANSPORTS: Transport[] = ["push", "slack", "teams", "sms"];
+const TRANSPORTS: Transport[] = ["push", "slack", "teams", "telegram", "sms"];
 const TITLES: Record<Transport, string> = {
   push: "Push",
   slack: "Slack",
   teams: "Microsoft Teams",
+  telegram: "Telegram",
   sms: "SMS",
 };
 
@@ -179,6 +181,13 @@ export function notificationsResponse(
       },
       { status: 201 },
     );
+  if (method === "POST" && pathname === CONNECT_TELEGRAM_PATH)
+    return NativeResponse.json({
+      botUsername: "openbot_test_bot",
+      code: "6f2b9d4e-1a3c-4e5f-8b7a-0c9d2e1f3a4b",
+      command: "link 6f2b9d4e-1a3c-4e5f-8b7a-0c9d2e1f3a4b",
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    });
   if (
     method === "DELETE" &&
     (pathname.startsWith(`${DESTINATIONS_PATH}/`) ||

@@ -141,7 +141,7 @@ tags:
   - { name: Components, description: "The charts, cards and other components a Bot draws in a conversation instead of answering in text. Most come with OpenBot, and an admin can write more in Playground. An admin decides what each tells the model, which Bots may draw it and which data it may read." }
   - { name: Skills, description: "Named instructions a person runs by typing / in a conversation. Anybody can write their own, and an admin writes the organization's. A skill adds no access: a Bot that runs one uses only the apps it can already use." }
   - { name: Devices, description: "The phones a person signed in to the OpenBot app on and turned notifications on for, which their Bots send push notifications to." }
-  - { name: Destinations, description: "Where a person continues a conversation with a Bot outside OpenBot: a Slack or Microsoft Teams chat, or a phone number for text messages." }
+  - { name: Destinations, description: "Where a person continues a conversation with a Bot outside OpenBot: a Slack, Microsoft Teams or Telegram chat, or a phone number for text messages." }
   - { name: Deliveries, description: "What Bots sent a person outside OpenBot, and where each one got to." }
   - { name: Notification settings, description: "How a person hears from their Bots while they're away: which ways each kind of update may use, how much each Bot may send, and which ways this deployment can reach anyone at all." }
   - { name: Routines, description: "A person's routines: what a Bot does for them on a schedule, in a conversation they share. A routine belongs to the person who made it and answers only them." }
@@ -328,6 +328,7 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/destinations/link-chat: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1link-chat' }
   /api/v2/organizations/{organizationId}/people/{personId}/destinations/verify-phone: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1verify-phone' }
   /api/v2/organizations/{organizationId}/people/{personId}/destinations/confirm-phone: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1confirm-phone' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/connect-telegram: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1connect-telegram' }
   /api/v2/organizations/{organizationId}/people/{personId}/destinations/{destinationId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1{destinationId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/deliveries: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1deliveries' }
   /api/v2/organizations/{organizationId}/people/{personId}/notification-settings: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1notification-settings' }
@@ -695,8 +696,8 @@ components:
             skills:write: Write and delete the signed-in person's skills, and for an admin the organization's and anybody's.
             devices:read: Read the phones the signed-in person registered for push notifications, and the key a browser subscribes to push notifications with.
             devices:write: Register the signed-in person's phones and browsers for push notifications, and remove them.
-            destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
-            destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams and text message destinations.
+            destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams, Telegram and text messages.
+            destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams, Telegram and text message destinations.
             deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
             notification-settings:read: Read where the signed-in person's updates go, how much each Bot may send them, and the ways this deployment can reach people.
             notification-settings:write: Change where the signed-in person's updates go and how much each Bot may send them.

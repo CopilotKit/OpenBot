@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **Telegram on Reaching you.** A Bot's **Reaching you** can connect Telegram: paste a BotFather
+  token, send the one-time `link <code>` to that bot, and only that chat is allow-listed. The API
+  adds `connectTelegramDestination` and the `telegram` destination / notification transport. An
+  OpenTag-shaped front lives in `channel-telegram/` for deployments that pair Telegram like Slack
+  and Teams. The published OpenBot server image still has to accept provider `telegram` and implement
+  the connect operation before inbound turns bind; see `docs/channels/telegram.md`. WhatsApp and
+  two-way SMS chat are follow-ups. Local Desktop still needs a reachable server for away channels.
+
 ## 1.2.2
 
 **Before upgrading.**

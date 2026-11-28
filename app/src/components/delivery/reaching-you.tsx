@@ -1,6 +1,7 @@
 import {
   IconBrandSlack,
   IconBrandTeams,
+  IconBrandTelegram,
   IconChevronRight,
   IconDeviceMobileMessage,
   IconSend,
@@ -47,16 +48,17 @@ import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
   type ChatLink,
   confirmSmsMutationOptions,
-  type Destination,
   destinationsQueryOptions,
   removeDeliveryBindingMutationOptions,
   startChatLinkMutationOptions,
   startSmsMutationOptions,
+  startTelegramMutationOptions,
+  type TelegramLink,
   type Transports,
   transportsQueryOptions,
 } from "@/lib/delivery";
-import { queryClient } from "@/query-client";
 import { failureSaid } from "@/lib/load-failure";
+import { queryClient } from "@/query-client";
 
 /**
  * The phone verification waiting for its code, kept for the tab.
@@ -82,7 +84,8 @@ function writePending(id: string) {
   }
 }
 
-type Transport = Destination["transport"];
+/** Ways a person can connect a conversation from Reaching you. */
+type ConnectTransport = "slack" | "teams" | "sms" | "telegram";
 type ChatPlatform = ChatLink["platform"];
 
 /** A one-time link message, the conversation and Bot it links, and when it stops working. */
@@ -91,34 +94,58 @@ type HeldLink = ChatLink & {
   agentId: string;
 };
 
+type HeldTelegram = TelegramLink & {
+  channelId: string;
+  agentId: string;
+};
+
 const TRANSPORT: Record<
-  Transport,
-  { link: string; icon: typeof IconBrandSlack; summary: string }
+  ConnectTransport,
+  { link: string; icon: typeof IconBrandSlack; summary: string; title: string }
 > = {
   slack: {
     link: "Link Slack",
     icon: IconBrandSlack,
     summary: "Continue a conversation from Slack.",
+    title: "Slack",
   },
   teams: {
     link: "Link Microsoft Teams",
     icon: IconBrandTeams,
     summary: "Continue a conversation from Microsoft Teams.",
+    title: "Microsoft Teams",
+  },
+  telegram: {
+    link: "Connect Telegram",
+    icon: IconBrandTelegram,
+    summary: "Continue a conversation from your Telegram bot.",
+    title: "Telegram",
   },
   sms: {
     link: "Connect a phone",
     icon: IconDeviceMobileMessage,
     summary: "Continue a conversation by text message.",
+    title: "SMS",
   },
 };
 
+function destinationLook(transport: string) {
+  if (transport in TRANSPORT) return TRANSPORT[transport as ConnectTransport];
+  return {
+    link: transport,
+    icon: IconSend,
+    summary: transport,
+    title: transport,
+  };
+}
+
 /**
- * Continuing a conversation in Slack, Microsoft Teams or by text message. Given a Bot, only that
- * Bot's conversations and destinations, and no Bot to pick.
+ * Continuing a conversation in Slack, Microsoft Teams, Telegram or by text message. Given a Bot,
+ * only that Bot's conversations and destinations, and no Bot to pick.
  *
  * The destinations already connected are rows with a Disconnect each. Connecting one is a row per
- * transport that opens a dialog, because it is several inputs — a conversation, then an account or
- * a phone number — and the answer is a code to send back.
+ * transport that opens a dialog, because it is several inputs — a conversation, then an account, a
+ * bot token or a phone number — and the answer is a code to send back.
  */
 export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
   const connected = useQuery(destinationsQueryOptions());
@@ -127,7 +154,7 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
   const botName = useBotNames();
   const [challengeId, setChallengeId] = useState(readPending);
   useEffect(() => writePending(challengeId), [challengeId]);
-  const [connecting, setConnecting] = useState<Transport | null>(null);
+  const [connecting, setConnecting] = useState<ConnectTransport | null>(null);
   /*
    * The last link message per platform, held here rather than in the dialog: the dialog unmounts
    * when it closes, and the code is only useful once it has been sent from Slack or Teams, which is
@@ -136,8 +163,14 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
   const [links, setLinks] = useState<Partial<Record<ChatPlatform, HeldLink>>>(
     {},
   );
-  const heldLink = (transport: Transport) => {
+  const [telegramLink, setTelegramLink] = useState<HeldTelegram | undefined>();
+  const heldLink = (transport: ConnectTransport) => {
     if (transport === "sms") return undefined;
+    if (transport === "telegram") {
+      return telegramLink && telegramLink.expiresAt > Date.now()
+        ? telegramLink
+        : undefined;
+    }
     const held = links[transport];
     return held && held.expiresAt > Date.now() ? held : undefined;
   };
@@ -151,10 +184,10 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
    * dialog whose every button is disabled. A phone with a code already on its way stays reachable,
    * so the code can still be confirmed.
    */
-  const open = (transport: Transport) =>
+  const open = (transport: ConnectTransport) =>
     !!transports.data?.[transport] ||
     (transport === "sms" && challengeId !== "");
-  const summary = (transport: Transport) => {
+  const summary = (transport: ConnectTransport) => {
     if (transport === "sms" && challengeId) {
       return "A verification code is on its way. Enter it to finish.";
     }
@@ -162,9 +195,11 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
       return "Your link code is ready to send. Open this to see it again.";
     }
     if (open(transport)) return TRANSPORT[transport].summary;
-    return transport === "sms"
-      ? "Text messages aren't set up yet. An admin has to turn them on first."
-      : "Not set up yet. An admin has to turn on Slack and Teams first.";
+    if (transport === "sms")
+      return "Text messages aren't set up yet. An admin has to turn them on first.";
+    if (transport === "telegram")
+      return "Telegram isn't set up yet. An admin has to turn it on first.";
+    return "Not set up yet. An admin has to turn on Slack and Teams first.";
   };
 
   return (
@@ -194,7 +229,8 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
         ) : (
           <PageRows>
             {destinations.map((binding, index) => {
-              const Icon = TRANSPORT[binding.transport].icon;
+              const look = destinationLook(binding.transport);
+              const Icon = look.icon;
               return (
                 <Fragment key={binding.id}>
                   {index > 0 ? <Separator /> : null}
@@ -204,11 +240,9 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
                     </ItemMedia>
                     <ItemContent>
                       <ItemTitle>
-                        {binding.transport === "slack"
-                          ? "Slack"
-                          : binding.transport === "teams"
-                            ? "Microsoft Teams"
-                            : binding.address}
+                        {binding.transport === "sms"
+                          ? binding.address
+                          : look.title}
                       </ItemTitle>
                       <ItemDescription>
                         {botName(binding.botId)}
@@ -235,44 +269,46 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
         )}
       </PageSection>
       <PageSection
-        description="In a Slack or Teams channel that others can read, the Bot replies to you in a direct message."
+        description="In a Slack, Teams or Telegram chat that others can read, the Bot replies to you in a direct message."
         title="Connect a conversation"
       >
         {transports.data ? (
           <PageRows>
-            {(Object.keys(TRANSPORT) as Transport[]).map((transport, index) => {
-              const Icon = TRANSPORT[transport].icon;
-              const opens = open(transport);
-              return (
-                <Fragment key={transport}>
-                  {index > 0 ? <Separator /> : null}
-                  <Item
-                    render={
-                      opens ? (
-                        <button
-                          onClick={() => setConnecting(transport)}
-                          type="button"
-                        />
-                      ) : undefined
-                    }
-                    size="sm"
-                  >
-                    <ItemMedia variant="icon">
-                      <Icon />
-                    </ItemMedia>
-                    <ItemContent>
-                      <ItemTitle>{TRANSPORT[transport].link}</ItemTitle>
-                      <ItemDescription>{summary(transport)}</ItemDescription>
-                    </ItemContent>
-                    {opens ? (
-                      <ItemActions>
-                        <IconChevronRight className="size-4 text-muted-foreground" />
-                      </ItemActions>
-                    ) : null}
-                  </Item>
-                </Fragment>
-              );
-            })}
+            {(Object.keys(TRANSPORT) as ConnectTransport[]).map(
+              (transport, index) => {
+                const Icon = TRANSPORT[transport].icon;
+                const opens = open(transport);
+                return (
+                  <Fragment key={transport}>
+                    {index > 0 ? <Separator /> : null}
+                    <Item
+                      render={
+                        opens ? (
+                          <button
+                            onClick={() => setConnecting(transport)}
+                            type="button"
+                          />
+                        ) : undefined
+                      }
+                      size="sm"
+                    >
+                      <ItemMedia variant="icon">
+                        <Icon />
+                      </ItemMedia>
+                      <ItemContent>
+                        <ItemTitle>{TRANSPORT[transport].link}</ItemTitle>
+                        <ItemDescription>{summary(transport)}</ItemDescription>
+                      </ItemContent>
+                      {opens ? (
+                        <ItemActions>
+                          <IconChevronRight className="size-4 text-muted-foreground" />
+                        </ItemActions>
+                      ) : null}
+                    </Item>
+                  </Fragment>
+                );
+              },
+            )}
           </PageRows>
         ) : null}
       </PageSection>
@@ -282,11 +318,21 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
           botName={botName}
           challengeId={challengeId}
           fixedBot={fixedBot}
-          linked={heldLink(connecting)}
+          linked={
+            connecting === "telegram" || connecting === "sms"
+              ? undefined
+              : (heldLink(connecting) as HeldLink | undefined)
+          }
           onChallenge={setChallengeId}
           onClose={() => setConnecting(null)}
           onLinked={(link) =>
             setLinks((prior) => ({ ...prior, [link.platform]: link }))
+          }
+          onTelegramLinked={setTelegramLink}
+          telegramLinked={
+            connecting === "telegram"
+              ? (heldLink("telegram") as HeldTelegram | undefined)
+              : undefined
           }
           transport={connecting}
         />
@@ -296,8 +342,9 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
 }
 
 /**
- * Choose the conversation, then link an account or verify a phone. Linking an account answers with a
- * one-time `link <code>` message to send to the OpenBot app; a phone answers with a text carrying a
+ * Choose the conversation, then link an account, connect a Telegram bot, or verify a phone. Linking
+ * an account answers with a one-time `link <code>` message to send to the OpenBot app; a Telegram
+ * bot answers with the same kind of message for that bot; a phone answers with a text carrying a
  * code to type back here.
  */
 function ConnectDialog({
@@ -307,32 +354,39 @@ function ConnectDialog({
   botName,
   challengeId,
   linked,
+  telegramLinked,
   onChallenge,
   onLinked,
+  onTelegramLinked,
   onClose,
 }: {
-  transport: Transport;
+  transport: ConnectTransport;
   available: Transports;
   fixedBot: string | undefined;
   botName: (id: string) => string;
   challengeId: string;
   /** The link message this platform last answered with, while it still works. */
   linked: HeldLink | undefined;
+  telegramLinked: HeldTelegram | undefined;
   onChallenge: (id: string) => void;
   onLinked: (link: HeldLink) => void;
+  onTelegramLinked: (link: HeldTelegram) => void;
   onClose: () => void;
 }) {
   const formId = useId();
   const channels = useInfiniteQuery(channelListQueryOptions());
   // Reopened with a link message still held, the dialog shows the conversation it links.
-  const [channelId, setChannelId] = useState(linked?.channelId ?? "");
-  const [pickedBot, setAgentId] = useState(linked?.agentId ?? "");
+  const prior = linked ?? telegramLinked;
+  const [channelId, setChannelId] = useState(prior?.channelId ?? "");
+  const [pickedBot, setAgentId] = useState(prior?.agentId ?? "");
   const agentId = fixedBot ?? pickedBot;
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
+  const [botToken, setBotToken] = useState("");
   const [copied, setCopied] = useState(false);
   const link = useMutation(startChatLinkMutationOptions());
   const sms = useMutation(startSmsMutationOptions());
+  const telegram = useMutation(startTelegramMutationOptions());
   const confirm = useMutation(confirmSmsMutationOptions(queryClient));
   const startLink = (platform: ChatPlatform) =>
     link.mutate(
@@ -352,7 +406,13 @@ function ConnectDialog({
     ) ?? [];
   const selected = channels.data?.find((channel) => channel.id === channelId);
   const chosen = !!agentId && !!channelId;
-  const error = channels.error ?? link.error ?? sms.error ?? confirm.error;
+  const error =
+    channels.error ??
+    link.error ??
+    sms.error ??
+    telegram.error ??
+    confirm.error;
+  const pendingTelegram = telegramLinked;
 
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
@@ -360,8 +420,9 @@ function ConnectDialog({
         <DialogHeader>
           <DialogTitle>{TRANSPORT[transport].link}</DialogTitle>
           <DialogDescription>
-            Each account or phone number works with one conversation at a time.
-            Linking it here moves it from the one it's linked to now.
+            Each account, Telegram bot or phone number works with one
+            conversation at a time. Linking it here moves it from the one it's
+            linked to now.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 grid gap-4 overflow-y-auto">
@@ -505,6 +566,88 @@ function ConnectDialog({
                 </form>
               ) : null}
             </>
+          ) : transport === "telegram" ? (
+            pendingTelegram ? (
+              <Item size="sm" variant="muted">
+                <ItemContent>
+                  <ItemDescription className="line-clamp-none">
+                    Send this message to @{pendingTelegram.botUsername} in a
+                    direct message in Telegram within{" "}
+                    {Math.ceil(
+                      (pendingTelegram.expiresAt - Date.now()) / 60_000,
+                    )}{" "}
+                    minutes. Only that chat is allow-listed for this
+                    conversation and Bot.
+                  </ItemDescription>
+                  <ItemTitle className="break-all font-mono">
+                    {pendingTelegram.command}
+                  </ItemTitle>
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(
+                        pendingTelegram.command,
+                      );
+                      setCopied(true);
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {copied ? "Copied" : "Copy"}
+                  </Button>
+                </ItemActions>
+              </Item>
+            ) : (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  telegram.mutate(
+                    { channelId, agentId, botToken },
+                    {
+                      onSuccess: (result) => {
+                        onTelegramLinked({ ...result, channelId, agentId });
+                        setBotToken("");
+                        setCopied(false);
+                      },
+                    },
+                  );
+                }}
+              >
+                <Field>
+                  <FieldLabel htmlFor={`${formId}-token`}>Bot token</FieldLabel>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      autoComplete="off"
+                      id={`${formId}-token`}
+                      onChange={(event) => setBotToken(event.target.value)}
+                      placeholder="123456789:AAH…"
+                      required
+                      spellCheck={false}
+                      type="password"
+                      value={botToken}
+                    />
+                    <Button
+                      disabled={
+                        !chosen ||
+                        !available.telegram ||
+                        telegram.isPending ||
+                        !botToken
+                      }
+                      size="sm"
+                      type="submit"
+                    >
+                      Connect Telegram
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-muted-foreground text-xs">
+                    From BotFather. OpenBot keeps it encrypted and never shows
+                    it again. Only the chat that sends the link code can talk to
+                    this Bot.
+                  </p>
+                </Field>
+              </form>
+            )
           ) : linked ? (
             <Item size="sm" variant="muted">
               <ItemContent>
@@ -542,8 +685,8 @@ function ConnectDialog({
           <Button onClick={onClose} size="sm" variant="outline">
             Close
           </Button>
-          {/* A phone's two steps each submit their own field, beside it. */}
-          {transport === "sms" ? null : (
+          {/* A phone's and Telegram's steps each submit their own field. */}
+          {transport === "sms" || transport === "telegram" ? null : (
             <Button
               disabled={!chosen || !available[transport] || link.isPending}
               onClick={() => startLink(transport)}

@@ -7,10 +7,12 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 import type {
   ChatLinkCode,
   ConfirmPhoneDestinationRequest,
+  ConnectTelegramDestinationRequest,
   DestinationPage,
   DestinationResponse,
   LinkChatDestinationRequest,
   PhoneVerification,
+  TelegramLinkCode,
   VerifyPhoneDestinationRequest,
 } from "../model";
 
@@ -61,6 +63,14 @@ export const getConfirmPhoneDestinationResponseMock =
       optedOutAt: null,
       createdAt: "2026-11-10T08:03:19.000Z",
     },
+  });
+
+export const getConnectTelegramDestinationResponseMock =
+  (): TelegramLinkCode => ({
+    botUsername: "openbot_sarah_bot",
+    code: "6f2b9d4e-1a3c-4e5f-8b7a-0c9d2e1f3a4b",
+    command: "link 6f2b9d4e-1a3c-4e5f-8b7a-0c9d2e1f3a4b",
+    expiresAt: "2026-11-14T09:15:00.000Z",
   });
 
 export const getListDestinationsMockHandler = (
@@ -210,6 +220,45 @@ export const getConfirmPhoneDestinationMockHandler = (
   );
 };
 
+export const getConnectTelegramDestinationMockHandler = (
+  overrideResponse?:
+    | TelegramLinkCode
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string },
+            ConnectTelegramDestinationRequest
+          >
+        >[0],
+      ) => Promise<TelegramLinkCode> | TelegramLinkCode),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<
+    { organizationId: string; personId: string },
+    ConnectTelegramDestinationRequest
+  >(
+    "*/api/v2/organizations/:organizationId/people/:personId/destinations/connect-telegram",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string },
+          ConnectTelegramDestinationRequest
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getConnectTelegramDestinationResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getDeleteDestinationMockHandler = (
   overrideResponse?:
     | void
@@ -253,5 +302,6 @@ export const getDestinationsMock = () => [
   getLinkChatDestinationMockHandler(),
   getVerifyPhoneDestinationMockHandler(),
   getConfirmPhoneDestinationMockHandler(),
+  getConnectTelegramDestinationMockHandler(),
   getDeleteDestinationMockHandler(),
 ];

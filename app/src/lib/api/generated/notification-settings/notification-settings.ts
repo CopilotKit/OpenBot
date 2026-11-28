@@ -896,7 +896,7 @@ export const getListNotificationTransportsUrl = (
 };
 
 /**
- * Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push is always there for browsers (web push, saveWebPushSubscription) and reaches phones once the OpenBot phone app's project is set up, Slack and Microsoft Teams need the OpenTag pairing, and text messages need Twilio. A person's settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push is always there for browsers (web push, saveWebPushSubscription) and reaches phones once the OpenBot phone app's project is set up, Slack and Microsoft Teams need the OpenTag pairing, Telegram needs the Telegram channel (a bot token connected under Reaching you, or the OpenTag- shaped Telegram front), and text messages need Twilio. A person's settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the ways OpenBot can reach people here
  */
 export const listNotificationTransports = async (

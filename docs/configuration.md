@@ -769,6 +769,21 @@ SMS through Twilio honors Advanced Opt-Out: `STOP` (and Twilio's other opt-out k
 number opted out, later messages show `opted_out` in the delivery history instead of being sent, and
 `START` resumes. Twilio sends the confirmation reply itself, so OpenBot does not.
 
+## Telegram
+
+Telegram is a **Reaching you** destination beside Slack, Teams and SMS. A person creates a bot with
+[BotFather](https://t.me/BotFather), opens a Bot's **Reaching you**, chooses **Connect Telegram**,
+pastes the bot token, and sends the one-time `link <code>` message to that bot in a direct message.
+Only that chat is allow-listed; other chats are refused.
+
+The API operation is `connectTelegramDestination`. The token is stored encrypted and never returned.
+See [channels/telegram.md](channels/telegram.md) for the OpenTag-shaped front in
+`channel-telegram/` (set `OPENTAG_URL` to it when pairing that way) and for what the OpenBot server
+image must implement before inbound turns bind.
+
+Local OpenBot Desktop has nowhere for Telegram callbacks to land, the same as Slack, Teams, SMS and
+push: those channels need OpenBot on a reachable server.
+
 ## Linked accounts
 
 OpenBot keeps a record of a person's accounts at outside providers, such as their GitHub account
