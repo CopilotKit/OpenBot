@@ -9,7 +9,7 @@ import {
 } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
-import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { ConversationNavigation } from "@/components/layout/conversation-navigation";
 import { agentListQueryOptions, agentQueryOptions } from "@/lib/agents/queries";
 import {
   readPendingStart,
@@ -90,7 +90,7 @@ function RouteComponent() {
         data-slot="conversation-header"
       >
         <div className="flex min-w-0 items-center gap-1.5">
-          <SidebarToggle />
+          <ConversationNavigation />
           {agentId ? (
             <ChannelAvatar participantIds={[agentId]} size={22} />
           ) : null}

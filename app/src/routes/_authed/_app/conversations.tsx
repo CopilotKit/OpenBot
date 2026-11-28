@@ -6,6 +6,7 @@ import { useState } from "react";
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import {
   ChannelRow,
+  ConversationsPanel,
   NONE_DELEGATING,
   pinnedFirst,
   SEARCH_DEBOUNCE_MS,
@@ -14,7 +15,6 @@ import {
   SearchResults,
   useDebounced,
 } from "@/components/app-sidebar/conversations-panel";
-import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { PageEmpty, PageRows, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,19 +34,15 @@ import { useMessageListEmphasis } from "@/lib/settings/message-list";
 import { delegatingConversationsQueryOptions } from "@/lib/tasks/queries";
 
 export const Route = createFileRoute("/_authed/_app/conversations")({
-  component: ConversationsPage,
+  component: () =>
+    nativeShell() ? <ConversationsPanel standalone /> : <ConversationsPage />,
 });
 
 /** Above this many rows a re-sort is not animated, as in the sidebar. */
 const MAX_ANIMATED_ROWS = 60;
 
 /**
- * Every conversation, as a page: the sidebar's Conversations panel for a screen with no sidebar
- * (the phone app's native shell, whose Conversations tab opens it), and at its own address in a
- * browser too. The same list, read the same way: pinned first, then newest, unread marked, the
- * same search over the whole history, and New conversation where the panel has it. The rows are
- * the sidebar's (`Channel`), so pressing and holding one (or right-clicking it) pins, renames or
- * deletes it there as well.
+ * Every conversation as a standalone browser page, using the same rows as the sidebar.
  *
  * Not virtualized, as the sidebar is not: rows off screen are skipped by `content-visibility`, and
  * older ones are read a page at a time as the list is scrolled to its end.
@@ -65,39 +61,18 @@ function ConversationsPage() {
   const searching = term.length > 0;
   const searchable = isChannelSearchable(term);
   const rows = pinnedFirst(channels.data ?? []);
-  const shell = nativeShell() !== null;
 
   return (
     <PageShell
       action={
-        <div className="flex items-center gap-2">
-          {/*
-           * Beside the account in the native shell, the icon alone, named for a screen reader: the
-           * words and the avatar do not both fit beside the title on a phone.
-           */}
-          {shell ? (
-            <Button
-              aria-label="New conversation"
-              // A whole tap target, as tall as the account beside it; the icon keeps its size.
-              className="size-11"
-              render={(props) => <Link {...props} to="/channel/new" />}
-              size="icon"
-              variant="ghost"
-            >
-              <IconMessagePlus />
-            </Button>
-          ) : (
-            <Button
-              render={(props) => <Link {...props} to="/channel/new" />}
-              size="sm"
-              variant="ghost"
-            >
-              <IconMessagePlus />
-              New conversation
-            </Button>
-          )}
-          <ShellAccountMenu />
-        </div>
+        <Button
+          render={(props) => <Link {...props} to="/channel/new" />}
+          size="sm"
+          variant="ghost"
+        >
+          <IconMessagePlus />
+          New conversation
+        </Button>
       }
       title="Conversations"
     >
