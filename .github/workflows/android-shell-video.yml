@@ -125,10 +125,13 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Boot the emulator (software keyboard on, animators on for the skeleton's shimmer)
+      - name: Boot the emulator (software keyboard on, animations off)
         timeout-minutes: 4
         env:
-          ANIMATOR_SCALE: "1"
+          # Off: with animations on, the web app's running-Bot animations drawn in software (the
+          # guest renderer) slowed every scene of the demo to 2-3 times its length (runs 46159324951,
+          # 46161277370, 46162581646). The skeleton then shows without its shimmer.
+          ANIMATOR_SCALE: "0"
           # The guest renderer: the host-side one (swiftshader_indirect) froze the emulator in the
           # middle of a recording (run 46119389519) as it did in test runs.
           GPU_MODE: guest
