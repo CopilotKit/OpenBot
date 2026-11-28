@@ -48,32 +48,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  demo:
-    name: Record the demo tour (mock)
+  build:
+    # The app and its UI tests, built once and handed to the recording job: a cold build (every
+    # change under ios-shell/ is one) takes about 5 minutes on these runners, which with the
+    # recording did not fit the 13-minute cap. The cap applies to the recording job.
+    name: Build the app for the recording (mock)
     if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'real'
     runs-on: macos-latest
-    timeout-minutes: 13
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Start the clock
-        run: echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
-
-      - name: Boot a simulator in the background
-        run: |
-          picked="$(python3 ios-shell/ci/pick_simulator.py)"
-          udid="$(printf '%s' "$picked" | cut -f1)"
-          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
-          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
-          # Booting takes minutes on a fresh runner: it runs while the rest of the job does.
-          nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
-            && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
-            xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
-            sleep 15; touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -95,26 +83,67 @@ jobs:
             (cd ios-shell && xcodegen generate)
           fi
 
-      # git's own id for the app's sources: hashFiles timed out on a slow runner.
       - name: Work out the build cache key
-        id: dd-key-1
+        id: dd-key
         run: echo "tree=$(git rev-parse HEAD:ios-shell)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: DerivedData-Debug
-          key: ios-shell-video-dd-Debug-${{ steps.dd-key-1.outputs.tree }}
+          key: ios-shell-video-dd-Debug-${{ steps.dd-key.outputs.tree }}
           restore-keys: ios-shell-video-dd-Debug-
 
-      # The app builds while the web app does: on a cold web cache the two together are what
-      # keeps the job inside its 13 minutes.
-      - name: Start the Debug build in the background
+      - name: Build the Debug app and its UI tests
         run: |
-          echo "$(date +%s) build-and-web" >> "$RUNNER_TEMP/timing"
-          nohup bash -c 'xcodebuild build-for-testing -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell \
+          set -o pipefail
+          xcodebuild build-for-testing -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell \
             -configuration Debug -destination "generic/platform=iOS Simulator" -derivedDataPath DerivedData-Debug \
-            CODE_SIGNING_ALLOWED=NO > xcodebuild-build.log 2>&1; echo $? > "$2"' build "$SIM_UDID" \
-            "$RUNNER_TEMP/build.status" > /dev/null 2>&1 &
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee xcodebuild-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
+          tar -C DerivedData-Debug/Build -czf products.tgz Products
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-shell-video-build-${{ github.run_id }}
+          path: products.tgz
+          retention-days: 1
+
+  demo:
+    name: Record the demo tour (mock)
+    needs: build
+    if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'real'
+    runs-on: macos-latest
+    timeout-minutes: 13
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start the clock
+        run: echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
+
+      - name: Boot a simulator in the background
+        run: |
+          picked="$(python3 ios-shell/ci/pick_simulator.py)"
+          udid="$(printf '%s' "$picked" | cut -f1)"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
+            && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
+            xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
+            sleep 15; touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ios-shell-video-build-${{ github.run_id }}
+
+      - name: Unpack the built app
+        run: |
+          echo "$(date +%s) unpack" >> "$RUNNER_TEMP/timing"
+          mkdir -p built && tar -C built -xzf products.tgz
+          echo "XCTESTRUN=$(ls "$PWD"/built/Products/*.xctestrun | head -1)" >> "$GITHUB_ENV"
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -170,14 +199,6 @@ jobs:
           path: app/dist
           key: ${{ steps.web-cache.outputs.cache-primary-key }}
 
-      - name: Wait for the Debug build
-        timeout-minutes: 8
-        run: |
-          echo "$(date +%s) build-wait" >> "$RUNNER_TEMP/timing"
-          while [ ! -f "$RUNNER_TEMP/build.status" ]; do sleep 2; done
-          grep -E "error:|BUILD (SUCCEEDED|FAILED)" xcodebuild-build.log || true
-          [ "$(cat "$RUNNER_TEMP/build.status")" = 0 ]
-
       - name: Record the demo tour
         timeout-minutes: 10
         env:
@@ -203,9 +224,8 @@ jobs:
           # the job past its 13 on slow runners; an idle stretch in the recording is cut instead.
           if [ "$WARM_UP" = "true" ]; then
           # One unrecorded pass first: a fresh simulator's first sign-in took over a minute.
-          xcodebuild test-without-building -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug \
-            -only-testing:OpenBotShellUITests/DemoTourUITests/testWarmUp CODE_SIGNING_ALLOWED=NO > xcodebuild-warm-up.log 2>&1 \
+          xcodebuild test-without-building -xctestrun "$XCTESTRUN" -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -only-testing:OpenBotShellUITests/DemoTourUITests/testWarmUp > xcodebuild-warm-up.log 2>&1 \
             || grep -E "error:|Test Case" xcodebuild-warm-up.log || true
           fi
           echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
@@ -215,9 +235,8 @@ jobs:
           recorder=$!
           sleep 2
           set +e
-          xcodebuild test-without-building -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug \
-            -only-testing:"$test_id" CODE_SIGNING_ALLOWED=NO > xcodebuild-demo.log 2>&1
+          xcodebuild test-without-building -xctestrun "$XCTESTRUN" -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -only-testing:"$test_id" > xcodebuild-demo.log 2>&1
           status=$?
           # SIGINT and wait, so the recorder writes a playable file.
           kill -INT "$recorder"
@@ -232,11 +251,9 @@ jobs:
         run: |
           echo "$(date +%s) cut" >> "$RUNNER_TEMP/timing"
           [ -f artifacts/video/demo-tour.mp4 ] || exit 0
-          # The swipe clip is kept whole: its marks are seconds apart and simctl's variable frame
-          # rate made the cut miss the swipe once.
-          # The unrecorded warm-up pass now only on request (warm_up): it took 3 minutes and pushed
-          # the job past its 13 on slow runners; an idle stretch in the recording is cut instead.
-          if [ "$WARM_UP" = "true" ]; then
+          # The swipe and self-hosted clips are kept whole: their marks are seconds apart and
+          # simctl's variable frame rate made the cut miss the swipe once.
+          if [ "$WHICH" != "swipe" ] && [ "$WHICH" != "selfhosted" ]; then
             python3 ios-shell/ci/trim_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "$STARTED" || true
           fi
           ls -la artifacts/video
