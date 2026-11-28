@@ -267,6 +267,24 @@ describe("the frame", () => {
     ).toBeTruthy();
   });
 
+  test("in the shell, the account button and its menu's rows are a thumb's size", async () => {
+    inShell(true);
+    serve([]);
+    const { view } = renderApp("/");
+    await view.findByRole("heading", { name: "Home" });
+    const account = view.getByRole("button", { name: "Account" });
+    // 44px square, the whole tap target iOS asks for, round a 36px avatar.
+    expect(account.className).toContain("size-11");
+    expect(account.querySelector(".size-9")).not.toBeNull();
+    await userEvent
+      .setup({ document: view.container.ownerDocument })
+      .click(account);
+    const settings = await within(document.body).findByRole("menuitem", {
+      name: "Settings",
+    });
+    expect(settings.className).toContain("py-3");
+  });
+
   test("in a browser, the sidebar is there as before", async () => {
     inShell(false);
     serve([]);

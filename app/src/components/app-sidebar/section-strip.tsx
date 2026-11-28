@@ -38,6 +38,7 @@ import {
   AccountRow,
   accountMenuClassName,
   accountMenuItemClassName,
+  largeAccountMenuItemClassName,
   StripVersion,
 } from "./account-label";
 import { DesktopAppMenuItem } from "./desktop-app-item";
@@ -146,10 +147,13 @@ function PageItem({ item }: { item: NavigationLink }) {
  */
 export function StripAccount({
   label,
+  large = false,
   side = "right",
 }: {
   /** The button's name, in place of the person's (see `AccountMenu`). */
   label?: string;
+  /** The button and the menu's rows at a thumb's size, for the phone app (see `AccountMenu`). */
+  large?: boolean;
   /** Beside the strip, or below a page's header. */
   side?: "right" | "bottom";
 } = {}) {
@@ -162,8 +166,11 @@ export function StripAccount({
   const switchOrganization = useSwitchOrganization();
   // No sidebar in the native shell, so no sheet to close.
   const setOpenMobile = useOptionalSidebar()?.setOpenMobile ?? (() => {});
+  const itemClassName = large
+    ? largeAccountMenuItemClassName
+    : accountMenuItemClassName;
   return (
-    <AccountMenu label={label} side={side}>
+    <AccountMenu label={label} large={large} side={side}>
       <DropdownMenuContent
         align="end"
         className={accountMenuClassName}
@@ -176,7 +183,7 @@ export function StripAccount({
           <OrganizationMenuItems
             choices={organizationChoices}
             invitationsWaiting={invitationsWaiting}
-            itemClassName={accountMenuItemClassName}
+            itemClassName={itemClassName}
             onNew={() => {
               // A narrow window's sheet would wait behind the dialog.
               setOpenMobile(false);
@@ -189,7 +196,7 @@ export function StripAccount({
           .filter((item) => item.section === "account")
           .map((item) => (
             <DropdownMenuItem
-              className={accountMenuItemClassName}
+              className={itemClassName}
               key={item.id}
               nativeButton={item.kind === "dialog"}
               // A link closes a narrow window's sheet as it is followed; a dialog has to close it
@@ -205,11 +212,11 @@ export function StripAccount({
               <BrandName>{item.label}</BrandName>
             </DropdownMenuItem>
           ))}
-        <DesktopAppMenuItem className={accountMenuItemClassName} />
-        <TroubleshootingLogsMenuItem className={accountMenuItemClassName} />
+        <DesktopAppMenuItem className={itemClassName} />
+        <TroubleshootingLogsMenuItem className={itemClassName} />
         {signOutOffered ? (
           <DropdownMenuItem
-            className={accountMenuItemClassName}
+            className={itemClassName}
             disabled={signOut.pending}
             onClick={signOut.run}
             variant="destructive"
