@@ -307,7 +307,8 @@ class RealBackendTestCase: ShellTestCase {
         note("reply: longest new text by 3 s step \(lengths); grew while shown (streaming) \(grew); after \(Int(Date().timeIntervalSince(started))) s")
         sleep(3)
         screenshot("j4-reply")
-        dismissKeyboardIfUp(app)
+        dismissKeyboardIfUp(app, tapping: webText(app, RealBackendTestCase.prompt))
+        XCTAssertTrue(tab(app, .bots).waitForExistence(timeout: 5), "the tab bar did not come back after the reply")
         note("after sending: \(debugState(app))")
 
         // Bots, a Bot.

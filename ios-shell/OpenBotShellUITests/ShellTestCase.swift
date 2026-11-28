@@ -70,10 +70,16 @@ class ShellTestCase: XCTestCase {
         guard app.keyboards.firstMatch.exists else { return }
         note("the keyboard was up; putting it away")
         if let neutral = neutral, neutral.exists, neutral.isHittable { neutral.tap() }
-        if !app.keyboards.firstMatch.waitForNonExistence(timeout: 3) {
+        // A tap on an empty part of the page blurs the field (a page that does not scroll ignores a drag).
+        if !app.keyboards.firstMatch.waitForNonExistence(timeout: 2) {
+            app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+        }
+        if !app.keyboards.firstMatch.waitForNonExistence(timeout: 2) {
             app.webViews.firstMatch.swipeDown()
         }
-        _ = app.keyboards.firstMatch.waitForNonExistence(timeout: 3)
+        if !app.keyboards.firstMatch.waitForNonExistence(timeout: 3) {
+            note("the keyboard stayed up")
+        }
     }
 
     /// True in the video workflow: scenes are paced for watching and the background step is short.
