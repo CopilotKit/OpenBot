@@ -107,7 +107,14 @@ jobs:
       - name: Identify the simulator toolchain
         id: toolchain
         run: |
-          key="$(xcodebuild -version; xcrun --sdk iphonesimulator --show-sdk-build-version)"
+          # Read the same version tuple without starting Xcode while the simulator boots.
+          developer_dir="$(xcode-select -p)"
+          xcode_plist="$developer_dir/../version.plist"
+          sdk_plist="$developer_dir/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Library/CoreServices/SystemVersion.plist"
+          version="$(plutil -extract CFBundleShortVersionString raw "$xcode_plist")"
+          build="$(plutil -extract ProductBuildVersion raw "$xcode_plist")"
+          sdk_build="$(plutil -extract ProductBuildVersion raw "$sdk_plist")"
+          key="$(printf 'Xcode %s\nBuild version %s\n%s' "$version" "$build" "$sdk_build")"
           echo "key=$(printf '%s' "$key" | shasum -a 256 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Restore the compiled UI tests
         id: products
@@ -200,21 +207,29 @@ jobs:
           echo "STARTED=$started" >> "$GITHUB_ENV"
           xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force artifacts/video/demo-tour.mp4 > artifacts/record.log 2>&1 &
           recorder=$!
+          stop_recording() {
+            kill -INT "$recorder" 2>/dev/null || true
+            wait "$recorder" || true
+          }
+          trap 'stop_recording; exit 130' INT TERM
           sleep 2
           set +e
           tests=(DerivedData-Debug/Build/Products/*.xctestrun)
           xcodebuild test-without-building -xctestrun "${tests[0]}" -destination "platform=iOS Simulator,id=$SIM_UDID" \
-            -parallel-testing-enabled NO -only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour > xcodebuild-demo.log 2>&1
+            -parallel-testing-enabled NO -only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour > xcodebuild-demo.log 2>&1 &
+          wait $!
           status=$?
-          # SIGINT and wait, so the recorder writes a playable file.
-          kill -INT "$recorder"
-          wait "$recorder"
+          trap - INT TERM
+          stop_recording
           grep -E "Test Case|error:|SHELL_NOTE" xcodebuild-demo.log
           exit $status
 
       - name: Report mock handoff progress
-        if: failure()
+        if: failure() || cancelled()
         run: |
+          if [ -f xcodebuild-demo.log ]; then
+            grep -E 'SHELL_NOTE testDemoTour: (scene|video-mark)' xcodebuild-demo.log || true
+          fi
           container="$(xcrun simctl get_app_container "$SIM_UDID" ai.openbot.shell data)" || exit 0
           python3 ios-shell/ci/demo_handoff.py "$container/Documents/diagnostics.jsonl"
 
