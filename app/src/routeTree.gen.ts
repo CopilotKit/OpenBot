@@ -31,6 +31,7 @@ import { Route as AuthedAppRoutinesRouteImport } from './routes/_authed/_app/rou
 import { Route as AuthedAppSkillsRouteImport } from './routes/_authed/_app/skills'
 import { Route as AuthedAppTeamBotsRouteImport } from './routes/_authed/_app/team-bots'
 import { Route as AuthedAppTeamsRouteImport } from './routes/_authed/_app/teams'
+import { Route as AuthedAppWindowsComputerRouteImport } from './routes/_authed/_app/windows-computer'
 import { Route as AuthedAdminIndexRouteImport } from './routes/_authed/admin/index'
 import { Route as AuthedAdminApprovalsRouteImport } from './routes/_authed/admin/approvals'
 import { Route as AuthedAdminAuditRouteImport } from './routes/_authed/admin/audit'
@@ -255,6 +256,12 @@ const AuthedAppTeamsRoute = AuthedAppTeamsRouteImport.update({
   path: '/teams',
   getParentRoute: () => AuthedAppRoute,
 } as any)
+const AuthedAppWindowsComputerRoute =
+  AuthedAppWindowsComputerRouteImport.update({
+    id: '/windows-computer',
+    path: '/windows-computer',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
 const AuthedAdminIndexRoute = AuthedAdminIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -906,6 +913,7 @@ export interface FileRoutesByFullPath {
   '/skills': typeof AuthedAppSkillsRoute
   '/team-bots': typeof AuthedAppTeamBotsRoute
   '/teams': typeof AuthedAppTeamsRoute
+  '/windows-computer': typeof AuthedAppWindowsComputerRoute
   '/admin/approvals': typeof AuthedAdminApprovalsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -1039,6 +1047,7 @@ export interface FileRoutesByTo {
   '/skills': typeof AuthedAppSkillsRoute
   '/team-bots': typeof AuthedAppTeamBotsRoute
   '/teams': typeof AuthedAppTeamsRoute
+  '/windows-computer': typeof AuthedAppWindowsComputerRoute
   '/admin/approvals': typeof AuthedAdminApprovalsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -1176,6 +1185,7 @@ export interface FileRoutesById {
   '/_authed/_app/skills': typeof AuthedAppSkillsRoute
   '/_authed/_app/team-bots': typeof AuthedAppTeamBotsRoute
   '/_authed/_app/teams': typeof AuthedAppTeamsRoute
+  '/_authed/_app/windows-computer': typeof AuthedAppWindowsComputerRoute
   '/_authed/admin/approvals': typeof AuthedAdminApprovalsRoute
   '/_authed/admin/audit': typeof AuthedAdminAuditRoute
   '/_authed/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -1315,6 +1325,7 @@ export interface FileRouteTypes {
     | '/skills'
     | '/team-bots'
     | '/teams'
+    | '/windows-computer'
     | '/admin/approvals'
     | '/admin/audit'
     | '/admin/boundaries'
@@ -1448,6 +1459,7 @@ export interface FileRouteTypes {
     | '/skills'
     | '/team-bots'
     | '/teams'
+    | '/windows-computer'
     | '/admin/approvals'
     | '/admin/audit'
     | '/admin/boundaries'
@@ -1584,6 +1596,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/skills'
     | '/_authed/_app/team-bots'
     | '/_authed/_app/teams'
+    | '/_authed/_app/windows-computer'
     | '/_authed/admin/approvals'
     | '/_authed/admin/audit'
     | '/_authed/admin/boundaries'
@@ -1863,6 +1876,13 @@ declare module '@tanstack/react-router' {
       path: '/teams'
       fullPath: '/teams'
       preLoaderRoute: typeof AuthedAppTeamsRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/windows-computer': {
+      id: '/_authed/_app/windows-computer'
+      path: '/windows-computer'
+      fullPath: '/windows-computer'
+      preLoaderRoute: typeof AuthedAppWindowsComputerRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/admin/': {
@@ -2856,6 +2876,7 @@ interface AuthedAppRouteChildren {
   AuthedAppSkillsRoute: typeof AuthedAppSkillsRoute
   AuthedAppTeamBotsRoute: typeof AuthedAppTeamBotsRoute
   AuthedAppTeamsRoute: typeof AuthedAppTeamsRoute
+  AuthedAppWindowsComputerRoute: typeof AuthedAppWindowsComputerRoute
   AuthedAppIndexRoute: typeof AuthedAppIndexRoute
   AuthedAppCapabilitiesMemoryRoute: typeof AuthedAppCapabilitiesMemoryRoute
   AuthedAppCapabilitiesSkillsRoute: typeof AuthedAppCapabilitiesSkillsRoute
@@ -2914,6 +2935,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppSkillsRoute: AuthedAppSkillsRoute,
   AuthedAppTeamBotsRoute: AuthedAppTeamBotsRoute,
   AuthedAppTeamsRoute: AuthedAppTeamsRoute,
+  AuthedAppWindowsComputerRoute: AuthedAppWindowsComputerRoute,
   AuthedAppIndexRoute: AuthedAppIndexRoute,
   AuthedAppCapabilitiesMemoryRoute: AuthedAppCapabilitiesMemoryRoute,
   AuthedAppCapabilitiesSkillsRoute: AuthedAppCapabilitiesSkillsRoute,
