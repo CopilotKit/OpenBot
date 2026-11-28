@@ -58,15 +58,42 @@ final class DemoTourUITests: ShellTestCase {
         pause(1.2)
         scene("sign-in")
 
-        // The software keyboard: the tab bar hides, the message box and Send sit on it. Send, the
-        // reply (mock stack A runs with MOCK_REPLY=1), then a drag down puts the keyboard away.
+        // Home: the software keyboard comes up, the tab bar hides, the message box and Send sit on it.
         let keyboard = app.keyboards.firstMatch
         if focusComposer(app, composer) {
-            composer.typeText("What changed in competitor pricing?")
+            composer.typeText("Plan my week")
+            let send = webElement(app, label: "Send message")
+            if send.waitForExistence(timeout: 5) {
+                XCTAssertLessThanOrEqual(send.frame.maxY, keyboard.frame.minY + 1, "demo: Send is under the keyboard on Home")
+            }
+            pause(1.2)
+            dragPageDown(app)
+            note(keyboard.waitForNonExistence(timeout: 2) ? "demo: Home: the drag down put the keyboard away"
+                                                          : "demo: Home: the drag down left the keyboard up")
+            dismissKeyboardIfUp(app)
+        } else {
+            XCTFail("demo: no keyboard on Home")
+        }
+        scene("home-keyboard")
+
+        // Conversations, one conversation: send a message, the reply (mock stack A runs with
+        // MOCK_REPLY=1; a new conversation from Home is one the mock cannot keep), then a drag down
+        // puts the keyboard away.
+        tab(app, .conversations).tap()
+        let row = webText(app, "Competitor pricing notes")
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        pause(1)
+        row.tap()
+        let answer = webText(app, "All three moved to per-seat pricing this year.")
+        _ = answer.waitForExistence(timeout: 15)
+        pause(1)
+        let box = app.webViews.textViews.firstMatch
+        if box.waitForExistence(timeout: 5), focusComposer(app, box) {
+            box.typeText("What changed since?")
             let send = webElement(app, label: "Send message")
             if send.waitForExistence(timeout: 5) {
                 XCTAssertLessThanOrEqual(send.frame.maxY, keyboard.frame.minY + 1, "demo: Send is under the keyboard")
-                pause(1)
+                pause(0.8)
                 send.tap()
             } else {
                 XCTFail("demo: no Send button")
@@ -76,27 +103,14 @@ final class DemoTourUITests: ShellTestCase {
             pause(1.5)
             if keyboard.exists {
                 dragPageDown(app)
-                note(keyboard.waitForNonExistence(timeout: 2)
-                     ? "demo: the drag down put the keyboard away"
-                     : "demo: the drag down left the keyboard up")
+                note(keyboard.waitForNonExistence(timeout: 2) ? "demo: the drag down put the keyboard away"
+                                                              : "demo: the drag down left the keyboard up")
             }
             dismissKeyboardIfUp(app)
             pause(1)
         } else {
-            XCTFail("demo: no keyboard")
+            XCTFail("demo: no keyboard in the conversation")
         }
-        scene("send")
-
-        // Conversations, one conversation.
-        tab(app, .conversations).tap()
-        let row = webText(app, "Competitor pricing notes")
-        XCTAssertTrue(row.waitForExistence(timeout: 15))
-        pause(1)
-        row.tap()
-        let answer = webText(app, "All three moved to per-seat pricing this year.")
-        _ = answer.waitForExistence(timeout: 15)
-        pause(1.2)
-        dismissKeyboardIfUp(app, tapping: answer)
         scene("conversation")
 
         // Bots, one Bot.

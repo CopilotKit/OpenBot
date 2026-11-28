@@ -130,6 +130,12 @@ jobs:
           for _ in $(seq 1 60); do
             if [ "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3010/api/auth/shell/config?platform=ios' || true)" = 200 ]; then
               echo "mock stack A is up"
+              # Warm the mock (its first answers took seconds, and the web app waited on them).
+              for _ in 1 2 3; do
+                for path in deployment people/me conversations "bots?limit=50" plan; do
+                  curl -s -o /dev/null -b better-auth.session_token=mock "http://127.0.0.1:3010/api/v2/organizations/default/$path" || true
+                done
+              done
               exit 0
             fi
             sleep 1

@@ -187,6 +187,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         loadingCheck?.cancel()
         diagnostics.log("page-load-begin", ["reason": reason])
         if !model.pageLoading { model.skeletonsShown += 1 }
+        pageSaidReady = false
         model.pageLoading = true
     }
 
@@ -206,8 +207,15 @@ final class ShellController: NSObject, WebControllerDelegate {
 
     /// After didFinish, without a `ready` (an older web app): ends the skeleton once the document is
     /// complete and the body has something in it, checking a few times.
+    /// The page said `ready` since the skeleton went up. A web app can say it before it has drawn
+    /// anything (it did, waiting on slow first requests): the skeleton then waits for one piece of
+    /// visible text instead of three.
+    private var pageSaidReady = false
+
     private func checkPageDrawn(attempt: Int = 0) {
         guard model.pageLoading else { return }
+        if attempt == 0 { loadingCheck?.cancel() }
+        let needed = pageSaidReady ? 1 : 3
         // Drawn: the document is complete and at least three pieces of text are really on screen:
         // inside the viewport, not hidden, not faded out, more than 4 px (screen-reader-only text
         // measures 1 px).
@@ -216,7 +224,7 @@ final class ShellController: NSObject, WebControllerDelegate {
           if (document.readyState !== 'complete' || !document.body) return false;
           var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
           var seen = 0, node, range = document.createRange();
-          while ((node = walker.nextNode()) && seen < 3) {
+          while ((node = walker.nextNode()) && seen < \(needed)) {
             if (!node.textContent.trim()) continue;
             range.selectNodeContents(node);
             var r = range.getBoundingClientRect();
@@ -231,7 +239,7 @@ final class ShellController: NSObject, WebControllerDelegate {
             }
             if (visible && opacity > 0.5) seen++;
           }
-          return seen >= 3;
+          return seen >= \(needed);
         })()
         """
         web.webView.evaluateJavaScript(script) { [weak self] result, _ in
@@ -539,7 +547,9 @@ final class ShellController: NSObject, WebControllerDelegate {
         let type = message["type"] as? String ?? ""
         switch type {
         case "ready":
-            endPageLoad("ready")
+            // The skeleton goes once the page really shows something (`checkPageDrawn`).
+            pageSaidReady = true
+            checkPageDrawn()
             refreshChrome()
         case "route":
             let path = message["path"] as? String ?? ""
