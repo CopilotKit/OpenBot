@@ -3,7 +3,6 @@ package ai.openbot.shell.test
 import ai.openbot.shell.R
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
-import androidx.test.uiautomator.Until
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -18,9 +17,10 @@ class ShellFlowTest : ShellTestBase() {
 
     private fun homeRendered(timeoutMs: Long = 30_000): Boolean = waitPageText(homeText, timeoutMs)
 
-    private fun accountButton() = device.findObject(By.text("Account"))
-        ?: device.wait(Until.findObject(By.desc("Account")), 5_000)
-        ?: device.findObject(By.text("Account"))
+    private fun accountIsVisible(): Boolean {
+        val button = webRect("Account") ?: bounds(waitWebObject("Account", 5_000)) ?: return false
+        return layoutBounds(R.id.openbot_webview)?.contains(button) == true
+    }
 
     private fun checkTabBar(moment: String) {
         val conversations = tab(Tab.CONVERSATIONS)
@@ -140,7 +140,7 @@ class ShellFlowTest : ShellTestBase() {
         val commitsAtStart = stateValue("commits")
         screenshot("1-home")
         assertNoWebNavigation("home")
-        check(accountButton() != null, "no Account button on Home")
+        check(accountIsVisible(), "no Account button on Home")
 
         tab(Tab.CONVERSATIONS)?.click()
         for (title in listOf("Competitor pricing notes", "Quarterly forecast", "Trip to Lisbon")) {
@@ -160,7 +160,7 @@ class ShellFlowTest : ShellTestBase() {
             web.swipe(androidx.test.uiautomator.Direction.DOWN, 0.8f)
         }
         assertNoWebNavigation("conversations")
-        check(accountButton() != null, "no Account button on Conversations")
+        check(accountIsVisible(), "no Account button on Conversations")
 
         check(tapWeb("Quarterly forecast"), "no 'Quarterly forecast' row to tap")
         val opened = waitPageText("Here is the first draft.", 25_000) || waitPageText("Can you draft the quarterly forecast?", 2_000)
@@ -202,7 +202,7 @@ class ShellFlowTest : ShellTestBase() {
         sleep(1_000)
         screenshot("4-bots")
         assertNoWebNavigation("bots")
-        check(accountButton() != null, "no Account button on Bots")
+        check(accountIsVisible(), "no Account button on Bots")
 
         tab(Tab.HOME)?.click()
         check(homeRendered(20_000), "Home did not come back")
@@ -325,10 +325,10 @@ class ShellFlowTest : ShellTestBase() {
         check(waitFor("sign_in_button", 5_000)?.isEnabled == true, "the Sign in button is not usable after the lock lifted")
         screenshot("after-offline-lifted")
 
-        // Signed in, offline at launch for 6 s: the tabs and Home come back by themselves.
+        // Leave time for UiAutomator to attach on a cold signed-in launch and observe the lock.
         if (!launchSignedIn("sign-in")) return
         sleep(3_000)
-        launch(MOCK_A, "signed-in-timed", reset = false, extras = mapOf("openbot.force_offline_seconds" to "6"))
+        launch(MOCK_A, "signed-in-timed", reset = false, extras = mapOf("openbot.force_offline_seconds" to "15"))
         check(waitFor("offline_lock", 5_000) != null, "no lock while signed in and offline")
         screenshot("signed-in-offline-lock")
         check(waitGone("offline_lock", 20_000), "the lock did not lift while signed in")
