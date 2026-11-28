@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   type DecisionAnswer,
@@ -116,6 +122,23 @@ test("the last row takes words instead, and Enter in it sends them", async () =>
   );
   expect(sent).toEqual([[OTHER, "Neither, wait for Monday"]]);
 });
+
+test.each([{ isComposing: true }, { keyCode: 229 }])(
+  "confirming a composed character does not send the answer (%j)",
+  async (ime) => {
+    const sent: [string, string][] = [];
+    const view = render(card(sent, { other: true }));
+    const user = userEvent.setup({ document });
+    const field = view.getByRole("textbox", { name: "Your answer" });
+    await user.type(field, "Wait for Monday");
+
+    fireEvent.keyDown(field, { key: "Enter", ...ime });
+    expect(sent).toEqual([]);
+
+    await user.keyboard("{Enter}");
+    expect(sent).toEqual([[OTHER, "Wait for Monday"]]);
+  },
+);
 
 test("the words row needs words before it can be sent", async () => {
   const sent: [string, string][] = [];
