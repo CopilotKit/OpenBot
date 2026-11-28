@@ -828,6 +828,104 @@ describe("the app's swipe back", () => {
   });
 });
 
+describe("a Back while a list's scroll is being put back", () => {
+  /** Frames the page asks for, run only when the test says: the scroll's restore is held meanwhile. */
+  let frames: FrameRequestCallback[] = [];
+  let realFrame: typeof window.requestAnimationFrame;
+  beforeEach(() => {
+    frames = [];
+    realFrame = window.requestAnimationFrame;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    }) as typeof window.requestAnimationFrame;
+  });
+  afterEach(() => {
+    window.requestAnimationFrame = realFrame;
+  });
+  const runFrames = () =>
+    act(() => {
+      const now = frames;
+      frames = [];
+      for (const frame of now) frame(performance.now());
+    });
+  const routesOf = (heard: unknown[]) =>
+    heard
+      .filter((m) => (m as { type: string }).type === "route")
+      .map((m) => (m as { path: string; depth: number }).path);
+  const back = () =>
+    act(() => {
+      window.dispatchEvent(new CustomEvent("openbot:back"));
+    });
+
+  /** The Chats list scrolled down, then a conversation opened from it, then Back: the hold. */
+  async function holding() {
+    inShell(true);
+    const heard = listen();
+    serve(
+      Array.from({ length: 30 }, (_, index) =>
+        channel(`c-${index}`, `Conversation ${index}`),
+      ),
+    );
+    const { view, router } = renderApp("/conversations");
+    await view.findByText("Conversation 29");
+    const list = view.container.querySelector(
+      '[data-slot="section-panel"] [data-slot="sidebar-content"]',
+    ) as HTMLElement;
+    list.scrollTop = 400;
+    await act(() =>
+      router.navigate({
+        to: "/channel/$channelId",
+        params: { channelId: "c-3" },
+      }),
+    );
+    await view.findByText("A conversation");
+    await back();
+    await view.findByText("Conversation 29");
+    await settleReactWork();
+    return { heard, view, router };
+  }
+
+  test("a second Back at the root does nothing, and the held route goes out once", async () => {
+    const { heard, router } = await holding();
+    // Held: the list has not been put back yet, so the root's route has not been said.
+    expect(routesOf(heard).at(-1)).toBe("/channel/c-3");
+    // Android's Back still read canGoBack true and asks again.
+    await back();
+    await settleReactWork();
+    expect(router.state.location.pathname).toBe("/conversations");
+    await runFrames();
+    await waitFor(() =>
+      expect(routesOf(heard)).toEqual([
+        "/conversations",
+        "/channel/c-3",
+        "/conversations",
+      ]),
+    );
+    await runFrames();
+    await settleReactWork();
+    expect(
+      routesOf(heard).filter((path) => path === "/conversations"),
+    ).toHaveLength(2);
+  });
+
+  test("a tab tap during the hold is not lost: the tapped tab is shown and reported", async () => {
+    const { heard, view, router } = await holding();
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("openbot:open", {
+          detail: { path: "/bots" },
+          cancelable: true,
+        }),
+      );
+    });
+    await view.findByText("The roster");
+    await runFrames();
+    await waitFor(() => expect(routesOf(heard).at(-1)).toBe("/bots"));
+    expect(router.state.location.pathname).toBe("/bots");
+  });
+});
+
 describe("the Bots tab in the shell", () => {
   test("is the sidebar's Bots panel, with New Bot and the account in its title's row", async () => {
     inShell(true);
