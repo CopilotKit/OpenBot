@@ -9,8 +9,14 @@
 
 export const DOWNLOAD_CONTENT_TYPE = "application/octet-stream";
 
+// A surrogate with no partner is not a character. `encodeURIComponent` throws on one, and a file
+// name read from a Windows disk or a Bot's own text can carry it.
+const LONE_SURROGATE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 function headerSafeFilename(name: string): string {
-  const cleaned = Array.from(name.normalize("NFC"), (character) => {
+  const wellFormed = name.replace(LONE_SURROGATE, "_");
+  const cleaned = Array.from(wellFormed.normalize("NFC"), (character) => {
     const code = character.codePointAt(0) ?? 0;
     // Header injection is removed before any quoting: a quote or backslash would otherwise escape
     // the quoted parameter and let a filename carry its own directive.
