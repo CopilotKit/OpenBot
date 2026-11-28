@@ -97,10 +97,16 @@ final class ShellController: NSObject, WebControllerDelegate {
         #if DEBUG
         if config.resetDataStore {
             steps.append { [weak self] next in
-                let store = WKWebsiteDataStore.default()
+                guard let self = self else { return }
+                let store = self.web.webView.configuration.websiteDataStore
+                let current = self.config.dataStoreID
                 store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {
-                    self?.diagnostics.log("test-hook", ["hook": "reset-data-store"])
-                    DispatchQueue.main.async { next() }
+                    // Other servers' stores from earlier tests go too.
+                    WKWebsiteDataStore.fetchAllDataStoreIdentifiers { ids in
+                        for id in ids where id != current { WKWebsiteDataStore.remove(forIdentifier: id) { _ in } }
+                        self.diagnostics.log("test-hook", ["hook": "reset-data-store", "otherStores": ids.count])
+                        DispatchQueue.main.async { next() }
+                    }
                 }
             }
         }
@@ -404,14 +410,21 @@ final class ShellController: NSObject, WebControllerDelegate {
         web.stop()
         model.signIn = .idle
         model.addressChecking = true
-        // Everything the web view stored, for every site: nothing of one server carries to the other.
-        WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) { [weak self] in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.diagnostics.log("site-data-cleared", ["reason": "server-switch", "all": true])
-                ShellConfig.saveSelfHosted(origin)
-                self.model.addressChecking = false
-                self.onRestart?()
+        // Each server has a data store of its own: the new one is simply another store, nothing to
+        // wait for. The old one is removed once its web view is gone.
+        let oldStore = config.dataStoreID
+        ShellConfig.saveSelfHosted(origin)
+        model.addressChecking = false
+        onRestart?()
+        ShellController.removeStore(oldStore, attempt: 1)
+    }
+
+    /// Removes a server's data store in the background (it fails while a web view still uses it:
+    /// tried again a few times).
+    static func removeStore(_ id: UUID, attempt: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double(attempt)) {
+            WKWebsiteDataStore.remove(forIdentifier: id) { error in
+                if error != nil, attempt < 5 { removeStore(id, attempt: attempt + 1) }
             }
         }
     }
@@ -516,9 +529,14 @@ final class ShellController: NSObject, WebControllerDelegate {
             // at a cold launch, see decideLaunchState). The server refuses `enter` for a web view
             // holding another person's session, so the site's data goes first, and `enter` loads
             // only once that has finished.
-            clearSiteData(reason: "before-enter") { [weak self] in
+            clearSiteData(reason: "before-enter") { [weak self] finished in
                 guard let self = self, self.model.signIn == .entering else { return }
-                load()
+                if finished {
+                    load()
+                } else {
+                    // Never sign in on unknown state: the leftover session may still be there.
+                    self.failSignIn("Sign-in didn't finish. Try again.")
+                }
             }
         }
     }
@@ -582,20 +600,21 @@ final class ShellController: NSObject, WebControllerDelegate {
     /// that is still running is waited for, so a sign-in that starts during sign-out's clear loads
     /// `enter` only after it.
     private var siteDataClearWaiters: [() -> Void]?
-    private func clearSiteData(reason: String, completion: (() -> Void)? = nil) {
-        // Never left waiting: WebKit once did not call back at all (run 46164083101, right after the
-        // app was built again for another server). After 4 s the caller goes ahead.
+    /// Calls back with true once the clear has finished, or false after 4 s without an answer from
+    /// WebKit (it did not answer once, right after a change of server in run 46164083101, when all
+    /// servers shared 1 store; each now has its own). The caller then fails rather than going on.
+    private func clearSiteData(reason: String, completion: ((Bool) -> Void)? = nil) {
         var completion = completion
         if let inner = completion {
             var called = false
-            let once = { [weak self] (timedOut: Bool) in
+            let once = { [weak self] (finished: Bool) in
                 guard !called else { return }
                 called = true
-                if timedOut { self?.diagnostics.log("site-data-clear-timeout", ["reason": reason]) }
-                inner()
+                if !finished { self?.diagnostics.log("site-data-clear-timeout", ["reason": reason]) }
+                inner(finished)
             }
-            completion = { once(false) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { once(true) }
+            completion = { _ in once(true) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { once(false) }
         }
         if siteDataClearWaiters != nil {
             // One clear at a time; a later caller waits for this one and then clears again.
@@ -627,7 +646,7 @@ final class ShellController: NSObject, WebControllerDelegate {
                         self.model.siteDataClears += 1
                         let waiters = self.siteDataClearWaiters ?? []
                         self.siteDataClearWaiters = nil
-                        completion?()
+                        completion?(true)
                         waiters.forEach { $0() }
                     }
                 }

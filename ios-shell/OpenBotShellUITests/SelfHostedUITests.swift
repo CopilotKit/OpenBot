@@ -118,6 +118,16 @@ final class SelfHostedUITests: ShellTestCase {
         XCTAssertTrue(app.buttons["self-hosted-toggle"].waitForExistence(timeout: 20), "Use OpenBot Cloud did not bring back the default first screen")
         XCTAssertEqual(stateValue(app, "server"), "127.0.0.1:3010")
         screenshot("5-back-on-cloud")
+
+        // Nothing of the self-hosted OpenBot survived: choosing it again starts signed out.
+        open(app)
+        submit(app, Self.selfHosted)
+        XCTAssertTrue(app.staticTexts["server-host"].waitForExistence(timeout: 20))
+        sleep(3)
+        XCTAssertFalse(tab(app, .home).exists, "the self-hosted session survived the change to Cloud and back")
+        XCTAssertEqual(stateValue(app, "phase"), "signedOut")
+        app.buttons["use-cloud"].tap()
+        XCTAssertTrue(app.buttons["self-hosted-toggle"].waitForExistence(timeout: 20))
         app.buttons["sign-in-button"].tap()
         XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 45), "signing in to Cloud did not reach the tabs")
         XCTAssertEqual(stateValue(app, "server"), "127.0.0.1:3010")

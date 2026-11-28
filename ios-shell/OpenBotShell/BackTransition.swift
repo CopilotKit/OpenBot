@@ -54,6 +54,13 @@ final class BackTransition {
     private var latestAskedAt = Date.distantPast
     private var lastRouteAt = Date.distantPast
     private var refreshWork: DispatchWorkItem?
+    /// A push that went ahead before its picture arrived: filled in when it does (same page).
+    private var pendingFill: (tab: String, index: Int, routeAt: Date)?
+
+    /// A finger came down on the page: a picture now, before a tap can change the page.
+    func touchDown() {
+        refresh(after: 0)
+    }
 
     func refresh(after seconds: TimeInterval) {
         refreshWork?.cancel()
@@ -62,8 +69,16 @@ final class BackTransition {
             let config = WKSnapshotConfiguration()
             config.afterScreenUpdates = false
             let asked = Date()
+            let routeAtAsk = self.lastRouteAt
             webView.takeSnapshot(with: config) { [weak self] image, _ in
-                guard let self = self, let image = image, asked >= self.lastRouteAt else { return }
+                guard let self = self, let image = image else { return }
+                if let pending = self.pendingFill, pending.routeAt == routeAtAsk,
+                   pending.index < (self.stacks[pending.tab]?.count ?? 0) {
+                    self.stacks[pending.tab]?[pending.index] = image
+                    self.pendingFill = nil
+                    return
+                }
+                guard routeAtAsk == self.lastRouteAt else { return }
                 self.latest = image
                 self.latestAskedAt = asked
             }
@@ -75,9 +90,11 @@ final class BackTransition {
     /// The page is about to show a new page in this tab: keep the picture of what is on screen now,
     /// at once, so the page can go ahead.
     func willPush(tab: String, completion: @escaping () -> Void) {
-        refreshWork?.cancel()
-        // No fresh picture of this page: no slide for it later (better than the wrong page).
-        stacks[tab, default: []].append(latestAskedAt >= lastRouteAt ? latest : nil)
+        // No fresh picture of this page yet: the one asked for at touch-down fills it in when it
+        // comes; without one, no slide for it later (better than the wrong page).
+        let fresh = latestAskedAt >= lastRouteAt ? latest : nil
+        stacks[tab, default: []].append(fresh)
+        if fresh == nil { pendingFill = (tab, (stacks[tab]?.count ?? 1) - 1, lastRouteAt) }
         latest = nil
         completion()
     }
@@ -192,5 +209,16 @@ final class BackTransition {
         UIView.animate(withDuration: animated ? 0.15 : 0, animations: { view.alpha = 0 }) { _ in
             view.removeFromSuperview()
         }
+    }
+}
+
+/// Reports every touch-down on the web view and then steps aside (it never recognizes): the moment
+/// to take the picture of the page a tap is about to leave, before the page changes.
+final class TouchDownRecognizer: UIGestureRecognizer {
+    var onTouchDown: (() -> Void)?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        onTouchDown?()
+        state = .failed
     }
 }

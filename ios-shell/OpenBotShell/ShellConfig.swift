@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Where the app points and which test hooks are on, read once at launch.
@@ -168,6 +169,20 @@ struct ShellConfig {
         } else {
             UserDefaults.standard.removeObject(forKey: selfHostedKey)
         }
+    }
+
+    /// The web view's own data store for this server (iOS 17 `WKWebsiteDataStore(forIdentifier:)`):
+    /// a stable id derived from the origin, so each server, Cloud included, keeps its cookies and
+    /// storage apart, and changing server is simply another store.
+    var dataStoreID: UUID { ShellConfig.dataStoreID(for: baseURL) }
+
+    static func dataStoreID(for origin: URL) -> UUID {
+        var digest = Array(SHA256.hash(data: Data(("openbot-shell-store:" + origin.absoluteString).utf8)).prefix(16))
+        digest[6] = (digest[6] & 0x0F) | 0x50  // version 5-style
+        digest[8] = (digest[8] & 0x3F) | 0x80  // RFC 4122 variant
+        let t = (digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7],
+                 digest[8], digest[9], digest[10], digest[11], digest[12], digest[13], digest[14], digest[15])
+        return UUID(uuid: t)
     }
 
     var baseHost: String { baseURL.host?.lowercased() ?? "" }

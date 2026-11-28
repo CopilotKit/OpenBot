@@ -60,8 +60,9 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         self.diagnostics = diagnostics
 
         let configuration = WKWebViewConfiguration()
-        // Persistent store, so cookies and localStorage survive a relaunch like they do in Safari.
-        configuration.websiteDataStore = WKWebsiteDataStore.default()
+        // A persistent store of this server's own, so cookies and localStorage survive a relaunch like
+        // they do in Safari, and nothing of one server is seen by another.
+        configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: config.dataStoreID)
         // Audio and video play in the page instead of jumping to the full-screen player.
         configuration.allowsInlineMediaPlayback = true
         // Appended to the Safari-like UA: the web app recognizes the shell by it too.
@@ -114,6 +115,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         hideKeyboardAccessory(when: "init")
         installKeyboardDragDismiss()
         installBackSwipe()
+        installTouchDown()
         // Also sees the page's own route changes, which no navigation delegate call reports.
         urlObservation = webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
             let url = webView.url
@@ -353,7 +355,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     func updateBack(canGoBack: Bool?, depth: Int? = nil, tab: String? = nil) {
         if let tab = tab { transition.route(tab: tab, depth: depth) }
         // A fresh picture of the new page once it has settled, for the next push.
-        transition.refresh(after: 0.6)
+        transition.refresh(after: 0.3)
         // The page has its new route: once it has drawn, a cover left by a back goes.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.transition.pageDrawn() }
         let mode = ShellBack.decide(canGoBack: canGoBack)
@@ -362,6 +364,16 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         webView.allowsBackForwardNavigationGestures = mode.usesWebKitGesture
         backSwipe?.isEnabled = !mode.usesWebKitGesture
         diagnostics.log("back-mode", ["mode": "\(mode)"])
+    }
+
+    private func installTouchDown() {
+        let touch = TouchDownRecognizer(target: nil, action: nil)
+        touch.cancelsTouchesInView = false
+        touch.delaysTouchesBegan = false
+        touch.delaysTouchesEnded = false
+        touch.delegate = self
+        touch.onTouchDown = { [weak self] in self?.transition.touchDown() }
+        webView.addGestureRecognizer(touch)
     }
 
     private func installBackSwipe() {
