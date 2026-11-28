@@ -57,9 +57,11 @@ What is native:
   `canGoBack` (production today) the web view's own back gesture works as before, with the guards
   above.
 - **The slide back** (`BackTransition.swift`; 1 live web view, the web app still owning the stacks):
-  - For each tab the app keeps a picture of every page under the current one, taken when the page
-    says `will-navigate` (direction "push") and before it lets the page go on (`openbot:navigate-ok`;
-    the page waits 120 ms at most). `route.depth` trims or pads that list.
+  - For each tab the app keeps a picture of every page under the current one. The picture is taken
+    when a finger comes down on the page and again after each route settles, and is filed under the
+    page when it says `will-navigate` (direction "push"); a picture taken when `will-navigate`
+    arrives would be too late (the page waits for `openbot:navigate-ok` 120 ms at most). A picture
+    of another page is never used: no slide instead. `route.depth` trims or pads the list.
   - A swipe from the left edge moves the live web view with the finger over the previous page's
     picture (moved 30% left, dimmed, the web view casting a shadow). Past a third of the width, or a
     quick flick, it completes: the picture goes on top, the app sends `openbot:back`, and the picture
@@ -77,8 +79,11 @@ What is native:
   OpenBot that answers the config is accepted, each other case has its own sentence, and a
   certificate error never has a way past it. https only (a debug build also takes http for local
   development hosts). The chosen origin is kept in UserDefaults and is the app's own origin from
-  then on: changing it drops a sign-in in progress, clears everything the web view stored, then
-  builds the app again from scratch (`SceneDelegate.build`), so the bridge, the policy, `enter`,
+  then on. Each server, Cloud included, has a web view data store of its own
+  (`WKWebsiteDataStore(forIdentifier:)`, an id derived from the origin): changing server drops a
+  sign-in in progress, builds the app again from scratch on the new server's store
+  (`SceneDelegate.build`) and removes the old server's store in the background, so nothing of one
+  server is seen by another and nothing has to be waited for. The bridge, the policy, `enter`,
   the renewal, downloads, media and the lock screen all follow it. The first screen then says
   "Signs in to <host>" with a quiet "Use OpenBot Cloud"; the lock screen says "Trying to reach
   <host>" and, for a self-hosted OpenBot, offers "Change address". A self-hosted OpenBot signs in
