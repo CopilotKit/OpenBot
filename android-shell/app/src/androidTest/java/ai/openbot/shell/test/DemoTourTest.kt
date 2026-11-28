@@ -32,7 +32,7 @@ class DemoTourTest : ShellTestBase() {
         pause(800)
         step("sign in through the Custom Tab")
         // Native sign-in, the Custom Tab with the mock's page followed by hand, each step held.
-        if (!check(signInThroughCustomTab("tour", shots = false, paceMs = 1_500), "demo: signing in did not reach the tabs")) return
+        if (!check(signInThroughCustomTab("tour", shots = false, paceMs = 1_000), "demo: signing in did not reach the tabs")) return
         check(waitPageText("Start a conversation", 30_000), "demo: Home did not render")
         pause(1_500)
 
@@ -40,7 +40,11 @@ class DemoTourTest : ShellTestBase() {
         // The software keyboard: the bottom bar hides, the message box sits on the keyboard.
         waitComposerRect(10_000)?.let { box ->
             tapComposer(box)
-            if (waitKeyboard(true, 6_000)) {
+            // A tap too soon after the page rendered can focus the box without raising the keyboard.
+            if (!waitKeyboard(true, 3_000)) {
+                tapComposer(composerRect() ?: box)
+            }
+            if (waitKeyboard(true, 4_000)) {
                 pause(500)
                 typeOnKeyboard("what changed in pricing")
                 val typed = pageString("document.activeElement ? (document.activeElement.innerText || document.activeElement.value || '') : ''")
@@ -61,8 +65,8 @@ class DemoTourTest : ShellTestBase() {
         check(waitPageText("Competitor pricing notes", 15_000), "demo: no conversations")
         pause(1_200)
         tapWeb("Competitor pricing notes")
-        check(waitPageText("What do our three closest competitors charge?", 15_000) || waitPageText("per-seat", 1_000), "demo: the conversation did not open")
-        pause(1_800)
+        check(waitPageText("closest competitors", 15_000), "demo: the conversation did not open")
+        pause(1_500)
         if (keyboardShown()) screenshot("conversation-keyboard-still")
         dismissKeyboardIfUp()
         pause(600)

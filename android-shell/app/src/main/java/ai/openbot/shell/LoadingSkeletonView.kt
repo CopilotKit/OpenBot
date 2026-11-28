@@ -37,6 +37,8 @@ class LoadingSkeletonView @JvmOverloads constructor(
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        // Touches stop here while it shows: nothing taps the half-loaded page underneath.
+        isClickable = true
         setColors(dark = false, pageBackground = null)
     }
 

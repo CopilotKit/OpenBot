@@ -22,6 +22,9 @@
 
     <string name="loading">Loading</string>
 
+    <string name="download_started">Downloading %1$s</string>
+    <string name="download_unsupported">This file can\'t be saved from the app.</string>
+
     <string name="dialog_ok">OK</string>
     <string name="dialog_cancel">Cancel</string>
 </resources>

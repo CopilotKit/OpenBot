@@ -37,6 +37,25 @@ object SessionCookies {
         return count
     }
 
+    /**
+     * Expires every other cookie the base origin holds (names from CookieManager), except
+     * Cloudflare's clearance cookies (`cf_*`, `__cf*`), which are not the person's and whose loss
+     * only brings the bot check back. Answers how many.
+     */
+    fun clearOrigin(config: ShellConfig): Int {
+        val manager = CookieManager.getInstance()
+        val url = config.origin + "/"
+        val secure = config.baseScheme == "https"
+        val names = namesFor(config).filter { it !in NAMES && !it.startsWith("cf_") && !it.startsWith("__cf") }.distinct()
+        for (name in names) {
+            val attributes = "; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT" + if (secure) "; Secure" else ""
+            manager.setCookie(url, "$name=$attributes")
+            if (config.baseHost.contains('.')) manager.setCookie(url, "$name=$attributes; Domain=${config.baseHost}")
+        }
+        manager.flush()
+        return names.size
+    }
+
     /** Plants a session cookie (the debug hooks only). */
     fun set(config: ShellConfig, name: String, value: String, secure: Boolean, done: (Boolean) -> Unit) {
         val attributes = "; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax" + if (secure) "; Secure" else ""

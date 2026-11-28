@@ -130,6 +130,9 @@ class ShellActivity : AppCompatActivity() {
         started = true
         render()
         controller.start(savedInstanceState?.getString(STATE_PATH))
+        // A recreated activity (Don't keep activities, a theme flip while the Custom Tab was open)
+        // can be started by the callback itself.
+        if (intent?.action == ACTION_SIGN_IN_CALLBACK) controller.handleCallback(intent.data)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -160,9 +163,62 @@ class ShellActivity : AppCompatActivity() {
         if (controller.phase == Phase.SIGNED_IN) outState.putString(STATE_PATH, web.currentPath)
     }
 
+    /**
+     * Dark mode switched while open (uiMode is in configChanges, so the WebView keeps its page):
+     * the native screens take the new colours, and the page's are read again.
+     */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        recolorNativeScreens()
         render()
+        root.postDelayed({ if (started) controller.refreshChrome() }, 500)
+    }
+
+    private fun recolorNativeScreens() {
+        val ink = ContextCompat.getColor(this, R.color.ink)
+        val paper = ContextCompat.getColor(this, R.color.paper)
+        val secondary = ContextCompat.getColor(this, R.color.ink_secondary)
+        for (screen in listOf(signInScreen, lock)) screen.setBackgroundColor(paper)
+        findViewById<TextView>(R.id.sign_in_title).setTextColor(ink)
+        signInLine.setTextColor(secondary)
+        signInMessage.setTextColor(secondary)
+        findViewById<TextView>(R.id.offline_lock_heading).setTextColor(ink)
+        findViewById<TextView>(R.id.offline_lock_message).setTextColor(secondary)
+        findViewById<TextView>(R.id.support_email).setTextColor(ink)
+        for (button in listOf(signInButton, findViewById<MaterialButton>(R.id.retry_button))) {
+            button.backgroundTintList = ColorStateList.valueOf(ink)
+            button.setTextColor(paper)
+        }
+        signInProgress.setIndicatorColor(paper)
+    }
+
+    /**
+     * The page's downloads: http(s) to the system's DownloadManager with the page's cookies and
+     * user agent; blob: and data: addresses (made in the page) cannot be handed over, so they are
+     * declined with a short message.
+     */
+    fun download(url: String, userAgent: String?, contentDisposition: String?, mimeType: String?) {
+        val uri = Uri.parse(url)
+        val name = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
+        if (uri.scheme != "https" && uri.scheme != "http") {
+            diagnostics.log("download", mapOf("result" to "unsupported", "scheme" to uri.scheme))
+            android.widget.Toast.makeText(this, R.string.download_unsupported, android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val request = android.app.DownloadManager.Request(uri)
+                .setTitle(name)
+                .setMimeType(mimeType)
+                .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
+            if (userAgent != null) request.addRequestHeader("User-Agent", userAgent)
+            getSystemService(android.app.DownloadManager::class.java).enqueue(request)
+            diagnostics.log("download", mapOf("result" to "enqueued", "url" to Diagnostics.redact(url)))
+            android.widget.Toast.makeText(this, getString(R.string.download_started, name), android.widget.Toast.LENGTH_SHORT).show()
+        } catch (error: RuntimeException) {
+            diagnostics.log("download", mapOf("result" to "failed", "error" to error.javaClass.simpleName))
+            android.widget.Toast.makeText(this, R.string.download_unsupported, android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onDestroy() {

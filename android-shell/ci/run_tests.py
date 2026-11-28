@@ -66,6 +66,7 @@ PROBE = [
     "ProbeTest#testWatchdogCatchesSilentLoad",
     "ProbeTest#testSessionSurvivesRelaunch",
     "ProbeTest#testSessionSurvivesRelaunch_2_relaunch",
+    "ProbeTest#testBlankWindowOpenKeepsThePage",
 ]
 SUITE2 = [
     "ShellFlowTest#testFirstScreenIsNative",

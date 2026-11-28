@@ -28,7 +28,12 @@ What is native:
   dropped). `"callback":"https"`: the same, finishing on `https://my.open.bot/api/auth/shell/callback`,
   claimed as an App Link (`android:autoVerify="true"`); the app uses it only when Android reports the
   domain verified (API 31+, `DomainVerificationManager`), else the web sign-in. The ticket and the
-  verifier then go to `/api/auth/shell/enter` in the WebView, which sets the session cookie there.
+  verifier then go to `/api/auth/shell/enter` in the WebView, which sets the session cookie there;
+  that one request carries the header `OpenBot-Shell: android`, which the server requires for it
+  (login CSRF: a page cannot add the header, so it cannot plant a session in someone else's app). The
+  enter address is never kept as the page to reload or logged. The trampoline passes a callback on
+  only with a well-formed ticket for the pending sign-in's mode, so another app firing
+  `openbotshell://` neither ends the sign-in nor closes the Custom Tab.
   Every step has a timeout and an error line on the native screen; closing the Custom Tab returns
   quietly. While signed in, the hosted sign-in's renewal (`/api/auth/hosted/sign-in`) runs through the
   Custom Tab the same way when the server has the hand-off.
@@ -37,9 +42,13 @@ What is native:
   navigate with the `openbot:open` event and loads the page if nobody handled it. The page's `route`
   messages select the tab. One WebView for all tabs. The bar hides while the keyboard is up. The bar,
   the status bar and the navigation bar take the page's background colour and light or dark style.
-- **Signing out.** The web app's own sign-out: the shell notices the bridge's `signed-out` message or
-  the WebView landing on `/sign`, deletes the two session cookies (and no others) and shows its own
-  sign-in screen.
+- **Signing out.** The web app's own sign-out: the shell notices the bridge's `signed-out` message at
+  once, and a landing on `/sign` (a `route` message, or the URL of a web app without the bridge)
+  after a 2.5 s confirmation (still on `/sign`, or no session cookie: the web app's /sign sends a
+  signed-in person on to "/"). Then the two session cookies, the origin's other cookies (except
+  Cloudflare's `cf_*` clearance), its storage, the cache and the history go, and the native sign-in
+  shows. After signing in the history is cleared, and Back never goes to another site's page, `/sign`
+  or `/api/`.
 - **The loading skeleton.** `LoadingSkeletonView` (`loading_skeleton`, "Loading") is the web area's
   default state: it covers the area (between the status bar and the bottom bar, which stays usable)
   from the instant the area is shown (cold launch with a session, the return from the Custom Tab before
@@ -48,7 +57,9 @@ What is native:
   finished without one (a web app without the bridge, or a bot check that must stay usable), never
   shorter than 300 ms. The WebView's own background is the app's or the page's colour, never white. Neutral shapes in
   surface-variant tones with a left-to-right highlight (1.3 s, linear); still when animations are off.
-  A load failure hands over to the lock screen.
+  It swallows taps while it shows, ends at the latest 10 s after the page commits, and a load failure
+  hands it over to the lock screen. Every new document on the app's own origin brings it back until
+  the page shows text (8 s at most).
 - **The lock screen.** No network (`ConnectivityManager` default-network callback), or the web app
   did not load (a failed main-frame load, a 5xx main document, an SSL error, 20 s without a commit, or
   no answer to a sign-in step): one native screen covers everything (`offline_lock`), "Cannot reach the
@@ -68,12 +79,19 @@ What is native:
   `OpenBotShellAndroid.postMessage(json)`, which `bridge.ts` calls; messages are accepted from the
   main frame on the base origin only. No `addJavascriptInterface`. The user agent ends with
   ` OpenBotShell-Android/<version>`.
+- **Only the app's own origin locks the app.** A page of another site that fails to load (the
+  identity provider, a link) sends the WebView back to the last page of the app; retries load the last
+  page of the app, never another site's.
 - **The WebView's rules.** JavaScript and DOM storage on; persistent cookies, flushed when the app
   pauses; file and content access off; Safe Browsing on; mixed content never; `onReceivedSslError`
   always cancels. Links to other sites open in a Custom Tab; `intent://` goes to an app only when safe
   (parsed with `Intent.parseUri`, component and selector removed, browsable only, from a tap); `mailto:`
   and `tel:` to the system. File inputs use the photo picker for images and the document picker
-  otherwise (no media permission). The microphone and camera are granted only to the base origin,
+  otherwise (no media permission). `window.open` goes through a throwaway WebView that catches the
+  address: the app's own pages load in the one WebView, other sites in a Custom Tab, a blank window is
+  dropped (the app's page stays). JavaScript dialogs show only for the app's own pages, titled
+  OpenBot. Downloads: http(s) go to the system's DownloadManager with the page's cookies; `blob:` and
+  `data:` downloads cannot be handed over and are declined with a message. The microphone and camera are granted only to the base origin,
   after Android's own runtime permission. A dead renderer (`onRenderProcessGone`) gets a new WebView
   and a reload.
 
@@ -163,3 +181,18 @@ debug tests also read the page with JavaScript through the app's own WebView. Sc
 `screencap`, named `<test>--<moment>.png`.
 
 On a public repository Actions artifacts can be downloaded by any signed-in GitHub user.
+
+## Known gaps and release tasks
+
+- **Release signing.** There is no release signing config: `release` builds unsigned. A Play upload
+  needs an upload key and Play App Signing; then `/.well-known/assetlinks.json` on my.open.bot must
+  name `ai.openbot.shell` and the app signing certificate's SHA-256 fingerprint (TODO) for the https
+  callback.
+- **Other sites inside the WebView.** A script navigation (not a tap) to another site loads inside
+  the WebView with no address shown; the web sign-in fallback runs the identity provider there, and
+  Google may refuse its OAuth inside a WebView (`disallowed_useragent`). The hand-off (Custom Tab) is
+  the design that avoids both; the fallback stays for servers without it.
+- **Renewal of the hosted sign-in** waits for the server's exact URLs.
+- **Cloudflare's bot check** on my.open.bot appears in the WebView from CI (see PRODUCTION-PARITY.md);
+  the app shows it, never covers it, and never tries to get past it.
+

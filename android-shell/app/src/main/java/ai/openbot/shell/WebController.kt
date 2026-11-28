@@ -58,7 +58,7 @@ class WebController(
         fun allowsLeavingOrigin(): Boolean
 
         /** A main-frame load failed, answered 5xx, or never answered. */
-        fun onLoadFailed(detail: String)
+        fun onLoadFailed(detail: String, url: String?)
 
         /** A main-frame load committed and painted (onPageCommitVisible). */
         fun onCommit()
@@ -90,6 +90,20 @@ class WebController(
     var lastLoadFailed = false
         private set
     private var lastRequestedUrl: String? = null
+
+    /** The last page of the app's own origin (never a sign-in hand-off address): what a retry loads. */
+    var lastOwnUrl: String? = null
+        private set
+
+    private fun isShellAuth(url: String?): Boolean = url != null && config.isOwnOrigin(url) &&
+        (Uri.parse(url).path ?: "").startsWith("/api/auth/shell/")
+
+    private fun rememberOwn(url: String?) {
+        if (url == null || !config.isOwnOrigin(url)) return
+        val path = Uri.parse(url).path ?: "/"
+        if (path.startsWith("/api/") || path == "/sign" || path.startsWith("/sign/")) return
+        lastOwnUrl = url
+    }
     private var allowHostedOnce: String? = null
     private var currentNavigationFailed = false
     private var currentNavigationCommitted = false
@@ -100,7 +114,7 @@ class WebController(
         webView.stopLoading()
         lastLoadFailed = true
         currentNavigationFailed = true
-        delegate?.onLoadFailed("watchdog")
+        delegate?.onLoadFailed("watchdog", lastRequestedUrl)
     }
 
     val userAgent: String get() = webView.settings.userAgentString
@@ -122,8 +136,13 @@ class WebController(
         settings.allowContentAccess = false
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         // window.open loads in this one WebView, where the navigation policy decides.
-        settings.setSupportMultipleWindows(false)
+        // window.open goes through onCreateWindow, which decides where its address goes (a blank
+        // window.open never blanks the app's own WebView).
+        settings.setSupportMultipleWindows(true)
         settings.javaScriptCanOpenWindowsAutomatically = false
+        view.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            activity.download(url, userAgent, contentDisposition, mimeType)
+        }
         settings.safeBrowsingEnabled = true
         settings.userAgentString = WebSettings.getDefaultUserAgent(activity) + " OpenBotShell-Android/" + config.version
         CookieManager.getInstance().setAcceptCookie(true)
@@ -179,6 +198,7 @@ class WebController(
     /** Loads a page of the web app (or any URL) as a full page load. */
     fun load(url: String) {
         lastRequestedUrl = url
+        rememberOwn(url)
         lastLoadFailed = false
         diagnostics.log("load", mapOf("url" to Diagnostics.redact(url)))
         delegate?.onFullLoad()
@@ -230,11 +250,41 @@ class WebController(
         }
     }
 
+    /**
+     * Loads the hand-off's enter address with the header the server requires for it (login CSRF:
+     * only the app sends `OpenBot-Shell`). The address itself (ticket, verifier) is never kept or
+     * logged: what a retry or a renderer restart loads is the page it leads to.
+     */
+    fun loadEnter(url: String, to: String) {
+        lastRequestedUrl = config.url(to)
+        lastLoadFailed = false
+        diagnostics.log("load-enter", mapOf("to" to to))
+        delegate?.onFullLoad()
+        armWatchdog()
+        webView.loadUrl(url, mapOf("OpenBot-Shell" to "android"))
+    }
+
+    /** Back to the last page of the app's own origin (after another site's page failed to load). */
+    fun backToOwn() {
+        load(lastOwnUrl ?: (config.origin + "/"))
+    }
+
+    /** Whether Back has a page of the app to go to: never another site's page, /sign or /api/. */
+    fun canGoBackInApp(): Boolean {
+        val history = webView.copyBackForwardList()
+        val index = history.currentIndex
+        if (index < 1) return false
+        val previous = history.getItemAtIndex(index - 1)?.url ?: return false
+        if (!config.isOwnOrigin(previous)) return false
+        val path = Uri.parse(previous).path ?: "/"
+        return !(path.startsWith("/api/") || path == "/sign" || path.startsWith("/sign/"))
+    }
+
     fun retry() {
-        diagnostics.log("retry", mapOf("url" to Diagnostics.redact(lastRequestedUrl)))
+        diagnostics.log("retry", mapOf("url" to Diagnostics.redact(lastOwnUrl ?: lastRequestedUrl)))
         val current = webView.url
-        if (current == null || lastLoadFailed || current == "about:blank") {
-            load(lastRequestedUrl ?: config.origin + "/")
+        if (current == null || lastLoadFailed || current == "about:blank" || !config.isOwnOrigin(current)) {
+            load(lastOwnUrl ?: lastRequestedUrl?.takeIf { config.isOwnOrigin(it) } ?: (config.origin + "/"))
         } else {
             delegate?.onFullLoad()
             lastLoadFailed = false
@@ -324,7 +374,7 @@ class WebController(
         pageReady = false
         create()
         activity.onWebViewRecreated()
-        load(lastRequestedUrl ?: config.origin + "/")
+        load(lastOwnUrl ?: lastRequestedUrl?.takeUnless { isShellAuth(it) } ?: (config.origin + "/"))
     }
 
     fun destroy() {
@@ -448,7 +498,8 @@ class WebController(
             pageReady = false
             currentNavigationFailed = false
             currentNavigationCommitted = false
-            if (url != null && url != "about:blank") lastRequestedUrl = url
+            if (url != null && url != "about:blank" && !isShellAuth(url)) lastRequestedUrl = url
+            rememberOwn(url)
             diagnostics.log("main-frame-start", mapOf("url" to Diagnostics.redact(url)))
             armWatchdog()
             delegate?.onDocumentStarted(url)
@@ -479,6 +530,7 @@ class WebController(
         }
 
         override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+            rememberOwn(url)
             delegate?.onUrlChanged(url)
             activity.onBackStateChanged()
         }
@@ -491,7 +543,7 @@ class WebController(
                 "url" to Diagnostics.redact(request.url.toString()),
             ))
             if (!request.isForMainFrame) return
-            failMainFrame("error ${error.errorCode}")
+            failMainFrame("error ${error.errorCode}", request.url.toString())
         }
 
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
@@ -509,7 +561,7 @@ class WebController(
                     "setCookieNames" to (headers["set-cookie"]?.split(",")?.map { it.substringBefore("=").trim() } ?: emptyList<String>()),
                 ))
             }
-            if (request.isForMainFrame && status >= 500) failMainFrame("http $status")
+            if (request.isForMainFrame && status >= 500) failMainFrame("http $status", request.url.toString())
         }
 
         override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
@@ -517,7 +569,7 @@ class WebController(
             handler.cancel()
             diagnostics.log("ssl-error", mapOf("primaryError" to error.primaryError, "url" to Diagnostics.redact(error.url)))
             val loading = lastRequestedUrl
-            if (loading != null && Uri.parse(loading).host == Uri.parse(error.url).host) failMainFrame("ssl ${error.primaryError}")
+            if (loading != null && Uri.parse(loading).host == Uri.parse(error.url).host) failMainFrame("ssl ${error.primaryError}", error.url)
         }
 
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
@@ -535,11 +587,11 @@ class WebController(
         delegate?.onCommit()
     }
 
-    private fun failMainFrame(detail: String) {
+    private fun failMainFrame(detail: String, url: String?) {
         disarmWatchdog()
         currentNavigationFailed = true
         lastLoadFailed = true
-        delegate?.onLoadFailed(detail)
+        delegate?.onLoadFailed(detail, url)
     }
 
     private inner class Chrome : WebChromeClient() {
@@ -568,11 +620,58 @@ class WebController(
             callback.invoke(origin, false, false)
         }
 
-        override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean = false
+        /**
+         * window.open: a throwaway WebView catches the address the page asks for. The app's own
+         * pages load in the one WebView, other sites go to a Custom Tab, and a blank window (or one
+         * with no address within 5 s) is dropped. Without a tap, nothing opens.
+         */
+        override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
+            val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+            if (!isUserGesture) {
+                diagnostics.log("window-open", mapOf("result" to "no-gesture"))
+                return false
+            }
+            val popup = WebView(activity)
+            var handled = false
+            popup.webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
+                    if (!handled) {
+                        handled = true
+                        val target = request.url
+                        diagnostics.log("window-open", mapOf("url" to Diagnostics.redact(target.toString())))
+                        when {
+                            config.isOwnOrigin(target) -> load(target.toString())
+                            target.scheme == "https" || target.scheme == "http" -> activity.openInCustomTab(target, "window-open")
+                        }
+                    }
+                    main.post { v.destroy() }
+                    return true
+                }
+            }
+            main.postDelayed({
+                if (!handled) {
+                    diagnostics.log("window-open", mapOf("result" to "no-address"))
+                    popup.destroy()
+                }
+            }, 5_000)
+            transport.webView = popup
+            resultMsg.sendToTarget()
+            return true
+        }
+
+        /** Dialogs only from the app's own pages, titled OpenBot; other sites' are declined. */
+        private fun ownDialog(url: String?, result: JsResult): Boolean {
+            if (config.isOwnOrigin(url)) return true
+            diagnostics.log("js-dialog-declined", mapOf("origin" to (url?.let { Uri.parse(it).host } ?: "")))
+            result.cancel()
+            return false
+        }
 
         override fun onJsAlert(view: WebView, url: String?, message: String?, result: JsResult): Boolean {
             diagnostics.log("js-alert")
+            if (!ownDialog(url, result)) return true
             MaterialAlertDialogBuilder(activity)
+                .setTitle(R.string.app_name)
                 .setMessage(message)
                 .setPositiveButton(R.string.dialog_ok) { _, _ -> result.confirm() }
                 .setOnCancelListener { result.cancel() }
@@ -582,7 +681,9 @@ class WebController(
 
         override fun onJsConfirm(view: WebView, url: String?, message: String?, result: JsResult): Boolean {
             diagnostics.log("js-confirm")
+            if (!ownDialog(url, result)) return true
             MaterialAlertDialogBuilder(activity)
+                .setTitle(R.string.app_name)
                 .setMessage(message)
                 .setNegativeButton(R.string.dialog_cancel) { _, _ -> result.cancel() }
                 .setPositiveButton(R.string.dialog_ok) { _, _ -> result.confirm() }
@@ -593,8 +694,10 @@ class WebController(
 
         override fun onJsPrompt(view: WebView, url: String?, message: String?, defaultValue: String?, result: JsPromptResult): Boolean {
             diagnostics.log("js-prompt")
+            if (!ownDialog(url, result)) return true
             val field = EditText(activity).apply { setText(defaultValue ?: "") }
             MaterialAlertDialogBuilder(activity)
+                .setTitle(R.string.app_name)
                 .setMessage(message)
                 .setView(field)
                 .setNegativeButton(R.string.dialog_cancel) { _, _ -> result.cancel() }

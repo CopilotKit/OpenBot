@@ -204,9 +204,14 @@ class ShellController(
     private var callbackArrived = false
     private var debugTab = false
     private val enterTimeout = Runnable {
-        diagnostics.log("enter-timeout", mapOf("seconds" to SignInFlow.TIMEOUT_MS / 1000))
-        failSignIn(activity.getString(R.string.sign_in_too_long))
+        val signedIn = SessionCookies.present(config)
+        diagnostics.log("enter-timeout", mapOf("seconds" to SignInFlow.TIMEOUT_MS / 1000, "sessionCookie" to signedIn))
+        if (signedIn && phase == Phase.SIGNED_OUT && signIn == SignInStep.ENTERING) finishSignIn()
+        else failSignIn(activity.getString(R.string.sign_in_too_long))
     }
+
+    /** The page has said `ready` on the bridge since launch: its messages, not its URL, tell. */
+    private var bridgeSeen = false
 
     private enum class FailureSource { WEB, SIGN_IN }
 
@@ -412,20 +417,16 @@ class ShellController(
             return
         }
         val ticket = HandoffConfig.ticket(uri?.toString(), mode)
+        if (ticket == null || !TICKET.matches(ticket)) {
+            // Any app can send openbotshell://: a callback without a well-formed ticket for this
+            // sign-in's mode is dropped, and the sign-in this app started stays pending.
+            diagnostics.log("callback-ignored", mapOf("reason" to "no-ticket-or-wrong-callback"))
+            return
+        }
         val returnTo = PendingSignIn.returnTo
         callbackArrived = true
         tabOpen = false
         PendingSignIn.clear()
-        if (ticket == null) {
-            diagnostics.log("callback-ignored", mapOf("reason" to "no-ticket-or-wrong-callback"))
-            if (renewing) {
-                renewing = false
-            } else {
-                signIn = SignInStep.IDLE
-                signInMessage = activity.getString(R.string.sign_in_not_finished)
-            }
-            return
-        }
         enter(ticket, pair.verifier, returnTo)
     }
 
@@ -434,7 +435,7 @@ class ShellController(
         diagnostics.log("enter", mapOf("to" to to, "renewal" to renewing))
         main.removeCallbacks(enterTimeout)
         main.postDelayed(enterTimeout, SignInFlow.TIMEOUT_MS)
-        web.load(enterUrl(ticket, verifier, to))
+        web.loadEnter(enterUrl(ticket, verifier, to), to)
     }
 
     private fun startWebSignIn() {
@@ -451,6 +452,9 @@ class ShellController(
         signInMessage = null
         clearLoadFailure()
         CookieManager.getInstance().flush()
+        // Back never walks back through the identity provider or the hand-off to /sign.
+        web.webView.clearHistory()
+        main.postDelayed({ web.webView.clearHistory() }, 1_500)
     }
 
     private fun failSignIn(message: String) {
@@ -476,7 +480,12 @@ class ShellController(
         clearLoadFailure()
         selectedTab = ShellTab.HOME
         val deleted = SessionCookies.delete(config)
-        diagnostics.log("session-cookies-deleted", mapOf("count" to deleted))
+        // Nothing of the person stays: the origin's storage, the cache and the history go too.
+        android.webkit.WebStorage.getInstance().deleteOrigin(config.origin)
+        web.webView.clearCache(true)
+        web.webView.clearHistory()
+        val others = SessionCookies.clearOrigin(config)
+        diagnostics.log("session-cookies-deleted", mapOf("count" to deleted, "otherCookiesCleared" to others))
     }
 
     // The loading skeleton. ----------------------------------------------------------------------------
@@ -565,7 +574,8 @@ class ShellController(
     val handlesBack: Boolean
         get() = !showsLock && when {
             phase == Phase.SIGNED_OUT && signIn == SignInStep.WEB_FALLBACK -> true
-            phase == Phase.SIGNED_IN || phase == Phase.PLAIN -> web.webView.canGoBack()
+            phase == Phase.SIGNED_IN -> web.canGoBackInApp()
+            phase == Phase.PLAIN -> web.webView.canGoBack()
             else -> false
         }
 
@@ -575,7 +585,8 @@ class ShellController(
             return
         }
         diagnostics.log("back", mapOf("canGoBack" to web.webView.canGoBack()))
-        if (web.webView.canGoBack()) web.webView.goBack()
+        val allowed = if (phase == Phase.SIGNED_IN) web.canGoBackInApp() else web.webView.canGoBack()
+        if (allowed) web.webView.goBack()
     }
 
     fun refreshChrome() {
@@ -655,6 +666,7 @@ class ShellController(
     override fun onBridgeMessage(message: JSONObject) {
         when (message.optString("type")) {
             "ready" -> {
+                bridgeSeen = true
                 pageShown("ready", 200)
                 refreshChrome()
             }
@@ -666,7 +678,9 @@ class ShellController(
                     if (phase != Phase.SIGNED_IN || renewing) finishSignIn()
                 } else if (path == "/sign" || path.startsWith("/sign/")) {
                     if (phase == Phase.SIGNED_IN) {
-                        sessionEnded("route-sign")
+                        // The web app's /sign sends a signed-in person on to "/": confirm first.
+                        main.removeCallbacks(confirmSignedOut)
+                        main.postDelayed(confirmSignedOut, 2_500)
                     } else if (signIn == SignInStep.ENTERING) {
                         failSignIn(activity.getString(R.string.sign_in_not_finished))
                     }
@@ -714,7 +728,14 @@ class ShellController(
 
     override fun allowsLeavingOrigin(): Boolean = signIn == SignInStep.WEB_FALLBACK
 
-    override fun onLoadFailed(detail: String) {
+    override fun onLoadFailed(detail: String, url: String?) {
+        if (url != null && !config.isOwnOrigin(url) && phase != Phase.PLAIN) {
+            // Another site's page did not load: not a reason to lock the app. Back to the app.
+            diagnostics.log("off-origin-load-failed", mapOf("host" to Uri.parse(url).host, "detail" to detail))
+            if (phase == Phase.SIGNED_IN) web.backToOwn()
+            else if (signIn == SignInStep.WEB_FALLBACK) web.loadPath("/sign?native-sign-in=web")
+            return
+        }
         stopSkeleton()
         if (phase == Phase.SIGNED_OUT && signIn == SignInStep.ENTERING) {
             failSignIn(activity.getString(R.string.sign_in_not_finished))
@@ -735,15 +756,31 @@ class ShellController(
             changed()
         }
         val onSignPage = path == "/sign" || path.startsWith("/sign/")
-        // A web app without the bridge (production today) says nothing: its URL tells.
-        if (phase == Phase.SIGNED_IN && onSignPage && !renewing) {
-            sessionEnded("url-sign")
+        if (phase == Phase.SIGNED_IN && onSignPage && !renewing && !bridgeSeen) {
+            // A web app without the bridge (production today) says nothing; its /sign page sends a
+            // signed-in person on to "/". Still on /sign after 2.5 s, or no session cookie: ended.
+            main.removeCallbacks(confirmSignedOut)
+            main.postDelayed(confirmSignedOut, 2_500)
+        } else if (phase == Phase.SIGNED_OUT && signIn == SignInStep.ENTERING && !onSignPage && !path.startsWith("/api/")) {
+            if (SessionCookies.present(config)) {
+                diagnostics.log("signed-in-by-url", mapOf("pathRoot" to first, "step" to "entering"))
+                finishSignIn()
+            }
         } else if (phase == Phase.SIGNED_OUT && signIn == SignInStep.WEB_FALLBACK && !onSignPage && !path.startsWith("/api/")) {
             if (SessionCookies.present(config)) {
                 diagnostics.log("signed-in-by-url", mapOf("pathRoot" to first))
                 finishSignIn()
             }
         }
+    }
+
+    private val confirmSignedOut = Runnable {
+        if (phase != Phase.SIGNED_IN) return@Runnable
+        val path = Uri.parse(web.webView.url ?: "").path ?: ""
+        val stillOnSign = config.isOwnOrigin(web.webView.url) && (path == "/sign" || path.startsWith("/sign/"))
+        val cookie = SessionCookies.present(config)
+        diagnostics.log("sign-page-check", mapOf("stillOnSign" to stillOnSign, "sessionCookie" to cookie))
+        if (stillOnSign || !cookie) sessionEnded("url-sign")
     }
 
     override fun onFinished() {
@@ -758,8 +795,13 @@ class ShellController(
         }
     }
 
+    private val skeletonDeadline = Runnable { pageShown("deadline-after-commit", 0) }
+
     override fun onCommit() {
         mainFrameCommits += 1
+        // However the page behaves after committing, the skeleton is gone 10 s later.
+        main.removeCallbacks(skeletonDeadline)
+        if (pageLoading) main.postDelayed(skeletonDeadline, SKELETON_AFTER_COMMIT_MS)
         if (failureSource == FailureSource.WEB || failureSource == null) clearLoadFailure()
         changed()
     }
@@ -768,5 +810,7 @@ class ShellController(
         const val MIN_SKELETON_MS = 300L
         const val NO_READY_MS = 1_500L
         const val MAX_TEXT_WAIT_MS = 8_000L
+        const val SKELETON_AFTER_COMMIT_MS = 10_000L
+        val TICKET = Regex("^[A-Za-z0-9._~-]{16,512}$")
     }
 }

@@ -559,7 +559,7 @@ abstract class ShellTestBase {
     fun foregroundPackage(): String = device.currentPackageName ?: ""
 
     /** Signs in on mock stack A through the Custom Tab, tapping the mock page's link like a person. */
-    fun signInThroughCustomTab(moment: String, shots: Boolean = true, paceMs: Long = 0): Boolean {
+    fun signInThroughCustomTab(moment: String, shots: Boolean = true, paceMs: Long = 0, forgedCallback: Boolean = false): Boolean {
         val button = waitFor("sign_in_button", 20_000) ?: run {
             check(false, "$moment: no native Sign in button")
             return false
@@ -574,8 +574,16 @@ abstract class ShellTestBase {
         }
         note("$moment: the Custom Tab is ${link.applicationPackage}")
         if (shots) screenshot("$moment-custom-tab")
+        if (forgedCallback) {
+            // Another app fires the callback with a bad ticket: dropped, the Custom Tab stays.
+            shell("am start -a android.intent.action.VIEW -d openbotshell://signed-in?ticket=forged")
+            sleep(2_000)
+            val still = waitInCustomTab(MOCK_LINK, 5_000)
+            check(still != null, "$moment: a forged callback closed the Custom Tab or ended the sign-in; foreground ${foregroundPackage()}")
+            if (still == null) return false
+        }
         sleep(paceMs)
-        link.click()
+        (waitInCustomTab(MOCK_LINK, 3_000) ?: link).click()
         sleep(1_500)
         // Chrome may ask before leaving for an app.
         for (label in listOf("Open", "Continue", "Open app")) {

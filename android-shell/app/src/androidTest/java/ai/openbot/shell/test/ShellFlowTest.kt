@@ -92,7 +92,7 @@ class ShellFlowTest : ShellTestBase() {
     @Test
     fun testNativeSignInThroughCustomTab() {
         launch(MOCK_A, "manual")
-        val ok = signInThroughCustomTab("manual")
+        val ok = signInThroughCustomTab("manual", forgedCallback = true)
         check(ok, "the Custom Tab sign-in did not reach the tabs")
         if (!ok) return
         check(homeRendered(), "the signed-in Home did not render")
@@ -189,6 +189,8 @@ class ShellFlowTest : ShellTestBase() {
         check(waitForState("tab=bots", 5_000), "Bots is not selected: ${debugState()}")
         sleep(1_000)
         screenshot("4-bots")
+        sleep(5_000)
+        screenshot("4b-bots-settled-6s")
         assertNoWebNavigation("bots")
         check(accountButton() != null, "no Account button on Bots")
 

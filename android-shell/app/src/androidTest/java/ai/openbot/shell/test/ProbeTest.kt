@@ -102,4 +102,21 @@ class ProbeTest : ShellTestBase() {
         note("bridge object on the page: ${pageString("String(typeof window.OpenBotShellAndroid)")}")
         note("webview package: ${shell("dumpsys webviewupdate").lines().firstOrNull { it.contains("Current WebView package") }?.trim()}")
     }
+
+    /** window.open with no address, from a tap: the app's WebView keeps its page (no blank page). */
+    @Test
+    fun testBlankWindowOpenKeepsThePage() {
+        launch(PROBE, "blank-open", plain = true)
+        check(waitPageText("probe done", 60_000), "the probe page never finished")
+        pageJs("(function(){var b=document.createElement('button');b.textContent='Open blank window';" +
+            "b.style.cssText='position:fixed;top:40%;left:10%;width:80%;height:80px;z-index:99999;font-size:20px';" +
+            "b.onclick=function(){window.__blank=window.open('', '_blank');};document.body.appendChild(b);return true;})()")
+        sleep(800)
+        check(tapWeb("Open blank window"), "no button to tap")
+        sleep(3_000)
+        screenshot("after-blank-window-open")
+        val text = pageText()
+        check(text.contains("probe done"), "a blank window.open replaced the app's page: ${text.take(120)}")
+        note("after a blank window.open: url ${pageString("location.href")}; foreground ${foregroundPackage()}")
+    }
 }
