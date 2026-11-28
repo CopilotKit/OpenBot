@@ -39,20 +39,28 @@ final class DemoTourUITests: ShellTestCase {
         // Whichever comes first: the consent alert (then the sheet), or the sheet.
         let consent = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Continue"]
         let service = XCUIApplication(bundleIdentifier: "com.apple.SafariViewService")
-        let links = [app.webViews.links["Sign in as test person"], app.links["Sign in as test person"],
-                     service.webViews.links["Sign in as test person"], service.links["Sign in as test person"]]
-        if let first = firstExisting([consent] + links, timeout: 20), first == consent {
+        let links = [service.links["Sign in as test person"], app.links["Sign in as test person"]]
+        // A cold Safari sheet can take longer than 20 s to render its first localhost page.
+        guard let first = firstExisting([consent] + links, timeout: 60) else {
+            screenshot("sign-in-sheet-unavailable")
+            XCTFail("demo: neither consent nor the sheet’s sign-in link appeared")
+            return
+        }
+        let link: XCUIElement
+        if first == consent {
             pause(1.5)
             consent.tap()
+            guard let loaded = firstExisting(links, timeout: 60) else {
+                screenshot("sign-in-sheet-unavailable")
+                XCTFail("demo: the sheet’s sign-in link did not load after consent")
+                return
+            }
+            link = loaded
         } else {
-            note("demo: no consent alert this time")
+            link = first
         }
-        if let link = firstExisting(links, timeout: 20) {
-            pause(1.2)
-            link.tap()
-        } else {
-            XCTFail("demo: the sheet's link was not reachable")
-        }
+        pause(1.2)
+        link.tap()
         XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 30), "demo: no tabs after signing in")
         let composer = app.webViews.textViews.firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 20))

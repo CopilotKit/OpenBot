@@ -104,12 +104,26 @@ jobs:
             xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
             sleep 15; touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Identify the simulator toolchain
+        id: toolchain
+        run: |
+          key="$(xcodebuild -version; xcrun --sdk iphonesimulator --show-sdk-build-version)"
+          echo "key=$(printf '%s' "$key" | shasum -a 256 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Restore the compiled UI tests
+        id: products
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData-Debug/Build/Products
+          key: ios-demo-products-v1-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('ios-shell/project.yml', 'ios-shell/OpenBotShell/**', 'ios-shell/OpenBotShellUITests/**') }}
+
+      - if: steps.products.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/xcodegen-dist
           key: ios-shell-video-xcodegen-v1
 
       - name: Generate the Xcode project
+        if: steps.products.outputs.cache-hit != 'true'
         run: |
           echo "$(date +%s) project" >> "$RUNNER_TEMP/timing"
           if [ ! -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
@@ -124,14 +138,9 @@ jobs:
             (cd ios-shell && xcodegen generate)
           fi
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: DerivedData-Debug
-          key: ios-shell-video-dd-Debug-${{ hashFiles('ios-shell/**') }}
-          restore-keys: ios-shell-video-dd-Debug-
-
       - name: Build the Debug app and its UI tests
-        timeout-minutes: 20
+        if: steps.products.outputs.cache-hit != 'true'
+        timeout-minutes: 8
         run: |
           echo "$(date +%s) build" >> "$RUNNER_TEMP/timing"
           set -o pipefail
@@ -139,6 +148,13 @@ jobs:
             -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee xcodebuild-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
+
+      - name: Save the compiled UI tests
+        if: steps.products.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData-Debug/Build/Products
+          key: ${{ steps.products.outputs.cache-primary-key }}
 
       - name: Wait for the workbench built by this run
         timeout-minutes: 5
@@ -186,9 +202,9 @@ jobs:
           recorder=$!
           sleep 2
           set +e
-          xcodebuild test-without-building -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug -parallel-testing-enabled NO \
-            -only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour CODE_SIGNING_ALLOWED=NO > xcodebuild-demo.log 2>&1
+          tests=(DerivedData-Debug/Build/Products/*.xctestrun)
+          xcodebuild test-without-building -xctestrun "${tests[0]}" -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -parallel-testing-enabled NO -only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour > xcodebuild-demo.log 2>&1
           status=$?
           # SIGINT and wait, so the recorder writes a playable file.
           kill -INT "$recorder"
